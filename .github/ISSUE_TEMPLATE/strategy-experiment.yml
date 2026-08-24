@@ -1,0 +1,72 @@
+name: Strategy experiment
+description: Define a falsifiable trading hypothesis and evaluation protocol.
+title: "[Strategy]: "
+body:
+  - type: markdown
+    attributes:
+      value: Strategy proposals must be testable and use defined-risk paper trading during development.
+
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Hypothesis
+      description: State the expected edge and why it should exist.
+      placeholder: After a large post-earnings IV contraction, liquid defined-risk spreads on ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: universe
+    attributes:
+      label: Instruments and universe
+      description: Specify underlyings, option structures, liquidity constraints, and exclusions.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rules
+    attributes:
+      label: Entry and exit rules
+      description: Define signals, timing, contract selection, exits, and no-trade conditions.
+    validations:
+      required: true
+
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risk gates
+      description: Define maximum loss, sizing, exposure, drawdown, and circuit-breaker rules.
+    validations:
+      required: true
+
+  - type: textarea
+    id: data
+    attributes:
+      label: Data requirements
+      description: List sources, time range, granularity, and assumptions about quotes or fills.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evaluation
+    attributes:
+      label: Evaluation protocol
+      description: Define train/test periods, benchmarks, costs, slippage, and leakage controls.
+    validations:
+      required: true
+
+  - type: textarea
+    id: success
+    attributes:
+      label: Success and rejection criteria
+      description: State metrics and thresholds that will accept or reject the hypothesis.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rollout
+    attributes:
+      label: Paper-trading rollout
+      description: Explain the bounded rollout, monitoring, and automatic stop conditions.
+    validations:
+      required: true

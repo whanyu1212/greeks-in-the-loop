@@ -1,0 +1,181 @@
+import { spawn, spawnSync, type ChildProcess } from "node:child_process"
+
+import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk"
+
+/** A managed OpenCode server and its connected SDK client. */
+export type OpencodeRuntime = {
+  /** Type-safe client connected to the managed server. */
+  client: OpencodeClient
+  /** HTTP URL of the managed OpenCode server. */
+  url: string
+  /** Disposes OpenCode resources and terminates its process tree. */
+  close: () => Promise<void>
+}
+
+/** Options used to start a managed OpenCode server. */
+type StartOpencodeOptions = {
+  /** Interface on which the server listens. */
+  hostname?: string
+  /** TCP port on which the server listens. */
+  port: number
+  /** Signal used to initiate runtime shutdown. */
+  signal: AbortSignal
+  /** Maximum time allowed for server startup, in milliseconds. */
+  timeoutMs: number
+}
+
+/**
+ * Waits for a child process to exit within a bounded duration.
+ *
+ * @param process Child process to observe.
+ * @param timeoutMs Maximum time to wait in milliseconds.
+ * @returns Whether the process exited before the timeout.
+ */
+const waitForExit = (process: ChildProcess, timeoutMs: number) => {
+  if (process.exitCode !== null || process.signalCode !== null) return Promise.resolve(true)
+
+  return new Promise<boolean>((resolve) => {
+    const timeout = setTimeout(() => done(false), timeoutMs)
+    const onExit = () => done(true)
+
+    function done(exited: boolean) {
+      clearTimeout(timeout)
+      process.removeListener("exit", onExit)
+      resolve(exited)
+    }
+
+    process.once("exit", onExit)
+  })
+}
+
+/**
+ * Sends a signal to a child process and all of its descendants.
+ *
+ * @param process Root child process of the managed process tree.
+ * @param signal Operating-system signal to send.
+ */
+const killProcessTree = (process: ChildProcess, signal: NodeJS.Signals) => {
+  if (!process.pid || process.exitCode !== null || process.signalCode !== null) return
+
+  if (globalThis.process.platform === "win32") {
+    spawnSync("taskkill", ["/pid", String(process.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    })
+    return
+  }
+
+  try {
+    globalThis.process.kill(-process.pid, signal)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error
+  }
+}
+
+/**
+ * Starts an OpenCode server and creates an SDK client for it.
+ *
+ * The server runs in its own process group so shutdown can terminate local
+ * MCP descendants as well as OpenCode itself. The returned `close` operation
+ * is idempotent and escalates from graceful disposal to forced termination.
+ *
+ * @param options Host, port, cancellation, and startup timeout settings.
+ * @returns A managed OpenCode runtime.
+ * @throws If OpenCode cannot start or does not report a valid server URL.
+ */
+export async function startOpencode({
+  hostname = "127.0.0.1",
+  port,
+  signal,
+  timeoutMs,
+}: StartOpencodeOptions): Promise<OpencodeRuntime> {
+  const process = spawn(
+    globalThis.process.env.OPENCODE_BIN ?? "opencode",
+    ["serve", `--hostname=${hostname}`, `--port=${port}`],
+    {
+      detached: globalThis.process.platform !== "win32",
+      env: globalThis.process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  )
+
+  let output = ""
+  const url = await new Promise<string>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      finish(new Error(`Timed out starting OpenCode after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    const onData = (chunk: Buffer) => {
+      output = `${output}${chunk.toString()}`.slice(-8_192)
+      for (const line of output.split("\n")) {
+        if (!line.startsWith("opencode server listening")) continue
+        const match = line.match(/on\s+(https?:\/\/[^\s]+)/)
+        finish(match ? undefined : new Error("OpenCode returned an invalid server URL"), match?.[1])
+        return
+      }
+    }
+    const onExit = (code: number | null, processSignal: NodeJS.Signals | null) => {
+      finish(
+        new Error(
+          `OpenCode exited during startup (${processSignal ?? `code ${String(code)}`})${output.trim() ? `: ${output.trim()}` : ""}`,
+        ),
+      )
+    }
+    const onError = (error: Error) => finish(error)
+    const onAbort = () => finish(signal.reason ?? new Error("OpenCode startup aborted"))
+
+    function finish(error?: Error, serverUrl?: string) {
+      clearTimeout(timeout)
+      process.stdout?.removeListener("data", onData)
+      process.stderr?.removeListener("data", onData)
+      process.removeListener("exit", onExit)
+      process.removeListener("error", onError)
+      signal.removeEventListener("abort", onAbort)
+
+      if (error || !serverUrl) {
+        killProcessTree(process, "SIGKILL")
+        reject(error ?? new Error("OpenCode failed to start"))
+        return
+      }
+
+      process.stdout?.resume()
+      process.stderr?.resume()
+      resolve(serverUrl)
+    }
+
+    process.stdout?.on("data", onData)
+    process.stderr?.on("data", onData)
+    process.once("exit", onExit)
+    process.once("error", onError)
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+
+  const client = createOpencodeClient({ baseUrl: url, directory: globalThis.process.cwd() })
+  let closing: Promise<void> | undefined
+
+  const close = () => {
+    closing ??= (async () => {
+      signal.removeEventListener("abort", onAbort)
+
+      await Promise.race([
+        client.instance.dispose().catch(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, 5_000)),
+      ])
+
+      killProcessTree(process, "SIGTERM")
+      if (!(await waitForExit(process, 5_000))) {
+        killProcessTree(process, "SIGKILL")
+        await waitForExit(process, 1_000)
+      }
+
+      process.stdout?.destroy()
+      process.stderr?.destroy()
+    })()
+    return closing
+  }
+  const onAbort = () => void close()
+  signal.addEventListener("abort", onAbort, { once: true })
+
+  return { client, url, close }
+}

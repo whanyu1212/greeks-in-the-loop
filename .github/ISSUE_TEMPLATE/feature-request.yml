@@ -1,0 +1,62 @@
+name: Feature request
+description: Propose a product, infrastructure, or developer-experience improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user or system problem before proposing a solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the smallest change that solves the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable conditions that would make this issue complete.
+      placeholder: |
+        - [ ] Trade intents are validated against a JSON schema.
+        - [ ] Invalid intents cannot reach Alpaca.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Primary area
+      options:
+        - Agent behavior
+        - CodeAct execution
+        - Market research
+        - Strategy logic
+        - Risk management
+        - Order execution
+        - Observability and audit
+        - Developer experience
+        - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: risk
+    attributes:
+      label: Trading and operational risk
+      description: Explain whether this can affect orders, positions, credentials, or unattended execution.
+    validations:
+      required: true

@@ -1,0 +1,5 @@
+.env
+dev_notes/
+dist/
+node_modules/
+workspace/

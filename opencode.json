@@ -1,0 +1,49 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "alpaca": {
+      "type": "local",
+      "command": [
+        "zsh",
+        "-lc",
+        "set -a; source ./.env; exec uvx alpaca-mcp-server"
+      ],
+      "enabled": true,
+      "environment": { "ALPACA_PAPER_TRADE": "true" },
+      "timeout": 60000
+    },
+    "fmp": {
+      "type": "local",
+      "command": [
+        "zsh",
+        "-lc",
+        "set -a; source ./.env; exec npx -y mcp-remote@0.1.49 \"https://financialmodelingprep.com/mcp?apikey=$FMP_API_KEY\" --transport http-first"
+      ],
+      "enabled": true,
+      "timeout": 60000
+    }
+  },
+  "permission": {
+    "read": {
+      "*": "allow",
+      ".env": "deny"
+    },
+    "alpaca_place_stock_order": "ask",
+    "alpaca_place_crypto_order": "ask",
+    "alpaca_place_option_order": "ask",
+    "alpaca_create_locate": "ask",
+    "alpaca_update_account_config": "ask",
+    "alpaca_cancel_all_orders": "ask",
+    "alpaca_cancel_order_by_id": "ask",
+    "alpaca_replace_order_by_id": "ask",
+    "alpaca_close_all_positions": "ask",
+    "alpaca_close_position": "ask",
+    "alpaca_do_not_exercise_options_position": "ask",
+    "alpaca_exercise_options_position": "ask",
+    "alpaca_create_watchlist": "ask",
+    "alpaca_update_watchlist_by_id": "ask",
+    "alpaca_add_asset_to_watchlist_by_id": "ask",
+    "alpaca_delete_watchlist_by_id": "ask",
+    "alpaca_remove_asset_from_watchlist_by_id": "ask"
+  }
+}
