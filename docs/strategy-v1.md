@@ -49,13 +49,20 @@ open spread, one pending entry, and one new entry per trading day.
   date and expiration date.
 
 Each cycle records its scheduled slot and `observed_at`, captured immediately
-after the last required provider response. Data ages are measured against
-`observed_at`. A provider timestamp after `observed_at` is invalid.
+after the last snapshot-forming market-data response. Data ages are measured
+against `observed_at` during snapshot construction. A snapshot-forming provider
+timestamp after `observed_at` is invalid. Later account and clock gate responses
+are stored with the decision but are not part of the immutable market snapshot.
 
-Immediately before approval, the strategy records `approved_at` and rechecks the
-Alpaca clock and entry window. Approval requires `approved_at < slot + 5 minutes`
-and `approved_at < min(15:00, session_close - 60 minutes)`. A cycle that misses
-either deadline produces `NO_ACTION`.
+After snapshot analysis, the strategy makes a final Alpaca clock request and
+captures `approval_evaluated_at` after that response. Approval is the atomic,
+in-memory evaluation performed at that timestamp; it makes no further provider
+request. It requires `approval_evaluated_at < slot + 5 minutes` and
+`approval_evaluated_at < min(15:00, session_close - 60 minutes)`, plus a returned
+clock that still reports the market open. Every sub-day freshness limit,
+including quote and latest-bar age, is measured again against
+`approval_evaluated_at`. A cycle that misses a deadline or freshness limit
+produces `NO_ACTION`.
 
 ## Provider Boundary
 
@@ -146,7 +153,7 @@ Both legs must pass every rule at the same decision timestamp:
 - Implied volatility is positive.
 - Bid and ask are finite, bid is positive, and ask is greater than bid.
 - Each option quote is dated for the current session, is no more than 60 seconds
-  old, and is not future-dated relative to `observed_at`.
+  old at approval, and is not future-dated relative to `observed_at`.
 - Each leg's absolute bid-ask width is at most $0.20.
 - Each leg's bid-ask width divided by its midpoint is at most 0.10.
 - Current daily volume is dated for the decision's trading date and is at least
@@ -165,17 +172,34 @@ open-interest value.
 
 ## Decision Snapshot
 
-All required provider calls for a cycle form one immutable decision snapshot
-identified by the scheduled slot and `observed_at`. The snapshot contains the
-reconciled account state, clock and calendar, underlying bars and quote, option
-chain, and contract metadata used by the decision.
+All snapshot-forming market-data calls for a cycle form one immutable decision
+snapshot identified by the scheduled slot and `observed_at`. The snapshot
+contains the clock and calendar used to establish the slot, underlying bars and
+quote, option chain, and contract metadata used by the decision. Reconciled
+account state and final clock responses are separate timestamped gate evidence.
 
-Approval reruns every entry gate, calculation, and ranking rule against only
-that snapshot. It may not combine fields from different snapshots. If any
-required data is refreshed before submission, the refresh creates a new snapshot
-and every strategy rule must run again. The candidate changed when its direction,
-leg symbols, entry limit, maximum loss, or eligibility result differs. A changed
+Approval reruns every market-data eligibility gate, calculation, and ranking rule
+against only that snapshot. It may not combine market fields from different
+snapshots. Account eligibility and time gates use their separate, timestamped
+reconciliation and clock evidence. Refreshing snapshot-forming market data,
+including bars, underlying quotes, option quotes, or contract metadata, creates
+a new snapshot and every strategy rule must run again. Final account
+reconciliation and clock requests can reject an entry but do not recursively
+trigger market-data reevaluation. The candidate changed when its direction, leg
+symbols, entry limit, maximum loss, or eligibility result differs. A changed
 candidate abandons the entry and produces `NO_ACTION` for that slot.
+
+Immediately before order submission, the executor completes reconciliation and
+a final Alpaca clock request, then captures `submission_evaluated_at` after both
+responses. It atomically rechecks account eligibility, the returned clock,
+approval deadlines, and every sub-day freshness limit against that timestamp.
+After those checks, it captures `submitted_at` immediately before invoking the
+order API and repeats the no-I/O deadline and freshness comparisons against
+`submitted_at`. The API invocation follows in the same synchronous call path.
+Both timestamps must be before `slot + 5 minutes` and
+`min(15:00, session_close - 60 minutes)`. A failed check abandons the entry. If
+satisfying a failed freshness check requires new market data, that market data
+forms a new snapshot and triggers the complete reevaluation above.
 
 ## Entry Pricing And Selection
 
