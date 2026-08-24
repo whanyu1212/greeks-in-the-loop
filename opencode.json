@@ -21,6 +21,16 @@
       ],
       "enabled": true,
       "timeout": 60000
+    },
+    "exa": {
+      "type": "local",
+      "command": [
+        "zsh",
+        "-lc",
+        "set -a; source ./.env; exec npx -y exa-mcp-server@3.4.1"
+      ],
+      "enabled": true,
+      "timeout": 60000
     }
   },
   "permission": {

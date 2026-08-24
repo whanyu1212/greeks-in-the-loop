@@ -9,7 +9,7 @@ The initial loop is intentionally observation-only. It can inspect the paper acc
 - Node.js 22
 - pnpm 10
 - Python 3.10+ and `uvx`
-- Alpaca paper-trading and FMP API keys
+- Alpaca paper-trading, FMP, and Exa API keys
 
 ## Setup
 
@@ -18,7 +18,7 @@ pnpm install
 cp .env.example .env
 ```
 
-Populate `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, and `FMP_API_KEY` in `.env`.
+Populate `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, `FMP_API_KEY`, and `EXA_API_KEY` in `.env`.
 
 ## Run
 
