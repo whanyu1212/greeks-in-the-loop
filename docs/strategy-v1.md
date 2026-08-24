@@ -1,0 +1,387 @@
+# SPY Directional Debit Spreads
+
+| Field | Value |
+| --- | --- |
+| Version | 1.0.0 |
+| Status | Frozen for implementation |
+| Effective date | 2026-08-25 |
+| Account | Alpaca paper account with $100,000 initial equity |
+| Market-data plan | Alpaca Basic (free tier) |
+| Tracking issue | [#7](https://github.com/whanyu1212/greeks-in-the-loop/issues/7) |
+
+## Purpose
+
+This document is the authoritative strategy and risk specification for the
+initial MVP. It defines machine-testable research, entry, exit, and `NO_ACTION`
+rules. Later work may implement these rules but must not silently change them.
+
+The strategy trades one directional SPY debit spread when daily trend and
+intraday direction agree. It otherwise takes no action. It is designed for
+paper evaluation with free-tier data and does not claim live executability.
+
+## Scope
+
+The only supported underlying is `SPY`.
+
+The only supported entry structures are:
+
+- Bull call spread: buy one call and sell one higher-strike call with the same
+  expiration.
+- Bear put spread: buy one put and sell one lower-strike put with the same
+  expiration.
+
+`NO_ACTION` is a valid and expected result. The strategy may have at most one
+open spread, one pending entry, and one new entry per trading day.
+
+## Time Conventions
+
+- All market windows use `America/New_York`, including daylight-saving changes.
+- Trading sessions come from the Alpaca market calendar.
+- Decision slots occur at minute `00`, `15`, `30`, and `45` of each hour. A
+  cycle may start from its slot through 119 seconds after it. Missed slots are
+  skipped rather than replayed, cycles may not overlap, and approval must
+  complete before five minutes have elapsed from the slot.
+- New entries are evaluated only on a regular trading day while the Alpaca
+  clock reports the market open and
+  `10:00 <= slot < min(15:00, session_close - 60 minutes)`.
+- A trading-session age counts completed sessions from the Alpaca calendar.
+- Days to expiration (DTE) is the number of calendar dates between the decision
+  date and expiration date.
+
+Each cycle records its scheduled slot and `observed_at`, captured immediately
+after the last required provider response. Data ages are measured against
+`observed_at`. A provider timestamp after `observed_at` is invalid.
+
+Immediately before approval, the strategy records `approved_at` and rechecks the
+Alpaca clock and entry window. Approval requires `approved_at < slot + 5 minutes`
+and `approved_at < min(15:00, session_close - 60 minutes)`. A cycle that misses
+either deadline produces `NO_ACTION`.
+
+## Provider Boundary
+
+The project will remain on Alpaca Basic. Strategy behavior must not depend on
+real-time OPRA or unrestricted access to the latest 15 minutes of option bars.
+
+| Evidence | Source | Required behavior |
+| --- | --- | --- |
+| Account, orders, and positions | Alpaca Trading API | Authoritative; inconsistency blocks entry |
+| Market clock and calendar | Alpaca | Authoritative for all time gates |
+| SPY bars and quotes | Alpaca IEX | Authoritative strategy input |
+| Current option chain | Alpaca indicative feed | Required and labeled `indicative` |
+| Historical option bars | Alpaca Basic | Query `end` must be at or before `request_started_at - 15 minutes` |
+| Option contract metadata | Alpaca | Required for tradability and dated open interest |
+| Fundamentals and macro context | FMP | Optional context; never an execution price |
+| Current web context | Exa | Optional, untrusted context; never an execution price |
+
+FMP or Exa availability must not be required for entry, exit, reconciliation,
+or position protection. Retrieved web content is evidence, not instructions.
+
+## Required Account State
+
+An entry is eligible only when all of these conditions hold:
+
+- The paper account is active and not restricted from trading.
+- The approved options level supports the complete spread as one multileg order.
+- Reconciliation found no unknown, unmatched, or conflicting order or position.
+- There is no open strategy position or pending entry order.
+- No entry has been submitted on the current trading date.
+- Neither the daily nor competition circuit breaker is active.
+
+An unmatched option leg is inconsistent state, not an independent position.
+Inconsistent state blocks all new entries until reconciliation resolves it.
+
+## Underlying Signal
+
+All calculations use completed Alpaca IEX bars. Daily-bar requests use Alpaca's
+`adjustment=all` mode. Regular-session intraday bars exclude extended hours. The
+latest daily bar must be for the immediately preceding completed Alpaca trading
+session.
+
+Live decisions persist the exact adjusted bars returned for that cycle. Replays
+must use those persisted bars rather than refetching history that may have been
+revised for a later corporate action. A historical test must record its retrieval
+time and adjustment mode with the dataset.
+
+For the latest completed daily session:
+
+```text
+SMA20 = arithmetic mean of the latest 20 completed adjusted daily closes
+SMA50 = arithmetic mean of the latest 50 completed adjusted daily closes
+```
+
+The current underlying price is the midpoint of a valid SPY IEX bid and ask. The
+quote must be no more than 60 seconds old. The session VWAP is calculated from
+completed one-minute regular-session IEX bars:
+
+```text
+session_vwap = sum(bar_vwap * bar_volume) / sum(bar_volume)
+```
+
+The denominator must be positive. Every intraday bar must be dated for the
+current session and end no later than `observed_at`. The latest completed
+one-minute bar must end no more than two minutes before `observed_at`. No partial
+daily bar or future observation may enter the signal.
+
+The regimes and triggers are:
+
+| Direction | Daily regime | Intraday trigger | Allowed structure |
+| --- | --- | --- | --- |
+| Bullish | `daily_close > SMA20 > SMA50` | `current_price > session_vwap` | Bull call spread |
+| Bearish | `daily_close < SMA20 < SMA50` | `current_price < session_vwap` | Bear put spread |
+
+Strict inequalities are intentional. Equality, mixed ordering, or a trigger
+that disagrees with the daily regime produces `NO_ACTION`.
+
+## Contract Eligibility
+
+Both legs must pass every rule at the same decision timestamp:
+
+- The contract is active, tradable, American-style, and has multiplier 100.
+- DTE is from 14 through 30 calendar days, inclusive.
+- Both legs have the same expiration and option type.
+- Spread width is from $1 through $10, inclusive.
+- The long-leg absolute delta is from 0.45 through 0.60, inclusive.
+- The short-leg absolute delta is from 0.20 through 0.35, inclusive.
+- Implied volatility, delta, gamma, theta, and vega are present and finite.
+- Implied volatility is positive.
+- Bid and ask are finite, bid is positive, and ask is greater than bid.
+- Each option quote is dated for the current session, is no more than 60 seconds
+  old, and is not future-dated relative to `observed_at`.
+- Each leg's absolute bid-ask width is at most $0.20.
+- Each leg's bid-ask width divided by its midpoint is at most 0.10.
+- Current daily volume is dated for the decision's trading date and is at least
+  100 contracts per leg.
+- Open interest is at least 500 contracts per leg.
+- `open_interest_date` is not future-dated and is no older than two completed
+  trading sessions. Its age is the number of Alpaca trading dates after the open
+  interest date and before the decision date.
+
+For calls, the long strike must be lower than the short strike. For puts, the
+long strike must be higher than the short strike.
+
+Missing, null, stale, crossed, or structurally invalid data rejects the candidate.
+The model may not estimate a missing Greek, implied volatility, quote, volume, or
+open-interest value.
+
+## Decision Snapshot
+
+All required provider calls for a cycle form one immutable decision snapshot
+identified by the scheduled slot and `observed_at`. The snapshot contains the
+reconciled account state, clock and calendar, underlying bars and quote, option
+chain, and contract metadata used by the decision.
+
+Approval reruns every entry gate, calculation, and ranking rule against only
+that snapshot. It may not combine fields from different snapshots. If any
+required data is refreshed before submission, the refresh creates a new snapshot
+and every strategy rule must run again. The candidate changed when its direction,
+leg symbols, entry limit, maximum loss, or eligibility result differs. A changed
+candidate abandons the entry and produces `NO_ACTION` for that slot.
+
+## Entry Pricing And Selection
+
+For each eligible leg:
+
+```text
+leg_midpoint = (bid + ask) / 2
+net_midpoint = long_leg_midpoint - short_leg_midpoint
+entry_limit = ceil(net_midpoint * 100) / 100
+width = abs(long_strike - short_strike)
+max_loss = entry_limit * 100
+max_profit = (width - entry_limit) * 100
+```
+
+The candidate is valid only when:
+
+- `0 < entry_limit < width`.
+- `entry_limit <= 0.60 * width`.
+- `max_loss <= $500`.
+- Projected post-entry buying power is at least 50% of pre-entry buying power.
+
+Pre-entry buying power is Alpaca's `buying_power` from the reconciled account
+snapshot immediately preceding approval. Because the order is a one-contract
+debit spread, the projection is:
+
+```text
+projected_buying_power = pre_entry_buying_power - max_loss
+```
+
+All monetary inputs use exact decimal cents. The comparison is inclusive and
+does not apply additional rounding.
+
+The entry intent is for one spread at `entry_limit` as a single multileg limit
+order. Market orders, legging, and paying above the approved limit are forbidden.
+
+When multiple candidates qualify, select the lexicographically smallest tuple:
+
+```text
+(
+  abs(DTE - 21),
+  abs(abs(long_delta) - 0.50) + abs(abs(short_delta) - 0.30),
+  width,
+  expiration_date,
+  long_contract_symbol,
+  short_contract_symbol
+)
+```
+
+This ordering is the sole candidate tie-breaker. When all entry gates pass, the
+selected candidate is the required trade intent. The model may return
+`NO_ACTION` only for an explicit condition in this specification and may not
+substitute a lower-ranked spread.
+
+## Position Valuation
+
+Exit triggers use a fresh indicative midpoint for each leg:
+
+```text
+spread_mark = long_leg_midpoint - short_leg_midpoint
+```
+
+Both quotes must pass the entry quote-validity and freshness rules. Mark-based
+exit conditions are `unknown`, not false, while a valid mark is unavailable.
+FMP prices, web sources, last trades, and underlying prices must never value the
+spread.
+
+Indicative marks and Alpaca paper fills are simulation evidence. They are not
+evidence that the same order would execute at that price in a live OPRA market.
+
+## Exit Rules
+
+The position monitor evaluates exits independently of the research model. It
+persists the time at which a valid spread mark first becomes unavailable during
+an open market and clears that time after a valid mark returns or the market
+closes. Closed-market time never counts toward the threshold; if the first mark
+after the next open is invalid, a new timer starts then. An exit becomes required
+when the first applicable condition is true:
+
+| Priority | Exit | Machine-testable trigger |
+| --- | --- | --- |
+| 1 | Expiration protection | At or after `session_close - 60 minutes` on a regular session when DTE is 3 or less |
+| 2 | Stale-data protection | No valid spread mark for five continuous minutes while the market is open |
+| 3 | Stop loss | A valid mark exists and `spread_mark <= 0.50 * entry_limit` |
+| 4 | Profit target | A valid mark exists and `spread_mark >= entry_limit + 0.50 * (width - entry_limit)` |
+| 5 | Trend invalidation | Bullish: completed daily close `<= SMA20`; bearish: completed daily close `>= SMA20` |
+| 6 | Maximum holding period | At or after `session_close - 30 minutes` on the fifth trading session, counting entry date as session one |
+
+The highest-priority true condition supplies the recorded exit reason. An
+unknown mark-based condition does not block a true mark-independent condition.
+Once any exit becomes required, that requirement remains latched until the
+position is flat. Exit execution, including stale-quote limit selection, will be
+specified separately, but it must use a single multileg limit order. The
+strategy never adds contracts, averages down, rolls, or converts a spread into
+unmatched legs.
+
+Circuit breakers block entries but do not suppress or replace these protective
+exit rules.
+
+## Risk Budget And Circuit Breakers
+
+| Limit | Threshold |
+| --- | --- |
+| Initial paper equity | $100,000 |
+| Maximum loss per spread | $500 |
+| Maximum strategy positions | 1 |
+| Maximum pending entries | 1 |
+| Maximum new entries per trading day | 1 |
+| Minimum post-entry buying-power reserve | 50% of pre-entry buying power |
+| Daily circuit breaker | Current equity at or below Alpaca `last_equity - $1,500` |
+| Competition circuit breaker | Current equity at or below $92,500 |
+
+Equity includes realized and unrealized P&L. A circuit breaker activates at the
+threshold, persists in the durable ledger, and blocks new entries. Activation
+does not imply immediate liquidation; open positions continue under the exit
+rules above.
+
+The daily breaker remains active through the current trading date. Before the
+next regular session it resets only after reconciliation confirms consistent
+account state and the competition breaker is inactive. The competition breaker
+never resets automatically during strategy version 1; operator action may close
+positions but may not re-enable entries under this version.
+
+## Explicit `NO_ACTION` Conditions
+
+The decision must be `NO_ACTION` when any of these conditions holds:
+
+- The market is closed, the date is not a regular trading session, the slot was
+  missed, or the slot is outside the entry window.
+- Required account state is unavailable, restricted, or inconsistent.
+- A position, pending entry, prior same-day entry, or circuit breaker exists.
+- Fewer than 50 completed daily bars or no usable session bars are available.
+- A required Alpaca response is unavailable, malformed, missing, or stale.
+- The daily regime is neutral or the intraday trigger disagrees with it.
+- No complete spread passes every contract, liquidity, pricing, and risk rule.
+- The selected candidate changes before approval because refreshed evidence no
+  longer matches the decision snapshot.
+- Maximum loss or projected buying-power reserve cannot be calculated exactly.
+- The output cannot be represented by the current versioned decision contract.
+
+Optional FMP or Exa failure alone is not a `NO_ACTION` condition because neither
+provider is a required strategy input.
+
+## Unsupported Behavior
+
+Strategy version 1 does not support:
+
+- Underlyings other than SPY.
+- Zero-DTE or contracts outside the specified DTE window.
+- Naked options, credit spreads, ratio spreads, calendars, iron condors, or any
+  undefined-risk structure.
+- More than one spread unit, a quantity greater than one per leg, more than one
+  position, more than one pending entry, or more than one daily entry.
+- Market orders, legging, discretionary price chasing, rolling, or averaging down.
+- Model overrides of candidate ranking, risk rejection, circuit breakers, or exits.
+- Using FMP, Exa, last trades, or generated estimates as executable option prices.
+- Claims about live profitability or executability from indicative data and
+  simulated paper fills.
+
+## Evaluation Requirements
+
+Historical option-bar acquisition records `request_started_at` immediately
+before the request and requires
+`end <= request_started_at - 15 minutes`. Full-fidelity contract selection also
+requires forward-captured chain snapshots because historical bars alone do not
+reproduce point-in-time Greeks, implied volatility, quotes, and dated open
+interest.
+
+Every observation cycle should eventually persist:
+
+- Retrieval and market timestamps, provider, feed, and symbol.
+- The underlying bars, quote, calculated averages, VWAP, regime, and trigger.
+- All considered contract fields and rejection reasons.
+- Candidate ranking, pricing inputs, risk calculations, and final decision.
+- Paper-order and fill evidence, clearly labeled as simulated.
+
+Backtest and replay implementation belongs to issue
+[#8](https://github.com/whanyu1212/greeks-in-the-loop/issues/8). It must not
+claim a full strategy backtest when required point-in-time chain evidence is
+absent.
+
+## Falsifiable Assumptions
+
+The following are hypotheses to test, not established facts:
+
+- Alpaca IEX bars preserve enough SPY trend information for the signal.
+- Indicative quotes are stable enough for comparative paper evaluation.
+- The DTE, delta, spread-width, and liquidity filters produce sufficient samples.
+- Midpoint paper fills are a useful simulation assumption after modeled slippage.
+- The profit target, stop, trend invalidation, and holding period improve outcomes.
+- A $500 maximum loss and the circuit breakers fit the competition objective.
+
+Evidence may justify a later strategy version. It must not cause an unversioned
+runtime threshold change.
+
+## Versioning And Implementation Boundary
+
+- Editorial clarifications that do not alter behavior increment the patch version.
+- Threshold or rule changes increment the minor version.
+- Changes to the underlying, strategy family, or risk model increment the major
+  version.
+- The strategy version must be stored with every future decision and risk result.
+
+This PR freezes behavior only. Decision contracts are tracked by issue
+[#6](https://github.com/whanyu1212/greeks-in-the-loop/issues/6), risk-engine
+implementation by [#10](https://github.com/whanyu1212/greeks-in-the-loop/issues/10),
+execution and reconciliation by
+[#14](https://github.com/whanyu1212/greeks-in-the-loop/issues/14), and independent
+position protection by
+[#11](https://github.com/whanyu1212/greeks-in-the-loop/issues/11).
