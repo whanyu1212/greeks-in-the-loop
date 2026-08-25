@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
 
 import { researchDecisionV1Schema } from "../src/contracts/research-decision-v1.js"
-import { researchBehaviorFixtures } from "./fixtures/research-agent-behavior.js"
+import { researchDecisionScenarios } from "./fixtures/research-decision-scenarios.js"
 
-describe("research decision behavior fixtures", () => {
-  for (const fixture of researchBehaviorFixtures) {
+describe("research decision scenarios", () => {
+  for (const fixture of researchDecisionScenarios) {
     it(fixture.name, () => {
       const parsed = researchDecisionV1Schema.safeParse(fixture.response)
 
@@ -19,7 +19,7 @@ describe("research decision behavior fixtures", () => {
   }
 
   it("covers the required fail-closed behavior classes", () => {
-    const scenarios = researchBehaviorFixtures.map(({ scenario }) => scenario).join("\n")
+    const scenarios = researchDecisionScenarios.map(({ scenario }) => scenario).join("\n")
 
     expect(scenarios).toMatch(/older than 60 seconds/)
     expect(scenarios).toMatch(/materially disagree/)

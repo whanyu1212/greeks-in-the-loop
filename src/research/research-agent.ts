@@ -27,7 +27,7 @@ export function buildResearchCyclePrompt(
 ) {
   return [
     `Run structured research cycle ${cycle} at ${startedAt.toISOString()}.`,
-    "Reconcile the paper account first, then inspect only the evidence needed to identify the strongest defined-risk options opportunity or conclude NO_ACTION.",
+    "Inspect observable paper-account state first without claiming reconciliation or risk approval, then inspect only the evidence needed to identify the highest-ranked eligible defined-risk options candidate or conclude NO_ACTION.",
     operatorObjective ? `Current operator objective: ${operatorObjective}` : undefined,
   ]
     .filter((line) => line !== undefined)

@@ -46,13 +46,13 @@ The agent's interpretation of identified observations. Inference must identify t
 | Account, order, position, clock, calendar | Retrieved during the current cycle |
 | SPY quote | Current session; age no greater than 60 seconds |
 | Proposed option quote | Current session; age no greater than 60 seconds |
-| Latest completed SPY one-minute bar | Ends no more than two minutes before evaluation |
-| Daily SPY history | Ends on the immediately preceding completed session; 50 distinct sessions |
+| SPY one-minute bars | Exactly one completed regular-session bar for every expected interval from session open through evaluation; no missing or duplicate intervals; latest bar ends no more than two minutes before evaluation |
+| Daily SPY history | Requested with `adjustment=all`; exactly one bar for each of the 50 immediately preceding completed Alpaca sessions; no missing, duplicate, skipped, or substituted sessions |
 | Option open interest | No more than two completed sessions old |
 | Historical option bars on Alpaca Basic | Request end at least 15 minutes before request start |
 | Current FMP or Exa context | Retrieved in the current cycle and has a usable provider/publication timestamp |
 
-Future-dated data is invalid. A stale primary observation may be refreshed once. If it remains stale, missing, or contradictory, the agent returns `NO_ACTION`.
+Future-dated data is invalid. Freshness is measured at a conservative instant captured after the last snapshot-forming market-data response, not at cycle start. If that later instant cannot be established, or a primary observation remains stale, missing, or contradictory after one refresh, the agent returns `NO_ACTION`.
 
 ## Conflict policy
 
@@ -68,15 +68,15 @@ The application currently registers only `alpaca-proposal-quotes-v1` as evidence
 
 A valid proposal therefore contains:
 
-- an Alpaca `SOURCED_FACT` for the exact proposed legs;
-- optional `INFERENCE` claims whose `basedOn` identifiers reference sourced facts;
+- an Alpaca `SOURCED_FACT` limited to what the exact-leg proposal quote snapshot proves;
+- optional `INFERENCE` claims only when that sourced fact directly supports them; exact-leg quotes must not be presented as proof of the directional signal;
 - no model-authored price, size, risk approval, or broker parameters.
 
 ## Responsibility split
 
 | Component | Responsibility |
 | --- | --- |
-| Research skill | Checklist, source selection, classification, freshness guidance, conflict handling |
+| Research skill | Checklist, source selection, classification, freshness guidance, conflict handling, observable candidate prefiltering and ranking |
 | Research agent | Gather evidence and emit `ResearchDecisionV1` or `NO_ACTION` |
 | Application | Parse and validate the contract; confirm trusted Alpaca quotes; derive `TradeIntentV1` |
 | Future ledger | Persist source snapshots and external provenance |
