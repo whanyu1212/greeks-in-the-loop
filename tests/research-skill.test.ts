@@ -23,12 +23,16 @@ describe("SPY debit-spread research skill", () => {
   })
 
   it("enforces exact decision-slot and approval eligibility", () => {
-    expect(skill).toContain("minute is `00`, `15`, `30`, or `45`")
+    expect(skill).toContain("derive the preceding quarter-hour slot")
+    expect(skill).toContain(
+      "flooring the local minute to `00`, `15`, `30`, or `45`",
+    )
     expect(skill).toContain("no more than 119 seconds")
+    expect(skill).toContain("entire following `01`, `16`, `31`, or `46` minute")
     expect(skill).toContain("`10:00 <= slot < min(15:00, session_close - 60 minutes)`")
     expect(skill).toContain("`slot + 5 minutes`")
     expect(skill).toContain("final Alpaca clock to still report the market open")
-    expect(sourcePolicy).toContain("missed 119-second start window")
+    expect(sourcePolicy).toContain("elapsed start greater than 119 seconds")
   })
 
   it("defines a complete ordered research checklist", () => {
@@ -82,13 +86,13 @@ describe("SPY debit-spread research skill", () => {
     expect(skill).toContain("no more than two completed Alpaca sessions")
     expect(skill).toContain("Use two distinct instants")
     expect(skill).toContain(
-      "capture `observed_at`",
+      "call `trusted_time` and use its returned UTC timestamp as `observed_at`",
     )
     expect(skill).toContain(
-      "capture a local `approval_evaluated_at`",
+      "call `trusted_time` again and use its returned UTC timestamp as `approval_evaluated_at`",
     )
     expect(skill).toContain(
-      "not the timestamp contained in the clock payload",
+      "Do not use the timestamp contained in the clock payload",
     )
     expect(skill).toContain(
       "Freeze this interval set at `observed_at`",
@@ -96,7 +100,7 @@ describe("SPY debit-spread research skill", () => {
     expect(skill).toContain("Refresh a stale primary observation once")
     expect(skill).toContain("final read-only Alpaca clock request")
     expect(skill).toContain(
-      "capture a local `approval_evaluated_at`",
+      "call `trusted_time` and use its result as `approval_evaluated_at`",
     )
     expect(sourcePolicy).toContain("post-snapshot `observed_at`")
     expect(sourcePolicy).toContain("post-clock `approval_evaluated_at`")
@@ -116,7 +120,7 @@ describe("SPY debit-spread research skill", () => {
       "never combine inputs anchored to different snapshot instants",
     )
     expect(sourcePolicy).toContain(
-      "only after all underlying and option snapshot-forming responses",
+      "immediately after all underlying and option snapshot-forming responses",
     )
   })
 

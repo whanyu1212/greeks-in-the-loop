@@ -16,7 +16,7 @@ This policy defines how the dedicated research agent selects sources, labels obs
 | Fact type | Authoritative source | Optional support | Conflict behavior |
 | --- | --- | --- | --- |
 | Paper account, orders, positions | Alpaca Trading API | None | Alpaca inconsistency blocks a proposal |
-| Market clock, calendar, scheduled slot, and deadlines | Alpaca plus cycle-start timestamp | None | Invalid quarter-hour slot, missed 119-second start window, closed market, or missed five-minute/entry deadline blocks a proposal |
+| Market clock, calendar, scheduled slot, and deadlines | Alpaca, cycle-start timestamp, and read-only `trusted_time` | None | Derive the preceding quarter-hour slot; elapsed start greater than 119 seconds, closed market, or missed five-minute/entry deadline blocks a proposal |
 | SPY bars and quote | Alpaca IEX | FMP context only | Alpaca controls the strategy signal |
 | Option contracts, chain, quotes, Greeks | Alpaca | None | Missing or conflicting fields reject the candidate |
 | Fundamentals and macro datasets | FMP | Exa corroboration | Material unresolved conflict produces `NO_ACTION` |
@@ -52,7 +52,7 @@ The agent's interpretation of identified observations. Inference must identify t
 | Historical option bars on Alpaca Basic | Request end at least 15 minutes before request start |
 | Current FMP or Exa context | Retrieved in the current cycle and has a usable provider/publication timestamp |
 
-Future-dated data is invalid. Snapshot membership is frozen at one local `observed_at` captured only after all underlying and option snapshot-forming responses—including bars, quotes, chain, contract metadata, Greeks, volume, and open interest—have completed. Every selected provider timestamp must be no later than that same instant. Deadlines and sub-day ages are rechecked at a separate local `approval_evaluated_at` captured after the final clock response completes; the clock payload timestamp is not a substitute. If either local instant cannot be established, or a primary observation remains stale, missing, or contradictory after one refresh, the agent returns `NO_ACTION`.
+Future-dated data is invalid. Snapshot membership is frozen at one `observed_at` returned by the read-only `trusted_time` tool immediately after all underlying and option snapshot-forming responses—including bars, quotes, chain, contract metadata, Greeks, volume, and open interest—have completed. Every selected provider timestamp must be no later than that same instant. Deadlines and sub-day ages are rechecked at a separate `approval_evaluated_at` returned by `trusted_time` immediately after the final clock response completes; the clock payload timestamp is not a substitute. If either local instant cannot be established, or a primary observation remains stale, missing, or contradictory after one refresh, the agent returns `NO_ACTION`.
 
 ## Conflict policy
 

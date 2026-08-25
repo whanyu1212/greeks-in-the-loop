@@ -50,6 +50,7 @@ describe("research agent policy", () => {
     expect(permission["alpaca_get_*"]).toBe("allow")
     expect(permission["fmp_*"]).toBe("allow")
     expect(permission["exa_*"]).toBe("allow")
+    expect(permission.trusted_time).toBe("allow")
     expect(config.permission?.["alpaca_*"]).toBe("deny")
   })
 
