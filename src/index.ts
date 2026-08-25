@@ -1,3 +1,13 @@
+/**
+ * Entry point for the observation-only trading research worker.
+ *
+ * The worker starts a managed local OpenCode server, creates one persistent
+ * session, and runs sequential research cycles until a process signal or cycle
+ * limit stops it. Each prompt disables known mutating Alpaca tools at the
+ * OpenCode runtime layer, while `startOpencode` owns cleanup of the server and
+ * its MCP descendants.
+ */
+
 import { readFileSync } from "node:fs"
 
 import { parse as parseEnv } from "dotenv"
@@ -35,6 +45,13 @@ This initial loop is observation-only. Never place, replace, cancel, close, exer
 
 Finish each cycle with a concise report containing: account state, market state, evidence inspected, opportunity or NO_ACTION, invalidation conditions, and what should be checked next.`
 
+/**
+ * Alpaca tools unavailable to the observation-only agent.
+ *
+ * Keep this list synchronized with the tools exposed by the configured Alpaca
+ * MCP server. OpenCode disables exact tool names only, so an MCP upgrade that
+ * introduces a new mutation requires an explicit audit and list update.
+ */
 const MUTATING_ALPACA_TOOLS = [
   "alpaca_place_stock_order",
   "alpaca_place_crypto_order",
