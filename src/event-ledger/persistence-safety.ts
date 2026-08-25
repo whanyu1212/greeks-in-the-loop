@@ -1,5 +1,7 @@
 const PROHIBITED_STRING_PATTERN =
   /(?:^|[^A-Za-z0-9])(?:Bearer\s+\S+|(?:api[_-]?key|apikey|(?:access|refresh|id|security|session)?[_-]?token|authorization|proxy[_-]?authorization|client[_-]?secret|cookies?|set[_-]?cookie|credentials?|password|private[_-]?key|secret(?:[_-]?(?:access[_-]?)?key)?|signature)\s*[:=]\s*\S+)/iu
+const URL_CANDIDATE_PATTERN =
+  /(?:[A-Za-z][A-Za-z0-9+.-]*:)?\/\/[^\s<>"']+/gu
 
 const PROHIBITED_NORMALIZED_KEYS = new Set([
   "env",
@@ -65,34 +67,45 @@ const includesKnownCredential = (
 }
 
 const assertSafeUrl = (value: string, path: readonly (string | number)[]) => {
-  let url: URL
-  try {
-    url = new URL(value.trim(), "https://ledger.invalid")
-  } catch {
-    return
-  }
+  const assertSafeCandidate = (candidate: string) => {
+    let url: URL
+    try {
+      url = new URL(candidate, "https://ledger.invalid")
+    } catch {
+      return
+    }
 
-  if (url.username || url.password) {
-    throw new UnsafePersistencePayloadError(path)
-  }
+    if (url.username || url.password) {
+      throw new UnsafePersistencePayloadError(path)
+    }
 
-  const assertSafeParameterKeys = (parameters: URLSearchParams) => {
-    for (const key of parameters.keys()) {
-      let decodedKey: string
-      try {
-        decodedKey = decodeURIComponent(key)
-      } catch {
-        throw new UnsafePersistencePayloadError(path)
+    const assertSafeParameterKeys = (parameters: URLSearchParams) => {
+      for (const key of parameters.keys()) {
+        let decodedKey: string
+        try {
+          decodedKey = decodeURIComponent(key)
+        } catch {
+          throw new UnsafePersistencePayloadError(path)
+        }
+        if (isProhibitedKey(decodedKey)) {
+          throw new UnsafePersistencePayloadError(path)
+        }
       }
-      if (isProhibitedKey(decodedKey)) {
-        throw new UnsafePersistencePayloadError(path)
-      }
+    }
+
+    assertSafeParameterKeys(url.searchParams)
+    if (url.hash.length > 1) {
+      assertSafeParameterKeys(new URLSearchParams(url.hash.slice(1)))
     }
   }
 
-  assertSafeParameterKeys(url.searchParams)
-  if (url.hash.length > 1) {
-    assertSafeParameterKeys(new URLSearchParams(url.hash.slice(1)))
+  const trimmedValue = value.trim()
+  assertSafeCandidate(trimmedValue)
+  for (const match of value.matchAll(URL_CANDIDATE_PATTERN)) {
+    const candidate = match[0]
+    if (candidate !== trimmedValue) {
+      assertSafeCandidate(candidate)
+    }
   }
 }
 
