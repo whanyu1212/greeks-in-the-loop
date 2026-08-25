@@ -57,13 +57,27 @@ const includesKnownCredential = (
   value: string,
   knownCredentialValues: readonly string[],
 ) => {
-  if (knownCredentialValues.some((credential) => value.includes(credential))) {
-    return true
+  let decoded = value
+  for (let pass = 0; pass < 3; pass += 1) {
+    if (
+      knownCredentialValues.some((credential) => decoded.includes(credential))
+    ) {
+      return true
+    }
+
+    const next = decoded.replace(
+      /%([0-7][0-9A-Fa-f])/gu,
+      (_match, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)),
+    )
+    if (next === decoded) break
+    decoded = next
   }
 
   try {
-    const decoded = decodeURIComponent(value)
-    return knownCredentialValues.some((credential) => decoded.includes(credential))
+    const fullyDecoded = decodeURIComponent(decoded)
+    return knownCredentialValues.some((credential) =>
+      fullyDecoded.includes(credential),
+    )
   } catch {
     return false
   }

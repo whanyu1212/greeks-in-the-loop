@@ -87,6 +87,18 @@ describe("assertPersistenceSafe", () => {
         [credential],
       ),
     ).toThrow(UnsafePersistencePayloadError)
+    expect(() =>
+      assertPersistenceSafe(
+        { claim: `%61lpaca-bare-credential-123%` },
+        [credential],
+      ),
+    ).toThrow(UnsafePersistencePayloadError)
+    expect(() =>
+      assertPersistenceSafe(
+        { claim: `%2561lpaca-bare-credential-123%` },
+        [credential],
+      ),
+    ).toThrow(UnsafePersistencePayloadError)
   })
 
   it.each([
