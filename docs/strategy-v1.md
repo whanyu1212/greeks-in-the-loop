@@ -261,10 +261,19 @@ Exit triggers use a fresh indicative midpoint for each leg:
 spread_mark = long_leg_midpoint - short_leg_midpoint
 ```
 
-Both quotes must pass the entry quote-validity and freshness rules. Mark-based
-exit conditions are `unknown`, not false, while a valid mark is unavailable.
-FMP prices, web sources, last trades, and underlying prices must never value the
-spread.
+For each position-monitor cycle, capture `monitor_evaluated_at` immediately after
+all required option-quote attempts settle, whether by response, provider error,
+or bounded timeout. Each quote must be dated for the current session, have a
+provider timestamp no later than `monitor_evaluated_at`, and be no more than 60
+seconds old at `monitor_evaluated_at`. Bid and ask must also satisfy the entry
+validity and spread-width rules. The spread mark and all mark-based exit checks
+use only quotes from that monitor cycle. Any failed attempt makes the mark
+invalid for that cycle.
+
+Mark-based exit conditions are `unknown`, not false, while a valid mark is
+unavailable. The stale-data timer begins at the first `monitor_evaluated_at` with
+an invalid mark. FMP prices, web sources, last trades, and underlying prices must
+never value the spread.
 
 Indicative marks and Alpaca paper fills are simulation evidence. They are not
 evidence that the same order would execute at that price in a live OPRA market.
