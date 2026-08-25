@@ -16,7 +16,7 @@ This policy defines how the dedicated research agent selects sources, labels obs
 | Fact type | Authoritative source | Optional support | Conflict behavior |
 | --- | --- | --- | --- |
 | Paper account, orders, positions | Alpaca Trading API | None | Alpaca inconsistency blocks a proposal |
-| Market clock and calendar | Alpaca | None | Missing or stale state blocks a proposal |
+| Market clock, calendar, scheduled slot, and deadlines | Alpaca plus cycle-start timestamp | None | Invalid quarter-hour slot, missed 119-second start window, closed market, or missed five-minute/entry deadline blocks a proposal |
 | SPY bars and quote | Alpaca IEX | FMP context only | Alpaca controls the strategy signal |
 | Option contracts, chain, quotes, Greeks | Alpaca | None | Missing or conflicting fields reject the candidate |
 | Fundamentals and macro datasets | FMP | Exa corroboration | Material unresolved conflict produces `NO_ACTION` |
@@ -44,7 +44,7 @@ The agent's interpretation of identified observations. Inference must identify t
 | Observation | Requirement |
 | --- | --- |
 | Account, order, position, clock, calendar | Retrieved during the current cycle |
-| SPY quote | Current session; age no greater than 60 seconds |
+| SPY quote | Current session; age no greater than 60 seconds; finite positive bid/ask with `ask >= bid`; `current_price` is exactly `(bid + ask) / 2` |
 | Proposed option quote | Current session; age no greater than 60 seconds |
 | SPY one-minute bars | Exactly one completed regular-session bar for every expected interval from session open through evaluation; no missing or duplicate intervals; latest bar ends no more than two minutes before evaluation |
 | Daily SPY history | Requested with `adjustment=all`; exactly one bar for each of the 50 immediately preceding completed Alpaca sessions; no missing, duplicate, skipped, or substituted sessions |

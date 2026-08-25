@@ -22,6 +22,15 @@ describe("SPY debit-spread research skill", () => {
     )
   })
 
+  it("enforces exact decision-slot and approval eligibility", () => {
+    expect(skill).toContain("minute is `00`, `15`, `30`, or `45`")
+    expect(skill).toContain("no more than 119 seconds")
+    expect(skill).toContain("`10:00 <= slot < min(15:00, session_close - 60 minutes)`")
+    expect(skill).toContain("`slot + 5 minutes`")
+    expect(skill).toContain("final Alpaca clock to still report the market open")
+    expect(sourcePolicy).toContain("missed 119-second start window")
+  })
+
   it("defines a complete ordered research checklist", () => {
     for (const step of [
       "Inspect observable account state",
@@ -85,6 +94,18 @@ describe("SPY debit-spread research skill", () => {
     expect(sourcePolicy).toContain("Requested with `adjustment=all`")
     expect(sourcePolicy).toContain("no missing or duplicate intervals")
     expect(skill).toContain("INSUFFICIENT_UNDERLYING_DATA")
+  })
+
+  it("defines current price as the validated SPY quote midpoint", () => {
+    expect(skill).toContain("bid and ask are finite and positive")
+    expect(skill).toContain("`ask >= bid`")
+    expect(skill).toContain("`current_price = (bid + ask) / 2`")
+    expect(skill).toContain(
+      "do not use the bid, ask, latest trade, bar close, or another field",
+    )
+    expect(sourcePolicy).toContain(
+      "`current_price` is exactly `(bid + ask) / 2`",
+    )
   })
 
   it("fails closed on material conflicts rather than choosing a narrative", () => {

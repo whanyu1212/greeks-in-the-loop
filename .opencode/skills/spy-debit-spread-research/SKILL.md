@@ -53,12 +53,16 @@ Refresh a stale primary observation once when a read-only refresh is available. 
 
 2. **Check the research context**
    - Inspect Alpaca clock and calendar.
-   - Research may occur outside the entry window, but the final decision must be `NO_ACTION` with `MARKET_WINDOW_INELIGIBLE` until deterministic application support for staged research exists.
+   - Treat the cycle-start timestamp in the request as the scheduled-slot candidate. It is eligible only when its New York minute is `00`, `15`, `30`, or `45` and it is no more than 119 seconds after that exact quarter-hour slot.
+   - The slot must satisfy `10:00 <= slot < min(15:00, session_close - 60 minutes)` on a regular Alpaca trading day while the market is open.
+   - Before proposing, require the final research evaluation instant to be earlier than both `slot + 5 minutes` and `min(15:00, session_close - 60 minutes)`, and require the final Alpaca clock to still report the market open.
+   - A free-running cycle that does not satisfy every slot and deadline condition must return `NO_ACTION` with `MARKET_WINDOW_INELIGIBLE`. Research may still occur outside the entry window, but it cannot produce `PROPOSE_TRADE` until deterministic staged-research support exists.
 
 3. **Build the authoritative SPY view**
    - Request completed Alpaca IEX daily bars with `adjustment=all`, completed regular-session one-minute bars, and a current SPY IEX quote.
    - Before calculating SMA20/SMA50, verify a one-to-one mapping to every one of the 50 immediately preceding completed Alpaca sessions.
    - Before calculating session VWAP, verify exactly one valid completed one-minute bar for every expected regular-session interval from session open through the evaluation instant; reject missing or duplicate intervals.
+   - Validate that the SPY quote bid and ask are finite and positive and that `ask >= bid`. Define `current_price = (bid + ask) / 2`; do not use the bid, ask, latest trade, bar close, or another field as `current_price`.
    - Bullish regime: `daily_close > SMA20 > SMA50` and `current_price > session_vwap`.
    - Bearish regime: `daily_close < SMA20 < SMA50` and `current_price < session_vwap`.
    - Equality, mixed ordering, incomplete bars, or disagreement means `SIGNAL_NOT_ACTIONABLE`.
