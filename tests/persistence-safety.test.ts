@@ -57,12 +57,15 @@ describe("assertPersistenceSafe", () => {
   it.each([
     "Bearer abcdefghijklmnop",
     "apikey=secret-value",
+    "API Key: third-party-secret",
     "client_secret: secret-value",
+    "Client Secret: secret-value",
     "Cookie: sid=secret-value",
     "Set-Cookie: sid=secret-value",
     "secret=secret-value",
     "AWS_SECRET_ACCESS_KEY=secret-value",
     "private_key: secret-value",
+    "Private Key: secret-value",
   ])("rejects credentials embedded in ordinary strings", (value) => {
     expect(() => assertPersistenceSafe({ claim: value })).toThrow(
       UnsafePersistencePayloadError,
@@ -92,6 +95,8 @@ describe("assertPersistenceSafe", () => {
     "//user:password@example.com/data",
     "  //user:password@example.com/data",
     "See https://alice:hunter2@example.com/data for details",
+    "https:alice:hunter2@example.com/path",
+    "See https:alice:hunter2@example.com/path for details",
     "https://example.com/path?access%5Ftoken=secret-value",
     "See https://example.com/path?token=secret-value for details",
     "https://example.com/path#token=secret-value",

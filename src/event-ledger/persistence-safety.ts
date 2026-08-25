@@ -1,7 +1,10 @@
-const PROHIBITED_STRING_PATTERN =
-  /(?:^|[^A-Za-z0-9])(?:Bearer\s+\S+|(?:api[_-]?key|apikey|(?:access|refresh|id|security|session)?[_-]?token|authorization|proxy[_-]?authorization|client[_-]?secret|cookies?|set[_-]?cookie|credentials?|password|private[_-]?key|secret(?:[_-]?(?:access[_-]?)?key)?|signature)\s*[:=]\s*\S+)/iu
+const PROHIBITED_BEARER_PATTERN =
+  /(?:^|[^A-Za-z0-9])Bearer\s+\S+/iu
+const PROHIBITED_LABELED_SECRET_PATTERN =
+  /(?:^|[^A-Za-z0-9])(?:api[\s_-]*key|(?:(?:access|refresh|id|security|session)[\s_-]*)?token|authorization|proxy[\s_-]*authorization|client[\s_-]*secret|cookies?|set[\s_-]*cookie|credentials?|password|private[\s_-]*key|secret(?:[\s_-]*(?:access[\s_-]*)?key)?|signature)\s*[:=]\s*\S+/iu
+const SCHEME_PREFIX_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/u
 const URL_CANDIDATE_PATTERN =
-  /(?:[A-Za-z][A-Za-z0-9+.-]*:)?\/\/[^\s<>"']+/gu
+  /(?:[A-Za-z][A-Za-z0-9+.-]*:[^\s<>"']+|\/\/[^\s<>"']+)/gu
 
 const PROHIBITED_NORMALIZED_KEYS = new Set([
   "env",
@@ -70,7 +73,9 @@ const assertSafeUrl = (value: string, path: readonly (string | number)[]) => {
   const assertSafeCandidate = (candidate: string) => {
     let url: URL
     try {
-      url = new URL(candidate, "https://ledger.invalid")
+      url = SCHEME_PREFIX_PATTERN.test(candidate)
+        ? new URL(candidate)
+        : new URL(candidate, "https://ledger.invalid")
     } catch {
       return
     }
@@ -127,7 +132,8 @@ const visit = (
     if (typeof value === "string") {
       if (
         includesKnownCredential(value, knownCredentialValues) ||
-        PROHIBITED_STRING_PATTERN.test(value)
+        PROHIBITED_BEARER_PATTERN.test(value) ||
+        PROHIBITED_LABELED_SECRET_PATTERN.test(value)
       ) {
         throw new UnsafePersistencePayloadError(path)
       }
