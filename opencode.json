@@ -13,6 +13,7 @@
         "alpaca_get_*": "allow",
         "fmp_*": "allow",
         "exa_*": "allow",
+        "trusted_time": "allow",
         "read": {
           "*": "deny",
           "docs/**": "allow",
@@ -24,7 +25,10 @@
         },
         "bash": "deny",
         "task": "deny",
-        "skill": "deny",
+        "skill": {
+          "*": "deny",
+          "spy-debit-spread-research": "allow"
+        },
         "external_directory": "deny",
         "webfetch": "deny",
         "websearch": "deny",

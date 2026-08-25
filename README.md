@@ -42,6 +42,10 @@ pnpm agent
 
 The worker creates one persistent OpenCode session for its lifetime and shuts down cleanly on `SIGINT` or `SIGTERM`. Every cycle selects the checked-in `research` agent; this identity cannot be overridden through `.env`. Each cycle records exactly one bounded outcome: `VALIDATED_NO_ACTION`, `DECISION_REJECTED`, `INTENT_DERIVATION_REJECTED`, or `INTENT_DERIVED`. The current sink writes JSON lines to standard output; durable storage is deferred to issue #13.
 
+## Research procedure
+
+Every unattended cycle loads the project-local `spy-debit-spread-research` skill. The checklist and [source/freshness policy](docs/research-source-policy.md) define source precedence, evidence classification, stale-data handling, conflict resolution, candidate eligibility, and fail-closed `NO_ACTION` behavior. Alpaca remains authoritative for broker and market facts; FMP and Exa provide optional supporting context.
+
 ## Security boundary
 
 OpenCode permissions enforce the agent's tool and workspace boundary. Application code independently validates `ResearchDecisionV1`, retrieves trusted option quotes, and derives `TradeIntentV1`. Prompt instructions describe desired behavior but are not treated as an authorization control.
@@ -56,6 +60,7 @@ pnpm test
 pnpm build
 pnpm agent:config
 pnpm agent:mcp
+pnpm agent:skills
 ```
 
 The resolved agent must deny unknown tools and broker mutations. The MCP check requires configured credentials and should report only Alpaca, FMP, and Exa.

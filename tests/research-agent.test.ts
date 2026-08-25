@@ -20,7 +20,7 @@ describe("research agent request construction", () => {
     ).toBe(
       [
         "Run structured research cycle 3 at 2026-08-25T13:30:00.000Z.",
-        "Reconcile the paper account first, then inspect only the evidence needed to identify the strongest defined-risk options opportunity or conclude NO_ACTION.",
+        "Inspect observable paper-account state first without claiming reconciliation or risk approval, then inspect only the evidence needed to identify the highest-ranked eligible defined-risk options candidate or conclude NO_ACTION.",
         "Current operator objective: Compare downside catalysts.",
       ].join("\n"),
     )
