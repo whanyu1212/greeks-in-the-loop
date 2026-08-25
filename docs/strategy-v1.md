@@ -330,9 +330,13 @@ late:
   reconciliation.
 - Fill outcome and reconciliation health are independent: a
   `FILLED_APPROVED` or `FILLED_LATE` outcome is not revoked by later health
-  evidence. Incomplete, missing, partial, unmatched, or materially conflicting
+  evidence. A consistent, open, unfilled `ACKNOWLEDGED` order with no fill
+  activity and no position remains healthy until its deadline; absent fill
+  evidence is expected in that state. Once any fill activity, nonzero position,
+  parent or nested-order status indicating any fill, or terminal parent state
+  exists, incomplete, missing, partial, unmatched, or materially conflicting
   symbol, quantity, side, status, activity, order, or position evidence remains
-  `RECONCILING` for up to 30 seconds after the first evidence. It becomes
+  `RECONCILING` for up to 30 seconds after that first evidence. It becomes
   `BROKER_INCONSISTENCY` if still unresolved after that bound; a terminal broker
   record that already confirms partial or unmatched exposure escalates
   immediately. Diagnostic parent/activity timestamp differences are excluded.
@@ -484,12 +488,12 @@ index is the count of Alpaca trading dates from the entry date through
 | Priority | Exit | Machine-testable trigger |
 | --- | --- | --- |
 | 0 | Late-fill protection | Any complete-spread exposure is marked `late_fill`; the flag persists until flat even before reconciliation converges |
-| 1 | Expiration protection | Exit DTE is less than 3 while the market is open, or exit DTE is 3 and time is at or after `session_close - 60 minutes` |
+| 1 | Expiration protection | Exit DTE is less than 3 while the market is open, or exit DTE is 3 and `cycle_decided_at >= session_close - 60 minutes` |
 | 2 | Stale-data protection | No valid spread mark for five continuous minutes while the market is open |
 | 3 | Stop loss | A valid mark exists and `spread_mark <= 0.50 * entry_limit` |
 | 4 | Profit target | A valid mark exists and `spread_mark >= entry_limit + 0.50 * (width - entry_limit)` |
 | 5 | Trend invalidation | Bullish: completed daily close `<= SMA20`; bearish: completed daily close `>= SMA20` |
-| 6 | Maximum holding period | Holding-session index is greater than 5 while the market is open, or index is 5 and time is at or after `session_close - 30 minutes` |
+| 6 | Maximum holding period | Holding-session index is greater than 5 while the market is open, or index is 5 and `cycle_decided_at >= session_close - 30 minutes` |
 
 The highest-priority true condition supplies the recorded exit reason. An
 unknown mark-based condition does not block a true mark-independent condition.
