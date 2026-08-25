@@ -3,11 +3,16 @@
  *
  * This module owns the server process and, on non-Windows platforms, its
  * detached process group so shutdown signals can reach local MCP descendants.
- * Callers own the returned client only for the runtime's lifetime and must
- * invoke the idempotent `close` operation when finished.
+ * Configuration overrides are removed from the child environment and external
+ * plugins are disabled before startup. Callers own the returned client only
+ * for the runtime's lifetime and must invoke the idempotent `close` operation
+ * when finished.
  */
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk"
 
@@ -82,6 +87,26 @@ const killProcessTree = (process: ChildProcess, signal: NodeJS.Signals) => {
 }
 
 /**
+ * Removes environment settings that could replace the checked-in agent policy.
+ *
+ * @param environment Parent process environment.
+ * @returns Environment inherited by the managed OpenCode process.
+ */
+export function createOpencodeEnvironment(
+  environment: NodeJS.ProcessEnv,
+  configHome: string,
+) {
+  const {
+    OPENCODE_CONFIG: _configPath,
+    OPENCODE_CONFIG_CONTENT: _configContent,
+    OPENCODE_CONFIG_DIR: _configDirectory,
+    OPENCODE_AGENT: _agentOverride,
+    ...childEnvironment
+  } = environment
+  return { ...childEnvironment, XDG_CONFIG_HOME: configHome }
+}
+
+/**
  * Starts an OpenCode server and creates an SDK client for it.
  *
  * The server runs in its own process group so shutdown can terminate local
@@ -98,12 +123,17 @@ export async function startOpencode({
   signal,
   timeoutMs,
 }: StartOpencodeOptions): Promise<OpencodeRuntime> {
+  const configHome = mkdtempSync(join(tmpdir(), "greeks-opencode-"))
+  const childEnvironment = createOpencodeEnvironment(
+    globalThis.process.env,
+    configHome,
+  )
   const process = spawn(
     globalThis.process.env.OPENCODE_BIN ?? "opencode",
-    ["serve", `--hostname=${hostname}`, `--port=${port}`],
+    ["--pure", "serve", `--hostname=${hostname}`, `--port=${port}`],
     {
       detached: globalThis.process.platform !== "win32",
-      env: globalThis.process.env,
+      env: childEnvironment,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     },
@@ -144,6 +174,7 @@ export async function startOpencode({
 
       if (error || !serverUrl) {
         killProcessTree(process, "SIGKILL")
+        rmSync(configHome, { force: true, recursive: true })
         reject(error ?? new Error("OpenCode failed to start"))
         return
       }
@@ -189,6 +220,7 @@ export async function startOpencode({
 
       process.stdout?.destroy()
       process.stderr?.destroy()
+      rmSync(configHome, { force: true, recursive: true })
     })()
     return closing
   }
