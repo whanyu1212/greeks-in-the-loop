@@ -299,14 +299,20 @@ closes. Closed-market time never counts toward the threshold; if the first mark
 after the next open is invalid, a new timer starts then. An exit becomes required
 when the first applicable condition is true:
 
+For every monitor cycle, `monitor_date` is the `America/New_York` calendar date
+at `monitor_evaluated_at`. Exit DTE is recalculated as the number of calendar
+dates from `monitor_date` to the contract expiration date. The holding-session
+index is the count of Alpaca trading dates from the entry date through
+`monitor_date`, inclusive, so the entry session is index 1.
+
 | Priority | Exit | Machine-testable trigger |
 | --- | --- | --- |
-| 1 | Expiration protection | At or after `session_close - 60 minutes` on a regular session when DTE is 3 or less |
+| 1 | Expiration protection | Exit DTE is less than 3 while the market is open, or exit DTE is 3 and time is at or after `session_close - 60 minutes` |
 | 2 | Stale-data protection | No valid spread mark for five continuous minutes while the market is open |
 | 3 | Stop loss | A valid mark exists and `spread_mark <= 0.50 * entry_limit` |
 | 4 | Profit target | A valid mark exists and `spread_mark >= entry_limit + 0.50 * (width - entry_limit)` |
 | 5 | Trend invalidation | Bullish: completed daily close `<= SMA20`; bearish: completed daily close `>= SMA20` |
-| 6 | Maximum holding period | At or after `session_close - 30 minutes` on the fifth trading session, counting entry date as session one |
+| 6 | Maximum holding period | Holding-session index is greater than 5 while the market is open, or index is 5 and time is at or after `session_close - 30 minutes` |
 
 The highest-priority true condition supplies the recorded exit reason. An
 unknown mark-based condition does not block a true mark-independent condition.
