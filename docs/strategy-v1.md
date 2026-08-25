@@ -298,9 +298,12 @@ overdue order discovered by recovery or lookup is canceled within one second of
 obtaining its ID. This one-second rule applies whenever an ID first becomes known
 after the deadline, including through the original POST response, lookup, or
 restart recovery. Capture `cancel_requested_at` immediately before every cancel
-API invocation. No unrelated provider request may precede these actions. The
-pending-entry lock remains set throughout; the strategy never intentionally
-carries an open entry beyond the deadline or into another session.
+API invocation and apply a five-second timeout to each cancel attempt. A cancel
+response, error, or timeout proceeds immediately to reconciliation; a timed-out
+or failed attempt never blocks the later cancel retries. No unrelated provider
+request may precede these actions. The pending-entry lock remains set throughout;
+the strategy never intentionally carries an open entry beyond the deadline or
+into another session.
 
 A cancellation response alone does not resolve the order. After every cancel
 request, the executor immediately reconciles the nested Alpaca order, positions,
@@ -443,11 +446,15 @@ time.
 Mark-based exit conditions are `unknown`, not false, while a valid mark is
 unavailable. The stale-data timer begins at `monitor_started_at` for the first
 cycle with an invalid mark, so request latency counts toward the five-minute
-threshold. For a cycle that crosses `session_close`, elapsed stale time is
-clamped at `session_close`; if five minutes accrued before the close, stale-data
-protection is a true signal for that cycle, otherwise the timer is cleared before
-state is persisted. FMP prices, web sources, last trades, and underlying prices
-must never value the spread.
+threshold. When a valid mark returns, first measure the completed unavailable
+interval through `monitor_evaluated_at`. If it reached five minutes, stale-data
+protection remains a true signal for the decision barrier and is latched before
+the timer can clear; only a shorter recovered interval clears immediately. For a
+cycle that crosses `session_close`, elapsed stale time is clamped at
+`session_close`; if five minutes accrued before the close, stale-data protection
+is a true signal for that cycle, otherwise the timer is cleared before state is
+persisted. FMP prices, web sources, last trades, and underlying prices must never
+value the spread.
 
 Indicative marks and Alpaca paper fills are simulation evidence. They are not
 evidence that the same order would execute at that price in a live OPRA market.
