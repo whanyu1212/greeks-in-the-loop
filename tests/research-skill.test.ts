@@ -80,20 +80,41 @@ describe("SPY debit-spread research skill", () => {
     )
     expect(skill).toContain("Reject missing or duplicate intervals")
     expect(skill).toContain("no more than two completed Alpaca sessions")
+    expect(skill).toContain("Use two distinct instants")
     expect(skill).toContain(
-      "Do not use the cycle-start timestamp as the final freshness instant",
+      "capture `observed_at`",
     )
     expect(skill).toContain(
-      "After the last snapshot-forming market-data response",
+      "capture a local `approval_evaluated_at`",
+    )
+    expect(skill).toContain(
+      "not the timestamp contained in the clock payload",
+    )
+    expect(skill).toContain(
+      "Freeze this interval set at `observed_at`",
     )
     expect(skill).toContain("Refresh a stale primary observation once")
     expect(skill).toContain("final read-only Alpaca clock request")
     expect(skill).toContain(
-      "Use its returned current timestamp as the conservative research evaluation instant",
+      "capture a local `approval_evaluated_at`",
     )
+    expect(sourcePolicy).toContain("post-snapshot `observed_at`")
+    expect(sourcePolicy).toContain("post-clock `approval_evaluated_at`")
     expect(sourcePolicy).toContain("Requested with `adjustment=all`")
     expect(sourcePolicy).toContain("no missing or duplicate intervals")
     expect(skill).toContain("INSUFFICIENT_UNDERLYING_DATA")
+  })
+
+  it("requires valid bar values and the exact volume-weighted VWAP formula", () => {
+    expect(skill).toContain("Every selected daily close must be finite and positive")
+    expect(skill).toContain(
+      "Every selected intraday `bar_vwap` and `bar_volume` must be finite and positive",
+    )
+    expect(skill).toContain("`sum(bar_volume) > 0`")
+    expect(skill).toContain(
+      "`session_vwap = sum(bar_vwap * bar_volume) / sum(bar_volume)`",
+    )
+    expect(skill).toContain("Do not use a simple average")
   })
 
   it("defines current price as the validated SPY quote midpoint", () => {

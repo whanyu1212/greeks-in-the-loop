@@ -31,11 +31,16 @@ For a fact type owned by Alpaca, missing, stale, or contradictory Alpaca data ca
 
 ## Freshness rules
 
-Do not use the cycle-start timestamp as the final freshness instant. After the last snapshot-forming market-data response, capture a conservative research evaluation instant and measure every age against it. If you cannot establish that later instant from current tool responses, return `NO_ACTION`; never make data appear fresher by measuring from cycle start.
+Use two distinct instants and never substitute the cycle-start timestamp for either one:
+
+1. Immediately after the last snapshot-forming market-data response completes, capture `observed_at`. Freeze the expected daily sessions and intraday intervals at this instant.
+2. After the final Alpaca clock response completes, capture a local `approval_evaluated_at`. This must be a timestamp observed after response completion, not the timestamp contained in the clock payload.
+
+If the runtime does not expose a trustworthy local timestamp for either capture, return `NO_ACTION`; never make data appear fresher or a deadline appear unexpired by using cycle start or a provider timestamp.
 
 - Account, order, position, clock, and calendar observations must come from the current cycle.
-- The SPY quote and each proposed option quote must be from the current session and no more than 60 seconds old.
-- Intraday SPY bars must contain exactly one completed regular-session one-minute bar for every expected interval from session open through the evaluation instant. Reject missing or duplicate intervals. The latest completed bar must end no more than two minutes before the evaluation instant.
+- The SPY quote and each proposed option quote must be from the current session and no more than 60 seconds old at both `observed_at` and `approval_evaluated_at`.
+- Intraday SPY bars must contain exactly one completed regular-session one-minute bar for every expected interval from session open through `observed_at`. Reject missing or duplicate intervals. Freeze this interval set at `observed_at`; do not require intervals that complete afterward. The latest selected bar must end no more than two minutes before `observed_at`, and its age must be rechecked at `approval_evaluated_at`.
 - Request daily SPY bars with `adjustment=all`. Daily history must contain exactly one bar for each of the 50 immediately preceding completed Alpaca sessions, ending on the immediately preceding session. Reject missing, duplicate, skipped, or substituted sessions; ignore only bars older than the required 50-session window.
 - Option open interest must be dated no more than two completed Alpaca sessions before the decision date.
 - Historical option-bar requests must end at least 15 minutes before request start on Alpaca Basic.
@@ -60,8 +65,9 @@ Refresh a stale primary observation once when a read-only refresh is available. 
 
 3. **Build the authoritative SPY view**
    - Request completed Alpaca IEX daily bars with `adjustment=all`, completed regular-session one-minute bars, and a current SPY IEX quote.
-   - Before calculating SMA20/SMA50, verify a one-to-one mapping to every one of the 50 immediately preceding completed Alpaca sessions.
-   - Before calculating session VWAP, verify exactly one valid completed one-minute bar for every expected regular-session interval from session open through the evaluation instant; reject missing or duplicate intervals.
+   - Before calculating SMA20/SMA50, verify a one-to-one mapping to every one of the 50 immediately preceding completed Alpaca sessions. Every selected daily close must be finite and positive.
+   - Capture `observed_at` after the last snapshot-forming response. Before calculating session VWAP, verify exactly one valid completed one-minute bar for every expected regular-session interval from session open through `observed_at`; reject missing or duplicate intervals.
+   - Every selected intraday `bar_vwap` and `bar_volume` must be finite and positive. Require `sum(bar_volume) > 0` and calculate `session_vwap = sum(bar_vwap * bar_volume) / sum(bar_volume)`. Do not use a simple average, close, or provider summary in place of this formula.
    - Validate that the SPY quote bid and ask are finite and positive and that `ask >= bid`. Define `current_price = (bid + ask) / 2`; do not use the bid, ask, latest trade, bar close, or another field as `current_price`.
    - Bullish regime: `daily_close > SMA20 > SMA50` and `current_price > session_vwap`.
    - Bearish regime: `daily_close < SMA20 < SMA50` and `current_price < session_vwap`.
@@ -98,8 +104,8 @@ Refresh a stale primary observation once when a read-only refresh is available. 
 
 7. **Challenge and recheck the candidate**
    - State at least one concrete invalidation condition.
-   - After the final snapshot-forming market-data response, make a final read-only Alpaca clock request. Use its returned current timestamp as the conservative research evaluation instant when available.
-   - Recheck quote and bar freshness against that later instant. If the clock lacks a usable current timestamp, or data became stale while researching, return `NO_ACTION`.
+   - After the snapshot is frozen at `observed_at`, make a final read-only Alpaca clock request. Immediately after that response completes, capture a local `approval_evaluated_at`; do not use the clock payload's timestamp as a substitute for response-completion time.
+   - Recheck quote and latest-bar age, the `slot + 5 minutes` deadline, the entry cutoff, and the returned open-market state against `approval_evaluated_at`. If a trustworthy local completion timestamp is unavailable, or data became stale or late while researching, return `NO_ACTION`.
    - Prefer `NO_ACTION` when evidence is weak, contradictory, stale, or incomplete.
    - If refreshed facts change direction, legs, or eligibility, return `CANDIDATE_CHANGED`.
 

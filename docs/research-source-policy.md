@@ -46,13 +46,13 @@ The agent's interpretation of identified observations. Inference must identify t
 | Account, order, position, clock, calendar | Retrieved during the current cycle |
 | SPY quote | Current session; age no greater than 60 seconds; finite positive bid/ask with `ask >= bid`; `current_price` is exactly `(bid + ask) / 2` |
 | Proposed option quote | Current session; age no greater than 60 seconds |
-| SPY one-minute bars | Exactly one completed regular-session bar for every expected interval from session open through evaluation; no missing or duplicate intervals; latest bar ends no more than two minutes before evaluation |
+| SPY one-minute bars | Expected interval set freezes at post-snapshot `observed_at`; exactly one completed regular-session bar per interval from session open through `observed_at`; no missing or duplicate intervals; finite positive VWAP and volume; positive total volume; latest-bar age checked at `observed_at` and post-clock `approval_evaluated_at` |
 | Daily SPY history | Requested with `adjustment=all`; exactly one bar for each of the 50 immediately preceding completed Alpaca sessions; no missing, duplicate, skipped, or substituted sessions |
 | Option open interest | No more than two completed sessions old |
 | Historical option bars on Alpaca Basic | Request end at least 15 minutes before request start |
 | Current FMP or Exa context | Retrieved in the current cycle and has a usable provider/publication timestamp |
 
-Future-dated data is invalid. Freshness is measured at a conservative instant captured after the last snapshot-forming market-data response, not at cycle start. If that later instant cannot be established, or a primary observation remains stale, missing, or contradictory after one refresh, the agent returns `NO_ACTION`.
+Future-dated data is invalid. Snapshot membership is frozen at a local `observed_at` captured after the final snapshot-forming response. Deadlines and sub-day ages are rechecked at a separate local `approval_evaluated_at` captured after the final clock response completes; the clock payload timestamp is not a substitute. If either local instant cannot be established, or a primary observation remains stale, missing, or contradictory after one refresh, the agent returns `NO_ACTION`.
 
 ## Conflict policy
 
