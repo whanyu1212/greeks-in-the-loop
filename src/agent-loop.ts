@@ -38,7 +38,7 @@ export type AgentLoopOptions = {
  * @param signal Signal that interrupts the delay.
  * @returns A promise that resolves after the delay or cancellation.
  */
-const abortableSleep = (milliseconds: number, signal: AbortSignal) =>
+export const abortableSleep = (milliseconds: number, signal: AbortSignal) =>
   new Promise<void>((resolve) => {
     const timeout = setTimeout(done, milliseconds)
 
@@ -49,6 +49,7 @@ const abortableSleep = (milliseconds: number, signal: AbortSignal) =>
     }
 
     signal.addEventListener("abort", done, { once: true })
+    if (signal.aborted) done()
   })
 
 /**
