@@ -166,9 +166,11 @@ export async function startOpencode({
   /**
    * Disposes the SDK instance and terminates the owned process tree.
    *
-   * Shutdown requests SDK disposal, sends SIGTERM to the owned process group,
-   * and sends SIGKILL to that group if the root OpenCode process does not exit
-   * within the graceful-shutdown bound.
+   * Shutdown first requests SDK disposal. On non-Windows platforms it then
+   * sends SIGTERM to the owned process group and escalates to SIGKILL if the
+   * root OpenCode process does not exit within the graceful-shutdown bound.
+   * Windows instead terminates the process tree immediately with `taskkill /T
+   * /F`; it does not provide the same graceful signal window.
    */
   const close = () => {
     closing ??= (async () => {
