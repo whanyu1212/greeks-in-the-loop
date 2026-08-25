@@ -116,9 +116,13 @@ SMA20 = arithmetic mean of the latest 20 completed adjusted daily closes
 SMA50 = arithmetic mean of the latest 50 completed adjusted daily closes
 ```
 
-The current underlying price is the midpoint of a valid SPY IEX bid and ask. The
-quote must be no more than 60 seconds old. The session VWAP is calculated from
-completed one-minute regular-session IEX bars:
+The current underlying price is the midpoint of a SPY IEX bid and ask. Both
+prices must be finite and positive, and ask must be greater than or equal to bid.
+The quote must be dated for the current session, have a provider timestamp no
+later than `observed_at`, and be no more than 60 seconds old at `observed_at`.
+Its age is rechecked at approval and submission under the sub-day freshness
+rules. The session VWAP is calculated from completed one-minute regular-session
+IEX bars:
 
 ```text
 session_vwap = sum(bar_vwap * bar_volume) / sum(bar_volume)
