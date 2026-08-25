@@ -253,11 +253,22 @@ The order's `entry_order_deadline` is
 `min(slot + 5 minutes, 15:00, session_close - 60 minutes)`. Before submission,
 persist the intent, deadline, unique `client_order_id`, and phase `PREPARED`.
 Arm the local deadline timer, durably transition to `SUBMITTING`, then immediately
-invoke the POST with that same ID in its payload. Transition to `ACKNOWLEDGED`
-when Alpaca returns the broker order ID. These phase changes are ordered writes:
-a `PREPARED` record proves no POST began. If the original POST returns its broker
-ID at or after `entry_order_deadline`, invoke cancellation within one second of
-receiving that response and before any unrelated request.
+invoke the POST with that same ID in its payload and a five-second timeout.
+Transition to `ACKNOWLEDGED` when Alpaca returns the broker order ID. These phase
+changes are ordered writes: a `PREPARED` record proves no POST began. If the
+deadline timer fires while the POST is still in flight without a broker ID, it
+independently transitions the intent to `SUBMISSION_AMBIGUOUS` and starts lookup.
+If the original POST later returns its broker ID at or after
+`entry_order_deadline`, invoke cancellation within one second of receiving that
+response and before any unrelated request.
+
+All POST, timer, and lookup completions update lifecycle state atomically with
+compare-and-set semantics. A broker ID returned by any source persists
+`ACKNOWLEDGED` and takes precedence over every ID-less phase. A not-found, error,
+or timeout result may transition to `SUBMISSION_AMBIGUOUS` only if the current
+state still has no broker ID; it cannot overwrite or remove an acknowledged ID.
+When competing completions first reveal an overdue ID, the cancellation path
+runs immediately under the one-second rule.
 
 Recovery runs before research or another entry. A recovered `PREPARED` intent is
 always abandoned as `ABANDONED_NO_ORDER`, clears the pending-entry lock, and does
