@@ -8,6 +8,9 @@
 
 import { spawn } from "node:child_process"
 import { readFileSync } from "node:fs"
+import { createRequire } from "node:module"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 
 import { parse as parseEnv } from "dotenv"
 
@@ -32,6 +35,13 @@ const baseEnvironment = Object.fromEntries(
   ),
 )
 
+const require = createRequire(import.meta.url)
+const fmpPackagePath = require.resolve("mcp-remote/package.json")
+const fmpProxyPath = join(dirname(fmpPackagePath), "dist", "proxy.js")
+const fmpPreloadPath = fileURLToPath(
+  new URL("./expand-fmp-key.cjs", import.meta.url),
+)
+
 const createServers = {
   alpaca: () => ({
     command: "uvx",
@@ -43,15 +53,17 @@ const createServers = {
     },
   }),
   fmp: () => ({
-    command: "npx",
+    command: process.execPath,
     args: [
-      "-y",
-      "mcp-remote@0.1.49",
-      `https://financialmodelingprep.com/mcp?apikey=${readRequiredSetting("FMP_API_KEY")}`,
+      "--require",
+      fmpPreloadPath,
+      fmpProxyPath,
+      "https://financialmodelingprep.com/mcp?apikey=${FMP_API_KEY}",
       "--transport",
       "http-first",
+      "--silent",
     ],
-    environment: {},
+    environment: { FMP_API_KEY: readRequiredSetting("FMP_API_KEY") },
   }),
   exa: () => ({
     command: "npx",

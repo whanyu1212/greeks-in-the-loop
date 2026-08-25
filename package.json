@@ -8,7 +8,9 @@
     "node": ">=22 <23"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["opencode-ai"]
+    "onlyBuiltDependencies": [
+      "opencode-ai"
+    ]
   },
   "scripts": {
     "agent": "tsx src/index.ts",
@@ -23,6 +25,7 @@
   "dependencies": {
     "@opencode-ai/sdk": "1.18.21",
     "dotenv": "17.4.2",
+    "mcp-remote": "0.1.49",
     "opencode-ai": "1.18.21",
     "zod": "4.4.3"
   },

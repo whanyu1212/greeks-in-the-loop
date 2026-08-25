@@ -32,6 +32,7 @@ const systemPrompt = readFileSync(
   "src/research/research-agent-system.md",
   "utf8",
 )
+const mcpLauncher = readFileSync("scripts/run-research-mcp.mjs", "utf8")
 const research = config.agent.research
 if (!research) throw new Error("research agent is required")
 const permission = research.permission ?? {}
@@ -105,6 +106,18 @@ describe("research agent policy", () => {
     )
     expect(manifest.scripts?.["agent:mcp"]).toContain(
       "scripts/run-isolated-opencode.mjs",
+    )
+  })
+
+  it("keeps the real FMP API key out of OS-visible child arguments", () => {
+    expect(mcpLauncher).toContain(
+      '"https://financialmodelingprep.com/mcp?apikey=${FMP_API_KEY}"',
+    )
+    expect(mcpLauncher).toContain('require.resolve("mcp-remote/package.json")')
+    expect(mcpLauncher).toContain('"--require"')
+    expect(mcpLauncher).toContain('"--silent"')
+    expect(mcpLauncher).not.toContain(
+      "mcp?apikey=${readRequiredSetting",
     )
   })
 
