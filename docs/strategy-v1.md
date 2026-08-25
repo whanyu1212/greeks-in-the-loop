@@ -255,7 +255,9 @@ persist the intent, deadline, unique `client_order_id`, and phase `PREPARED`.
 Arm the local deadline timer, durably transition to `SUBMITTING`, then immediately
 invoke the POST with that same ID in its payload. Transition to `ACKNOWLEDGED`
 when Alpaca returns the broker order ID. These phase changes are ordered writes:
-a `PREPARED` record proves no POST began.
+a `PREPARED` record proves no POST began. If the original POST returns its broker
+ID at or after `entry_order_deadline`, invoke cancellation within one second of
+receiving that response and before any unrelated request.
 
 Recovery runs before research or another entry. A recovered `PREPARED` intent is
 always abandoned as `ABANDONED_NO_ORDER`, clears the pending-entry lock, and does
@@ -291,7 +293,9 @@ restores that daily allowance.
 If the order is not filled by the deadline and its broker ID is known to a
 running executor, invoke cancellation within one second after the deadline. An
 overdue order discovered by recovery or lookup is canceled within one second of
-obtaining its ID. Capture `cancel_requested_at` immediately before every cancel
+obtaining its ID. This one-second rule applies whenever an ID first becomes known
+after the deadline, including through the original POST response, lookup, or
+restart recovery. Capture `cancel_requested_at` immediately before every cancel
 API invocation. No unrelated provider request may precede these actions. The
 pending-entry lock remains set throughout; the strategy never intentionally
 carries an open entry beyond the deadline or into another session.
