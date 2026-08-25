@@ -1,3 +1,18 @@
+/**
+ * Sequential scheduling for autonomous agent cycles.
+ *
+ * Cycle attempts never overlap: the loop waits for `runCycle` to settle before
+ * invoking the corresponding result or error callback and starting its delay.
+ * Callback return values are not awaited, so callers must coordinate any
+ * asynchronous callback work that must finish before the next cycle. Failed
+ * attempts use the same interval as successful attempts; this module does not
+ * apply retry backoff.
+ *
+ * Cancellation prevents new cycles and interrupts the inter-cycle delay. The
+ * supplied `runCycle` implementation remains responsible for cancelling any
+ * work already in progress.
+ */
+
 /** Configuration and callbacks for a sequential agent loop. */
 export type AgentLoopOptions = {
   /** Delay between completed cycle attempts, in milliseconds. */
@@ -41,7 +56,8 @@ const abortableSleep = (milliseconds: number, signal: AbortSignal) =>
  *
  * A failed cycle is reported through `onError` and does not terminate the
  * loop. This allows transient model or MCP failures to recover on a later
- * cycle.
+ * cycle. Attempts never overlap, and both successful and failed attempts wait
+ * the configured interval before the next cycle.
  *
  * @param options Loop timing, cancellation, and callback configuration.
  * @returns The number of cycles attempted.
