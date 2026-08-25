@@ -109,6 +109,20 @@ describe("research agent policy", () => {
     )
   })
 
+  it("preserves standard proxy and custom-CA connectivity settings", () => {
+    for (const setting of [
+      "HTTP_PROXY",
+      "HTTPS_PROXY",
+      "NO_PROXY",
+      "NODE_EXTRA_CA_CERTS",
+      "SSL_CERT_DIR",
+      "SSL_CERT_FILE",
+    ]) {
+      expect(mcpLauncher).toContain(`"${setting}"`)
+    }
+    expect(mcpLauncher).toContain('"--enable-proxy"')
+  })
+
   it("keeps the real FMP API key out of OS-visible child arguments", () => {
     expect(mcpLauncher).toContain(
       '"https://financialmodelingprep.com/mcp?apikey=${FMP_API_KEY}"',

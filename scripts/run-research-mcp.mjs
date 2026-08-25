@@ -29,10 +29,32 @@ const readRequiredSetting = (name) => {
   return value
 }
 
+const connectivityEnvironmentNames = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "NODE_EXTRA_CA_CERTS",
+  "SSL_CERT_DIR",
+  "SSL_CERT_FILE",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+]
+
 const baseEnvironment = Object.fromEntries(
-  ["HOME", "LANG", "LC_ALL", "PATH", "TMPDIR"].flatMap((name) =>
+  [
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "TMPDIR",
+    ...connectivityEnvironmentNames,
+  ].flatMap((name) =>
     process.env[name] === undefined ? [] : [[name, process.env[name]]],
   ),
+)
+const proxyConfigured = connectivityEnvironmentNames.some(
+  (name) => name.toLowerCase().includes("proxy") && process.env[name],
 )
 
 const require = createRequire(import.meta.url)
@@ -61,6 +83,7 @@ const createServers = {
       "https://financialmodelingprep.com/mcp?apikey=${FMP_API_KEY}",
       "--transport",
       "http-first",
+      ...(proxyConfigured ? ["--enable-proxy"] : []),
       "--silent",
     ],
     environment: { FMP_API_KEY: readRequiredSetting("FMP_API_KEY") },
