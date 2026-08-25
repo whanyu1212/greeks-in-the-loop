@@ -63,7 +63,7 @@ A minimal valid result requires only:
 | `contractVersion` | Selects the compatible parser and validation rules. |
 | `strategyVersion` | Ties the conclusion to the frozen strategy rules. |
 | `outcome` | Selects the safe no-action branch. |
-| `reasonCodes` | Records one or more machine-readable strategy reasons. |
+| `reasonCodes` | Records one or more machine-readable strategy reasons, bounded by the number of supported codes. |
 
 `evidence` is optional and defaults to an empty list. Extra commentary is discarded so malformed optional prose cannot invalidate an otherwise safe `NO_ACTION`.
 

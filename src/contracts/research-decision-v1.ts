@@ -104,7 +104,10 @@ const noActionDecisionV1Schema = z
     contractVersion: z.literal(RESEARCH_DECISION_CONTRACT_VERSION),
     strategyVersion: z.literal(STRATEGY_VERSION),
     outcome: z.literal("NO_ACTION"),
-    reasonCodes: z.array(z.enum(NO_ACTION_REASON_CODES)).min(1),
+    reasonCodes: z
+      .array(z.enum(NO_ACTION_REASON_CODES))
+      .min(1)
+      .max(NO_ACTION_REASON_CODES.length),
     evidence: z.array(evidenceClaimSchema).max(64).optional().default([]),
   })
   .strip()
