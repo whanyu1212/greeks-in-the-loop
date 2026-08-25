@@ -102,7 +102,10 @@ Inconsistent state blocks all new entries until reconciliation resolves it.
 All calculations use completed Alpaca IEX bars. Daily-bar requests use Alpaca's
 `adjustment=all` mode. Regular-session intraday bars exclude extended hours. The
 latest daily bar must be for the immediately preceding completed Alpaca trading
-session.
+session. The daily snapshot must contain exactly one bar for each of the 50
+immediately preceding completed Alpaca trading sessions. Each selected bar must
+have a finite positive close, and any missing or duplicate session rejects the
+snapshot; older bars returned by the provider are ignored.
 
 Live decisions persist the exact adjusted bars returned for that cycle. Replays
 must use those persisted bars rather than refetching history that may have been
@@ -130,8 +133,12 @@ session_vwap = sum(bar_vwap * bar_volume) / sum(bar_volume)
 
 The denominator must be positive. Every intraday bar must be dated for the
 current session and end no later than `observed_at`. The latest completed
-one-minute bar must end no more than two minutes before `observed_at`. No partial
-daily bar or future observation may enter the signal.
+one-minute bar must end no more than two minutes before `observed_at`. The
+expected set contains every regular-session one-minute interval whose start is
+at or after `session_open` and whose end is at or before `observed_at`. The
+snapshot must contain exactly one bar for every expected interval, with a finite
+positive VWAP and positive volume; a missing or duplicate interval rejects the
+snapshot. No partial daily bar or future observation may enter the signal.
 
 The regimes and triggers are:
 
@@ -332,9 +339,12 @@ records `trend_observed_at` when that attempt settles. Trend completion never
 delays option-mark calculation; all available signals meet only at the bounded
 decision barrier. A valid trend snapshot requires finite positive closes, the
 latest bar dated for that required preceding session, and no bar timestamp after
-`trend_observed_at`. It calculates the latest completed daily close and SMA20,
-persists the bars and result, and reuses that immutable snapshot for the rest of
-the current session because no newer eligible bar can complete intraday.
+`trend_observed_at`. The 20 selected bars must map one-to-one, with no missing or
+duplicate date, to the 20 immediately preceding completed Alpaca trading
+sessions ending on that required session; older returned bars are ignored. It
+calculates the latest completed daily close and SMA20, persists the bars and
+result, and reuses that immutable snapshot for the rest of the current session
+because no newer eligible bar can complete intraday.
 
 If the trend request fails or returns invalid data, trend invalidation is
 `unknown` for that cycle and does not block any other exit. The monitor retries
