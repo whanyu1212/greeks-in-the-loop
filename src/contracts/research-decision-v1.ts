@@ -31,7 +31,9 @@ const expirationDate = z.iso.date().refine((value) => {
   const year = Number(value.slice(0, 4))
   return year >= 2000 && year <= 2099
 })
-const timestamp = z.iso.datetime({ offset: true })
+// Millisecond precision matches Date.parse, so sub-ms fractions cannot
+// collapse distinct instants into the same freshness comparison.
+const timestamp = z.iso.datetime({ offset: true, precision: 3 })
 
 const sourcedFactSchema = z
   .object({

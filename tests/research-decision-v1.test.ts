@@ -414,6 +414,34 @@ describe("ResearchDecision v1 evidence validation", () => {
     )
   })
 
+  it("rejects a sub-millisecond evaluation timestamp", () => {
+    expectFailureCode(
+      bullishProposal,
+      "CONTEXT_INVALID",
+      {
+        ...context,
+        evaluatedAt: "2026-08-25T14:31:00.0000Z",
+      },
+    )
+  })
+
+  it("rejects a snapshot retrievedAt with sub-millisecond precision", () => {
+    expectFailureCode(
+      bullishProposal,
+      "CONTEXT_INVALID",
+      {
+        ...context,
+        snapshots: {
+          ...context.snapshots,
+          "alpaca-market-1": {
+            ...context.snapshots["alpaca-market-1"]!,
+            retrievedAt: "2026-08-25T14:30:00.0009Z",
+          },
+        },
+      },
+    )
+  })
+
   it("rejects a freshness deadline before snapshot retrieval", () => {
     expectFailureCode(
       bullishProposal,

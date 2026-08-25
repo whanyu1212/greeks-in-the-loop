@@ -222,7 +222,7 @@ For every sourced fact, validation rejects:
 - snapshot metadata whose `freshUntil` precedes `retrievedAt`
 - a snapshot whose `freshUntil` is before `evaluatedAt`
 
-A snapshot is valid through the exact `freshUntil` instant. FMP and Exa snapshots may support context, but they do not become authoritative execution-price sources.
+A snapshot is valid through the exact `freshUntil` instant. Context timestamps must use millisecond precision so freshness comparisons cannot collapse distinct sub-millisecond instants. FMP and Exa snapshots may support context, but they do not become authoritative execution-price sources.
 
 The context is a validation interface only. Durable snapshot persistence is deferred to the event-ledger work in issue #13.
 
