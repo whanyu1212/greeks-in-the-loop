@@ -63,15 +63,9 @@ Refresh a stale primary observation once when a read-only refresh is available. 
    - Before proposing, require the final research evaluation instant to be earlier than both `slot + 5 minutes` and `min(15:00, session_close - 60 minutes)`, and require the final Alpaca clock to still report the market open.
    - A free-running cycle that does not satisfy every slot and deadline condition must return `NO_ACTION` with `MARKET_WINDOW_INELIGIBLE`. Research may still occur outside the entry window, but it cannot produce `PROPOSE_TRADE` until deterministic staged-research support exists.
 
-3. **Build the authoritative SPY view**
+3. **Gather the authoritative SPY inputs**
    - Request completed Alpaca IEX daily bars with `adjustment=all`, completed regular-session one-minute bars, and a current SPY IEX quote.
-   - Before calculating SMA20/SMA50, verify a one-to-one mapping to every one of the 50 immediately preceding completed Alpaca sessions. Every selected daily close must be finite and positive.
-   - Capture `observed_at` after the last snapshot-forming response. Before calculating session VWAP, verify exactly one valid completed one-minute bar for every expected regular-session interval from session open through `observed_at`; reject missing or duplicate intervals.
-   - Every selected intraday `bar_vwap` and `bar_volume` must be finite and positive. Require `sum(bar_volume) > 0` and calculate `session_vwap = sum(bar_vwap * bar_volume) / sum(bar_volume)`. Do not use a simple average, close, or provider summary in place of this formula.
-   - Validate that the SPY quote bid and ask are finite and positive and that `ask >= bid`. Define `current_price = (bid + ask) / 2`; do not use the bid, ask, latest trade, bar close, or another field as `current_price`.
-   - Bullish regime: `daily_close > SMA20 > SMA50` and `current_price > session_vwap`.
-   - Bearish regime: `daily_close < SMA20 < SMA50` and `current_price < session_vwap`.
-   - Equality, mixed ordering, incomplete bars, or disagreement means `SIGNAL_NOT_ACTIONABLE`.
+   - Do not capture `observed_at` or finalize SMA, VWAP, direction, freshness, or future-date checks yet. Option chain, contract metadata, quotes, Greeks, volume, and open interest are also snapshot-forming inputs and must be retrieved before the snapshot instant is captured.
 
 4. **Gather optional external context**
    - Use FMP for fundamentals or macro datasets.
@@ -85,8 +79,14 @@ Refresh a stale primary observation once when a read-only refresh is available. 
    - If external context materially contradicts the thesis and cannot be resolved with current sourced facts, return `NO_ACTION`.
    - Never average incompatible observations from different timestamps or snapshots.
 
-6. **Select one candidate**
-   - Treat these rules as research prefilters only; passing them is not deterministic risk approval.
+6. **Complete one snapshot and select one candidate**
+   - Retrieve the option chain, contract metadata, quotes, Greeks, current-session volume, and dated open interest needed to evaluate all candidate legs.
+   - Immediately after the final underlying or option snapshot-forming response completes, capture one local `observed_at`. Every selected underlying and option provider timestamp must be no later than this same instant; never combine inputs anchored to different snapshot instants.
+   - Freeze the required 50-session daily set and expected intraday intervals at `observed_at`. Verify a one-to-one mapping to every required daily session and exactly one valid completed one-minute bar for every expected regular-session interval through `observed_at`.
+   - Every selected daily close must be finite and positive. Every selected intraday `bar_vwap` and `bar_volume` must be finite and positive. Require `sum(bar_volume) > 0` and calculate `session_vwap = sum(bar_vwap * bar_volume) / sum(bar_volume)`. Do not use a simple average, close, or provider summary in place of this formula.
+   - Validate that the SPY quote bid and ask are finite and positive and that `ask >= bid`. Define `current_price = (bid + ask) / 2`; do not use the bid, ask, latest trade, bar close, or another field as `current_price`.
+   - Calculate SMA20 and SMA50 only after the snapshot is complete. Bullish regime requires `daily_close > SMA20 > SMA50` and `current_price > session_vwap`. Bearish regime requires `daily_close < SMA20 < SMA50` and `current_price < session_vwap`. Equality, mixed ordering, incomplete data, or disagreement means `SIGNAL_NOT_ACTIONABLE`.
+   - Treat the remaining rules as research prefilters only; passing them is not deterministic risk approval.
    - Underlying must be SPY.
    - Structure must be one bull call spread for a bullish direction or one bear put spread for a bearish direction.
    - DTE must be 14–30 calendar days.

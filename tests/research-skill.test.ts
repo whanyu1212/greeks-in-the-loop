@@ -35,10 +35,10 @@ describe("SPY debit-spread research skill", () => {
     for (const step of [
       "Inspect observable account state",
       "Check the research context",
-      "Build the authoritative SPY view",
+      "Gather the authoritative SPY inputs",
       "Gather optional external context",
       "Resolve conflicts",
-      "Select one candidate",
+      "Complete one snapshot and select one candidate",
       "Challenge and recheck the candidate",
       "Emit the contract",
     ]) {
@@ -103,6 +103,21 @@ describe("SPY debit-spread research skill", () => {
     expect(sourcePolicy).toContain("Requested with `adjustment=all`")
     expect(sourcePolicy).toContain("no missing or duplicate intervals")
     expect(skill).toContain("INSUFFICIENT_UNDERLYING_DATA")
+  })
+
+  it("captures one observed_at after all underlying and option snapshot inputs", () => {
+    expect(skill).toContain(
+      "Option chain, contract metadata, quotes, Greeks, volume, and open interest are also snapshot-forming inputs",
+    )
+    expect(skill).toContain(
+      "after the final underlying or option snapshot-forming response completes",
+    )
+    expect(skill).toContain(
+      "never combine inputs anchored to different snapshot instants",
+    )
+    expect(sourcePolicy).toContain(
+      "only after all underlying and option snapshot-forming responses",
+    )
   })
 
   it("requires valid bar values and the exact volume-weighted VWAP formula", () => {

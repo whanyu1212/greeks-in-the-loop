@@ -52,7 +52,7 @@ The agent's interpretation of identified observations. Inference must identify t
 | Historical option bars on Alpaca Basic | Request end at least 15 minutes before request start |
 | Current FMP or Exa context | Retrieved in the current cycle and has a usable provider/publication timestamp |
 
-Future-dated data is invalid. Snapshot membership is frozen at a local `observed_at` captured after the final snapshot-forming response. Deadlines and sub-day ages are rechecked at a separate local `approval_evaluated_at` captured after the final clock response completes; the clock payload timestamp is not a substitute. If either local instant cannot be established, or a primary observation remains stale, missing, or contradictory after one refresh, the agent returns `NO_ACTION`.
+Future-dated data is invalid. Snapshot membership is frozen at one local `observed_at` captured only after all underlying and option snapshot-forming responses—including bars, quotes, chain, contract metadata, Greeks, volume, and open interest—have completed. Every selected provider timestamp must be no later than that same instant. Deadlines and sub-day ages are rechecked at a separate local `approval_evaluated_at` captured after the final clock response completes; the clock payload timestamp is not a substitute. If either local instant cannot be established, or a primary observation remains stale, missing, or contradictory after one refresh, the agent returns `NO_ACTION`.
 
 ## Conflict policy
 
