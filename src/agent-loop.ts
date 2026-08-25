@@ -1,9 +1,12 @@
 /**
  * Sequential scheduling for autonomous agent cycles.
  *
- * Cycles never overlap: the loop waits for the current attempt and its callback
- * to finish before sleeping and starting another. Failed attempts use the same
- * interval as successful attempts; this module does not apply retry backoff.
+ * Cycle attempts never overlap: the loop waits for `runCycle` to settle before
+ * invoking the corresponding result or error callback and starting its delay.
+ * Callback return values are not awaited, so callers must coordinate any
+ * asynchronous callback work that must finish before the next cycle. Failed
+ * attempts use the same interval as successful attempts; this module does not
+ * apply retry backoff.
  *
  * Cancellation prevents new cycles and interrupts the inter-cycle delay. The
  * supplied `runCycle` implementation remains responsible for cancelling any

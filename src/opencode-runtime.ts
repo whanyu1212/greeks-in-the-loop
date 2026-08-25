@@ -2,9 +2,9 @@
  * Lifecycle management for the local OpenCode server used by the agent.
  *
  * This module owns the server process and, on non-Windows platforms, its
- * detached process group so that local MCP descendants cannot outlive the
- * worker. Callers own the returned client only for the runtime's lifetime and
- * must invoke the idempotent `close` operation when finished.
+ * detached process group so shutdown signals can reach local MCP descendants.
+ * Callers own the returned client only for the runtime's lifetime and must
+ * invoke the idempotent `close` operation when finished.
  */
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
@@ -166,8 +166,9 @@ export async function startOpencode({
   /**
    * Disposes the SDK instance and terminates the owned process tree.
    *
-   * Shutdown first gives the server and its MCP children time to exit, then
-   * escalates from SIGTERM to SIGKILL within fixed bounds.
+   * Shutdown requests SDK disposal, sends SIGTERM to the owned process group,
+   * and sends SIGKILL to that group if the root OpenCode process does not exit
+   * within the graceful-shutdown bound.
    */
   const close = () => {
     closing ??= (async () => {
