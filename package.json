@@ -9,6 +9,7 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "better-sqlite3",
       "opencode-ai"
     ]
   },
@@ -25,12 +26,14 @@
   },
   "dependencies": {
     "@opencode-ai/sdk": "1.18.21",
+    "better-sqlite3": "13.0.3",
     "dotenv": "17.4.2",
     "mcp-remote": "0.1.49",
     "opencode-ai": "1.18.21",
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
     "@types/node": "22.20.1",
     "tsx": "4.23.12",
     "typescript": "7.0.2",

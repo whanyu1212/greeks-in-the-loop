@@ -145,6 +145,20 @@ describe("ResearchDecision v1 NO_ACTION contract", () => {
     )
   })
 
+  it("rejects an unbounded reason-code list", () => {
+    expectFailureCode(
+      {
+        contractVersion: "1.0.0",
+        strategyVersion: "1.0.0",
+        outcome: "NO_ACTION",
+        reasonCodes: Array(NO_ACTION_REASON_CODES.length + 1).fill(
+          "SIGNAL_NOT_ACTIONABLE",
+        ),
+      },
+      "SCHEMA_INVALID",
+    )
+  })
+
   it("does not require execution-level fields", () => {
     const result = validateResearchDecisionV1(
       {
