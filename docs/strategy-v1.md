@@ -384,8 +384,9 @@ session open when closed. Once `spread_filled_at` is known, evidence observed
 within 60 seconds retains the first-monitor deadline of 60 seconds after the
 fill. If it is already overdue, start the cycle immediately before any further
 reconciliation request and record the overdue discovery. A late-fill flag is
-latched as soon as `spread_filled_at` is known, including during
-`BROKER_INCONSISTENCY` and before final adoption.
+latched as soon as `spread_filled_at >= entry_order_deadline` is known, including
+during `BROKER_INCONSISTENCY` and before final adoption. It is never set when
+`spread_filled_at < entry_order_deadline`.
 
 When multiple candidates qualify, select the lexicographically smallest tuple:
 
@@ -511,7 +512,7 @@ index is the count of Alpaca trading dates from the entry date through
 
 | Priority | Exit | Machine-testable trigger |
 | --- | --- | --- |
-| 0 | Late-fill protection | Any complete-spread exposure is marked `late_fill`; the flag persists until flat even before reconciliation converges |
+| 0 | Late-fill protection | Complete-spread exposure has `spread_filled_at >= entry_order_deadline`; mark `late_fill` and persist the flag until flat even before reconciliation converges |
 | 1 | Expiration protection | Exit DTE is less than 3 while the market is open, or exit DTE is 3 and `cycle_decided_at >= session_close - 60 minutes` |
 | 2 | Stale-data protection | No valid spread mark for five continuous minutes while the market is open |
 | 3 | Stop loss | A valid mark exists and `spread_mark <= 0.50 * entry_limit` |
