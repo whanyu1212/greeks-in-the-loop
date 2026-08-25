@@ -263,19 +263,25 @@ Exit triggers use a fresh indicative midpoint for each leg:
 spread_mark = long_leg_midpoint - short_leg_midpoint
 ```
 
-For each position-monitor cycle, capture `monitor_evaluated_at` immediately after
-all required option-quote attempts settle, whether by response, provider error,
-or bounded timeout. Each quote must be dated for the current session, have a
-provider timestamp no later than `monitor_evaluated_at`, and be no more than 60
-seconds old at `monitor_evaluated_at`. Bid and ask must also satisfy the entry
-validity and spread-width rules. The spread mark and all mark-based exit checks
-use only quotes from that monitor cycle. Any failed attempt makes the mark
+While a position is open and the market is open, position-monitor cycles start
+no more than 60 seconds apart. Each cycle captures `monitor_started_at`
+immediately before starting the required option-quote attempts. The attempts run
+in parallel and must settle by response, provider error, or timeout within 30
+seconds of `monitor_started_at`.
+
+Capture `monitor_evaluated_at` immediately after all attempts settle. Each quote
+must be dated for the current session, have a provider timestamp no later than
+`monitor_evaluated_at`, and be no more than 60 seconds old at
+`monitor_evaluated_at`. Bid and ask must also satisfy the entry validity and
+spread-width rules. The spread mark and all mark-based exit checks use only
+quotes from that monitor cycle. Any failed or over-time attempt makes the mark
 invalid for that cycle.
 
 Mark-based exit conditions are `unknown`, not false, while a valid mark is
-unavailable. The stale-data timer begins at the first `monitor_evaluated_at` with
-an invalid mark. FMP prices, web sources, last trades, and underlying prices must
-never value the spread.
+unavailable. The stale-data timer begins at `monitor_started_at` for the first
+cycle with an invalid mark, so request latency counts toward the five-minute
+threshold. FMP prices, web sources, last trades, and underlying prices must never
+value the spread.
 
 Indicative marks and Alpaca paper fills are simulation evidence. They are not
 evidence that the same order would execute at that price in a live OPRA market.
