@@ -282,6 +282,11 @@ between attempt starts. This cadence continues before and after the deadline and
 requires operator resolution if Alpaca cannot establish an order or definitive
 rejection.
 
+A recovered `SUBMISSION_AMBIGUOUS` intent resumes that same bounded lookup loop
+before research or any other entry work. Its persisted deadline remains active;
+a found order transitions atomically to `ACKNOWLEDGED`, and if overdue, enters
+the one-second cancellation path before any unrelated request.
+
 The same rule applies without a restart: a POST timeout, transport error, or
 response without a broker ID transitions immediately from `SUBMITTING` to
 `SUBMISSION_AMBIGUOUS` and starts lookup without resubmitting. Its already-armed
