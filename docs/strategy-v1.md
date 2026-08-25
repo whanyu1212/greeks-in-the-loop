@@ -268,27 +268,78 @@ spread_mark = long_leg_midpoint - short_leg_midpoint
 ```
 
 While a position is open and the market is open, position-monitor cycles start
-no more than 60 seconds apart. Each cycle captures `monitor_started_at`
-immediately before starting the required option-quote attempts. The attempts run
-in parallel and must settle by response, provider error, or timeout within 30
-seconds of `monitor_started_at`.
+no more than 60 seconds apart. The first cycle starts within 60 seconds of an
+opening fill when the market is open, or within 60 seconds after the Alpaca
+market calendar's official `session_open` when a position was carried into the
+session. The cycle starts on the calendar deadline even when an Alpaca clock
+request fails.
 
-Capture `monitor_evaluated_at` immediately after all attempts settle. Each quote
-must be dated for the current session, have a provider timestamp no later than
+Each cycle captures `monitor_started_at` immediately before launching option
+quotes, an Alpaca clock request, and any needed trend request in parallel. Option
+quote and trend attempts must settle by response, provider error, or timeout
+within 30 seconds. The clock attempt has a five-second timeout and records
+`clock_observed_at` when it settles. Each branch records its result independently,
+so a slow branch cannot extend another branch's deadline.
+
+Capture `monitor_evaluated_at` immediately after the option-quote attempts
+settle, without waiting for clock or trend results. Each quote must be dated for
+the current session, have a provider timestamp no later than
 `monitor_evaluated_at`, and be no more than 60 seconds old at
 `monitor_evaluated_at`. Bid and ask must also satisfy the entry validity and
 spread-width rules. The spread mark and all mark-based exit checks use only
-quotes from that monitor cycle. Any failed or over-time attempt makes the mark
-invalid for that cycle.
+quotes from that monitor cycle. Any failed or over-time quote attempt makes the
+mark invalid for that cycle. A failed clock check records degraded market-state
+evidence.
+
+After every branch has settled or reached its deadline, capture
+`cycle_decided_at`; this decision barrier is no more than 30 seconds after
+`monitor_started_at`. A cycle is open-market eligible when `monitor_started_at`
+is within the Alpaca calendar's regular session and one of these conditions
+holds: the clock reports `is_open=true`; the clock attempt fails, in which case
+the calendar is the degraded fallback; or an `is_open=false` response is observed
+at or after `session_close` and therefore describes the post-close state rather
+than the state at `monitor_started_at`. An `is_open=false` response observed
+before `session_close` makes the cycle ineligible and is authoritative over the
+calendar.
+
+Each branch records its signal and observation timestamp when it settles. Signal
+validity, including quote freshness, is fixed at that timestamp; the explicitly
+bounded wait for the decision barrier does not invalidate an already valid
+signal. At the barrier, evaluate every available signal, apply the priority table
+below once, and latch exactly one highest-priority reason. Thus a lower-priority
+trend timeout cannot suppress a valid mark-based signal, including when a cycle
+starts shortly before the scheduled close. A cycle that was not open-market
+eligible does not latch an exit and treats the stale-data timer as closed-market
+time.
 
 Mark-based exit conditions are `unknown`, not false, while a valid mark is
 unavailable. The stale-data timer begins at `monitor_started_at` for the first
 cycle with an invalid mark, so request latency counts toward the five-minute
-threshold. FMP prices, web sources, last trades, and underlying prices must never
-value the spread.
+threshold. For a cycle that crosses `session_close`, elapsed stale time is
+clamped at `session_close`; if five minutes accrued before the close, stale-data
+protection is a true signal for that cycle, otherwise the timer is cleared before
+state is persisted. FMP prices, web sources, last trades, and underlying prices
+must never value the spread.
 
 Indicative marks and Alpaca paper fills are simulation evidence. They are not
 evidence that the same order would execute at that price in a live OPRA market.
+
+For trend invalidation, the first monitor cycle of each trading session requests
+at least 20 completed SPY IEX daily bars with `adjustment=all` and an `end` date
+equal to the Alpaca session immediately preceding the cycle's session date. It
+starts this request at `monitor_started_at`, applies the 30-second deadline, and
+records `trend_observed_at` when that attempt settles. Trend completion never
+delays option-mark calculation; all available signals meet only at the bounded
+decision barrier. A valid trend snapshot requires finite positive closes, the
+latest bar dated for that required preceding session, and no bar timestamp after
+`trend_observed_at`. It calculates the latest completed daily close and SMA20,
+persists the bars and result, and reuses that immutable snapshot for the rest of
+the current session because no newer eligible bar can complete intraday.
+
+If the trend request fails or returns invalid data, trend invalidation is
+`unknown` for that cycle and does not block any other exit. The monitor retries
+the request on each later cycle until it obtains a valid snapshot; it never
+reuses the prior session's trend snapshot for the current session.
 
 ## Exit Rules
 
@@ -300,7 +351,7 @@ after the next open is invalid, a new timer starts then. An exit becomes require
 when the first applicable condition is true:
 
 For every monitor cycle, `monitor_date` is the `America/New_York` calendar date
-at `monitor_evaluated_at`. Exit DTE is recalculated as the number of calendar
+at `cycle_decided_at`. Exit DTE is recalculated as the number of calendar
 dates from `monitor_date` to the contract expiration date. The holding-session
 index is the count of Alpaca trading dates from the entry date through
 `monitor_date`, inclusive, so the entry session is index 1.
