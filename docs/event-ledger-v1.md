@@ -75,7 +75,7 @@ The ledger rejects:
 - environment or request-header containers;
 - credential-bearing URL user information;
 - secret-like URL query or fragment parameters;
-- `undefined`, bigint, functions, symbols, non-finite numbers, cyclic values, dates, and other prototype-bearing objects.
+- `undefined`, bigint, functions, symbols, non-finite numbers, cyclic values, excessive nesting, dates, and other prototype-bearing objects.
 
 The SQLite adapter requires the application to supply its known credential values when it is created. Unsafe raw payloads fail before schema normalization or append and are never partially committed. Errors expose only bounded structural path placeholders and never include rejected values or untrusted property names.
 

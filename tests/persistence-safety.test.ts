@@ -128,4 +128,15 @@ describe("assertPersistenceSafe", () => {
       UnsafePersistencePayloadError,
     )
   })
+
+  it("rejects excessive nesting without overflowing the call stack", () => {
+    let deeplyNested: unknown = "safe"
+    for (let depth = 0; depth < 2_000; depth += 1) {
+      deeplyNested = { nested: deeplyNested }
+    }
+
+    expect(() => assertPersistenceSafe(deeplyNested)).toThrow(
+      UnsafePersistencePayloadError,
+    )
+  })
 })

@@ -25,6 +25,7 @@ const PROHIBITED_KEY_SUFFIXES = [
   "token",
 ] as const
 const MAX_ERROR_PATH_PARTS = 16
+const MAX_TRAVERSAL_DEPTH = 64
 
 const isProhibitedKey = (key: string) => {
   const normalized = key.toLowerCase().replace(/[^a-z0-9]/gu, "")
@@ -101,6 +102,10 @@ const visit = (
   ancestors: Set<object>,
   knownCredentialValues: readonly string[],
 ): void => {
+  if (path.length > MAX_TRAVERSAL_DEPTH) {
+    throw new UnsafePersistencePayloadError(path)
+  }
+
   if (
     value === null ||
     typeof value === "string" ||
