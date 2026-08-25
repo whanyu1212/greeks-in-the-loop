@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { runAgentLoop } from "../src/agent-loop.js"
+import { abortableSleep, runAgentLoop } from "../src/agent-loop.js"
+
+describe("abortableSleep", () => {
+  it("resolves immediately when cancellation happened before listener registration", async () => {
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(abortableSleep(60_000, controller.signal)).resolves.toBeUndefined()
+  })
+})
 
 describe("runAgentLoop", () => {
   it("runs sequential cycles and waits only between them", async () => {

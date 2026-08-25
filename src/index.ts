@@ -116,6 +116,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 const once = process.argv.includes("--once")
 const intervalMs = readPositiveInteger("AGENT_INTERVAL_MS", 5 * 60 * 1000)
+const cycleTimeoutMs = readPositiveInteger("AGENT_CYCLE_TIMEOUT_MS", 2 * 60 * 1000)
 const maxCycles = once
   ? 1
   : readPositiveInteger("AGENT_MAX_CYCLES", Number.MAX_SAFE_INTEGER)
@@ -145,35 +146,51 @@ try {
     signal: abortController.signal,
     runCycle: async (cycle) => {
       const tools = Object.fromEntries(MUTATING_ALPACA_TOOLS.map((tool) => [tool, false]))
-      const response = await runtime.client.session.prompt({
-        path: { id: sessionId },
-        body: {
-          agent,
-          system: READ_ONLY_SYSTEM_PROMPT,
-          tools,
-          parts: [
-            {
-              type: "text",
-              text: [
-                `Run observation cycle ${cycle} at ${new Date().toISOString()}.`,
-                "Reconcile the paper account first, then inspect only the evidence needed to identify the strongest defined-risk options opportunity or conclude NO_ACTION.",
-                task ? `Current operator objective: ${task}` : undefined,
-              ]
-                .filter((line) => line !== undefined)
-                .join("\n"),
-            },
-          ],
-        },
-      })
-      if (!response.data) throw formatApiError("Prompting OpenCode session", response.error)
+      const cycleController = new AbortController()
+      const abortCycle = () => cycleController.abort(abortController.signal.reason)
+      const cycleTimeout = setTimeout(
+        () => cycleController.abort(new DOMException("Agent cycle timed out", "TimeoutError")),
+        cycleTimeoutMs,
+      )
 
-      const text = response.data.parts
-        .filter((part) => part.type === "text")
-        .map((part) => part.text.trim())
-        .filter(Boolean)
-        .join("\n")
+      abortController.signal.addEventListener("abort", abortCycle, { once: true })
+      if (abortController.signal.aborted) abortCycle()
 
-      return text || "Cycle completed without a text report."
+      try {
+        const response = await runtime.client.session.prompt({
+          path: { id: sessionId },
+          signal: cycleController.signal,
+          body: {
+            agent,
+            system: READ_ONLY_SYSTEM_PROMPT,
+            tools,
+            parts: [
+              {
+                type: "text",
+                text: [
+                  `Run observation cycle ${cycle} at ${new Date().toISOString()}.`,
+                  "Reconcile the paper account first, then inspect only the evidence needed to identify the strongest defined-risk options opportunity or conclude NO_ACTION.",
+                  task ? `Current operator objective: ${task}` : undefined,
+                ]
+                  .filter((line) => line !== undefined)
+                  .join("\n"),
+              },
+            ],
+          },
+        })
+        if (!response.data) throw formatApiError("Prompting OpenCode session", response.error)
+
+        const text = response.data.parts
+          .filter((part) => part.type === "text")
+          .map((part) => part.text.trim())
+          .filter(Boolean)
+          .join("\n")
+
+        return text || "Cycle completed without a text report."
+      } finally {
+        clearTimeout(cycleTimeout)
+        abortController.signal.removeEventListener("abort", abortCycle)
+      }
     },
   })
 } finally {
