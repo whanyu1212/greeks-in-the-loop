@@ -1,8 +1,10 @@
 # greeks-in-the-loop
 
-CodeAct-oriented paper-trading agent built with the OpenCode SDK, Alpaca, and Financial Modeling Prep.
+Read-only paper-trading research agent built with the OpenCode SDK, Alpaca, and Financial Modeling Prep.
 
-The worker is intentionally non-executing. It can inspect the paper account and market data, write and run analysis under `workspace/`, and emit a validated `ResearchDecisionV1`. A proposed trade is confirmed against a fresh, application-owned Alpaca indicative quote snapshot and deterministically converted into a non-executable `TradeIntentV1` for future risk evaluation. Alpaca mutation tools remain disabled until deterministic risk and execution gates are implemented.
+The worker is intentionally non-executing. Its dedicated `research` agent can inspect read-only paper-account and market data, gather FMP and Exa evidence, write artifacts under `workspace/`, and emit a validated `ResearchDecisionV1`. A proposed trade is confirmed against a fresh, application-owned Alpaca indicative quote snapshot and deterministically converted into a non-executable `TradeIntentV1` for future risk evaluation.
+
+The research agent is deny-by-default: broker mutations, generic shell execution, source edits, external-directory access, subagents, and unreviewed tools are unavailable. The managed runtime ignores user-global OpenCode plugins and MCP configuration, and each project MCP process receives only its own credentials. Risk and execution authority remain outside OpenCode.
 
 ## Strategy
 
@@ -38,7 +40,13 @@ Run continuously at the configured interval:
 pnpm agent
 ```
 
-The worker creates one persistent OpenCode session for its lifetime and shuts down cleanly on `SIGINT` or `SIGTERM`. Each cycle records exactly one bounded outcome: `VALIDATED_NO_ACTION`, `DECISION_REJECTED`, `INTENT_DERIVATION_REJECTED`, or `INTENT_DERIVED`. The current sink writes JSON lines to standard output; durable storage is deferred to issue #13.
+The worker creates one persistent OpenCode session for its lifetime and shuts down cleanly on `SIGINT` or `SIGTERM`. Every cycle selects the checked-in `research` agent; this identity cannot be overridden through `.env`. Each cycle records exactly one bounded outcome: `VALIDATED_NO_ACTION`, `DECISION_REJECTED`, `INTENT_DERIVATION_REJECTED`, or `INTENT_DERIVED`. The current sink writes JSON lines to standard output; durable storage is deferred to issue #13.
+
+## Security boundary
+
+OpenCode permissions enforce the agent's tool and workspace boundary. Application code independently validates `ResearchDecisionV1`, retrieves trusted option quotes, and derives `TradeIntentV1`. Prompt instructions describe desired behavior but are not treated as an authorization control.
+
+Generated artifacts are ignored by Git and may be written only under `workspace/`. Generic shell access is intentionally disabled because OpenCode command permissions do not provide a filesystem or environment sandbox.
 
 ## Verify
 
@@ -46,4 +54,8 @@ The worker creates one persistent OpenCode session for its lifetime and shuts do
 pnpm typecheck
 pnpm test
 pnpm build
+pnpm agent:config
+pnpm agent:mcp
 ```
+
+The resolved agent must deny unknown tools and broker mutations. The MCP check requires configured credentials and should report only Alpaca, FMP, and Exa.
