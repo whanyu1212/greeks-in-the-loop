@@ -4,7 +4,7 @@
 | --- | --- |
 | Contract version | 1.0.0 |
 | Strategy version | 1.0.0 |
-| Status | Contract layer implemented; runtime integration pending |
+| Status | Contract and runtime validation integrated |
 | Tracking issue | [#6](https://github.com/whanyu1212/greeks-in-the-loop/issues/6) |
 | Strategy specification | [`strategy-v1.md`](strategy-v1.md) |
 
@@ -225,6 +225,14 @@ For every sourced fact, validation rejects:
 A snapshot is valid through the exact `freshUntil` instant. Context timestamps must use millisecond precision so freshness comparisons cannot collapse distinct sub-millisecond instants. FMP and Exa snapshots may support context, but they do not become authoritative execution-price sources.
 
 The context is a validation interface only. Durable snapshot persistence is deferred to the event-ledger work in issue #13.
+
+## Runtime Integration
+
+The current runtime requires the final agent response to be exactly one bare JSON object. Markdown fences, prose surrounding the object, malformed JSON, and schema-invalid objects become bounded `DECISION_REJECTED` outcomes; raw rejected payloads are not retained.
+
+A `NO_ACTION` response omits optional evidence in this phase and is validated without a market-data request. A `PROPOSE_TRADE` response must include a sourced fact using the reserved cycle-local snapshot reference `alpaca-proposal-quotes-v1`. Application code binds that reference only after fetching fresh Alpaca indicative quotes for the exact proposed OCC symbols. Other model-authored snapshot references remain unknown and fail closed.
+
+A validated proposal is converted into the non-executable [`TradeIntentV1`](trade-intent-v1.md) contract using exact integer arithmetic. Dedicated-agent research policy and broader evidence registration remain issue #5 work; durable snapshot and outcome persistence remain issue #13 work.
 
 ## Model-Excluded Fields
 
