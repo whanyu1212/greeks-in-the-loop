@@ -438,6 +438,36 @@ describe("ResearchDecision v1 evidence validation", () => {
     )
   })
 
+  it.each(["constructor", "toString", "valueOf", "hasOwnProperty"])(
+    "rejects inherited snapshot key %s without a trusted own snapshot",
+    (snapshotRef) => {
+      expectFailureCode(
+        {
+          ...bullishProposal,
+          evidence: [{ ...sourcedFact, snapshotRef }],
+        },
+        "UNKNOWN_SNAPSHOT",
+      )
+    },
+  )
+
+  it("accepts a trusted own snapshot whose key collides with a prototype name", () => {
+    const result = validateResearchDecisionV1(
+      {
+        ...bullishProposal,
+        evidence: [{ ...sourcedFact, snapshotRef: "constructor" }],
+      },
+      {
+        ...context,
+        snapshots: {
+          constructor: context.snapshots["alpaca-market-1"]!,
+        },
+      },
+    )
+
+    expect(result.success).toBe(true)
+  })
+
   it("rejects a snapshot retrieved after evaluation", () => {
     expectFailureCode(
       bullishProposal,

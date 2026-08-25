@@ -339,7 +339,15 @@ export function validateResearchDecisionV1(
       return
     }
 
-    const snapshot = parsedContext.data.snapshots[evidence.snapshotRef]
+    // Only own snapshot keys are trusted. Inherited names such as
+    // "constructor" would otherwise resolve to Object.prototype and skip
+    // freshness checks because Date.parse(undefined) is NaN.
+    const snapshot = Object.hasOwn(
+      parsedContext.data.snapshots,
+      evidence.snapshotRef,
+    )
+      ? parsedContext.data.snapshots[evidence.snapshotRef]
+      : undefined
     if (snapshot === undefined) {
       issues.push({
         code: "UNKNOWN_SNAPSHOT",
