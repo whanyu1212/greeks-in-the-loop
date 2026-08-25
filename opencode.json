@@ -24,7 +24,10 @@
         },
         "bash": "deny",
         "task": "deny",
-        "skill": "deny",
+        "skill": {
+          "*": "deny",
+          "spy-debit-spread-research": "allow"
+        },
         "external_directory": "deny",
         "webfetch": "deny",
         "websearch": "deny",

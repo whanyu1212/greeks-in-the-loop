@@ -17,6 +17,7 @@
     "agent:config": "node scripts/run-isolated-opencode.mjs debug agent research",
     "agent:mcp": "node scripts/run-isolated-opencode.mjs mcp list",
     "agent:once": "tsx src/index.ts --once",
+    "agent:skills": "node scripts/run-isolated-opencode.mjs debug skill",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "test": "vitest run",

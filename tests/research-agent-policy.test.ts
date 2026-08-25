@@ -53,18 +53,21 @@ describe("research agent policy", () => {
     expect(config.permission?.["alpaca_*"]).toBe("deny")
   })
 
-  it("denies interactive and authority-expanding built-in tools", () => {
+  it("denies authority-expanding tools and permits only the strategy skill", () => {
     for (const name of [
       "bash",
       "external_directory",
       "question",
-      "skill",
       "task",
       "webfetch",
       "websearch",
     ]) {
       expect(permission[name]).toBe("deny")
     }
+    expect(permission.skill).toEqual({
+      "*": "deny",
+      "spy-debit-spread-research": "allow",
+    })
   })
 
   it("limits file reads and edits to reviewed project paths", () => {
