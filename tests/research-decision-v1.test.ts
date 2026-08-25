@@ -324,6 +324,19 @@ describe("ResearchDecision v1 proposal contract", () => {
     expectFailureCode(input, "SCHEMA_INVALID")
   })
 
+  it("rejects an expiration whose full year is not uniquely encoded by the OCC symbol", () => {
+    expectFailureCode(
+      {
+        ...bullishProposal,
+        candidate: {
+          ...bullishProposal.candidate,
+          expiration: "2126-09-18",
+        },
+      },
+      "SCHEMA_INVALID",
+    )
+  })
+
   it("rejects duplicate leg symbols", () => {
     expectFailureCode(
       {

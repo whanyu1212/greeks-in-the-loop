@@ -23,8 +23,14 @@ const boundedIdentifier = z
   .max(128)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u)
 const SPY_OPTION_SYMBOL_PATTERN = /^SPY(\d{6})([CP])(\d{8})$/u
+const OCC_EXPIRATION_CENTURY_PREFIX = "20"
 const contractSymbol = z.string().regex(SPY_OPTION_SYMBOL_PATTERN)
-const expirationDate = z.iso.date()
+// OCC symbols encode a two-digit year. This contract only accepts 2000–2099
+// so a full ISO date maps to exactly one symbol expiration.
+const expirationDate = z.iso.date().refine((value) => {
+  const year = Number(value.slice(0, 4))
+  return year >= 2000 && year <= 2099
+})
 const timestamp = z.iso.datetime({ offset: true })
 
 const sourcedFactSchema = z
@@ -74,7 +80,7 @@ const parseOptionContractSymbol = (symbol: string) => {
   }
 
   return {
-    expiration,
+    expiration: `${OCC_EXPIRATION_CENTURY_PREFIX}${expiration.slice(0, 2)}-${expiration.slice(2, 4)}-${expiration.slice(4, 6)}`,
     optionType,
     strike: Number(strike) / 1_000,
   }
@@ -151,9 +157,6 @@ const proposedTradeDecisionV1Schema = z
     // Cross-check redundant leg fields so downstream code receives one identity.
     const expectedOptionType =
       decision.candidate.structure === "BULL_CALL_SPREAD" ? "C" : "P"
-    const expectedExpiration = decision.candidate.expiration
-      .replaceAll("-", "")
-      .slice(2)
 
     for (const [legName, leg] of [
       ["longLeg", decision.candidate.longLeg],
@@ -162,7 +165,7 @@ const proposedTradeDecisionV1Schema = z
       const parsedSymbol = parseOptionContractSymbol(leg.contractSymbol)
       if (
         parsedSymbol === undefined ||
-        parsedSymbol.expiration !== expectedExpiration ||
+        parsedSymbol.expiration !== decision.candidate.expiration ||
         parsedSymbol.optionType !== expectedOptionType ||
         parsedSymbol.strike !== leg.strike
       ) {

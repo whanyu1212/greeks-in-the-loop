@@ -160,6 +160,7 @@ Proposal validation enforces:
 - a bear-put long strike is higher than its short strike
 - expiration and each leg identifier are present
 - each OCC contract symbol matches SPY, the candidate expiration, option type, and stated strike
+- candidate expiration years are limited to 2000–2099 so the OCC two-digit year is unambiguous
 - the long and short legs identify different contracts
 - at least one sourced fact supports the proposal
 - unknown proposal and candidate fields are rejected
