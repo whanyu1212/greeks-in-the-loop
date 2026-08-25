@@ -311,7 +311,11 @@ and fill activities, using requests with five-second timeouts and retry starts n
 more than five seconds apart while the order is nonterminal or those records
 disagree. Whenever reconciliation finds an open cancelable remainder after the
 deadline, another cancel attempt starts within one second and before the next
-reconciliation request. New entries remain blocked throughout.
+reconciliation request. Until a terminal broker status is confirmed, another
+cancel attempt starts no more than ten seconds after the prior attempt settles,
+regardless of its response and even if every intervening reconciliation request
+fails or times out. Unavailable reconciliation never suppresses cancellation
+retries. New entries remain blocked throughout.
 
 Fill activities are authoritative for race ordering. `spread_filled_at` is the
 latest Alpaca transaction timestamp among the minimum set of leg fills that
