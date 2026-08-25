@@ -266,8 +266,10 @@ recovered `SUBMITTING` intent without a broker ID is looked up by
 `client_order_id` with a five-second timeout and is never resubmitted. A found
 order durably transitions to `ACKNOWLEDGED` with its broker ID. Not-found or
 unavailable evidence transitions to `SUBMISSION_AMBIGUOUS`, blocks trading,
-retries lookup on the reconciliation cadence, and requires operator resolution
-if Alpaca cannot establish an order or definitive rejection.
+and retries lookup with a five-second timeout and no more than five seconds
+between attempt starts. This cadence continues before and after the deadline and
+requires operator resolution if Alpaca cannot establish an order or definitive
+rejection.
 
 The same rule applies without a restart: a POST timeout, transport error, or
 response without a broker ID transitions immediately from `SUBMITTING` to
