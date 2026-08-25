@@ -192,7 +192,7 @@ describe("createSqliteLedgerStore", () => {
         cycleNumber: 1,
         refreshToken: "secret-value",
       },
-    } as LedgerEventV1
+    } as unknown as LedgerEventV1
 
     await expect(store.append(unsafeEvent)).rejects.toThrow(
       "Unsafe persistence payload",
@@ -236,7 +236,7 @@ describe("createSqliteLedgerStore", () => {
     const invalidEvent = {
       ...cycleStarted("event-1"),
       [unsafeProperty]: true,
-    } as LedgerEventV1
+    } as unknown as LedgerEventV1
 
     let error: unknown
     try {

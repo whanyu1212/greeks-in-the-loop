@@ -67,7 +67,7 @@ const includesKnownCredential = (
 const assertSafeUrl = (value: string, path: readonly (string | number)[]) => {
   let url: URL
   try {
-    url = new URL(value)
+    url = new URL(value.trim(), "https://ledger.invalid")
   } catch {
     return
   }

@@ -116,6 +116,16 @@ const baseEventShape = {
   cycleId: identifier.optional(),
   sessionId: identifier.optional(),
 }
+const baseEventSchema = z.object(baseEventShape)
+
+type LedgerEventEnvelopeV1 = z.infer<typeof baseEventSchema>
+
+export type LedgerEventV1 = {
+  [T in EventType]: LedgerEventEnvelopeV1 & {
+    eventType: T
+    payload: z.infer<(typeof payloadSchemas)[T]>
+  }
+}[EventType]
 
 const eventSchemas = Object.entries(payloadSchemas).map(([eventType, payload]) =>
   z
@@ -167,9 +177,7 @@ export const ledgerEventV1Schema = z.union(
     (typeof eventSchemas)[number],
     ...(typeof eventSchemas)[number][],
   ],
-)
-
-export type LedgerEventV1 = z.infer<typeof ledgerEventV1Schema>
+) as z.ZodType<LedgerEventV1>
 
 export type StoredLedgerEventV1 = LedgerEventV1 & {
   sequence: number

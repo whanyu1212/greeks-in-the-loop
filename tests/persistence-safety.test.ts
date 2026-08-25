@@ -89,6 +89,8 @@ describe("assertPersistenceSafe", () => {
   it.each([
     "https://example.com/mcp?apikey=secret-value",
     "https://user:password@example.com/data",
+    "//user:password@example.com/data",
+    "  //user:password@example.com/data",
     "https://example.com/path?access%5Ftoken=secret-value",
     "https://example.com/path#token=secret-value",
     "https://example.com/data?refresh_token=secret-value",

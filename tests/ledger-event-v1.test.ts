@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   ledgerEventV1Schema,
   LEDGER_EVENT_TYPES,
+  type LedgerEventV1,
 } from "../src/event-ledger/ledger-event-v1.js"
 
 const baseEvent = {
@@ -38,11 +39,14 @@ describe("LedgerEventV1", () => {
   })
 
   it("rejects a payload that does not match its event type", () => {
+    const invalidEvent: LedgerEventV1 = {
+      ...baseEvent,
+      // @ts-expect-error The event type and payload must remain paired statically.
+      payload: { status: "VALIDATED_NO_ACTION" },
+    }
+
     expect(
-      ledgerEventV1Schema.safeParse({
-        ...baseEvent,
-        payload: { status: "VALIDATED_NO_ACTION" },
-      }).success,
+      ledgerEventV1Schema.safeParse(invalidEvent).success,
     ).toBe(false)
   })
 
