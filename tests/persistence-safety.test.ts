@@ -66,6 +66,9 @@ describe("assertPersistenceSafe", () => {
     "AWS_SECRET_ACCESS_KEY=secret-value",
     "private_key: secret-value",
     "Private Key: secret-value",
+    '"API Key": "third-party-secret"',
+    "**secret**: third-party-secret",
+    "__client_secret__: third-party-secret",
   ])("rejects credentials embedded in ordinary strings", (value) => {
     expect(() => assertPersistenceSafe({ claim: value })).toThrow(
       UnsafePersistencePayloadError,

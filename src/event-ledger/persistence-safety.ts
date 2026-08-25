@@ -2,6 +2,7 @@ const PROHIBITED_BEARER_PATTERN =
   /(?:^|[^A-Za-z0-9])Bearer\s+\S+/iu
 const PROHIBITED_LABELED_SECRET_PATTERN =
   /(?:^|[^A-Za-z0-9])(?:api[\s_-]*key|(?:(?:access|refresh|id|security|session)[\s_-]*)?token|authorization|proxy[\s_-]*authorization|client[\s_-]*secret|cookies?|set[\s_-]*cookie|credentials?|password|private[\s_-]*key|secret(?:[\s_-]*(?:access[\s_-]*)?key)?|signature)\s*[:=]\s*\S+/iu
+const LABEL_FORMATTING_PATTERN = /["'`*_~\[\](){}]/gu
 const SCHEME_PREFIX_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/u
 const URL_CANDIDATE_PATTERN =
   /(?:[A-Za-z][A-Za-z0-9+.-]*:[^\s<>"']+|\/\/[^\s<>"']+)/gu
@@ -144,10 +145,12 @@ const visit = (
     typeof value === "boolean"
   ) {
     if (typeof value === "string") {
+      const unformattedValue = value.replace(LABEL_FORMATTING_PATTERN, "")
       if (
         includesKnownCredential(value, knownCredentialValues) ||
         PROHIBITED_BEARER_PATTERN.test(value) ||
-        PROHIBITED_LABELED_SECRET_PATTERN.test(value)
+        PROHIBITED_LABELED_SECRET_PATTERN.test(value) ||
+        PROHIBITED_LABELED_SECRET_PATTERN.test(unformattedValue)
       ) {
         throw new UnsafePersistencePayloadError(path)
       }
