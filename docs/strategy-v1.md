@@ -192,11 +192,12 @@ candidate abandons the entry and produces `NO_ACTION` for that slot.
 Immediately before order submission, the executor completes reconciliation and
 a final Alpaca clock request, then captures `submission_evaluated_at` after both
 responses. It atomically rechecks account eligibility, the returned clock,
-approval deadlines, and every sub-day freshness limit against that timestamp.
-After those checks, it captures `submitted_at` immediately before invoking the
-order API and repeats the no-I/O deadline and freshness comparisons against
-`submitted_at`. The API invocation follows in the same synchronous call path.
-Both timestamps must be before `slot + 5 minutes` and
+the buying-power reserve using the final reconciled account snapshot, approval
+deadlines, and every sub-day freshness limit against that timestamp. After those
+checks, it captures `submitted_at` immediately before invoking the order API and
+repeats the no-I/O deadline and freshness comparisons against `submitted_at`.
+The API invocation follows in the same synchronous call path. Both timestamps
+must be before `slot + 5 minutes` and
 `min(15:00, session_close - 60 minutes)`. A failed check abandons the entry. If
 satisfying a failed freshness check requires new market data, that market data
 forms a new snapshot and triggers the complete reevaluation above.
@@ -222,8 +223,9 @@ The candidate is valid only when:
 - Projected post-entry buying power is at least 50% of pre-entry buying power.
 
 Pre-entry buying power is Alpaca's `buying_power` from the reconciled account
-snapshot immediately preceding approval. Because the order is a one-contract
-debit spread, the projection is:
+snapshot immediately preceding the gate evaluation. The reserve gate runs once
+for approval and again with the final reconciliation snapshot immediately before
+submission. Because the order is a one-contract debit spread, each projection is:
 
 ```text
 projected_buying_power = pre_entry_buying_power - max_loss
