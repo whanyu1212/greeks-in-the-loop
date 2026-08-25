@@ -107,7 +107,8 @@ const normalizeBaseUrl = (
       url.protocol !== "https:" ||
       url.username !== "" ||
       url.password !== "" ||
-      (!allowCustomHost && url.hostname !== "data.alpaca.markets")
+      (!allowCustomHost &&
+        url.origin !== "https://data.alpaca.markets")
     ) {
       throw new Error("invalid origin")
     }

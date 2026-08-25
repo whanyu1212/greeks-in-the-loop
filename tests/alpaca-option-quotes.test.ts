@@ -73,6 +73,7 @@ describe("Alpaca option quote provider", () => {
     "not-a-url",
     "http://data.alpaca.markets",
     "https://user:password@data.alpaca.markets",
+    "https://data.alpaca.markets:8443",
     "https://example.com",
   ])("rejects unsafe production base URL %s without echoing it", (baseUrl) => {
     expect(() =>
