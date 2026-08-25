@@ -190,6 +190,33 @@ describe("SPY debit-spread research skill", () => {
     )
   })
 
+  it("defines exact daily close and arithmetic SMA inputs", () => {
+    expect(skill).toContain(
+      "`daily_close` to the finite positive adjusted close from the immediately preceding completed Alpaca session",
+    )
+    expect(skill).toContain(
+      "`SMA20` as the arithmetic mean of the latest 20 selected adjusted daily closes",
+    )
+    expect(skill).toContain(
+      "`SMA50` as the arithmetic mean of all 50 selected adjusted daily closes",
+    )
+    expect(skill).toContain("do not use a provider indicator, EMA")
+    expect(sourcePolicy).toContain(
+      "SMA20/SMA50 are arithmetic means of the latest 20/50 selected adjusted closes",
+    )
+  })
+
+  it("defines DTE from decision date to expiration date", () => {
+    expect(skill).toContain(
+      "number of calendar dates between the New York decision date and the expiration date",
+    )
+    expect(skill).toContain("DTE must be 14–30, inclusive")
+    expect(skill).toContain("do not count the decision date as an additional day")
+    expect(sourcePolicy).toContain(
+      "Number of calendar dates between the New York decision date and expiration",
+    )
+  })
+
   it("requires the Alpaca Basic indicative option feed", () => {
     expect(skill).toContain(
       "Alpaca Basic indicative option feed",

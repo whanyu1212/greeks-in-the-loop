@@ -87,11 +87,12 @@ If any snapshot-forming input is stale and a read-only refresh is available, dis
    - Freeze the required 50-session daily set and expected intraday intervals at `observed_at`. Verify a one-to-one mapping to every required daily session and exactly one valid completed one-minute bar for every expected regular-session interval through `observed_at`.
    - Every selected daily close must be finite and positive. Every selected intraday `bar_vwap` and `bar_volume` must be finite and positive. Require `sum(bar_volume) > 0` and calculate `session_vwap = sum(bar_vwap * bar_volume) / sum(bar_volume)`. Do not use a simple average, close, or provider summary in place of this formula.
    - Validate that the SPY quote bid and ask are finite and positive and that `ask >= bid`. Define `current_price = (bid + ask) / 2`; do not use the bid, ask, latest trade, bar close, or another field as `current_price`.
-   - Calculate SMA20 and SMA50 only after the snapshot is complete. Bullish regime requires `daily_close > SMA20 > SMA50` and `current_price > session_vwap`. Bearish regime requires `daily_close < SMA20 < SMA50` and `current_price < session_vwap`. Equality, mixed ordering, incomplete data, or disagreement means `SIGNAL_NOT_ACTIONABLE`.
+   - Calculate SMA20 and SMA50 only after the snapshot is complete. Bind `daily_close` to the finite positive adjusted close from the immediately preceding completed Alpaca session. Define `SMA20` as the arithmetic mean of the latest 20 selected adjusted daily closes and `SMA50` as the arithmetic mean of all 50 selected adjusted daily closes; do not use a provider indicator, EMA, another session's close, or a differently adjusted series.
+   - Bullish regime requires `daily_close > SMA20 > SMA50` and `current_price > session_vwap`. Bearish regime requires `daily_close < SMA20 < SMA50` and `current_price < session_vwap`. Equality, mixed ordering, incomplete data, or disagreement means `SIGNAL_NOT_ACTIONABLE`.
    - Treat the remaining rules as research prefilters only; passing them is not deterministic risk approval.
    - Underlying must be SPY.
    - Structure must be one bull call spread for a bullish direction or one bear put spread for a bearish direction.
-   - DTE must be 14–30 calendar days.
+   - Define DTE as the number of calendar dates between the New York decision date and the expiration date. DTE must be 14–30, inclusive; do not count the decision date as an additional day or use trading-session count.
    - Both legs must be active, tradable, American-style contracts with multiplier 100, the same expiration, and the same option type.
    - Width must be $1–$10.
    - Long absolute delta must be 0.45–0.60; short absolute delta must be 0.20–0.35.

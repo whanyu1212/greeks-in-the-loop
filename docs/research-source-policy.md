@@ -46,8 +46,9 @@ The agent's interpretation of identified observations. Inference must identify t
 | Account, order, position, clock, calendar | Retrieved during the current cycle |
 | SPY quote | Current session; age no greater than 60 seconds; finite positive bid/ask with `ask >= bid`; `current_price` is exactly `(bid + ask) / 2` |
 | Proposed option quote | Current session; age no greater than 60 seconds |
+| Option DTE | Number of calendar dates between the New York decision date and expiration; eligible range 14–30 inclusive |
 | SPY one-minute bars | Expected interval set freezes at post-snapshot `observed_at`; exactly one completed regular-session bar per interval from session open through `observed_at`; no missing or duplicate intervals; finite positive VWAP and volume; positive total volume; latest-bar age checked at `observed_at` and post-clock `approval_evaluated_at` |
-| Daily SPY history | Requested with `adjustment=all`; exactly one bar for each of the 50 immediately preceding completed Alpaca sessions; no missing, duplicate, skipped, or substituted sessions |
+| Daily SPY history and trend | Requested with `adjustment=all`; exactly one bar for each of the 50 immediately preceding completed Alpaca sessions; `daily_close` is the immediately preceding session's adjusted close; SMA20/SMA50 are arithmetic means of the latest 20/50 selected adjusted closes; no missing, duplicate, skipped, or substituted sessions |
 | Option open interest | No more than two completed sessions old |
 | Historical option bars on Alpaca Basic | Request end at least 15 minutes before request start |
 | Current FMP or Exa context | Retrieved in the current cycle and has a usable provider/publication timestamp |
