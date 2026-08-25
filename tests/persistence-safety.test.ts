@@ -58,6 +58,11 @@ describe("assertPersistenceSafe", () => {
     "Bearer abcdefghijklmnop",
     "apikey=secret-value",
     "client_secret: secret-value",
+    "Cookie: sid=secret-value",
+    "Set-Cookie: sid=secret-value",
+    "secret=secret-value",
+    "AWS_SECRET_ACCESS_KEY=secret-value",
+    "private_key: secret-value",
   ])("rejects credentials embedded in ordinary strings", (value) => {
     expect(() => assertPersistenceSafe({ claim: value })).toThrow(
       UnsafePersistencePayloadError,

@@ -1,5 +1,5 @@
 const PROHIBITED_STRING_PATTERN =
-  /(?:\bBearer\s+[A-Za-z0-9._~+/-]{8,}|\b(?:api[_-]?key|apikey|(?:access|refresh|id|security|session)?[_-]?token|authorization|client[_-]?secret|credentials?|password|signature)\s*[:=]\s*\S{4,})/iu
+  /(?:^|[^A-Za-z0-9])(?:Bearer\s+\S+|(?:api[_-]?key|apikey|(?:access|refresh|id|security|session)?[_-]?token|authorization|proxy[_-]?authorization|client[_-]?secret|cookies?|set[_-]?cookie|credentials?|password|private[_-]?key|secret(?:[_-]?(?:access[_-]?)?key)?|signature)\s*[:=]\s*\S+)/iu
 
 const PROHIBITED_NORMALIZED_KEYS = new Set([
   "env",
