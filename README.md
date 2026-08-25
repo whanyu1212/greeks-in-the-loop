@@ -4,6 +4,10 @@ CodeAct-oriented paper-trading agent built with the OpenCode SDK, Alpaca, and Fi
 
 The initial loop is intentionally observation-only. It can inspect the paper account and market data, write and run analysis under `workspace/`, and report an opportunity or `NO_ACTION`. Alpaca mutation tools remain disabled until deterministic risk and execution gates are implemented.
 
+## Strategy
+
+The frozen MVP strategy is documented in [SPY Directional Debit Spreads](docs/strategy-v1.md). It assumes the project will remain on the free Alpaca Basic data tier. The specification defines future behavior; the current worker remains observation-only.
+
 ## Requirements
 
 - Node.js 22
