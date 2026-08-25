@@ -246,7 +246,118 @@ All monetary inputs use exact decimal cents. The comparison is inclusive and
 does not apply additional rounding.
 
 The entry intent is for one spread at `entry_limit` as a single multileg limit
-order. Market orders, legging, and paying above the approved limit are forbidden.
+order with `time_in_force=day`. Market orders, legging, and paying above the
+approved limit are forbidden.
+
+The order's `entry_order_deadline` is
+`min(slot + 5 minutes, 15:00, session_close - 60 minutes)`. Before submission,
+persist the intent, deadline, unique `client_order_id`, and phase `PREPARED`.
+Arm the local deadline timer, durably transition to `SUBMITTING`, then immediately
+invoke the POST with that same ID in its payload. Transition to `ACKNOWLEDGED`
+when Alpaca returns the broker order ID. These phase changes are ordered writes:
+a `PREPARED` record proves no POST began.
+
+Recovery runs before research or another entry. A recovered `PREPARED` intent is
+always abandoned as `ABANDONED_NO_ORDER`, clears the pending-entry lock, and does
+not consume the daily entry because its ordered phase proves no POST began. A
+recovered `SUBMITTING` intent without a broker ID is looked up by
+`client_order_id` with a five-second timeout and is never resubmitted. A found
+order durably transitions to `ACKNOWLEDGED` with its broker ID. Not-found or
+unavailable evidence transitions to `SUBMISSION_AMBIGUOUS`, blocks trading,
+retries lookup on the reconciliation cadence, and requires operator resolution
+if Alpaca cannot establish an order or definitive rejection.
+
+The same rule applies without a restart: a POST timeout, transport error, or
+response without a broker ID transitions immediately from `SUBMITTING` to
+`SUBMISSION_AMBIGUOUS` and starts lookup without resubmitting. Its already-armed
+deadline timer remains active. If that timer fires without a broker ID, lookup
+continues; an order found after the deadline is canceled under the overdue rule
+below.
+
+A recovered `ACKNOWLEDGED` intent, including one produced by lookup, immediately
+rearms its deadline timer and resumes reconciliation. If its deadline has passed,
+it invokes cancellation under the overdue rule below before any unrelated call.
+The allowed terminal phases are `FILLED_APPROVED`, `FILLED_LATE`,
+`NO_FILL_TERMINAL`, `CONTAINED_FLAT`, and `ABANDONED_NO_ORDER`; each clears the
+pending-entry lock, although a resulting position independently blocks entry.
+Transitioning to `SUBMITTING` consumes the one-entry-per-day limit even when the
+POST is rejected or an operator later proves no broker order exists. A definitive
+HTTP rejection or operator-confirmed absence may transition directly to
+`NO_FILL_TERMINAL` without a broker order record. Operator resolution of
+`SUBMISSION_AMBIGUOUS` must therefore end in `ACKNOWLEDGED`,
+`NO_FILL_TERMINAL`, or reconciliation state `BROKER_INCONSISTENCY` and never
+restores that daily allowance.
+
+If the order is not filled by the deadline and its broker ID is known to a
+running executor, invoke cancellation within one second after the deadline. An
+overdue order discovered by recovery or lookup is canceled within one second of
+obtaining its ID. Capture `cancel_requested_at` immediately before every cancel
+API invocation. No unrelated provider request may precede these actions. The
+pending-entry lock remains set throughout; the strategy never intentionally
+carries an open entry beyond the deadline or into another session.
+
+A cancellation response alone does not resolve the order. After every cancel
+request, the executor immediately reconciles the nested Alpaca order, positions,
+and fill activities, using requests with five-second timeouts and retry starts no
+more than five seconds apart while the order is nonterminal or those records
+disagree. Whenever reconciliation finds an open cancelable remainder after the
+deadline, another cancel attempt starts within one second and before the next
+reconciliation request. New entries remain blocked throughout.
+
+Fill activities are authoritative for race ordering. `spread_filled_at` is the
+latest Alpaca transaction timestamp among the minimum set of leg fills that
+first completes all legs in the submitted ratios. A parent `filled_at` that
+differs is retained as diagnostic evidence but does not change classification;
+the activity timestamps remain authoritative. Position or parent-order evidence
+without the required activities is provisional protection evidence but does not
+finalize classification. `entry_order_deadline` is a UTC instant and equality is
+late:
+
+- A complete spread with `spread_filled_at < entry_order_deadline` is adopted as
+  the strategy position in phase `FILLED_APPROVED`, even if evidence arrives
+  after a cancel request. Broker fill ordering, not local request timestamps,
+  resolves the race.
+- A complete spread with `spread_filled_at >= entry_order_deadline` is immediately
+  marked `late_fill`, adopted for position protection in phase `FILLED_LATE`, and
+  may not be treated as an approved entry.
+- A terminal no-fill status (`canceled`, `expired`, or `rejected`) with no fill
+  activity and no resulting position produces phase `NO_FILL_TERMINAL`.
+  `done_for_day` is not terminal and remains subject to cancellation and
+  reconciliation.
+- Fill outcome and reconciliation health are independent: a
+  `FILLED_APPROVED` or `FILLED_LATE` outcome is not revoked by later health
+  evidence. Incomplete, missing, partial, unmatched, or materially conflicting
+  symbol, quantity, side, status, activity, order, or position evidence remains
+  `RECONCILING` for up to 30 seconds after the first evidence. It becomes
+  `BROKER_INCONSISTENCY` if still unresolved after that bound; a terminal broker
+  record that already confirms partial or unmatched exposure escalates
+  immediately. Diagnostic parent/activity timestamp differences are excluded.
+  As the next action, cancel any open remainder, suspend all new automated
+  orders, alert the operator with the order and exposure evidence, and reconcile
+  on the cadence above. A complete matched spread discovered later is classified
+  under the timestamp rules above. Any residual unmatched leg requires manual
+  flattening; automated legging is forbidden.
+
+After containment, a terminal parent order, no open remainder, and flat Alpaca
+positions transition to `CONTAINED_FLAT`, clear the pending lock, and end
+`BROKER_INCONSISTENCY`; historical fill activities remain audit evidence and do
+not prevent this transition. The consumed daily entry is never restored.
+
+Emergency operator liquidation of unmatched exposure is outside automated
+strategy execution and is the sole exception to the multileg, limit-order, and
+no-legging rules; the operator may use single-leg or market orders only to reduce
+that inconsistent exposure.
+
+Position protection starts from the first complete-spread evidence in the order,
+activity, or position records; it does not wait for every source to converge. If
+provisional evidence appears without `spread_filled_at`, start monitoring
+immediately when the market is open, or within 60 seconds after the next Alpaca
+session open when closed. Once `spread_filled_at` is known, evidence observed
+within 60 seconds retains the first-monitor deadline of 60 seconds after the
+fill. If it is already overdue, start the cycle immediately before any further
+reconciliation request and record the overdue discovery. A late-fill flag is
+latched as soon as `spread_filled_at` is known, including during
+`BROKER_INCONSISTENCY` and before final adoption.
 
 When multiple candidates qualify, select the lexicographically smallest tuple:
 
@@ -368,6 +479,7 @@ index is the count of Alpaca trading dates from the entry date through
 
 | Priority | Exit | Machine-testable trigger |
 | --- | --- | --- |
+| 0 | Late-fill protection | Any complete-spread exposure is marked `late_fill`; the flag persists until flat even before reconciliation converges |
 | 1 | Expiration protection | Exit DTE is less than 3 while the market is open, or exit DTE is 3 and time is at or after `session_close - 60 minutes` |
 | 2 | Stale-data protection | No valid spread mark for five continuous minutes while the market is open |
 | 3 | Stop loss | A valid mark exists and `spread_mark <= 0.50 * entry_limit` |
