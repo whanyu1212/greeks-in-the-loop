@@ -132,6 +132,7 @@ const toInsertParameters = (
 
 export type CreateSqliteLedgerStoreOptions = Readonly<{
   path: string
+  knownCredentialValues: readonly string[]
   now?: () => Date
   timeoutMs?: number
 }>
@@ -144,9 +145,23 @@ export type CreateSqliteLedgerStoreOptions = Readonly<{
  */
 export function createSqliteLedgerStore({
   path,
+  knownCredentialValues,
   now = () => new Date(),
   timeoutMs = 5_000,
 }: CreateSqliteLedgerStoreOptions): LedgerStore {
+  if (
+    !Array.isArray(knownCredentialValues) ||
+    knownCredentialValues.length > 32 ||
+    knownCredentialValues.some(
+      (credential) =>
+        typeof credential !== "string" ||
+        credential.length === 0 ||
+        credential.length > 4_096,
+    )
+  ) {
+    throw new Error("Known credential values are invalid")
+  }
+  const protectedCredentialValues = [...knownCredentialValues]
   const database = new Database(path, { timeout: timeoutMs })
   database.pragma("foreign_keys = ON")
   database.pragma("journal_mode = WAL")
@@ -193,9 +208,15 @@ export function createSqliteLedgerStore({
       throw new Error("Ledger append batch cannot exceed 1000 events")
     }
 
-    assertPersistenceSafe(events)
-    const validated = events.map((event) => ledgerEventV1Schema.parse(event))
-    assertPersistenceSafe(validated)
+    assertPersistenceSafe(events, protectedCredentialValues)
+    const validated = events.map((event, index) => {
+      const parsed = ledgerEventV1Schema.safeParse(event)
+      if (!parsed.success) {
+        throw new Error(`Invalid ledger event at batch index ${index}`)
+      }
+      return parsed.data
+    })
+    assertPersistenceSafe(validated, protectedCredentialValues)
     for (const event of validated) {
       if (
         Buffer.byteLength(JSON.stringify(event.payload), "utf8") >

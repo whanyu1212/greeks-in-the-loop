@@ -40,6 +40,20 @@ describe("assertPersistenceSafe", () => {
     expect(String(error)).not.toContain("secret-value")
   })
 
+  it("redacts untrusted property names from errors", () => {
+    const unsafeProperty = "credential-value_secret"
+    let error: unknown
+    try {
+      assertPersistenceSafe({ [unsafeProperty]: "value" })
+    } catch (caught) {
+      error = caught
+    }
+
+    expect(error).toBeInstanceOf(UnsafePersistencePayloadError)
+    expect(String(error)).toContain("<field>")
+    expect(String(error)).not.toContain(unsafeProperty)
+  })
+
   it.each([
     "Bearer abcdefghijklmnop",
     "apikey=secret-value",
@@ -48,6 +62,23 @@ describe("assertPersistenceSafe", () => {
     expect(() => assertPersistenceSafe({ claim: value })).toThrow(
       UnsafePersistencePayloadError,
     )
+  })
+
+  it("rejects bare known credentials in text and property names", () => {
+    const credential = "alpaca-bare-credential-123"
+
+    expect(() =>
+      assertPersistenceSafe({ claim: credential }, [credential]),
+    ).toThrow(UnsafePersistencePayloadError)
+    expect(() =>
+      assertPersistenceSafe({ [credential]: true }, [credential]),
+    ).toThrow(UnsafePersistencePayloadError)
+    expect(() =>
+      assertPersistenceSafe(
+        { locator: `https://example.com/${encodeURIComponent(credential)}` },
+        [credential],
+      ),
+    ).toThrow(UnsafePersistencePayloadError)
   })
 
   it.each([

@@ -71,12 +71,13 @@ Editing an applied migration causes startup failure. Schema changes require a ne
 The ledger rejects:
 
 - API keys, secrets, passwords, tokens, cookies, and authorization fields;
+- bare values matching application-supplied Alpaca, FMP, or Exa credentials;
 - environment or request-header containers;
 - credential-bearing URL user information;
 - secret-like URL query or fragment parameters;
 - `undefined`, bigint, functions, symbols, non-finite numbers, cyclic values, dates, and other prototype-bearing objects.
 
-Unsafe raw payloads fail before schema normalization or append and are never partially committed. Errors identify only a bounded field path and never include the rejected value.
+The SQLite adapter requires the application to supply its known credential values when it is created. Unsafe raw payloads fail before schema normalization or append and are never partially committed. Errors expose only bounded structural path placeholders and never include rejected values or untrusted property names.
 
 Raw model responses, full OpenCode transcripts, complete MCP/provider responses, hidden reasoning, credentials, and secret-bearing URLs are outside the ledger contract.
 

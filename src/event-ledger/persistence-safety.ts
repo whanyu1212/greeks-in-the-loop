@@ -24,6 +24,7 @@ const PROHIBITED_KEY_SUFFIXES = [
   "signature",
   "token",
 ] as const
+const MAX_ERROR_PATH_PARTS = 16
 
 const isProhibitedKey = (key: string) => {
   const normalized = key.toLowerCase().replace(/[^a-z0-9]/gu, "")
@@ -35,8 +36,30 @@ const isProhibitedKey = (key: string) => {
 
 export class UnsafePersistencePayloadError extends Error {
   constructor(path: readonly (string | number)[]) {
-    super(`Unsafe persistence payload at ${path.length === 0 ? "<root>" : path.join(".")}`)
+    const boundedPath = path
+      .slice(0, MAX_ERROR_PATH_PARTS)
+      .map((part) => (typeof part === "number" ? `[${part}]` : "<field>"))
+    if (path.length > MAX_ERROR_PATH_PARTS) boundedPath.push("<truncated>")
+    super(
+      `Unsafe persistence payload at ${boundedPath.length === 0 ? "<root>" : boundedPath.join(".")}`,
+    )
     this.name = "UnsafePersistencePayloadError"
+  }
+}
+
+const includesKnownCredential = (
+  value: string,
+  knownCredentialValues: readonly string[],
+) => {
+  if (knownCredentialValues.some((credential) => value.includes(credential))) {
+    return true
+  }
+
+  try {
+    const decoded = decodeURIComponent(value)
+    return knownCredentialValues.some((credential) => decoded.includes(credential))
+  } catch {
+    return false
   }
 }
 
@@ -76,6 +99,7 @@ const visit = (
   value: unknown,
   path: readonly (string | number)[],
   ancestors: Set<object>,
+  knownCredentialValues: readonly string[],
 ): void => {
   if (
     value === null ||
@@ -83,7 +107,10 @@ const visit = (
     typeof value === "boolean"
   ) {
     if (typeof value === "string") {
-      if (PROHIBITED_STRING_PATTERN.test(value)) {
+      if (
+        includesKnownCredential(value, knownCredentialValues) ||
+        PROHIBITED_STRING_PATTERN.test(value)
+      ) {
         throw new UnsafePersistencePayloadError(path)
       }
       assertSafeUrl(value, path)
@@ -110,7 +137,7 @@ const visit = (
 
   if (Array.isArray(value)) {
     for (const [index, item] of value.entries()) {
-      visit(item, [...path, index], ancestors)
+      visit(item, [...path, index], ancestors, knownCredentialValues)
     }
     ancestors.delete(value)
     return
@@ -122,10 +149,13 @@ const visit = (
   }
 
   for (const [key, item] of Object.entries(value)) {
-    if (isProhibitedKey(key)) {
+    if (
+      includesKnownCredential(key, knownCredentialValues) ||
+      isProhibitedKey(key)
+    ) {
       throw new UnsafePersistencePayloadError([...path, key])
     }
-    visit(item, [...path, key], ancestors)
+    visit(item, [...path, key], ancestors, knownCredentialValues)
   }
   ancestors.delete(value)
 }
@@ -135,6 +165,9 @@ const visit = (
  *
  * The original payload is never included in the thrown error.
  */
-export function assertPersistenceSafe(value: unknown): void {
-  visit(value, [], new Set())
+export function assertPersistenceSafe(
+  value: unknown,
+  knownCredentialValues: readonly string[] = [],
+): void {
+  visit(value, [], new Set(), knownCredentialValues)
 }

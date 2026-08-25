@@ -6,9 +6,20 @@ import Database from "better-sqlite3"
 import { afterEach, describe, expect, it } from "vitest"
 
 import type { LedgerEventV1 } from "../src/event-ledger/ledger-event-v1.js"
-import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
+import {
+  createSqliteLedgerStore as createConfiguredSqliteLedgerStore,
+  type CreateSqliteLedgerStoreOptions,
+} from "../src/event-ledger/sqlite-ledger-store.js"
 
 const temporaryDirectories: string[] = []
+
+const createSqliteLedgerStore = (
+  options: Omit<CreateSqliteLedgerStoreOptions, "knownCredentialValues">,
+) =>
+  createConfiguredSqliteLedgerStore({
+    ...options,
+    knownCredentialValues: [],
+  })
 
 const createTemporaryPath = () => {
   const directory = mkdtempSync(join(tmpdir(), "research-ledger-test-"))
@@ -187,6 +198,54 @@ describe("createSqliteLedgerStore", () => {
       "Unsafe persistence payload",
     )
     await expect(store.list({ limit: 10 })).resolves.toEqual([])
+
+    await store.close()
+  })
+
+  it("rejects bare application credentials in schema-valid text", async () => {
+    const credential = "alpaca-bare-credential-123"
+    const store = createConfiguredSqliteLedgerStore({
+      path: ":memory:",
+      knownCredentialValues: [credential],
+    })
+    await store.migrate()
+    const credentialBearingEvent = {
+      ...cycleStarted("event-1"),
+      eventType: "EVIDENCE_SNAPSHOT_REFERENCED",
+      payload: {
+        snapshotRef: "snapshot-1",
+        provider: "ALPACA",
+        source: credential,
+        retrievedAt: "2026-08-25T14:30:00.000Z",
+        freshUntil: "2026-08-25T14:31:00.000Z",
+      },
+    } as LedgerEventV1
+
+    await expect(store.append(credentialBearingEvent)).rejects.toThrow(
+      "Unsafe persistence payload",
+    )
+    await expect(store.list({ limit: 10 })).resolves.toEqual([])
+
+    await store.close()
+  })
+
+  it("does not expose unknown property names in schema errors", async () => {
+    const store = createSqliteLedgerStore({ path: ":memory:" })
+    await store.migrate()
+    const unsafeProperty = "configured-credential-value"
+    const invalidEvent = {
+      ...cycleStarted("event-1"),
+      [unsafeProperty]: true,
+    } as LedgerEventV1
+
+    let error: unknown
+    try {
+      await store.append(invalidEvent)
+    } catch (caught) {
+      error = caught
+    }
+    expect(String(error)).toBe("Error: Invalid ledger event at batch index 0")
+    expect(String(error)).not.toContain(unsafeProperty)
 
     await store.close()
   })
