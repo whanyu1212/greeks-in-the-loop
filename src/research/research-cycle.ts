@@ -21,6 +21,21 @@ export const PROPOSAL_QUOTE_SNAPSHOT_REF =
   "alpaca-proposal-quotes-v1" as const
 export const MAX_RESEARCH_RESPONSE_BYTES = 64 * 1024
 
+// This context validates proposal evidence topology and restricts every sourced
+// fact to the application-owned quote alias before any provider request. Real
+// quote timestamps replace it for the authoritative post-fetch validation.
+const PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT = {
+  evaluatedAt: "2000-01-01T00:00:00.000Z",
+  snapshots: {
+    [PROPOSAL_QUOTE_SNAPSHOT_REF]: {
+      provider: "ALPACA",
+      source: "proposal-evidence-preflight",
+      retrievedAt: "2000-01-01T00:00:00.000Z",
+      freshUntil: "2000-01-01T00:00:00.000Z",
+    },
+  },
+} as const
+
 export type ProcessResearchCycleOptions = Readonly<{
   rawResponse: string
   signal: AbortSignal
@@ -58,8 +73,10 @@ const schemaIssues = (
 const recordOutcome = async (
   outcome: ResearchCycleOutcomeV1,
   sink: ResearchCycleOutcomeSink,
+  signal: AbortSignal,
 ): Promise<ProcessedResearchCycle> => {
-  await sink.record(outcome)
+  signal.throwIfAborted()
+  await sink.record(outcome, signal)
   return {
     outcome,
     report: `Research cycle outcome: ${outcome.status}`,
@@ -84,6 +101,8 @@ export async function processResearchCycle({
   now = () => new Date(),
   deriveIntent = deriveTradeIntentV1,
 }: ProcessResearchCycleOptions): Promise<ProcessedResearchCycle> {
+  signal.throwIfAborted()
+
   if (Buffer.byteLength(rawResponse, "utf8") > MAX_RESEARCH_RESPONSE_BYTES) {
     return recordOutcome(
       {
@@ -92,6 +111,7 @@ export async function processResearchCycle({
         issues: [{ code: "RESPONSE_TOO_LARGE", path: [] }],
       },
       outcomeSink,
+      signal,
     )
   }
 
@@ -106,6 +126,7 @@ export async function processResearchCycle({
         issues: [{ code: "MALFORMED_JSON", path: [] }],
       },
       outcomeSink,
+      signal,
     )
   }
 
@@ -118,6 +139,7 @@ export async function processResearchCycle({
         issues: schemaIssues(parsedDecision.error.issues),
       },
       outcomeSink,
+      signal,
     )
   }
 
@@ -134,6 +156,7 @@ export async function processResearchCycle({
           issues: validation.issues,
         },
         outcomeSink,
+        signal,
       )
     }
 
@@ -144,9 +167,27 @@ export async function processResearchCycle({
         decision: parsedDecision.data,
       },
       outcomeSink,
+      signal,
     )
   }
 
+  const evidencePreflight = validateResearchDecisionV1(
+    parsedDecision.data,
+    PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
+  )
+  if (!evidencePreflight.success) {
+    return recordOutcome(
+      {
+        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+        status: "DECISION_REJECTED",
+        issues: evidencePreflight.issues,
+      },
+      outcomeSink,
+      signal,
+    )
+  }
+
+  signal.throwIfAborted()
   const quoteConfirmation = await quoteProvider.confirmQuotes({
     longContractSymbol:
       parsedDecision.data.candidate.longLeg.contractSymbol,
@@ -154,6 +195,8 @@ export async function processResearchCycle({
       parsedDecision.data.candidate.shortLeg.contractSymbol,
     signal,
   })
+  signal.throwIfAborted()
+
   if (!quoteConfirmation.success) {
     return recordOutcome(
       {
@@ -162,6 +205,7 @@ export async function processResearchCycle({
         reasons: quoteConfirmation.reasons,
       },
       outcomeSink,
+      signal,
     )
   }
 
@@ -180,6 +224,7 @@ export async function processResearchCycle({
         issues: validation.issues,
       },
       outcomeSink,
+      signal,
     )
   }
   if (validation.data.outcome !== "PROPOSE_TRADE") {
@@ -190,6 +235,7 @@ export async function processResearchCycle({
         issues: [{ code: "SCHEMA_INVALID", path: ["outcome"] }],
       },
       outcomeSink,
+      signal,
     )
   }
 
@@ -207,6 +253,7 @@ export async function processResearchCycle({
         reasons: derivation.reasons,
       },
       outcomeSink,
+      signal,
     )
   }
 
@@ -218,5 +265,6 @@ export async function processResearchCycle({
       intent: derivation.intent,
     },
     outcomeSink,
+    signal,
   )
 }

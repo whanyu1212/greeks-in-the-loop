@@ -48,7 +48,10 @@ export type ResearchCycleOutcomeV1 =
     }
 
 export type ResearchCycleOutcomeSink = Readonly<{
-  record(outcome: ResearchCycleOutcomeV1): Promise<void>
+  record(
+    outcome: ResearchCycleOutcomeV1,
+    signal: AbortSignal,
+  ): Promise<void>
 }>
 
 /**
@@ -61,7 +64,8 @@ export function createConsoleResearchCycleOutcomeSink(
   write: (line: string) => void = console.log,
 ): ResearchCycleOutcomeSink {
   return {
-    async record(outcome) {
+    async record(outcome, signal) {
+      signal.throwIfAborted()
       write(JSON.stringify(outcome))
     },
   }

@@ -77,7 +77,8 @@ const quoteSnapshot = {
 const setup = () => {
   const outcomes: ResearchCycleOutcomeV1[] = []
   const record = vi.fn<ResearchCycleOutcomeSink["record"]>(
-    async (outcome) => {
+    async (outcome, signal) => {
+      signal.throwIfAborted()
       outcomes.push(outcome)
     },
   )
@@ -244,6 +245,30 @@ describe("processResearchCycle", () => {
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
   })
 
+  it("rejects invalid evidence topology before a failing provider can mask it", async () => {
+    const dependencies = setup()
+    dependencies.confirmQuotes.mockResolvedValue({
+      success: false,
+      reasons: ["QUOTE_REQUEST_FAILED"],
+    })
+
+    const result = await processResearchCycle({
+      rawResponse: JSON.stringify({
+        ...proposal,
+        evidence: [proposal.evidence[0], { ...proposal.evidence[0] }],
+      }),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toMatchObject({
+      status: "DECISION_REJECTED",
+      issues: [{ code: "DUPLICATE_CLAIM_ID" }],
+    })
+    expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
+    expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+  })
+
   it("fetches only the exact proposed symbols", async () => {
     const dependencies = setup()
 
@@ -258,6 +283,41 @@ describe("processResearchCycle", () => {
       shortContractSymbol: proposal.candidate.shortLeg.contractSymbol,
       signal: expect.any(AbortSignal),
     })
+  })
+
+  it("rejects an already-aborted cycle before parsing or recording", async () => {
+    const dependencies = setup()
+    const abortReason = new DOMException("Timed out", "TimeoutError")
+
+    await expect(
+      processResearchCycle({
+        rawResponse: JSON.stringify(noAction),
+        signal: AbortSignal.abort(abortReason),
+        ...dependencies,
+      }),
+    ).rejects.toBe(abortReason)
+    expect(dependencies.record).not.toHaveBeenCalled()
+    expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
+    expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+  })
+
+  it("does not record when cancellation happens immediately before the sink", async () => {
+    const dependencies = setup()
+    const controller = new AbortController()
+    const abortReason = new DOMException("Timed out", "TimeoutError")
+    dependencies.record.mockImplementation(async (_outcome, signal) => {
+      controller.abort(abortReason)
+      signal.throwIfAborted()
+    })
+
+    await expect(
+      processResearchCycle({
+        rawResponse: JSON.stringify(noAction),
+        signal: controller.signal,
+        ...dependencies,
+      }),
+    ).rejects.toBe(abortReason)
+    expect(dependencies.outcomes).toEqual([])
   })
 
   it("propagates quote cancellation without recording an outcome", async () => {
@@ -318,6 +378,7 @@ describe("processResearchCycle", () => {
       status: "DECISION_REJECTED",
       issues: [{ code: "UNKNOWN_SNAPSHOT" }],
     })
+    expect(dependencies.quoteProvider.confirmQuotes).not.toHaveBeenCalled()
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
   })
 
