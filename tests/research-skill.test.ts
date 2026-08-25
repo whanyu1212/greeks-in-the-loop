@@ -35,6 +35,17 @@ describe("SPY debit-spread research skill", () => {
     expect(sourcePolicy).toContain("elapsed start greater than 119 seconds")
   })
 
+  it("requires active account state and complete multileg option approval", () => {
+    expect(skill).toContain("account status to be active")
+    expect(skill).toContain(
+      "approved options level to support submitting the complete multileg spread",
+    )
+    expect(skill).toContain("`ACCOUNT_STATE_INELIGIBLE`")
+    expect(sourcePolicy).toContain(
+      "Account must be active and approved for the complete multileg spread",
+    )
+  })
+
   it("defines a complete ordered research checklist", () => {
     for (const step of [
       "Inspect observable account state",
@@ -97,7 +108,13 @@ describe("SPY debit-spread research skill", () => {
     expect(skill).toContain(
       "Freeze this interval set at `observed_at`",
     )
-    expect(skill).toContain("Refresh a stale primary observation once")
+    expect(skill).toContain("discard the entire snapshot and rebuild every underlying and option")
+    expect(skill).toContain("Capture a new `observed_at`")
+    expect(skill).toContain(
+      "Never replace one stale observation inside an existing snapshot",
+    )
+    expect(sourcePolicy).toContain("one complete snapshot rebuild")
+    expect(sourcePolicy).toContain("Partial refresh")
     expect(skill).toContain("final read-only Alpaca clock request")
     expect(skill).toContain(
       "call `trusted_time` and use its result as `approval_evaluated_at`",
@@ -171,6 +188,17 @@ describe("SPY debit-spread research skill", () => {
     expect(skill).toContain(
       "Never call or request a tool that places, replaces, cancels, closes, exercises",
     )
+  })
+
+  it("requires the Alpaca Basic indicative option feed", () => {
+    expect(skill).toContain(
+      "Alpaca Basic indicative option feed",
+    )
+    expect(skill).toContain(
+      "Do not use OPRA, SIP, or an unspecified/default option feed",
+    )
+    expect(sourcePolicy).toContain("Alpaca Basic indicative feed")
+    expect(sourcePolicy).toContain("default/unspecified, OPRA")
   })
 
   it("uses exact candidate prefilters without claiming risk approval", () => {

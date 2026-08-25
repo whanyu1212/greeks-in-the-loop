@@ -47,12 +47,13 @@ If `trusted_time` is unavailable or invalid for either capture, return `NO_ACTIO
 - FMP or Exa context used as current evidence must identify a publication or provider timestamp and be retrieved during the current cycle. If a current claim has no usable timestamp, treat it as stale.
 - Future-dated observations are invalid.
 
-Refresh a stale primary observation once when a read-only refresh is available. If it remains missing, stale, future-dated, or internally inconsistent, return `NO_ACTION`.
+If any snapshot-forming input is stale and a read-only refresh is available, discard the entire snapshot and rebuild every underlying and option snapshot-forming input from the beginning. Capture a new `observed_at`, then rerun every signal calculation, candidate prefilter, eligibility check, and ranking rule. Never replace one stale observation inside an existing snapshot or reuse its old `observed_at`. If the rebuilt snapshot remains missing, stale, future-dated, or internally inconsistent, return `NO_ACTION`.
 
 ## Research checklist
 
 1. **Inspect observable account state**
-   - Inspect the paper account, open positions, and open orders.
+   - Inspect the paper account, account configuration, open positions, and open orders.
+   - Require the paper account status to be active and the approved options level to support submitting the complete multileg spread. If either fact is absent, ambiguous, or ineligible, return `NO_ACTION` with `ACCOUNT_STATE_INELIGIBLE`.
    - Do not claim reconciliation or risk approval: the event ledger, circuit-breaker state, daily-entry history, and deterministic risk engine are not available to this agent.
    - If observable Alpaca state is restricted or already contains conflicting strategy exposure, return the matching `NO_ACTION` reason. Leave unobservable risk limits to downstream code.
 
@@ -80,7 +81,8 @@ Refresh a stale primary observation once when a read-only refresh is available. 
    - Never average incompatible observations from different timestamps or snapshots.
 
 6. **Complete one snapshot and select one candidate**
-   - Retrieve the option chain, contract metadata, quotes, Greeks, current-session volume, and dated open interest needed to evaluate all candidate legs.
+   - Request and label the Alpaca Basic indicative option feed for the option chain and every option snapshot or quote used in candidate filtering and ranking. Do not use OPRA, SIP, or an unspecified/default option feed.
+   - Retrieve the option chain, contract metadata, indicative quotes, Greeks, current-session volume, and dated open interest needed to evaluate all candidate legs.
    - Immediately after the final underlying or option snapshot-forming response completes, call `trusted_time` once and use its result as `observed_at`. Every selected underlying and option provider timestamp must be no later than this same instant; never combine inputs anchored to different snapshot instants.
    - Freeze the required 50-session daily set and expected intraday intervals at `observed_at`. Verify a one-to-one mapping to every required daily session and exactly one valid completed one-minute bar for every expected regular-session interval through `observed_at`.
    - Every selected daily close must be finite and positive. Every selected intraday `bar_vwap` and `bar_volume` must be finite and positive. Require `sum(bar_volume) > 0` and calculate `session_vwap = sum(bar_vwap * bar_volume) / sum(bar_volume)`. Do not use a simple average, close, or provider summary in place of this formula.
