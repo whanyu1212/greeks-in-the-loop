@@ -14,8 +14,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:6006
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:6006/v1/traces
 ```
 
-The trace-specific standard variables take precedence over their generic
-counterparts:
+Non-empty trace-specific standard variables take precedence over their generic
+counterparts; an empty trace-specific value is treated as unset:
 
 | Trace-specific | Generic | Purpose |
 | --- | --- | --- |

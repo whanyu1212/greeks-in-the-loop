@@ -19,6 +19,8 @@ describe("createOpencodeEnvironment", () => {
         PATH: "/usr/bin",
         PHOENIX_API_KEY: "secret",
         PHOENIX_CLIENT_HEADERS: '{"authorization":"secret"}',
+        Phoenix_Api_Key: "case-insensitive-secret",
+        otel_exporter_otlp_headers: "authorization=case-insensitive-secret",
         XDG_CONFIG_HOME: "/tmp/user-config",
       },
       "/tmp/runtime-config",

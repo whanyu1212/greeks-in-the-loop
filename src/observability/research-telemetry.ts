@@ -156,7 +156,9 @@ const resolveEndpoint = (settings: ResearchTelemetrySettings) => {
 }
 
 const resolveHeaders = (settings: ResearchTelemetrySettings) => {
-  const raw = settings.tracesHeaders ?? settings.headers
+  const raw = settings.tracesHeaders?.trim()
+    ? settings.tracesHeaders
+    : settings.headers
   if (raw === undefined || raw.trim() === "") return {}
   if (raw.length > MAX_HEADERS_LENGTH || /[\r\n]/.test(raw)) {
     throw new Error("invalid headers")
@@ -187,7 +189,9 @@ const resolveHeaders = (settings: ResearchTelemetrySettings) => {
 }
 
 const resolveTimeout = (settings: ResearchTelemetrySettings) => {
-  const raw = settings.tracesTimeoutMs ?? settings.timeoutMs
+  const raw = settings.tracesTimeoutMs?.trim()
+    ? settings.tracesTimeoutMs
+    : settings.timeoutMs
   if (raw === undefined || raw.trim() === "") return DEFAULT_EXPORT_TIMEOUT_MS
   const timeoutMillis = Number(raw)
   if (!Number.isSafeInteger(timeoutMillis) || timeoutMillis <= 0) {

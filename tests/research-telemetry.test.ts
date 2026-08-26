@@ -102,6 +102,29 @@ describe("startResearchTelemetry", () => {
     expect(start).toHaveBeenCalledOnce()
   })
 
+  it("treats empty trace-specific settings as unset", () => {
+    const createSdk = vi.fn(() => ({
+      start: () => undefined,
+      shutdown: async () => undefined,
+    }))
+    startResearchTelemetry(
+      {
+        endpoint: "https://generic.example/otel",
+        tracesHeaders: "  ",
+        headers: "authorization=Bearer%20generic",
+        tracesTimeoutMs: "",
+        timeoutMs: "1234",
+      },
+      { createSdk },
+    )
+
+    expect(createSdk).toHaveBeenCalledWith({
+      url: "https://generic.example/otel/v1/traces",
+      headers: { authorization: "Bearer generic" },
+      timeoutMillis: 1_234,
+    })
+  })
+
   it("rejects unsafe configuration without logging its values", () => {
     const warn = vi.fn()
     const createSdk = vi.fn()

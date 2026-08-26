@@ -104,10 +104,11 @@ export function createOpencodeEnvironment(
     ...childEnvironment
   } = environment
   for (const name of Object.keys(childEnvironment)) {
+    const normalizedName = name.toUpperCase()
     if (
-      name.startsWith("OTEL_") ||
-      name === "PHOENIX_API_KEY" ||
-      name === "PHOENIX_CLIENT_HEADERS"
+      normalizedName.startsWith("OTEL_") ||
+      normalizedName === "PHOENIX_API_KEY" ||
+      normalizedName === "PHOENIX_CLIENT_HEADERS"
     ) {
       delete childEnvironment[name]
     }
