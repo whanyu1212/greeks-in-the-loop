@@ -81,7 +81,7 @@ The ledger rejects:
 
 The SQLite adapter requires the application to supply its known credential values when it is created. Unsafe raw payloads fail before schema normalization or append and are never partially committed. Errors expose only bounded structural path placeholders and never include rejected values or untrusted property names.
 
-Raw model responses, full OpenCode transcripts, complete MCP/provider responses, hidden reasoning, credentials, and secret-bearing URLs are outside the ledger contract.
+Raw model responses, full OpenCode transcripts, complete MCP/provider responses, hidden reasoning, credentials, and secret-bearing URLs are outside the ledger contract. `RESEARCH_REPORT_RECORDED` retains the bounded validated `ResearchReportV2` dossier, including normalized agent-reported account checks, market calculations, candidate diagnostics, and timestamped Exa citations; it does not promote those observations to application-confirmed facts.
 
 ## Queries
 
@@ -129,7 +129,7 @@ Domain code must depend only on `LedgerStore`, so event schemas and reconstructi
 
 ## Runtime lifecycle
 
-The worker creates a fresh OpenCode session for every cycle, then generates one stable `cycleId` and `correlationId` before the prompt. It appends `OPENCODE_SESSION_STARTED` and `RESEARCH_CYCLE_STARTED` before model work begins. Evidence references, validated or rejected decisions, derived or rejected intents, and `RESEARCH_CYCLE_COMPLETED` are then appended as one causally ordered atomic batch.
+The worker creates a fresh OpenCode session for every cycle, then generates one stable `cycleId` and `correlationId` before the prompt. It appends `OPENCODE_SESSION_STARTED` and `RESEARCH_CYCLE_STARTED` before model work begins. Valid research reports, preliminary findings, evidence references, validated or rejected decisions, derived or rejected intents, and `RESEARCH_CYCLE_COMPLETED` are then appended as one causally ordered atomic batch. `PRELIMINARY_RESEARCH_RECORDED` stores only the bounded `PreliminaryResearchV1` result and reconstructs a mandatory refresh marker; it never represents or causes a trade intent.
 
 Timeout, explicit cancellation, unexpected runtime failure, process shutdown, and startup recovery produce `RESEARCH_CYCLE_INTERRUPTED`. A cycle-scoped recorder arbitrates completion and interruption in memory, while database constraints provide the durable exactly-one-terminal backstop. Ledger persistence failures are fatal and are never relabeled as ordinary cycle interruptions.
 

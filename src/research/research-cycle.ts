@@ -3,16 +3,23 @@ import {
   type TradeIntentDerivationResult,
 } from "../contracts/trade-intent-v1.js"
 import {
-  researchDecisionV1Schema,
   validateResearchDecisionV1,
   type ProposedTradeDecisionV1,
   type ResearchDecisionV1,
   type ResearchDecisionValidationIssue,
 } from "../contracts/research-decision-v1.js"
+import {
+  researchReportV2Schema,
+  type ResearchReportV2,
+} from "../contracts/research-report-v2.js"
 import { MAX_LEDGER_EVENT_PAYLOAD_BYTES } from "../event-ledger/ledger-event-v1.js"
 import type {
   OptionQuoteProvider,
 } from "../market-data/alpaca-option-quotes.js"
+import {
+  newYorkLocalTime,
+  type ResearchEligibilityV1,
+} from "../scheduling/research-eligibility.js"
 import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
   type ResearchCycleOutcomeSink,
@@ -24,6 +31,8 @@ export const PROPOSAL_QUOTE_SNAPSHOT_REF =
   "alpaca-proposal-quotes-v1" as const
 export const MAX_RESEARCH_RESPONSE_BYTES = 64 * 1024
 const MAX_TERMINAL_REJECTION_DETAILS = 64
+const MAX_PROPOSAL_MARKET_REGIME_AGE_MS = 60_000
+const MAX_PROPOSAL_ACCOUNT_CHECK_AGE_MS = 5 * 60_000
 
 // This context validates proposal evidence topology and restricts every sourced
 // fact to the application-owned quote alias before any provider request. Real
@@ -42,9 +51,11 @@ const PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT = {
 
 export type ProcessResearchCycleOptions = Readonly<{
   rawResponse: string
+  cycleStartedAt: string
   signal: AbortSignal
   quoteProvider: OptionQuoteProvider
   outcomeSink: ResearchCycleOutcomeSink
+  getEligibility: () => ResearchEligibilityV1
   now?: () => Date
   deriveIntent?: (
     decision: ProposedTradeDecisionV1,
@@ -55,6 +66,7 @@ export type ProcessResearchCycleOptions = Readonly<{
 export type ProcessedResearchCycle = Readonly<{
   outcome: ResearchCycleOutcomeV1
   report: string
+  researchReport?: ResearchReportV2
 }>
 
 const schemaIssues = (
@@ -66,6 +78,98 @@ const schemaIssues = (
       typeof part === "symbol" ? String(part) : part,
     ),
   }))
+
+const observationIsFresh = (
+  observedAt: string,
+  evaluatedAt: string,
+  maximumAgeMs: number,
+) => {
+  const evaluationTime = Date.parse(evaluatedAt)
+  const observationTime = Date.parse(observedAt)
+  const age = evaluationTime - observationTime
+  return (
+    Number.isFinite(evaluationTime) &&
+    Number.isFinite(observationTime) &&
+    age >= 0 &&
+    age <= maximumAgeMs
+  )
+}
+
+const proposalMarketRegimeIsFresh = (
+  report: ResearchReportV2,
+  evaluatedAt: string,
+) =>
+  observationIsFresh(
+    report.analysis.marketRegime.observedAt,
+    evaluatedAt,
+    MAX_PROPOSAL_MARKET_REGIME_AGE_MS,
+  )
+
+const proposalAccountChecksAreFresh = (
+  report: ResearchReportV2,
+  evaluatedAt: string,
+) =>
+  observationIsFresh(
+    report.analysis.accountChecks.observedAt,
+    evaluatedAt,
+    MAX_PROPOSAL_ACCOUNT_CHECK_AGE_MS,
+  )
+
+const proposalHistoryIssuePath = (
+  report: ResearchReportV2,
+  eligibility: ResearchEligibilityV1,
+): readonly (string | number)[] | undefined => {
+  const sessionDate = eligibility.sessionDate
+  if (sessionDate === undefined) return ["analysis", "marketRegime", "observedAt"]
+
+  const observedAt = Date.parse(report.analysis.marketRegime.observedAt)
+  const sessionOpen = newYorkLocalTime(sessionDate, "09:30").getTime()
+  const expectedIntradayBars = Math.floor((observedAt - sessionOpen) / 60_000)
+  if (
+    !Number.isFinite(observedAt) ||
+    expectedIntradayBars <= 0 ||
+    report.analysis.marketRegime.intradayBarCount !== expectedIntradayBars
+  ) {
+    return ["analysis", "marketRegime", "intradayBarCount"]
+  }
+
+  if (report.analysis.candidateEvaluation === undefined) {
+    return ["analysis", "candidateEvaluation"]
+  }
+  const sessionDay = Date.parse(`${sessionDate}T00:00:00.000Z`)
+  const expirationDay = Date.parse(`${report.result.outcome === "PROPOSE_TRADE"
+    ? report.result.candidate.expiration
+    : sessionDate}T00:00:00.000Z`)
+  const expectedDte = (expirationDay - sessionDay) / 86_400_000
+  if (
+    !Number.isInteger(expectedDte) ||
+    report.analysis.candidateEvaluation.dte !== expectedDte
+  ) {
+    return ["analysis", "candidateEvaluation", "dte"]
+  }
+  const previousSessionDates = eligibility.previousSessionDates
+  if (previousSessionDates === undefined || previousSessionDates.length < 2) {
+    return ["analysis", "candidateEvaluation", "legs", 0, "openInterestDate"]
+  }
+  const eligibleOpenInterestDates = new Set([
+    sessionDate,
+    ...previousSessionDates.slice(-2),
+  ])
+  const staleOpenInterestIndex =
+    report.analysis.candidateEvaluation.legs.findIndex(
+      ({ openInterestDate }) => !eligibleOpenInterestDates.has(openInterestDate),
+    )
+  if (staleOpenInterestIndex >= 0) {
+    return [
+      "analysis",
+      "candidateEvaluation",
+      "legs",
+      staleOpenInterestIndex,
+      "openInterestDate",
+    ]
+  }
+  return undefined
+}
 
 const boundTerminalOutcome = (
   outcome: ResearchCycleOutcomeV1,
@@ -88,6 +192,8 @@ const boundTerminalOutcome = (
 type TerminalRecordMetadata = Readonly<{
   evidenceSnapshots?: ResearchCycleTerminalRecordV1["evidenceSnapshots"]
   validatedDecision?: ResearchDecisionV1
+  preliminaryResearch?: ResearchCycleTerminalRecordV1["preliminaryResearch"]
+  researchReport?: ResearchReportV2
 }>
 
 /**
@@ -111,11 +217,20 @@ const recordOutcome = async (
     ...(metadata.validatedDecision === undefined
       ? {}
       : { validatedDecision: metadata.validatedDecision }),
+    ...(metadata.preliminaryResearch === undefined
+      ? {}
+      : { preliminaryResearch: metadata.preliminaryResearch }),
+    ...(metadata.researchReport === undefined
+      ? {}
+      : { researchReport: metadata.researchReport }),
   }
   await sink.record(record, signal)
   return {
     outcome: boundedOutcome,
     report: `Research cycle outcome: ${boundedOutcome.status}`,
+    ...(metadata.researchReport === undefined
+      ? {}
+      : { researchReport: metadata.researchReport }),
   }
 }
 
@@ -131,9 +246,11 @@ const recordOutcome = async (
  */
 export async function processResearchCycle({
   rawResponse,
+  cycleStartedAt,
   signal,
   quoteProvider,
   outcomeSink,
+  getEligibility,
   now = () => new Date(),
   deriveIntent = deriveTradeIntentV1,
 }: ProcessResearchCycleOptions): Promise<ProcessedResearchCycle> {
@@ -166,13 +283,13 @@ export async function processResearchCycle({
     )
   }
 
-  const parsedDecision = researchDecisionV1Schema.safeParse(input)
-  if (!parsedDecision.success) {
+  const parsedReport = researchReportV2Schema.safeParse(input)
+  if (!parsedReport.success) {
     return recordOutcome(
       {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
         status: "DECISION_REJECTED",
-        issues: schemaIssues(parsedDecision.error.issues),
+        issues: schemaIssues(parsedReport.error.issues),
       },
       outcomeSink,
       signal,
@@ -181,7 +298,9 @@ export async function processResearchCycle({
 
   if (
     Buffer.byteLength(
-      JSON.stringify({ decision: parsedDecision.data }),
+      JSON.stringify({
+        researchReport: parsedReport.data,
+      }),
       "utf8",
     ) > MAX_LEDGER_EVENT_PAYLOAD_BYTES
   ) {
@@ -196,70 +315,197 @@ export async function processResearchCycle({
     )
   }
 
-  if (parsedDecision.data.outcome === "NO_ACTION") {
-    const validation = validateResearchDecisionV1(parsedDecision.data, {
-      evaluatedAt: now().toISOString(),
+  const researchReport = parsedReport.data
+  const result = researchReport.result
+  const recordReportOutcome = (
+    outcome: ResearchCycleOutcomeV1,
+    metadata: TerminalRecordMetadata = {},
+  ) =>
+    recordOutcome(outcome, outcomeSink, signal, {
+      ...metadata,
+      researchReport,
+    })
+  const processingEvaluatedAt = now()
+  const cycleStartTime = Date.parse(cycleStartedAt)
+  if (
+    !Number.isFinite(processingEvaluatedAt.getTime()) ||
+    !Number.isFinite(cycleStartTime) ||
+    cycleStartTime > processingEvaluatedAt.getTime() ||
+    Date.parse(researchReport.analysis.asOf) > processingEvaluatedAt.getTime()
+  ) {
+    return recordReportOutcome({
+      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+      status: "DECISION_REJECTED",
+      issues: [{ code: "CONTEXT_INVALID", path: ["analysis", "asOf"] }],
+    })
+  }
+  const exaSources = researchReport.analysis.externalContext.filter(
+    ({ provider }) => provider === "EXA",
+  )
+  if (
+    exaSources.length > 0 &&
+    !exaSources.some(({ retrievedAt }) => {
+      const retrievedTime = Date.parse(retrievedAt)
+      return (
+        retrievedTime >= cycleStartTime &&
+        retrievedTime <= processingEvaluatedAt.getTime()
+      )
+    })
+  ) {
+    return recordReportOutcome({
+      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+      status: "DECISION_REJECTED",
+      issues: [
+        {
+          code: "CONTEXT_INVALID",
+          path: ["analysis", "externalContext"],
+        },
+      ],
+    })
+  }
+
+  if (result.outcome === "PRELIMINARY_RESEARCH") {
+    const eligibility = getEligibility()
+    const eligibilityTime = Date.parse(eligibility.evaluatedAt)
+    const futureObservationIndex = result.evidence.findIndex(
+      (claim) =>
+        claim.kind === "SOURCED_FACT" &&
+        Date.parse(claim.observedAt) > eligibilityTime,
+    )
+    if (
+      !eligibility.researchEligible ||
+      eligibility.sessionDate !== result.targetSessionDate ||
+      !Number.isFinite(eligibilityTime) ||
+      Date.parse(researchReport.analysis.asOf) > eligibilityTime ||
+      futureObservationIndex >= 0
+    ) {
+      const issuePath =
+        futureObservationIndex >= 0
+          ? ["evidence", futureObservationIndex, "observedAt"]
+          : ["targetSessionDate"]
+      return recordReportOutcome(
+        {
+          outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+          status: "DECISION_REJECTED",
+          issues: [
+            {
+              code: "CONTEXT_INVALID",
+              path: issuePath,
+            },
+          ],
+        },
+      )
+    }
+    return recordReportOutcome(
+      {
+        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+        status: "PRELIMINARY_RESEARCH_RETAINED",
+        research: result,
+      },
+      { preliminaryResearch: result },
+    )
+  }
+
+  if (result.outcome === "NO_ACTION") {
+    const validation = validateResearchDecisionV1(result, {
+      evaluatedAt: processingEvaluatedAt.toISOString(),
       snapshots: {},
     })
     if (!validation.success) {
-      return recordOutcome(
+      return recordReportOutcome(
         {
           outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
           status: "DECISION_REJECTED",
           issues: validation.issues,
         },
-        outcomeSink,
-        signal,
       )
     }
 
-    return recordOutcome(
+    return recordReportOutcome(
       {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
         status: "VALIDATED_NO_ACTION",
-        decision: parsedDecision.data,
+        decision: result,
       },
-      outcomeSink,
-      signal,
       { validatedDecision: validation.data },
     )
   }
 
   const evidencePreflight = validateResearchDecisionV1(
-    parsedDecision.data,
+    result,
     PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
   )
   if (!evidencePreflight.success) {
-    return recordOutcome(
+    return recordReportOutcome(
       {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
         status: "DECISION_REJECTED",
         issues: evidencePreflight.issues,
       },
-      outcomeSink,
-      signal,
     )
+  }
+
+  const proposalEligibility = getEligibility()
+  if (!proposalEligibility.tradeIntentEligible) {
+    return recordReportOutcome(
+      {
+        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["MARKET_WINDOW_INELIGIBLE"],
+      },
+    )
+  }
+  if (!proposalMarketRegimeIsFresh(researchReport, proposalEligibility.evaluatedAt)) {
+    return recordReportOutcome({
+      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+      status: "DECISION_REJECTED",
+      issues: [
+        {
+          code: "CONTEXT_INVALID",
+          path: ["analysis", "marketRegime", "observedAt"],
+        },
+      ],
+    })
+  }
+  if (!proposalAccountChecksAreFresh(researchReport, proposalEligibility.evaluatedAt)) {
+    return recordReportOutcome({
+      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+      status: "DECISION_REJECTED",
+      issues: [
+        {
+          code: "CONTEXT_INVALID",
+          path: ["analysis", "accountChecks", "observedAt"],
+        },
+      ],
+    })
+  }
+  const historyIssuePath = proposalHistoryIssuePath(
+    researchReport,
+    proposalEligibility,
+  )
+  if (historyIssuePath !== undefined) {
+    return recordReportOutcome({
+      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+      status: "DECISION_REJECTED",
+      issues: [{ code: "CONTEXT_INVALID", path: historyIssuePath }],
+    })
   }
 
   signal.throwIfAborted()
   const quoteConfirmation = await quoteProvider.confirmQuotes({
-    longContractSymbol:
-      parsedDecision.data.candidate.longLeg.contractSymbol,
-    shortContractSymbol:
-      parsedDecision.data.candidate.shortLeg.contractSymbol,
+    longContractSymbol: result.candidate.longLeg.contractSymbol,
+    shortContractSymbol: result.candidate.shortLeg.contractSymbol,
     signal,
   })
   signal.throwIfAborted()
 
   if (!quoteConfirmation.success) {
-    return recordOutcome(
+    return recordReportOutcome(
       {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
         status: "INTENT_DERIVATION_REJECTED",
         reasons: quoteConfirmation.reasons,
       },
-      outcomeSink,
-      signal,
     )
   }
 
@@ -267,10 +513,63 @@ export async function processResearchCycle({
     {
       snapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
       ...quoteConfirmation.snapshot.snapshotMetadata,
+      temporalClass: "LIVE",
     },
   ]
 
-  const validation = validateResearchDecisionV1(parsedDecision.data, {
+  if (
+    !proposalMarketRegimeIsFresh(
+      researchReport,
+      quoteConfirmation.snapshot.evaluatedAt,
+    )
+  ) {
+    return recordReportOutcome(
+      {
+        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+        status: "DECISION_REJECTED",
+        issues: [
+          {
+            code: "CONTEXT_INVALID",
+            path: ["analysis", "marketRegime", "observedAt"],
+          },
+        ],
+      },
+      { evidenceSnapshots },
+    )
+  }
+  if (
+    !proposalAccountChecksAreFresh(
+      researchReport,
+      quoteConfirmation.snapshot.evaluatedAt,
+    )
+  ) {
+    return recordReportOutcome(
+      {
+        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+        status: "DECISION_REJECTED",
+        issues: [
+          {
+            code: "CONTEXT_INVALID",
+            path: ["analysis", "accountChecks", "observedAt"],
+          },
+        ],
+      },
+      { evidenceSnapshots },
+    )
+  }
+
+  if (!getEligibility().tradeIntentEligible) {
+    return recordReportOutcome(
+      {
+        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["MARKET_WINDOW_INELIGIBLE"],
+      },
+      { evidenceSnapshots },
+    )
+  }
+
+  const validation = validateResearchDecisionV1(result, {
     evaluatedAt: quoteConfirmation.snapshot.evaluatedAt,
     snapshots: {
       [PROPOSAL_QUOTE_SNAPSHOT_REF]:
@@ -278,26 +577,22 @@ export async function processResearchCycle({
     },
   })
   if (!validation.success) {
-    return recordOutcome(
+    return recordReportOutcome(
       {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
         status: "DECISION_REJECTED",
         issues: validation.issues,
       },
-      outcomeSink,
-      signal,
       { evidenceSnapshots },
     )
   }
   if (validation.data.outcome !== "PROPOSE_TRADE") {
-    return recordOutcome(
+    return recordReportOutcome(
       {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
         status: "DECISION_REJECTED",
         issues: [{ code: "SCHEMA_INVALID", path: ["outcome"] }],
       },
-      outcomeSink,
-      signal,
       { evidenceSnapshots },
     )
   }
@@ -309,14 +604,12 @@ export async function processResearchCycle({
     shortQuote: quoteConfirmation.snapshot.shortQuote,
   })
   if (!derivation.success) {
-    return recordOutcome(
+    return recordReportOutcome(
       {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
         status: "INTENT_DERIVATION_REJECTED",
         reasons: derivation.reasons,
       },
-      outcomeSink,
-      signal,
       {
         evidenceSnapshots,
         validatedDecision: validation.data,
@@ -324,15 +617,13 @@ export async function processResearchCycle({
     )
   }
 
-  return recordOutcome(
+  return recordReportOutcome(
     {
       outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
       status: "INTENT_DERIVED",
       decision: validation.data,
       intent: derivation.intent,
     },
-    outcomeSink,
-    signal,
     {
       evidenceSnapshots,
       validatedDecision: validation.data,

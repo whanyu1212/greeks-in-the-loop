@@ -22,17 +22,19 @@ describe("SPY debit-spread research skill", () => {
     )
   })
 
-  it("enforces exact decision-slot and approval eligibility", () => {
-    expect(skill).toContain("derive the preceding quarter-hour slot")
-    expect(skill).toContain(
-      "flooring the local minute to `00`, `15`, `30`, or `45`",
-    )
-    expect(skill).toContain("no more than 119 seconds")
-    expect(skill).toContain("entire following `01`, `16`, `31`, or `46` minute")
-    expect(skill).toContain("`10:00 <= slot < min(15:00, session_close - 60 minutes)`")
-    expect(skill).toContain("`slot + 5 minutes`")
-    expect(skill).toContain("final Alpaca clock to still report the market open")
+  it("keeps decision-slot eligibility authoritative in application code", () => {
+    expect(skill).toContain("application-supplied eligibility and session date as authoritative")
+    expect(skill).toContain("cannot expand application eligibility")
+    expect(skill).toContain("rechecks the slot and deadline immediately before and after exact-leg quote confirmation")
+    expect(skill).toContain("Never return `PROPOSE_TRADE` in that state")
     expect(sourcePolicy).toContain("elapsed start greater than 119 seconds")
+  })
+
+  it("defines staged research with mandatory temporal labels and refresh", () => {
+    expect(skill).toContain("`PRELIMINARY_RESEARCH`")
+    expect(skill).toContain("`LIVE`, `DELAYED`, or `PRIOR_CLOSE`")
+    expect(skill).toContain("`requiresRefresh: true`")
+    expect(systemPrompt).toContain("Preliminary research is historical planning context")
   })
 
   it("requires active account state and complete multileg option approval", () => {

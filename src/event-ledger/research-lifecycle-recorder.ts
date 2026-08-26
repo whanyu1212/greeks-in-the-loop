@@ -110,6 +110,25 @@ const completionEvents = (
   }
 
   const outcome = record.outcome
+  if (record.researchReport !== undefined) {
+    append({
+      ...envelope(),
+      eventType: "RESEARCH_REPORT_RECORDED",
+      payload: { report: record.researchReport },
+    })
+  }
+  const preliminaryResearch =
+    record.preliminaryResearch ??
+    (outcome.status === "PRELIMINARY_RESEARCH_RETAINED"
+      ? outcome.research
+      : undefined)
+  if (preliminaryResearch !== undefined) {
+    append({
+      ...envelope(),
+      eventType: "PRELIMINARY_RESEARCH_RECORDED",
+      payload: { research: preliminaryResearch },
+    })
+  }
   const validatedDecision =
     record.validatedDecision ??
     (outcome.status === "VALIDATED_NO_ACTION" ||
@@ -125,6 +144,8 @@ const completionEvents = (
   }
 
   switch (outcome.status) {
+    case "PRELIMINARY_RESEARCH_RETAINED":
+      break
     case "VALIDATED_NO_ACTION":
       break
     case "DECISION_REJECTED":

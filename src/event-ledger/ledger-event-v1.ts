@@ -1,7 +1,9 @@
 import { z } from "zod"
 
 import { researchDecisionV1Schema } from "../contracts/research-decision-v1.js"
+import { preliminaryResearchV1Schema } from "../contracts/preliminary-research-v1.js"
 import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
+import { researchReportV2Schema } from "../contracts/research-report-v2.js"
 
 export const LEDGER_EVENT_VERSION = "1.0.0" as const
 export const MAX_LEDGER_EVENT_PAYLOAD_BYTES = 64 * 1024
@@ -10,6 +12,8 @@ export const LEDGER_EVENT_TYPES = [
   "OPENCODE_SESSION_STARTED",
   "RESEARCH_CYCLE_STARTED",
   "EVIDENCE_SNAPSHOT_REFERENCED",
+  "PRELIMINARY_RESEARCH_RECORDED",
+  "RESEARCH_REPORT_RECORDED",
   "RESEARCH_DECISION_VALIDATED",
   "RESEARCH_DECISION_REJECTED",
   "TRADE_INTENT_DERIVED",
@@ -49,6 +53,7 @@ const payloadSchemas = {
       source: z.string().trim().min(1).max(128),
       retrievedAt: timestamp,
       freshUntil: timestamp,
+      temporalClass: z.enum(["LIVE", "DELAYED", "PRIOR_CLOSE"]).optional(),
     })
     .strict()
     .refine(
@@ -59,6 +64,16 @@ const payloadSchemas = {
         message: "Snapshot freshness cannot end before retrieval",
       },
     ),
+  PRELIMINARY_RESEARCH_RECORDED: z
+    .object({
+      research: preliminaryResearchV1Schema,
+    })
+    .strict(),
+  RESEARCH_REPORT_RECORDED: z
+    .object({
+      report: researchReportV2Schema,
+    })
+    .strict(),
   RESEARCH_DECISION_VALIDATED: z
     .object({
       decision: researchDecisionV1Schema,
@@ -93,6 +108,7 @@ const payloadSchemas = {
     .object({
       status: z.enum([
         "VALIDATED_NO_ACTION",
+        "PRELIMINARY_RESEARCH_RETAINED",
         "DECISION_REJECTED",
         "INTENT_DERIVATION_REJECTED",
         "INTENT_DERIVED",

@@ -21,16 +21,23 @@ import {
 } from "./event-ledger/research-lifecycle-recorder.js"
 import { createSqliteLedgerStore } from "./event-ledger/sqlite-ledger-store.js"
 import { createAlpacaOptionQuoteProvider } from "./market-data/alpaca-option-quotes.js"
+import { createAlpacaCalendarClient } from "./market-data/alpaca-calendar-client.js"
 import { startOpencode } from "./opencode-runtime.js"
 import {
   buildResearchCyclePrompt,
   RESEARCH_AGENT_NAME,
 } from "./research/research-agent.js"
+import { writeResearchCycleArtifact } from "./research/research-artifact.js"
 import {
   loadResearchContextV1,
   reconstructResearchContextV1,
 } from "./research/research-context-v1.js"
 import { processResearchCycle } from "./research/research-cycle.js"
+import {
+  DEFAULT_PREMARKET_RESEARCH_START_ET,
+  evaluateResearchEligibility,
+  newYorkDate,
+} from "./scheduling/research-eligibility.js"
 
 /** Settings parsed from the project environment file without exporting secrets. */
 const fileEnv = (() => {
@@ -164,6 +171,21 @@ const quoteProvider = createAlpacaOptionQuoteProvider({
     readSetting("ALPACA_MARKET_DATA_BASE_URL")?.trim() ||
     "https://data.alpaca.markets",
 })
+const calendar = createAlpacaCalendarClient({
+  apiKey: alpacaApiKey,
+  secretKey: alpacaSecretKey,
+  baseUrl:
+    readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
+    "https://paper-api.alpaca.markets",
+})
+const premarketStartEt =
+  readSetting("AGENT_PREMARKET_START_ET")?.trim() ||
+  DEFAULT_PREMARKET_RESEARCH_START_ET
+// Validate configured wall time before starting any external process.
+evaluateResearchEligibility({
+  evaluatedAt: new Date(),
+  premarketStartEt,
+})
 const ledgerPath = readSetting("RESEARCH_LEDGER_PATH")?.trim() ||
   ".state/research-ledger.sqlite"
 mkdirSync(dirname(ledgerPath), { recursive: true })
@@ -189,6 +211,34 @@ try {
       maxCycles,
       signal: abortController.signal,
       runCycle: async (attempt) => {
+        const eligibilityEvaluatedAt = new Date()
+        const calendarSignal = AbortSignal.any([
+          abortController.signal,
+          AbortSignal.timeout(cycleTimeoutMs),
+        ])
+        const session = await calendar.getSession(
+          newYorkDate(eligibilityEvaluatedAt),
+          calendarSignal,
+        )
+        const initialEligibility = evaluateResearchEligibility({
+          evaluatedAt: new Date(),
+          ...(session === undefined ? {} : { session }),
+          premarketStartEt,
+        })
+        const getEligibility = () =>
+          evaluateResearchEligibility({
+            evaluatedAt: new Date(),
+            ...(session === undefined ? {} : { session }),
+            premarketStartEt,
+            tradeIntentWindow: initialEligibility.tradeIntentWindow ?? null,
+          })
+        if (!initialEligibility.researchEligible) {
+          return `Research cycle skipped: ${initialEligibility.reason ?? "RESEARCH_WINDOW_INELIGIBLE"}`
+        }
+        const sessionDate = initialEligibility.sessionDate
+        if (sessionDate === undefined) {
+          throw new WorkerFatalError("Eligible research cycle has no session date")
+        }
         const created = await runtime.client.session.create({
           body: { title: `trading-agent ${new Date().toISOString()}` },
         })
@@ -272,7 +322,7 @@ try {
         let timedOut = false
 
         try {
-          const report = await runWithCycleDeadline({
+          const processed = await runWithCycleDeadline({
             timeoutMs: cycleTimeoutMs,
             shutdownSignal: abortController.signal,
             run: async (signal) => {
@@ -290,6 +340,7 @@ try {
                         new Date(cycle.startedAt),
                         task,
                         researchContext,
+                        initialEligibility,
                       ),
                     },
                   ],
@@ -305,13 +356,14 @@ try {
                 .filter(Boolean)
                 .join("\n")
 
-              const processed = await processResearchCycle({
+              return processResearchCycle({
                 rawResponse: text,
+                cycleStartedAt: cycle.startedAt,
                 signal,
                 quoteProvider,
                 outcomeSink: cycle.outcomeSink,
+                getEligibility,
               })
-              return processed.report
             },
             onTimeout: async () => {
               timedOut = true
@@ -328,7 +380,23 @@ try {
               }
             },
           })
-          return report
+          try {
+            const artifactPath = await writeResearchCycleArtifact({
+              cycleId: cycle.cycleId,
+              cycleNumber,
+              sessionDate,
+              outcome: processed.outcome,
+              ...(processed.researchReport === undefined
+                ? {}
+                : { researchReport: processed.researchReport }),
+            })
+            return `${processed.report}\nResearch artifact: ${artifactPath}`
+          } catch {
+            console.error(
+              `[cycle ${cycleNumber}] validated outcome recorded, but research artifact could not be written`,
+            )
+            return `${processed.report}\nResearch artifact: unavailable`
+          }
         } catch (error) {
           if (error instanceof LedgerPersistenceError) {
             abortController.abort(error)

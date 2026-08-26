@@ -13,6 +13,7 @@ export const NO_ACTION_REASON_CODES = [
   "NO_ELIGIBLE_SPREAD",
   "CANDIDATE_CHANGED",
   "EXACT_RISK_INPUTS_UNAVAILABLE",
+  "REQUIRED_EXA_EVIDENCE_UNAVAILABLE",
   "CONTRACT_UNREPRESENTABLE",
 ] as const
 
@@ -88,7 +89,7 @@ const parseOptionContractSymbol = (symbol: string) => {
   }
 }
 
-const candidateSchema = z
+export const researchCandidateV1Schema = z
   .object({
     underlying: z.literal("SPY"),
     structure: z.enum(["BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"]),
@@ -97,6 +98,49 @@ const candidateSchema = z
     shortLeg: optionLegSchema,
   })
   .strict()
+  .superRefine((candidate, refinement) => {
+    const strikesAreOrdered =
+      candidate.structure === "BULL_CALL_SPREAD"
+        ? candidate.longLeg.strike < candidate.shortLeg.strike
+        : candidate.longLeg.strike > candidate.shortLeg.strike
+    if (!strikesAreOrdered) {
+      refinement.addIssue({
+        code: "custom",
+        path: [],
+        message: "The option strikes are not ordered for the proposed structure",
+      })
+    }
+
+    if (candidate.longLeg.contractSymbol === candidate.shortLeg.contractSymbol) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["shortLeg", "contractSymbol"],
+        message: "The spread legs must identify different contracts",
+      })
+    }
+
+    // Cross-check redundant leg fields so every retained candidate has one identity.
+    const expectedOptionType =
+      candidate.structure === "BULL_CALL_SPREAD" ? "C" : "P"
+    for (const [legName, leg] of [
+      ["longLeg", candidate.longLeg],
+      ["shortLeg", candidate.shortLeg],
+    ] as const) {
+      const parsedSymbol = parseOptionContractSymbol(leg.contractSymbol)
+      if (
+        parsedSymbol === undefined ||
+        parsedSymbol.expiration !== candidate.expiration ||
+        parsedSymbol.optionType !== expectedOptionType ||
+        parsedSymbol.strike !== leg.strike
+      ) {
+        refinement.addIssue({
+          code: "custom",
+          path: [legName, "contractSymbol"],
+          message: "The contract symbol does not match the candidate leg",
+        })
+      }
+    }
+  })
 
 // Keep the safe branch permissive so irrelevant prose cannot block NO_ACTION.
 const noActionDecisionV1Schema = z
@@ -120,7 +164,7 @@ const proposedTradeDecisionV1Schema = z
     outcome: z.literal("PROPOSE_TRADE"),
     direction: z.enum(["BULLISH", "BEARISH"]),
     thesis: boundedText,
-    candidate: candidateSchema,
+    candidate: researchCandidateV1Schema,
     invalidation: z.array(boundedText).min(1).max(16),
     evidence: z.array(evidenceClaimSchema).min(1).max(64),
   })
@@ -134,52 +178,6 @@ const proposedTradeDecisionV1Schema = z
         path: ["candidate", "structure"],
         message: "The candidate structure does not match the proposed direction",
       })
-    }
-
-    const strikesAreOrdered =
-      decision.candidate.structure === "BULL_CALL_SPREAD"
-        ? decision.candidate.longLeg.strike < decision.candidate.shortLeg.strike
-        : decision.candidate.longLeg.strike > decision.candidate.shortLeg.strike
-    if (!strikesAreOrdered) {
-      refinement.addIssue({
-        code: "custom",
-        path: ["candidate"],
-        message: "The option strikes are not ordered for the proposed structure",
-      })
-    }
-
-    if (
-      decision.candidate.longLeg.contractSymbol ===
-      decision.candidate.shortLeg.contractSymbol
-    ) {
-      refinement.addIssue({
-        code: "custom",
-        path: ["candidate", "shortLeg", "contractSymbol"],
-        message: "The spread legs must identify different contracts",
-      })
-    }
-
-    // Cross-check redundant leg fields so downstream code receives one identity.
-    const expectedOptionType =
-      decision.candidate.structure === "BULL_CALL_SPREAD" ? "C" : "P"
-
-    for (const [legName, leg] of [
-      ["longLeg", decision.candidate.longLeg],
-      ["shortLeg", decision.candidate.shortLeg],
-    ] as const) {
-      const parsedSymbol = parseOptionContractSymbol(leg.contractSymbol)
-      if (
-        parsedSymbol === undefined ||
-        parsedSymbol.expiration !== decision.candidate.expiration ||
-        parsedSymbol.optionType !== expectedOptionType ||
-        parsedSymbol.strike !== leg.strike
-      ) {
-        refinement.addIssue({
-          code: "custom",
-          path: ["candidate", legName, "contractSymbol"],
-          message: "The contract symbol does not match the candidate leg",
-        })
-      }
     }
 
     if (!decision.evidence.some(({ kind }) => kind === "SOURCED_FACT")) {
@@ -199,6 +197,7 @@ export const researchDecisionV1Schema = z.discriminatedUnion("outcome", [
 export type ResearchDecisionV1 = z.infer<typeof researchDecisionV1Schema>
 export type NoActionDecisionV1 = z.infer<typeof noActionDecisionV1Schema>
 export type ProposedTradeDecisionV1 = z.infer<typeof proposedTradeDecisionV1Schema>
+export type ResearchCandidateV1 = z.infer<typeof researchCandidateV1Schema>
 
 const evidenceSnapshotMetadataSchema = z
   .object({

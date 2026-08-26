@@ -42,7 +42,10 @@ const cycleStarted = (
 
 const cycleCompleted = (
   cycleNumber: number,
-  status: "VALIDATED_NO_ACTION" | "INTENT_DERIVED" = "VALIDATED_NO_ACTION",
+  status:
+    | "VALIDATED_NO_ACTION"
+    | "PRELIMINARY_RESEARCH_RETAINED"
+    | "INTENT_DERIVED" = "VALIDATED_NO_ACTION",
 ): LedgerEventV1 => ({
   eventId: `completed-cycle-${cycleNumber}`,
   eventVersion: "1.0.0",
@@ -110,6 +113,39 @@ const evidenceReferenced = (
   },
 })
 
+const preliminaryRecorded = (): LedgerEventV1 => ({
+  eventId: "preliminary-cycle-1",
+  eventVersion: "1.0.0",
+  eventType: "PRELIMINARY_RESEARCH_RECORDED",
+  occurredAt: "2026-08-26T13:01:10.000Z",
+  correlationId: "correlation-cycle-1",
+  causationEventId: "started-cycle-1",
+  cycleId: "cycle-1",
+  sessionId: "session-cycle-1",
+  payload: {
+    research: {
+      contractVersion: "1.0.0",
+      strategyVersion: "1.0.0",
+      outcome: "PRELIMINARY_RESEARCH",
+      targetSessionDate: "2026-08-26",
+      direction: "UNDETERMINED",
+      thesis: "Refresh the prior-close setup during the regular session.",
+      invalidation: ["Reject if live evidence is unavailable."],
+      evidence: [
+        {
+          claimId: "prior-close",
+          kind: "SOURCED_FACT",
+          claim: "The latest completed daily bar is from the prior close.",
+          provider: "ALPACA",
+          temporalClass: "PRIOR_CLOSE",
+          observedAt: "2026-08-25T20:00:00.000Z",
+        },
+      ],
+      requiresRefresh: true,
+    },
+  },
+})
+
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { force: true, recursive: true })
@@ -117,6 +153,65 @@ afterEach(() => {
 })
 
 describe("ResearchContextV1", () => {
+  it("carries the latest preliminary finding forward with mandatory refresh", () => {
+    const context = projectResearchContextV1(
+      [
+        stored(cycleStarted(1), 1),
+        stored(preliminaryRecorded(), 2),
+        stored(cycleCompleted(1, "PRELIMINARY_RESEARCH_RETAINED"), 3),
+      ],
+      { generatedAt: "2026-08-26T14:00:00.000Z" },
+    )
+
+    expect(context.latestPreliminaryResearch).toMatchObject({
+      cycleId: "cycle-1",
+      targetSessionDate: "2026-08-26",
+      direction: "UNDETERMINED",
+      sourcedObservations: [
+        {
+          claimId: "prior-close",
+          provider: "ALPACA",
+          temporalClass: "PRIOR_CLOSE",
+          observedAt: "2026-08-25T20:00:00.000Z",
+        },
+      ],
+      requiresRefresh: true,
+    })
+    expect(JSON.stringify(context)).not.toContain("Refresh the prior-close setup")
+    expect(JSON.stringify(context)).not.toContain("latest completed daily bar")
+    expect(context.requiredRefreshes).toContainEqual({
+      cycleId: "cycle-1",
+      reason: "PRELIMINARY_RESEARCH",
+    })
+  })
+
+  it("clears preliminary refresh after a later proposal is freshly validated", () => {
+    const laterProposal: LedgerEventV1 = {
+      ...validatedProposal(),
+      eventId: "validated-proposal-cycle-2",
+      correlationId: "correlation-cycle-2",
+      cycleId: "cycle-2",
+      sessionId: "session-cycle-2",
+    }
+    const context = projectResearchContextV1(
+      [
+        stored(cycleStarted(1), 1),
+        stored(preliminaryRecorded(), 2),
+        stored(cycleCompleted(1, "PRELIMINARY_RESEARCH_RETAINED"), 3),
+        stored(cycleStarted(2), 4),
+        stored(laterProposal, 5),
+        stored(cycleCompleted(2, "INTENT_DERIVED"), 6),
+      ],
+      { generatedAt: "2026-08-26T14:00:00.000Z" },
+    )
+
+    expect(context.latestPreliminaryResearch).toBeUndefined()
+    expect(context.requiredRefreshes).not.toContainEqual({
+      cycleId: "cycle-1",
+      reason: "PRELIMINARY_RESEARCH",
+    })
+  })
+
   it("projects normalized bounded memory without decision prose", () => {
     const events: StoredLedgerEventV1[] = [
       stored(cycleStarted(1), 1),
@@ -283,7 +378,8 @@ describe("ResearchContextV1", () => {
     await firstStore.migrate()
     await firstStore.appendBatch([
       cycleStarted(1),
-      cycleCompleted(1),
+      preliminaryRecorded(),
+      cycleCompleted(1, "PRELIMINARY_RESEARCH_RETAINED"),
       cycleStarted(2),
     ])
     await firstStore.close()
@@ -302,8 +398,17 @@ describe("ResearchContextV1", () => {
     expect(generatedIds).toBe(1)
     expect(context.nextCycleNumber).toBe(3)
     expect(context.recentTerminalOutcomes).toMatchObject([
-      { cycleId: "cycle-1", cycleNumber: 1, status: "VALIDATED_NO_ACTION" },
+      {
+        cycleId: "cycle-1",
+        cycleNumber: 1,
+        status: "PRELIMINARY_RESEARCH_RETAINED",
+      },
     ])
+    expect(context.latestPreliminaryResearch).toMatchObject({
+      cycleId: "cycle-1",
+      targetSessionDate: "2026-08-26",
+      requiresRefresh: true,
+    })
     expect(context.recentInterruptions).toMatchObject([
       {
         cycleId: "cycle-2",
@@ -345,6 +450,11 @@ describe("ResearchContextV1", () => {
     expect(reopenedContext.recentInterruptions).toMatchObject([
       { cycleId: "cycle-2", reason: "PROCESS_RESTART" },
     ])
+    expect(reopenedContext.latestPreliminaryResearch).toMatchObject({
+      cycleId: "cycle-1",
+      direction: "UNDETERMINED",
+      requiresRefresh: true,
+    })
     await thirdStore.close()
   })
 })
