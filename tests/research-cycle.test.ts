@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { TradeIntentDerivationResult } from "../src/contracts/trade-intent-v1.js"
 import type { ProposedTradeDecisionV1 } from "../src/contracts/research-decision-v1.js"
 import type { OptionQuoteProvider } from "../src/market-data/alpaca-option-quotes.js"
+import type { ResearchCycleTrace } from "../src/observability/research-telemetry.js"
 import type { ResearchEligibilityV1 } from "../src/scheduling/research-eligibility.js"
 import { MAX_LEDGER_EVENT_PAYLOAD_BYTES } from "../src/event-ledger/ledger-event-v1.js"
 import {
@@ -740,11 +741,22 @@ describe("processResearchCycle", () => {
 
   it("records a valid minimal NO_ACTION without quotes or derivation", async () => {
     const dependencies = setup()
+    const operations: string[] = []
+    const trace: ResearchCycleTrace = {
+      identify: () => undefined,
+      setModel: () => undefined,
+      setOutcome: () => undefined,
+      run: async (operation, work) => {
+        operations.push(operation)
+        return work()
+      },
+    }
 
     const result = await processResearchCycle({
       rawResponse: serializeReport(noAction),
       signal: new AbortController().signal,
       now: () => new Date("2026-08-25T14:31:00.000Z"),
+      trace,
       ...dependencies,
     })
 
@@ -758,6 +770,11 @@ describe("processResearchCycle", () => {
     })
     expect(dependencies.quoteProvider.confirmQuotes).not.toHaveBeenCalled()
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+    expect(operations).toEqual([
+      "research.report.parse",
+      "research.decision.validate",
+      "ledger.cycle.terminalize",
+    ])
     expect(dependencies.outcomes).toEqual([result.outcome])
     expect(dependencies.records).toEqual([
       {

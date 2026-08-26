@@ -103,7 +103,21 @@ export function createOpencodeEnvironment(
     OPENCODE_AGENT: _agentOverride,
     ...childEnvironment
   } = environment
-  return { ...childEnvironment, XDG_CONFIG_HOME: configHome }
+  for (const name of Object.keys(childEnvironment)) {
+    const normalizedName = name.toUpperCase()
+    if (
+      normalizedName.startsWith("OTEL_") ||
+      normalizedName === "PHOENIX_API_KEY" ||
+      normalizedName === "PHOENIX_CLIENT_HEADERS"
+    ) {
+      delete childEnvironment[name]
+    }
+  }
+  return {
+    ...childEnvironment,
+    OTEL_SDK_DISABLED: "true",
+    XDG_CONFIG_HOME: configHome,
+  }
 }
 
 /**

@@ -14,7 +14,13 @@ describe("createOpencodeEnvironment", () => {
         OPENCODE_CONFIG: "/tmp/unsafe.json",
         OPENCODE_CONFIG_CONTENT: '{"permission":"allow"}',
         OPENCODE_CONFIG_DIR: "/tmp/unsafe",
+        OTEL_EXPORTER_OTLP_HEADERS: "authorization=secret",
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "https://collector.example/v1/traces",
         PATH: "/usr/bin",
+        PHOENIX_API_KEY: "secret",
+        PHOENIX_CLIENT_HEADERS: '{"authorization":"secret"}',
+        Phoenix_Api_Key: "case-insensitive-secret",
+        otel_exporter_otlp_headers: "authorization=case-insensitive-secret",
         XDG_CONFIG_HOME: "/tmp/user-config",
       },
       "/tmp/runtime-config",
@@ -22,6 +28,7 @@ describe("createOpencodeEnvironment", () => {
 
     expect(environment).toEqual({
       HOME: "/tmp/home",
+      OTEL_SDK_DISABLED: "true",
       PATH: "/usr/bin",
       XDG_CONFIG_HOME: "/tmp/runtime-config",
     })

@@ -65,6 +65,7 @@ Useful environment controls are documented in [`.env.example`](.env.example):
 | `AGENT_INTERVAL_MS` | Controls continuous-run spacing. |
 | `AGENT_MAX_CYCLES` | Stops a continuous run after a bounded number of attempts. |
 | `AGENT_TASK` | Adds an operator objective to the structured research prompt. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Optionally enables fail-open OTLP HTTP/protobuf tracing. See [Research tracing](docs/observability.md). |
 
 The worker creates a fresh OpenCode session for every cycle and shuts down cleanly on `SIGINT` or `SIGTERM`. Every cycle selects the checked-in `research` agent; this identity cannot be overridden through `.env`. Each eligible cycle durably records exactly one bounded outcome: `VALIDATED_NO_ACTION`, `PRELIMINARY_RESEARCH_RETAINED`, `DECISION_REJECTED`, `INTENT_DERIVATION_REJECTED`, or `INTENT_DERIVED`. Cycles outside the configured research window are skipped before an OpenCode session is created.
 
@@ -118,6 +119,15 @@ SQLite stores an append-only event stream in `ledger_events`. Each row contains 
 The JSON artifact is a deterministic `ResearchRunV1` view intended for humans and downstream inspection. It can be deleted and regenerated from SQLite. The SQLite ledger is the authoritative restart/audit record; artifact-write failure does not roll back a committed ledger outcome.
 
 The project intentionally does **not** retain raw model responses, hidden reasoning, full OpenCode transcripts, raw Alpaca/FMP/Exa responses, credentials, or secret-bearing URLs. The bounded report is the retained analysis record, and all its observations remain labeled `AGENT_REPORTED`; only application-confirmed quotes and deterministic intent calculations cross that trust boundary.
+
+## Observability
+
+Optional manual OpenTelemetry/OpenInference tracing shows coarse research-cycle
+timing and outcomes without copying research content into the telemetry
+backend. It is disabled by default, fails open, works with OTLP-compatible
+backends such as Phoenix, and does not alter the SQLite audit record. See
+[Research tracing](docs/observability.md) for configuration, backend examples,
+the exact span/attribute boundary, and intentionally deferred work.
 
 ## Research procedure
 

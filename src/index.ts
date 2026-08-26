@@ -14,6 +14,11 @@ import { dirname } from "node:path"
 import { parse as parseEnv } from "dotenv"
 
 import { runAgentLoop } from "./agent-loop.js"
+import {
+  RESEARCH_DECISION_CONTRACT_VERSION,
+  STRATEGY_VERSION,
+} from "./contracts/research-decision-v1.js"
+import { RESEARCH_REPORT_VERSION } from "./contracts/research-report-v2.js"
 import { runWithCycleDeadline } from "./cycle-deadline.js"
 import {
   createResearchLifecycleRecorder,
@@ -22,6 +27,7 @@ import {
 import { createSqliteLedgerStore } from "./event-ledger/sqlite-ledger-store.js"
 import { createAlpacaOptionQuoteProvider } from "./market-data/alpaca-option-quotes.js"
 import { createAlpacaCalendarClient } from "./market-data/alpaca-calendar-client.js"
+import { startResearchTelemetry } from "./observability/research-telemetry.js"
 import { startOpencode } from "./opencode-runtime.js"
 import {
   buildResearchCyclePrompt,
@@ -191,10 +197,25 @@ evaluateResearchEligibility({
 })
 const ledgerPath = readSetting("RESEARCH_LEDGER_PATH")?.trim() ||
   ".state/research-ledger.sqlite"
+const traceVersions = {
+  agentName: RESEARCH_AGENT_NAME,
+  strategyVersion: STRATEGY_VERSION,
+  decisionContractVersion: RESEARCH_DECISION_CONTRACT_VERSION,
+  reportVersion: RESEARCH_REPORT_VERSION,
+}
 mkdirSync(dirname(ledgerPath), { recursive: true })
 const ledgerStore = createSqliteLedgerStore({
   path: ledgerPath,
   knownCredentialValues,
+})
+const telemetry = startResearchTelemetry({
+  disabled: readSetting("OTEL_SDK_DISABLED"),
+  tracesEndpoint: readSetting("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
+  endpoint: readSetting("OTEL_EXPORTER_OTLP_ENDPOINT"),
+  tracesHeaders: readSetting("OTEL_EXPORTER_OTLP_TRACES_HEADERS"),
+  headers: readSetting("OTEL_EXPORTER_OTLP_HEADERS"),
+  tracesTimeoutMs: readSetting("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT"),
+  timeoutMs: readSetting("OTEL_EXPORTER_OTLP_TIMEOUT"),
 })
 
 try {
@@ -213,21 +234,32 @@ try {
       intervalMs,
       maxCycles,
       signal: abortController.signal,
-      runCycle: async (attempt) => {
-        const eligibilityEvaluatedAt = new Date()
-        const calendarSignal = AbortSignal.any([
-          abortController.signal,
-          AbortSignal.timeout(cycleTimeoutMs),
-        ])
-        const session = await calendar.getSession(
-          newYorkDate(eligibilityEvaluatedAt),
-          calendarSignal,
+      runCycle: async (attempt) => telemetry.runCycle(
+        attempt,
+        traceVersions,
+        async (cycleTrace) => {
+        const { initialEligibility, session } = await cycleTrace.run(
+          "research.eligibility",
+          async () => {
+            const eligibilityEvaluatedAt = new Date()
+            const calendarSignal = AbortSignal.any([
+              abortController.signal,
+              AbortSignal.timeout(cycleTimeoutMs),
+            ])
+            const session = await calendar.getSession(
+              newYorkDate(eligibilityEvaluatedAt),
+              calendarSignal,
+            )
+            return {
+              session,
+              initialEligibility: evaluateResearchEligibility({
+                evaluatedAt: new Date(),
+                ...(session === undefined ? {} : { session }),
+                premarketStartEt,
+              }),
+            }
+          },
         )
-        const initialEligibility = evaluateResearchEligibility({
-          evaluatedAt: new Date(),
-          ...(session === undefined ? {} : { session }),
-          premarketStartEt,
-        })
         const getEligibility = () =>
           evaluateResearchEligibility({
             evaluatedAt: new Date(),
@@ -236,7 +268,9 @@ try {
             tradeIntentWindow: initialEligibility.tradeIntentWindow ?? null,
           })
         if (!initialEligibility.researchEligible) {
-          return `Research cycle skipped: ${initialEligibility.reason ?? "RESEARCH_WINDOW_INELIGIBLE"}`
+          const reason = initialEligibility.reason ?? "RESEARCH_WINDOW_INELIGIBLE"
+          cycleTrace.setOutcome("SKIPPED", reason)
+          return `Research cycle skipped: ${reason}`
         }
         const sessionDate = initialEligibility.sessionDate
         if (sessionDate === undefined) {
@@ -307,6 +341,11 @@ try {
         }
         console.log(`OpenCode session ${sessionId} started at ${runtime.url}`)
         const cycleNumber = cycle.cycleNumber
+        cycleTrace.identify({
+          cycleId: cycle.cycleId,
+          cycleNumber,
+          sessionId,
+        })
 
         const interruptCycle = async (
           reason: Parameters<typeof cycle.interrupt>[0],
@@ -331,29 +370,42 @@ try {
             timeoutMs: cycleTimeoutMs,
             shutdownSignal: abortController.signal,
             run: async (signal) => {
-              const response = await runtime.client.session.prompt({
-                path: { id: sessionId },
-                signal,
-                body: {
-                  agent: RESEARCH_AGENT_NAME,
-                  tools,
-                  parts: [
-                    {
-                      type: "text",
-                      text: buildResearchCyclePrompt(
-                        cycleNumber,
-                        new Date(cycle.startedAt),
-                        task,
-                        researchContext,
-                        initialEligibility,
-                      ),
+              const response = await cycleTrace.run(
+                "opencode.session.prompt",
+                async () => {
+                  const response = await runtime.client.session.prompt({
+                    path: { id: sessionId },
+                    signal,
+                    body: {
+                      agent: RESEARCH_AGENT_NAME,
+                      tools,
+                      parts: [
+                        {
+                          type: "text",
+                          text: buildResearchCyclePrompt(
+                            cycleNumber,
+                            new Date(cycle.startedAt),
+                            task,
+                            researchContext,
+                            initialEligibility,
+                          ),
+                        },
+                      ],
                     },
-                  ],
+                  })
+                  if (!response.data) {
+                    throw formatApiError(
+                      "Prompting OpenCode session",
+                      response.error,
+                    )
+                  }
+                  cycleTrace.setModel({
+                    providerId: response.data.info.providerID,
+                    modelId: response.data.info.modelID,
+                  })
+                  return response
                 },
-              })
-              if (!response.data) {
-                throw formatApiError("Prompting OpenCode session", response.error)
-              }
+              )
 
               const text = response.data.parts
                 .filter((part) => part.type === "text")
@@ -368,10 +420,12 @@ try {
                 quoteProvider,
                 outcomeSink: cycle.outcomeSink,
                 getEligibility,
+                trace: cycleTrace,
               })
             },
             onTimeout: async () => {
               timedOut = true
+              cycleTrace.setOutcome("TIMEOUT")
               const failure = await synchronizeSessionAbort(
                 "Aborting timed-out OpenCode session",
               )
@@ -385,9 +439,15 @@ try {
               }
             },
           })
+          cycleTrace.setOutcome(processed.outcome.status)
           try {
-            const run = await loadResearchRunV1(ledgerStore, cycle.cycleId)
-            const artifactPath = await writeResearchRunArtifact({ run })
+            const artifactPath = await cycleTrace.run(
+              "research.artifact.project",
+              async () => {
+                const run = await loadResearchRunV1(ledgerStore, cycle.cycleId)
+                return writeResearchRunArtifact({ run })
+              },
+            )
             return `${processed.report}\nResearch artifact: ${artifactPath}`
           } catch {
             console.error(
@@ -397,10 +457,13 @@ try {
           }
         } catch (error) {
           if (error instanceof LedgerPersistenceError) {
+            cycleTrace.setOutcome("FAILED")
             abortController.abort(error)
           } else if (abortController.signal.aborted) {
+            cycleTrace.setOutcome(timedOut ? "TIMEOUT" : "SHUTDOWN")
             await interruptCycle(timedOut ? "TIMEOUT" : "SHUTDOWN")
           } else if (!timedOut) {
+            cycleTrace.setOutcome("FAILED")
             const abortFailure = await synchronizeSessionAbort(
               "Aborting failed OpenCode session",
             )
@@ -418,7 +481,7 @@ try {
         } finally {
           if (!abortController.signal.aborted) await deleteSession()
         }
-      },
+      }),
       onResult: (result, attempt) =>
         console.log(`[cycle ${cycleNumbers.get(attempt) ?? attempt}]\n${result}`),
       onError: (error, attempt) =>
@@ -434,5 +497,9 @@ try {
     await runtime.close()
   }
 } finally {
-  await ledgerStore.close()
+  try {
+    await ledgerStore.close()
+  } finally {
+    await telemetry.shutdown()
+  }
 }
