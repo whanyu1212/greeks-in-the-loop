@@ -1,4 +1,5 @@
 .env
+.state/
 dev_notes/
 dist/
 node_modules/

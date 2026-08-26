@@ -4,6 +4,7 @@ import { z } from "zod"
 import {
   ledgerEventV1Schema,
   LEDGER_EVENT_TYPES,
+  MAX_LEDGER_EVENT_PAYLOAD_BYTES,
   type LedgerEventV1,
   type StoredLedgerEventV1,
 } from "./ledger-event-v1.js"
@@ -14,8 +15,6 @@ import type {
 import { applyLedgerMigrations } from "./migrations.js"
 import { assertPersistenceSafe } from "./persistence-safety.js"
 
-export const MAX_LEDGER_EVENT_PAYLOAD_BYTES = 64 * 1024
-
 const identifier = z
   .string()
   .min(1)
@@ -24,6 +23,8 @@ const identifier = z
 const querySchema = z
   .object({
     afterSequence: z.number().int().nonnegative().optional(),
+    beforeSequence: z.number().int().nonnegative().optional(),
+    direction: z.enum(["ASC", "DESC"]).optional(),
     correlationId: identifier.optional(),
     cycleId: identifier.optional(),
     sessionId: identifier.optional(),
@@ -270,6 +271,11 @@ export function createSqliteLedgerStore({
         limit: parsed.limit,
       }
 
+      if (parsed.beforeSequence !== undefined) {
+        where.push("sequence < @beforeSequence")
+        parameters.beforeSequence = parsed.beforeSequence
+      }
+
       for (const [field, column] of [
         ["correlationId", "correlation_id"],
         ["cycleId", "cycle_id"],
@@ -290,12 +296,14 @@ export function createSqliteLedgerStore({
         where.push(`event_type IN (${placeholders.join(", ")})`)
       }
 
+      // `direction` is a validated fixed literal; values never reach SQL here.
+      const direction = parsed.direction ?? "ASC"
       const rows = database
         .prepare(`
           SELECT ${SELECT_COLUMNS}
           FROM ledger_events
           WHERE ${where.join(" AND ")}
-          ORDER BY sequence ASC
+          ORDER BY sequence ${direction}
           LIMIT @limit
         `)
         .all(parameters) as LedgerRow[]

@@ -224,7 +224,7 @@ For every sourced fact, validation rejects:
 
 A snapshot is valid through the exact `freshUntil` instant. Context timestamps must use millisecond precision so freshness comparisons cannot collapse distinct sub-millisecond instants. FMP and Exa snapshots may support context, but they do not become authoritative execution-price sources.
 
-The context is a validation interface only. Durable snapshot persistence is deferred to the event-ledger work in issue #13.
+The validation context remains invocation-local. The event ledger durably stores only normalized snapshot references and metadata, not complete provider responses.
 
 ## Runtime Integration
 
@@ -232,7 +232,7 @@ The current runtime requires the final agent response to be exactly one bare JSO
 
 A `NO_ACTION` response omits optional evidence in this phase and is validated without a market-data request. A `PROPOSE_TRADE` response must include a sourced fact using the reserved cycle-local snapshot reference `alpaca-proposal-quotes-v1`. Application code binds that reference only after fetching fresh Alpaca indicative quotes for the exact proposed OCC symbols. Other model-authored snapshot references remain unknown and fail closed.
 
-A validated proposal is converted into the non-executable [`TradeIntentV1`](trade-intent-v1.md) contract using exact integer arithmetic. Dedicated-agent research policy and broader evidence registration remain issue #5 work; durable snapshot and outcome persistence remain issue #13 work.
+A validated proposal is converted into the non-executable [`TradeIntentV1`](trade-intent-v1.md) contract using exact integer arithmetic. The event ledger durably records normalized evidence metadata, the validated decision, and the resulting intent or rejection.
 
 ## Model-Excluded Fields
 

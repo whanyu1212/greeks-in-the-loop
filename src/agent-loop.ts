@@ -27,6 +27,8 @@ export type AgentLoopOptions = {
   onResult?: (result: string, cycle: number) => void
   /** Receives an error from a failed cycle. */
   onError?: (error: unknown, cycle: number) => void
+  /** Identifies failures that must stop the worker instead of retrying. */
+  isFatalError?: (error: unknown) => boolean
   /** Overrides the delay implementation, primarily for tests. */
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>
 }
@@ -55,10 +57,10 @@ export const abortableSleep = (milliseconds: number, signal: AbortSignal) =>
 /**
  * Runs agent cycles sequentially until cancellation or the cycle limit.
  *
- * A failed cycle is reported through `onError` and does not terminate the
- * loop. This allows transient model or MCP failures to recover on a later
- * cycle. Attempts never overlap, and both successful and failed attempts wait
- * the configured interval before the next cycle.
+ * A non-fatal failed cycle is reported through `onError` and does not terminate
+ * the loop. This allows transient model or MCP failures to recover on a later
+ * cycle. Fatal failures propagate immediately. Attempts never overlap, and both
+ * successful and non-fatal failed attempts wait before the next cycle.
  *
  * @param options Loop timing, cancellation, and callback configuration.
  * @returns The number of cycles attempted.
@@ -70,6 +72,7 @@ export async function runAgentLoop({
   runCycle,
   onResult = (result, cycle) => console.log(`[cycle ${cycle}]\n${result}`),
   onError = (error, cycle) => console.error(`[cycle ${cycle}] failed`, error),
+  isFatalError = () => false,
   sleep = abortableSleep,
 }: AgentLoopOptions): Promise<number> {
   let cycle = 0
@@ -80,6 +83,7 @@ export async function runAgentLoop({
     try {
       onResult(await runCycle(cycle), cycle)
     } catch (error) {
+      if (isFatalError(error)) throw error
       if (signal.aborted) break
       onError(error, cycle)
     }

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import { createOpencodeEnvironment } from "../src/opencode-runtime.js"
+import {
+  createOpencodeEnvironment,
+  startOpencode,
+} from "../src/opencode-runtime.js"
 
 describe("createOpencodeEnvironment", () => {
   it("removes settings that can replace the checked-in agent policy", () => {
@@ -22,5 +25,19 @@ describe("createOpencodeEnvironment", () => {
       PATH: "/usr/bin",
       XDG_CONFIG_HOME: "/tmp/runtime-config",
     })
+  })
+})
+
+describe("startOpencode", () => {
+  it("does not spawn when shutdown was already requested", async () => {
+    const reason = new Error("shutdown")
+
+    await expect(
+      startOpencode({
+        port: 4096,
+        signal: AbortSignal.abort(reason),
+        timeoutMs: 1_000,
+      }),
+    ).rejects.toBe(reason)
   })
 })

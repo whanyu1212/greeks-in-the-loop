@@ -4,6 +4,7 @@ import {
   buildResearchCyclePrompt,
   RESEARCH_AGENT_NAME,
 } from "../src/research/research-agent.js"
+import { projectResearchContextV1 } from "../src/research/research-context-v1.js"
 
 describe("research agent request construction", () => {
   it("uses the fixed checked-in agent identity", () => {
@@ -30,5 +31,25 @@ describe("research agent request construction", () => {
     expect(
       buildResearchCyclePrompt(1, new Date("2026-08-25T13:30:00.000Z")),
     ).not.toContain("Current operator objective")
+  })
+
+  it("labels ledger context as historical and requires current facts to be refreshed", () => {
+    const context = projectResearchContextV1([], {
+      generatedAt: "2026-08-25T13:29:00.000Z",
+    })
+
+    const prompt = buildResearchCyclePrompt(
+      1,
+      new Date("2026-08-25T13:30:00.000Z"),
+      undefined,
+      context,
+    )
+
+    expect(prompt).toContain(
+      "Application-generated durable context from prior cycles follows.",
+    )
+    expect(prompt).toContain("OpenCode session memory is not authoritative")
+    expect(prompt).toContain("all current account, market, quote, and freshness facts must be refreshed")
+    expect(prompt).toContain(JSON.stringify(context))
   })
 })

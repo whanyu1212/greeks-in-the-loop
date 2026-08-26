@@ -1,27 +1,36 @@
 /**
  * Entry point for the structured, non-executing trading research worker.
  *
- * The worker starts a managed local OpenCode server, creates one persistent
- * session, and runs sequential research cycles until a process signal or cycle
+ * The worker starts a managed local OpenCode server, creates an isolated session
+ * for each sequential research cycle, and runs until a process signal or cycle
  * limit stops it. Every cycle selects the checked-in, deny-by-default research
  * agent, while `startOpencode` owns cleanup of the server and its MCP
  * descendants.
  */
 
-import { readFileSync } from "node:fs"
+import { mkdirSync, readFileSync } from "node:fs"
+import { dirname } from "node:path"
 
 import { parse as parseEnv } from "dotenv"
 
 import { runAgentLoop } from "./agent-loop.js"
 import { runWithCycleDeadline } from "./cycle-deadline.js"
+import {
+  createResearchLifecycleRecorder,
+  LedgerPersistenceError,
+} from "./event-ledger/research-lifecycle-recorder.js"
+import { createSqliteLedgerStore } from "./event-ledger/sqlite-ledger-store.js"
 import { createAlpacaOptionQuoteProvider } from "./market-data/alpaca-option-quotes.js"
 import { startOpencode } from "./opencode-runtime.js"
 import {
   buildResearchCyclePrompt,
   RESEARCH_AGENT_NAME,
 } from "./research/research-agent.js"
+import {
+  loadResearchContextV1,
+  reconstructResearchContextV1,
+} from "./research/research-context-v1.js"
 import { processResearchCycle } from "./research/research-cycle.js"
-import { createConsoleResearchCycleOutcomeSink } from "./research/research-cycle-outcome-v1.js"
 
 /** Settings parsed from the project environment file without exporting secrets. */
 const fileEnv = (() => {
@@ -118,6 +127,13 @@ const formatApiError = (operation: string, error: unknown) => {
   return new Error(`${operation} failed${detail}`)
 }
 
+class WorkerFatalError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause })
+    this.name = "WorkerFatalError"
+  }
+}
+
 const abortController = new AbortController()
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => abortController.abort(new Error(`Received ${signal}`)))
@@ -133,95 +149,224 @@ const maxCycles = once
 const port = readPositiveInteger("OPENCODE_SERVER_PORT", 4096)
 const serverTimeout = readPositiveInteger("OPENCODE_SERVER_TIMEOUT_MS", 60_000)
 const task = readSetting("AGENT_TASK")?.trim()
+const alpacaApiKey = readRequiredSetting("ALPACA_API_KEY")
+const alpacaSecretKey = readRequiredSetting("ALPACA_SECRET_KEY")
+const knownCredentialValues = [
+  alpacaApiKey,
+  alpacaSecretKey,
+  readSetting("FMP_API_KEY")?.trim(),
+  readSetting("EXA_API_KEY")?.trim(),
+].filter((value): value is string => value !== undefined && value.length > 0)
 const quoteProvider = createAlpacaOptionQuoteProvider({
-  apiKey: readRequiredSetting("ALPACA_API_KEY"),
-  secretKey: readRequiredSetting("ALPACA_SECRET_KEY"),
+  apiKey: alpacaApiKey,
+  secretKey: alpacaSecretKey,
   baseUrl:
     readSetting("ALPACA_MARKET_DATA_BASE_URL")?.trim() ||
     "https://data.alpaca.markets",
 })
-const outcomeSink = createConsoleResearchCycleOutcomeSink()
-
-const runtime = await startOpencode({
-  port,
-  signal: abortController.signal,
-  timeoutMs: serverTimeout,
+const ledgerPath = readSetting("RESEARCH_LEDGER_PATH")?.trim() ||
+  ".state/research-ledger.sqlite"
+mkdirSync(dirname(ledgerPath), { recursive: true })
+const ledgerStore = createSqliteLedgerStore({
+  path: ledgerPath,
+  knownCredentialValues,
 })
 
 try {
-  const created = await runtime.client.session.create({
-    body: { title: `trading-agent ${new Date().toISOString()}` },
-  })
-  if (!created.data) throw formatApiError("Creating OpenCode session", created.error)
-
-  const sessionId = created.data.id
-  console.log(`OpenCode session ${sessionId} started at ${runtime.url}`)
-
-  await runAgentLoop({
-    intervalMs,
-    maxCycles,
+  await ledgerStore.migrate(abortController.signal)
+  let researchContext = await reconstructResearchContextV1(ledgerStore)
+  const lifecycleRecorder = createResearchLifecycleRecorder({ store: ledgerStore })
+  const runtime = await startOpencode({
+    port,
     signal: abortController.signal,
-    runCycle: async (cycle) => {
-      const tools = Object.fromEntries(MUTATING_ALPACA_TOOLS.map((tool) => [tool, false]))
+    timeoutMs: serverTimeout,
+  })
 
-      return runWithCycleDeadline({
-        timeoutMs: cycleTimeoutMs,
-        shutdownSignal: abortController.signal,
-        run: async (signal) => {
-          const response = await runtime.client.session.prompt({
-            path: { id: sessionId },
-            signal,
-            body: {
-              agent: RESEARCH_AGENT_NAME,
-              tools,
-              parts: [
-                {
-                  type: "text",
-                  text: buildResearchCyclePrompt(cycle, new Date(), task),
-                },
-              ],
-            },
-          })
-          if (!response.data) throw formatApiError("Prompting OpenCode session", response.error)
-
-          const text = response.data.parts
-            .filter((part) => part.type === "text")
-            .map((part) => part.text.trim())
-            .filter(Boolean)
-            .join("\n")
-
-          const processed = await processResearchCycle({
-            rawResponse: text,
-            signal,
-            quoteProvider,
-            outcomeSink,
-          })
-          return processed.report
-        },
-        onTimeout: async () => {
-          let failure: Error | undefined
-
+  try {
+    const cycleNumbers = new Map<number, number>()
+    await runAgentLoop({
+      intervalMs,
+      maxCycles,
+      signal: abortController.signal,
+      runCycle: async (attempt) => {
+        const created = await runtime.client.session.create({
+          body: { title: `trading-agent ${new Date().toISOString()}` },
+        })
+        if (!created.data) {
+          throw formatApiError("Creating OpenCode session", created.error)
+        }
+        const sessionId = created.data.id
+        const synchronizeSessionAbort = async (operation: string) => {
           try {
             const aborted = await runtime.client.session.abort({
               path: { id: sessionId },
               signal: AbortSignal.timeout(cycleAbortTimeoutMs),
             })
-            if (typeof aborted.data !== "boolean") {
-              failure = formatApiError("Aborting timed-out OpenCode session", aborted.error)
+            return typeof aborted.data === "boolean"
+              ? undefined
+              : formatApiError(operation, aborted.error)
+          } catch (error) {
+            return formatApiError(operation, error)
+          }
+        }
+        const deleteSession = async () => {
+          try {
+            const deleted = await runtime.client.session.delete({
+              path: { id: sessionId },
+              signal: AbortSignal.timeout(cycleAbortTimeoutMs),
+            })
+            if (deleted.data !== true) {
+              throw formatApiError("Deleting completed OpenCode session", deleted.error)
             }
           } catch (error) {
-            failure = formatApiError("Aborting timed-out OpenCode session", error)
+            if (abortController.signal.aborted) return
+            if (error instanceof WorkerFatalError) throw error
+            throw new WorkerFatalError(
+              "Deleting completed OpenCode session failed",
+              error,
+            )
           }
+        }
 
-          if (failure) {
-            console.error(failure.message)
-            abortController.abort(failure)
-            throw failure
+        let cycle
+        try {
+          await lifecycleRecorder.recordOpenCodeSessionStarted(
+            sessionId,
+            abortController.signal,
+          )
+          try {
+            researchContext = await loadResearchContextV1(ledgerStore)
+          } catch (error) {
+            throw new LedgerPersistenceError("context query", error)
           }
-        },
-      })
-    },
-  })
+          const cycleNumber = researchContext.nextCycleNumber
+          cycleNumbers.set(attempt, cycleNumber)
+          cycle = await lifecycleRecorder.startCycle({
+            sessionId,
+            cycleNumber,
+            signal: abortController.signal,
+          })
+        } catch (error) {
+          abortController.abort(error)
+          throw error
+        }
+        console.log(`OpenCode session ${sessionId} started at ${runtime.url}`)
+        const cycleNumber = cycle.cycleNumber
+
+        const interruptCycle = async (
+          reason: Parameters<typeof cycle.interrupt>[0],
+        ) => {
+          try {
+            await cycle.interrupt(
+              reason,
+              AbortSignal.timeout(cycleAbortTimeoutMs),
+            )
+          } catch (error) {
+            abortController.abort(error)
+            throw error
+          }
+        }
+        const tools = Object.fromEntries(
+          MUTATING_ALPACA_TOOLS.map((tool) => [tool, false]),
+        )
+        let timedOut = false
+
+        try {
+          const report = await runWithCycleDeadline({
+            timeoutMs: cycleTimeoutMs,
+            shutdownSignal: abortController.signal,
+            run: async (signal) => {
+              const response = await runtime.client.session.prompt({
+                path: { id: sessionId },
+                signal,
+                body: {
+                  agent: RESEARCH_AGENT_NAME,
+                  tools,
+                  parts: [
+                    {
+                      type: "text",
+                      text: buildResearchCyclePrompt(
+                        cycleNumber,
+                        new Date(cycle.startedAt),
+                        task,
+                        researchContext,
+                      ),
+                    },
+                  ],
+                },
+              })
+              if (!response.data) {
+                throw formatApiError("Prompting OpenCode session", response.error)
+              }
+
+              const text = response.data.parts
+                .filter((part) => part.type === "text")
+                .map((part) => part.text.trim())
+                .filter(Boolean)
+                .join("\n")
+
+              const processed = await processResearchCycle({
+                rawResponse: text,
+                signal,
+                quoteProvider,
+                outcomeSink: cycle.outcomeSink,
+              })
+              return processed.report
+            },
+            onTimeout: async () => {
+              timedOut = true
+              const failure = await synchronizeSessionAbort(
+                "Aborting timed-out OpenCode session",
+              )
+
+              await interruptCycle("TIMEOUT")
+              if (failure) {
+                console.error(failure.message)
+                const fatal = new WorkerFatalError(failure.message, failure)
+                abortController.abort(fatal)
+                throw fatal
+              }
+            },
+          })
+          return report
+        } catch (error) {
+          if (error instanceof LedgerPersistenceError) {
+            abortController.abort(error)
+          } else if (abortController.signal.aborted) {
+            await interruptCycle(timedOut ? "TIMEOUT" : "SHUTDOWN")
+          } else if (!timedOut) {
+            const abortFailure = await synchronizeSessionAbort(
+              "Aborting failed OpenCode session",
+            )
+            await interruptCycle("FAILED")
+            if (abortFailure) {
+              const fatal = new WorkerFatalError(
+                abortFailure.message,
+                abortFailure,
+              )
+              abortController.abort(fatal)
+              throw fatal
+            }
+          }
+          throw error
+        } finally {
+          if (!abortController.signal.aborted) await deleteSession()
+        }
+      },
+      onResult: (result, attempt) =>
+        console.log(`[cycle ${cycleNumbers.get(attempt) ?? attempt}]\n${result}`),
+      onError: (error, attempt) =>
+        console.error(
+          `[cycle ${cycleNumbers.get(attempt) ?? attempt}] failed`,
+          error,
+        ),
+      isFatalError: (error) =>
+        error instanceof LedgerPersistenceError ||
+        error instanceof WorkerFatalError,
+    })
+  } finally {
+    await runtime.close()
+  }
 } finally {
-  await runtime.close()
+  await ledgerStore.close()
 }

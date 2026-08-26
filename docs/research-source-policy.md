@@ -65,7 +65,7 @@ Future-dated data is invalid. Snapshot membership is frozen at one `observed_at`
 
 ## Contract boundary
 
-The application currently registers only `alpaca-proposal-quotes-v1` as evidence for a proposed trade. The agent must not invent FMP or Exa snapshot references. External context may shape or reject a thesis, but durable external provenance is deferred to the event ledger.
+The application currently registers only `alpaca-proposal-quotes-v1` as evidence for a proposed trade. The agent must not invent FMP or Exa snapshot references. External context may shape or reject a thesis, but the ledger records only application-owned normalized evidence references.
 
 A valid proposal therefore contains:
 
@@ -80,6 +80,6 @@ A valid proposal therefore contains:
 | Research skill | Checklist, source selection, classification, freshness guidance, conflict handling, observable candidate prefiltering and ranking |
 | Research agent | Gather evidence and emit `ResearchDecisionV1` or `NO_ACTION` |
 | Application | Parse and validate the contract; confirm trusted Alpaca quotes; derive `TradeIntentV1` |
-| Future ledger | Persist source snapshots and external provenance |
+| Event ledger | Persist normalized application-owned evidence references and bounded research outcomes |
 | Future risk engine | Approve or reject intents deterministically |
 | Future executor | Perform isolated broker mutations |

@@ -1,6 +1,8 @@
 import type {
+  EvidenceSnapshotMetadata,
   NoActionDecisionV1,
   ProposedTradeDecisionV1,
+  ResearchDecisionV1,
   ResearchDecisionValidationIssue,
 } from "../contracts/research-decision-v1.js"
 import type {
@@ -47,15 +49,29 @@ export type ResearchCycleOutcomeV1 =
       intent: TradeIntentV1
     }
 
+export type ResearchCycleEvidenceSnapshotReferenceV1 = Readonly<{
+  snapshotRef: string
+  provider: EvidenceSnapshotMetadata["provider"]
+  source: string
+  retrievedAt: string
+  freshUntil: string
+}>
+
+export type ResearchCycleTerminalRecordV1 = Readonly<{
+  outcome: ResearchCycleOutcomeV1
+  evidenceSnapshots: readonly ResearchCycleEvidenceSnapshotReferenceV1[]
+  validatedDecision?: ResearchDecisionV1
+}>
+
 export type ResearchCycleOutcomeSink = Readonly<{
   record(
-    outcome: ResearchCycleOutcomeV1,
+    record: ResearchCycleTerminalRecordV1,
     signal: AbortSignal,
   ): Promise<void>
 }>
 
 /**
- * Creates the temporary JSON-lines outcome sink used before the event ledger.
+ * Creates an optional JSON-lines adapter for local diagnostics and tests.
  *
  * @param write Output function, injectable for tests.
  * @returns An awaited storage-neutral outcome sink.
@@ -64,9 +80,9 @@ export function createConsoleResearchCycleOutcomeSink(
   write: (line: string) => void = console.log,
 ): ResearchCycleOutcomeSink {
   return {
-    async record(outcome, signal) {
+    async record(record, signal) {
       signal.throwIfAborted()
-      write(JSON.stringify(outcome))
+      write(JSON.stringify(record.outcome))
     },
   }
 }

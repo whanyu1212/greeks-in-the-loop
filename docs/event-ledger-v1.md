@@ -5,13 +5,13 @@
 | Envelope version | `1.0.0` |
 | Storage adapter | SQLite through `better-sqlite3` |
 | Ownership model | One worker process, one writable connection |
-| Runtime integration | Deferred to Issue #13 PR2 |
+| Runtime integration | Research worker startup, cycles, and restart recovery |
 
 ## Purpose
 
 The ledger is the durable audit boundary for the existing research-to-intent flow. It stores validated, versioned events needed for restart recovery and later bounded context reconstruction.
 
-PR1 provides the storage capability only. It does not replace the console outcome sink or change the running research worker.
+The running worker opens and migrates the ledger before OpenCode starts, records every session and cycle, reconstructs incomplete work after restart, and closes the ledger after runtime shutdown.
 
 ## Event envelope
 
@@ -36,13 +36,15 @@ The event vocabulary is intentionally limited to domains already implemented. Fu
 
 ## Ordering and atomicity
 
-Events are returned in ascending `sequence` order.
+Events are returned in ascending `sequence` order by default. Queries can request descending order for bounded recent-history projections.
 
 `appendBatch` validates the complete batch before opening a transaction. The transaction commits every event or none. A duplicate event ID, invalid causal reference, unsafe payload, schema failure, or SQLite error rolls back the batch.
 
 Each serialized event payload is limited to 64 KiB. Event-specific arrays and strings have tighter schema bounds where appropriate.
 
 Causal events must appear before their dependents in the same batch or already exist in the ledger.
+
+Each research cycle has one start and at most one completion or interruption event. Database constraints reject cycle identity drift, cross-cycle causation, duplicate terminals, and events appended after a terminal. Normal result events and completion are committed in one atomic batch.
 
 ## Append-only guarantee
 
@@ -88,7 +90,7 @@ The database-neutral store supports:
 - exact event-ID lookup;
 - correlation, cycle, and session filtering;
 - event-type filtering;
-- ascending sequence cursor pagination;
+- ascending or descending sequence pagination with exclusive before/after cursors;
 - required bounded limits.
 
 Queries use prepared parameters. No arbitrary SQL is exposed through the store interface.
@@ -125,15 +127,18 @@ Add a PostgreSQL adapter when any of these becomes true:
 
 Domain code must depend only on `LedgerStore`, so event schemas and reconstruction logic remain portable.
 
-## PR2 integration boundary
+## Runtime lifecycle
 
-Issue #13 PR2 will:
+The worker creates a fresh OpenCode session for every cycle, then generates one stable `cycleId` and `correlationId` before the prompt. It appends `OPENCODE_SESSION_STARTED` and `RESEARCH_CYCLE_STARTED` before model work begins. Evidence references, validated or rejected decisions, derived or rejected intents, and `RESEARCH_CYCLE_COMPLETED` are then appended as one causally ordered atomic batch.
 
-- generate stable cycle and correlation identifiers;
-- record session, cycle, evidence-reference, decision, rejection, and intent events;
-- record interrupted cycles;
-- reconstruct recent and incomplete state on startup;
-- build compact agent-context projections;
-- replace the temporary console-only outcome sink.
+Timeout, explicit cancellation, unexpected runtime failure, process shutdown, and startup recovery produce `RESEARCH_CYCLE_INTERRUPTED`. A cycle-scoped recorder arbitrates completion and interruption in memory, while database constraints provide the durable exactly-one-terminal backstop. Ledger persistence failures are fatal and are never relabeled as ordinary cycle interruptions.
 
-The SQLite adapter and SQL remain outside research-domain code.
+On startup, the worker scans lifecycle events in bounded pages. Every start without a completion or interruption receives a `PROCESS_RESTART` interruption using its original cycle, correlation, session, and start-event causation identity. Recovery is idempotent.
+
+## Bounded agent context
+
+The worker projects at most 500 recent ledger events into a maximum 32 KiB context containing recent outcomes, the latest validated candidate and direction, recurring bounded rejection codes, normalized evidence references, recent interruptions, and required refresh markers. Projection metadata identifies truncation and the next durable cycle number.
+
+The projection excludes thesis and evidence prose, invalidation prose, raw model responses, complete provider payloads, transcripts, credentials, and hidden reasoning. Every prompt labels projected state as historical planning context and requires current account, market, quote, and freshness facts to be refreshed. OpenCode session memory is not authoritative.
+
+The SQLite adapter and SQL remain outside research-domain code; lifecycle and projection modules depend only on `LedgerStore`.

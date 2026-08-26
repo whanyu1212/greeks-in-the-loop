@@ -227,7 +227,7 @@ The decision passed its structural gate, but trusted quotes could not be confirm
 
 The decision passed validation and application code produced a `TradeIntentV1`. The intent remains pre-risk and non-executable.
 
-The current sink writes JSON lines and is awaited before cycle completion. Issue #13 will replace it with durable ledger storage. Agent responses larger than 64 KiB in UTF-8 are rejected before JSON parsing and are never retained in an outcome.
+The ledger-backed sink is awaited before cycle completion and atomically records the normalized decision, evidence reference, intent result, and terminal outcome. Agent responses larger than 64 KiB in UTF-8 are rejected before JSON parsing and are never retained in an outcome.
 
 ## Evidence Reference
 
@@ -263,6 +263,6 @@ These omissions prevent downstream code from confusing deterministic proposal ec
 ## Downstream Boundaries
 
 - **Issue #5:** dedicated agent, research checklist, source precedence, and permissions.
-- **Issue #13:** durable raw snapshots, decisions, intents, outcomes, and correlation IDs.
+- **Issue #13:** normalized snapshot references, decisions, intents, outcomes, restart state, and correlation IDs.
 - **Issue #10:** account and portfolio risk gates, approval, and rejection.
 - **Execution work:** broker-ready order construction, submission, and reconciliation.

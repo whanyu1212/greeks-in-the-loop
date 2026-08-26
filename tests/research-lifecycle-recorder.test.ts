@@ -1,0 +1,564 @@
+import { describe, expect, it, vi } from "vitest"
+
+import type {
+  NoActionDecisionV1,
+  ProposedTradeDecisionV1,
+} from "../src/contracts/research-decision-v1.js"
+import type { TradeIntentV1 } from "../src/contracts/trade-intent-v1.js"
+import type {
+  LedgerEventV1,
+  StoredLedgerEventV1,
+} from "../src/event-ledger/ledger-event-v1.js"
+import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
+import { createResearchLifecycleRecorder } from "../src/event-ledger/research-lifecycle-recorder.js"
+import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
+import type { ResearchCycleTerminalRecordV1 } from "../src/research/research-cycle-outcome-v1.js"
+
+const TIMESTAMP = "2026-08-26T10:00:00.000Z"
+const signal = new AbortController().signal
+
+const noActionDecision: NoActionDecisionV1 = {
+  contractVersion: "1.0.0",
+  strategyVersion: "1.0.0",
+  outcome: "NO_ACTION",
+  reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
+  evidence: [],
+}
+
+const proposedDecision: ProposedTradeDecisionV1 = {
+  contractVersion: "1.0.0",
+  strategyVersion: "1.0.0",
+  outcome: "PROPOSE_TRADE",
+  direction: "BULLISH",
+  thesis: "Daily and intraday direction agree.",
+  candidate: {
+    underlying: "SPY",
+    structure: "BULL_CALL_SPREAD",
+    expiration: "2026-09-18",
+    longLeg: {
+      contractSymbol: "SPY260918C00650000",
+      strike: 650,
+    },
+    shortLeg: {
+      contractSymbol: "SPY260918C00655000",
+      strike: 655,
+    },
+  },
+  invalidation: ["Reject if refreshed evidence changes the candidate."],
+  evidence: [
+    {
+      claimId: "fact-1",
+      kind: "SOURCED_FACT",
+      claim: "The exact proposed legs were confirmed.",
+      snapshotRef: "snapshot-1",
+    },
+  ],
+}
+
+const intent: TradeIntentV1 = {
+  contractVersion: "1.0.0",
+  decisionContractVersion: "1.0.0",
+  strategyVersion: "1.0.0",
+  direction: "BULLISH",
+  structure: "BULL_CALL_SPREAD",
+  expiration: "2026-09-18",
+  longContractSymbol: "SPY260918C00650000",
+  shortContractSymbol: "SPY260918C00655000",
+  quoteSnapshotRef: "snapshot-1",
+  evaluatedAt: TIMESTAMP,
+  longQuote: {
+    contractSymbol: "SPY260918C00650000",
+    feed: "INDICATIVE",
+    bidCentsPerShare: 220,
+    askCentsPerShare: 223,
+    providerTimestamp: "2026-08-26T09:59:30.000000000Z",
+  },
+  shortQuote: {
+    contractSymbol: "SPY260918C00655000",
+    feed: "INDICATIVE",
+    bidCentsPerShare: 120,
+    askCentsPerShare: 121,
+    providerTimestamp: "2026-08-26T09:59:31.000000000Z",
+  },
+  entryLimitCentsPerShare: 101,
+  widthCentsPerShare: 500,
+  maxLossCentsPerContract: 10_100,
+  maxProfitCentsPerContract: 39_900,
+  stopLossMarkHalfCentsPerShare: 101,
+  profitTargetMarkHalfCentsPerShare: 601,
+}
+
+const evidenceSnapshots = [
+  {
+    snapshotRef: "snapshot-1",
+    provider: "ALPACA",
+    source: "options-snapshots-indicative",
+    retrievedAt: TIMESTAMP,
+    freshUntil: "2026-08-26T10:00:30.000Z",
+  },
+  {
+    snapshotRef: "snapshot-2",
+    provider: "FMP",
+    source: "market-calendar",
+    retrievedAt: TIMESTAMP,
+    freshUntil: "2026-08-26T10:01:00.000Z",
+  },
+] as const
+
+const asStored = (
+  event: LedgerEventV1,
+  sequence: number,
+): StoredLedgerEventV1 =>
+  ({
+    ...event,
+    sequence,
+    recordedAt: TIMESTAMP,
+  }) as StoredLedgerEventV1
+
+const setup = () => {
+  const events: LedgerEventV1[] = []
+  const append = vi.fn<LedgerStore["append"]>(async (event, appendSignal) => {
+    appendSignal?.throwIfAborted()
+    events.push(event)
+    return asStored(event, events.length)
+  })
+  const appendBatch = vi.fn<LedgerStore["appendBatch"]>(
+    async (batch, appendSignal) => {
+      appendSignal?.throwIfAborted()
+      const firstSequence = events.length + 1
+      events.push(...batch)
+      return batch.map((event, index) =>
+        asStored(event, firstSequence + index),
+      )
+    },
+  )
+  const store: LedgerStore = {
+    migrate: vi.fn(async () => undefined),
+    append,
+    appendBatch,
+    getByEventId: vi.fn(async () => undefined),
+    list: vi.fn(async () => []),
+    close: vi.fn(async () => undefined),
+  }
+  let nextId = 0
+  const recorder = createResearchLifecycleRecorder({
+    store,
+    idFactory: () => `id-${++nextId}`,
+    now: () => new Date(TIMESTAMP),
+  })
+
+  return { append, appendBatch, events, recorder }
+}
+
+const startCycle = async (setupResult: ReturnType<typeof setup>) =>
+  setupResult.recorder.startCycle({
+    sessionId: "session-1",
+    cycleNumber: 7,
+    signal,
+  })
+
+const assertCausalChain = (events: readonly LedgerEventV1[]) => {
+  for (let index = 1; index < events.length; index += 1) {
+    expect(events[index]!.causationEventId).toBe(events[index - 1]!.eventId)
+  }
+}
+
+const terminalMappingCases: readonly {
+  name: string
+  record: ResearchCycleTerminalRecordV1
+  eventTypes: readonly LedgerEventV1["eventType"][]
+}[] = [
+  {
+    name: "validated no action",
+    record: {
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "VALIDATED_NO_ACTION",
+        decision: noActionDecision,
+      },
+      evidenceSnapshots: [],
+      validatedDecision: noActionDecision,
+    },
+    eventTypes: [
+      "RESEARCH_DECISION_VALIDATED",
+      "RESEARCH_CYCLE_COMPLETED",
+    ],
+  },
+  {
+    name: "decision rejection",
+    record: {
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{ code: "SCHEMA_INVALID", path: ["candidate", 0] }],
+      },
+      evidenceSnapshots,
+    },
+    eventTypes: [
+      "EVIDENCE_SNAPSHOT_REFERENCED",
+      "EVIDENCE_SNAPSHOT_REFERENCED",
+      "RESEARCH_DECISION_REJECTED",
+      "RESEARCH_CYCLE_COMPLETED",
+    ],
+  },
+  {
+    name: "intent derivation rejection with a validated decision",
+    record: {
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["QUOTE_STALE"],
+      },
+      evidenceSnapshots: [evidenceSnapshots[0]],
+      validatedDecision: proposedDecision,
+    },
+    eventTypes: [
+      "EVIDENCE_SNAPSHOT_REFERENCED",
+      "RESEARCH_DECISION_VALIDATED",
+      "TRADE_INTENT_DERIVATION_REJECTED",
+      "RESEARCH_CYCLE_COMPLETED",
+    ],
+  },
+  {
+    name: "derived intent without duplicate decision or intent events",
+    record: {
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVED",
+        decision: proposedDecision,
+        intent,
+      },
+      evidenceSnapshots: [evidenceSnapshots[0]],
+      validatedDecision: proposedDecision,
+    },
+    eventTypes: [
+      "EVIDENCE_SNAPSHOT_REFERENCED",
+      "RESEARCH_DECISION_VALIDATED",
+      "TRADE_INTENT_DERIVED",
+      "RESEARCH_CYCLE_COMPLETED",
+    ],
+  },
+]
+
+describe("createResearchLifecycleRecorder", () => {
+  it("records an OpenCode session start with generated envelope identity", async () => {
+    const state = setup()
+
+    await state.recorder.recordOpenCodeSessionStarted("session-1", signal)
+
+    expect(state.events).toEqual([
+      {
+        eventId: "id-1",
+        eventVersion: "1.0.0",
+        eventType: "OPENCODE_SESSION_STARTED",
+        occurredAt: TIMESTAMP,
+        correlationId: "id-2",
+        sessionId: "session-1",
+        payload: { sessionId: "session-1" },
+      },
+    ])
+  })
+
+  it("starts a cycle once and returns its stable public identity and sink", async () => {
+    const state = setup()
+
+    const cycle = await startCycle(state)
+
+    expect(cycle).toMatchObject({
+      cycleId: "id-1",
+      correlationId: "id-2",
+      sessionId: "session-1",
+      cycleNumber: 7,
+      startedAt: TIMESTAMP,
+      outcomeSink: { record: expect.any(Function) },
+      interrupt: expect.any(Function),
+    })
+    expect(state.events).toEqual([
+      {
+        eventId: "id-3",
+        eventVersion: "1.0.0",
+        eventType: "RESEARCH_CYCLE_STARTED",
+        occurredAt: TIMESTAMP,
+        correlationId: "id-2",
+        cycleId: "id-1",
+        sessionId: "session-1",
+        payload: { cycleNumber: 7 },
+      },
+    ])
+  })
+
+  it.each(terminalMappingCases)(
+    "maps $name to one atomic causal batch",
+    async ({ record, eventTypes }) => {
+      const state = setup()
+      const cycle = await startCycle(state)
+
+      await cycle.outcomeSink.record(record, signal)
+
+      expect(state.appendBatch).toHaveBeenCalledOnce()
+      const terminalEvents = state.events.slice(1)
+      expect(terminalEvents.map(({ eventType }) => eventType)).toEqual(eventTypes)
+      expect(terminalEvents.at(-1)).toMatchObject({
+        eventType: "RESEARCH_CYCLE_COMPLETED",
+        payload: { status: record.outcome.status },
+      })
+      expect(
+        terminalEvents.every(
+          (event) =>
+            event.cycleId === cycle.cycleId &&
+            event.correlationId === cycle.correlationId &&
+            event.sessionId === cycle.sessionId &&
+            event.occurredAt === TIMESTAMP,
+        ),
+      ).toBe(true)
+      assertCausalChain(state.events)
+    },
+  )
+
+  it("preserves evidence order and normalized rejection details", async () => {
+    const state = setup()
+    const cycle = await startCycle(state)
+
+    await cycle.outcomeSink.record(
+      {
+        outcome: {
+          outcomeVersion: "1.0.0",
+          status: "DECISION_REJECTED",
+          issues: [{ code: "SCHEMA_INVALID", path: ["candidate", 0] }],
+        },
+        evidenceSnapshots,
+      },
+      signal,
+    )
+
+    expect(state.events.slice(1).map(({ payload }) => payload)).toEqual([
+      evidenceSnapshots[0],
+      evidenceSnapshots[1],
+      { issues: [{ code: "SCHEMA_INVALID", path: ["candidate", 0] }] },
+      { status: "DECISION_REJECTED" },
+    ])
+  })
+
+  it.each([
+    "TIMEOUT",
+    "CANCELLED",
+    "SHUTDOWN",
+    "PROCESS_RESTART",
+    "FAILED",
+  ] as const)("interrupts an active cycle with %s", async (reason) => {
+    const state = setup()
+    const cycle = await startCycle(state)
+
+    await cycle.interrupt(reason, signal)
+
+    expect(state.events.at(-1)).toEqual({
+      eventId: "id-4",
+      eventVersion: "1.0.0",
+      eventType: "RESEARCH_CYCLE_INTERRUPTED",
+      occurredAt: TIMESTAMP,
+      correlationId: cycle.correlationId,
+      causationEventId: "id-3",
+      cycleId: cycle.cycleId,
+      sessionId: cycle.sessionId,
+      payload: { reason },
+    })
+  })
+
+  it("keeps a failed atomic completion retryable without partial events", async () => {
+    const state = setup()
+    const cycle = await startCycle(state)
+    const terminalRecord: ResearchCycleTerminalRecordV1 = {
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "VALIDATED_NO_ACTION",
+        decision: noActionDecision,
+      },
+      evidenceSnapshots: [],
+      validatedDecision: noActionDecision,
+    }
+    state.appendBatch.mockRejectedValueOnce(new Error("atomic write failed"))
+
+    await expect(
+      cycle.outcomeSink.record(terminalRecord, signal),
+    ).rejects.toThrow("Ledger cycle-completion append failed")
+    expect(state.events.map(({ eventType }) => eventType)).toEqual([
+      "RESEARCH_CYCLE_STARTED",
+    ])
+
+    await cycle.outcomeSink.record(terminalRecord, signal)
+    expect(state.events.map(({ eventType }) => eventType)).toEqual([
+      "RESEARCH_CYCLE_STARTED",
+      "RESEARCH_DECISION_VALIDATED",
+      "RESEARCH_CYCLE_COMPLETED",
+    ])
+  })
+
+  it("allows exactly one winner in a completion-interruption race", async () => {
+    const state = setup()
+    const cycle = await startCycle(state)
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    state.appendBatch.mockImplementationOnce(async (batch) => {
+      await blocked
+      const firstSequence = state.events.length + 1
+      state.events.push(...batch)
+      return batch.map((event, index) =>
+        asStored(event, firstSequence + index),
+      )
+    })
+
+    const completion = cycle.outcomeSink.record(
+      {
+        outcome: {
+          outcomeVersion: "1.0.0",
+          status: "VALIDATED_NO_ACTION",
+          decision: noActionDecision,
+        },
+        evidenceSnapshots: [],
+        validatedDecision: noActionDecision,
+      },
+      signal,
+    )
+    const interruption = cycle.interrupt("TIMEOUT", signal)
+
+    expect(state.append).toHaveBeenCalledOnce()
+    release()
+    await Promise.all([completion, interruption])
+    expect(state.events.map(({ eventType }) => eventType)).toEqual([
+      "RESEARCH_CYCLE_STARTED",
+      "RESEARCH_DECISION_VALIDATED",
+      "RESEARCH_CYCLE_COMPLETED",
+    ])
+  })
+
+  it("keeps an interruption terminal when completion arrives afterward", async () => {
+    const state = setup()
+    const cycle = await startCycle(state)
+
+    await cycle.interrupt("PROCESS_RESTART", signal)
+    await cycle.outcomeSink.record(
+      {
+        outcome: {
+          outcomeVersion: "1.0.0",
+          status: "VALIDATED_NO_ACTION",
+          decision: noActionDecision,
+        },
+        evidenceSnapshots: [],
+        validatedDecision: noActionDecision,
+      },
+      signal,
+    )
+
+    expect(state.appendBatch).not.toHaveBeenCalled()
+    expect(state.events.map(({ eventType }) => eventType)).toEqual([
+      "RESEARCH_CYCLE_STARTED",
+      "RESEARCH_CYCLE_INTERRUPTED",
+    ])
+  })
+
+  it("lets a waiting interruption terminate after a racing completion fails", async () => {
+    const state = setup()
+    const cycle = await startCycle(state)
+    let rejectWrite!: (error: Error) => void
+    state.appendBatch.mockImplementationOnce(
+      async () =>
+        new Promise<readonly StoredLedgerEventV1[]>((_resolve, reject) => {
+          rejectWrite = reject
+        }),
+    )
+
+    const completion = cycle.outcomeSink.record(
+      {
+        outcome: {
+          outcomeVersion: "1.0.0",
+          status: "VALIDATED_NO_ACTION",
+          decision: noActionDecision,
+        },
+        evidenceSnapshots: [],
+        validatedDecision: noActionDecision,
+      },
+      signal,
+    )
+    const interruption = cycle.interrupt("SHUTDOWN", signal)
+    rejectWrite(new Error("completion failed"))
+
+    await expect(completion).rejects.toThrow(
+      "Ledger cycle-completion append failed",
+    )
+    await interruption
+    expect(state.events.map(({ eventType }) => eventType)).toEqual([
+      "RESEARCH_CYCLE_STARTED",
+      "RESEARCH_CYCLE_INTERRUPTED",
+    ])
+  })
+
+  it("does not start or terminalize with an already-aborted signal", async () => {
+    const state = setup()
+    const aborted = AbortSignal.abort(new Error("cancelled"))
+
+    await expect(
+      state.recorder.startCycle({
+        sessionId: "session-1",
+        cycleNumber: 1,
+        signal: aborted,
+      }),
+    ).rejects.toThrow("cancelled")
+    expect(state.events).toEqual([])
+
+    const cycle = await startCycle(state)
+    await expect(cycle.interrupt("CANCELLED", aborted)).rejects.toThrow(
+      "cancelled",
+    )
+    expect(state.events.map(({ eventType }) => eventType)).toEqual([
+      "RESEARCH_CYCLE_STARTED",
+    ])
+  })
+
+  it("persists a complete chain through the SQLite store and migration constraints", async () => {
+    const store = createSqliteLedgerStore({
+      path: ":memory:",
+      knownCredentialValues: [],
+      now: () => new Date(TIMESTAMP),
+    })
+    await store.migrate()
+    let nextId = 0
+    const recorder = createResearchLifecycleRecorder({
+      store,
+      idFactory: () => `sqlite-id-${++nextId}`,
+      now: () => new Date(TIMESTAMP),
+    })
+    await recorder.recordOpenCodeSessionStarted("session-1", signal)
+    const cycle = await recorder.startCycle({
+      sessionId: "session-1",
+      cycleNumber: 1,
+      signal,
+    })
+
+    await cycle.outcomeSink.record(
+      {
+        outcome: {
+          outcomeVersion: "1.0.0",
+          status: "INTENT_DERIVED",
+          decision: proposedDecision,
+          intent,
+        },
+        evidenceSnapshots: [evidenceSnapshots[0]],
+        validatedDecision: proposedDecision,
+      },
+      signal,
+    )
+
+    const stored = await store.list({ cycleId: cycle.cycleId, limit: 10 })
+    expect(stored.map(({ eventType }) => eventType)).toEqual([
+      "RESEARCH_CYCLE_STARTED",
+      "EVIDENCE_SNAPSHOT_REFERENCED",
+      "RESEARCH_DECISION_VALIDATED",
+      "TRADE_INTENT_DERIVED",
+      "RESEARCH_CYCLE_COMPLETED",
+    ])
+    assertCausalChain(stored)
+    await store.close()
+  })
+})

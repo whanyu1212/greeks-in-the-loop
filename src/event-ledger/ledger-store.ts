@@ -5,6 +5,8 @@ import type {
 
 export type LedgerEventQuery = Readonly<{
   afterSequence?: number
+  beforeSequence?: number
+  direction?: "ASC" | "DESC"
   correlationId?: string
   cycleId?: string
   sessionId?: string

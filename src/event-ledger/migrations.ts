@@ -65,6 +65,137 @@ export const LEDGER_MIGRATIONS: readonly LedgerMigration[] = [
       END;
     `,
   },
+  {
+    id: "002_research_lifecycle_integrity",
+    sql: `
+      CREATE TABLE ledger_migration_002_guard (
+        valid INTEGER NOT NULL CHECK (valid = 1)
+      );
+
+      INSERT INTO ledger_migration_002_guard (valid)
+      SELECT CASE WHEN EXISTS (
+        SELECT 1
+        FROM ledger_events AS event
+        WHERE (
+          event.event_type <> 'OPENCODE_SESSION_STARTED'
+          AND event.cycle_id IS NULL
+        ) OR (
+          event.cycle_id IS NOT NULL
+          AND event.event_type <> 'RESEARCH_CYCLE_STARTED'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM ledger_events AS start
+            WHERE start.cycle_id = event.cycle_id
+              AND start.event_type = 'RESEARCH_CYCLE_STARTED'
+              AND start.correlation_id = event.correlation_id
+              AND start.session_id IS event.session_id
+          )
+        ) OR (
+          event.cycle_id IS NOT NULL
+          AND event.event_type <> 'RESEARCH_CYCLE_STARTED'
+          AND (
+            event.causation_event_id IS NULL
+            OR NOT EXISTS (
+              SELECT 1
+              FROM ledger_events AS cause
+              WHERE cause.event_id = event.causation_event_id
+                AND cause.cycle_id IS event.cycle_id
+            )
+          )
+        ) OR EXISTS (
+          SELECT 1
+          FROM ledger_events AS terminal
+          WHERE terminal.cycle_id = event.cycle_id
+            AND terminal.sequence < event.sequence
+            AND terminal.event_type IN (
+              'RESEARCH_CYCLE_COMPLETED',
+              'RESEARCH_CYCLE_INTERRUPTED'
+            )
+        )
+      ) THEN 0 ELSE 1 END;
+
+      DROP TABLE ledger_migration_002_guard;
+
+      CREATE UNIQUE INDEX ledger_events_one_cycle_start
+        ON ledger_events(cycle_id)
+        WHERE event_type = 'RESEARCH_CYCLE_STARTED';
+
+      CREATE UNIQUE INDEX ledger_events_one_cycle_terminal
+        ON ledger_events(cycle_id)
+        WHERE event_type IN (
+          'RESEARCH_CYCLE_COMPLETED',
+          'RESEARCH_CYCLE_INTERRUPTED'
+        );
+
+      CREATE TRIGGER ledger_events_cycle_identity
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.cycle_id IS NOT NULL
+        AND NEW.event_type <> 'RESEARCH_CYCLE_STARTED'
+      BEGIN
+        SELECT CASE
+          WHEN NOT EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE cycle_id = NEW.cycle_id
+              AND event_type = 'RESEARCH_CYCLE_STARTED'
+          )
+          THEN RAISE(ABORT, 'cycle event requires a cycle start')
+        END;
+
+        SELECT CASE
+          WHEN NOT EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE cycle_id = NEW.cycle_id
+              AND event_type = 'RESEARCH_CYCLE_STARTED'
+              AND correlation_id = NEW.correlation_id
+              AND session_id IS NEW.session_id
+          )
+          THEN RAISE(ABORT, 'cycle identity must match its cycle start')
+        END;
+      END;
+
+      CREATE TRIGGER ledger_events_causation_same_cycle
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.cycle_id IS NOT NULL
+        AND NEW.event_type <> 'RESEARCH_CYCLE_STARTED'
+        AND EXISTS (
+          SELECT 1
+          FROM ledger_events
+          WHERE cycle_id = NEW.cycle_id
+            AND event_type = 'RESEARCH_CYCLE_STARTED'
+            AND correlation_id = NEW.correlation_id
+            AND session_id IS NEW.session_id
+        )
+      BEGIN
+        SELECT CASE
+          WHEN NEW.causation_event_id IS NULL OR NOT EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE event_id = NEW.causation_event_id
+              AND cycle_id IS NEW.cycle_id
+          )
+          THEN RAISE(ABORT, 'causation must reference the same research cycle')
+        END;
+      END;
+
+      CREATE TRIGGER ledger_events_no_post_terminal
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.cycle_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM ledger_events
+          WHERE cycle_id = NEW.cycle_id
+            AND event_type IN (
+              'RESEARCH_CYCLE_COMPLETED',
+              'RESEARCH_CYCLE_INTERRUPTED'
+            )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'cannot append after a cycle terminal event');
+      END;
+    `,
+  },
 ]
 
 const checksum = (sql: string) =>
