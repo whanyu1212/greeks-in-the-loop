@@ -322,7 +322,7 @@ try {
         let timedOut = false
 
         try {
-          const report = await runWithCycleDeadline({
+          const processed = await runWithCycleDeadline({
             timeoutMs: cycleTimeoutMs,
             shutdownSignal: abortController.signal,
             run: async (signal) => {
@@ -356,7 +356,7 @@ try {
                 .filter(Boolean)
                 .join("\n")
 
-              const processed = await processResearchCycle({
+              return processResearchCycle({
                 rawResponse: text,
                 cycleStartedAt: cycle.startedAt,
                 signal,
@@ -364,23 +364,6 @@ try {
                 outcomeSink: cycle.outcomeSink,
                 getEligibility,
               })
-              try {
-                const artifactPath = await writeResearchCycleArtifact({
-                  cycleId: cycle.cycleId,
-                  cycleNumber,
-                  sessionDate,
-                  outcome: processed.outcome,
-                  ...(processed.researchReport === undefined
-                    ? {}
-                    : { researchReport: processed.researchReport }),
-                })
-                return `${processed.report}\nResearch artifact: ${artifactPath}`
-              } catch {
-                console.error(
-                  `[cycle ${cycleNumber}] validated outcome recorded, but research artifact could not be written`,
-                )
-                return `${processed.report}\nResearch artifact: unavailable`
-              }
             },
             onTimeout: async () => {
               timedOut = true
@@ -397,7 +380,23 @@ try {
               }
             },
           })
-          return report
+          try {
+            const artifactPath = await writeResearchCycleArtifact({
+              cycleId: cycle.cycleId,
+              cycleNumber,
+              sessionDate,
+              outcome: processed.outcome,
+              ...(processed.researchReport === undefined
+                ? {}
+                : { researchReport: processed.researchReport }),
+            })
+            return `${processed.report}\nResearch artifact: ${artifactPath}`
+          } catch {
+            console.error(
+              `[cycle ${cycleNumber}] validated outcome recorded, but research artifact could not be written`,
+            )
+            return `${processed.report}\nResearch artifact: unavailable`
+          }
         } catch (error) {
           if (error instanceof LedgerPersistenceError) {
             abortController.abort(error)

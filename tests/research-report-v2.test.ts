@@ -106,4 +106,38 @@ describe("ResearchReportV2", () => {
       }).success,
     ).toBe(false)
   })
+
+  it("rejects preliminary sourced facts observed after the report as-of", () => {
+    const result = researchReportV2Schema.safeParse({
+      ...noAction,
+      result: {
+        contractVersion: "1.0.0",
+        strategyVersion: "1.0.0",
+        outcome: "PRELIMINARY_RESEARCH",
+        targetSessionDate: "2026-08-26",
+        direction: "UNDETERMINED",
+        thesis: "Retain context for a later refresh.",
+        invalidation: ["Discard when refreshed facts disagree."],
+        evidence: [
+          {
+            claimId: "future-fact",
+            kind: "SOURCED_FACT",
+            claim: "This observation postdates the report snapshot.",
+            provider: "ALPACA",
+            temporalClass: "LIVE",
+            observedAt: "2026-08-26T14:30:00.001Z",
+          },
+        ],
+        requiresRefresh: true,
+      },
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error("Expected report rejection")
+    expect(result.error.issues).toContainEqual(
+      expect.objectContaining({
+        path: ["result", "evidence", 0, "observedAt"],
+      }),
+    )
+  })
 })

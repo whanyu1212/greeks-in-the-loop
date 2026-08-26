@@ -172,22 +172,43 @@ export const researchReportV2Schema = z
   .strict()
   .superRefine((report, refinement) => {
     const asOf = Date.parse(report.analysis.asOf)
-    const observations = [
-      ["accountChecks.observedAt", report.analysis.accountChecks.observedAt],
-      ["marketRegime.observedAt", report.analysis.marketRegime.observedAt],
+    const observations: ReadonlyArray<
+      readonly [readonly (string | number)[], string]
+    > = [
+      [
+        ["analysis", "accountChecks", "observedAt"],
+        report.analysis.accountChecks.observedAt,
+      ],
+      [
+        ["analysis", "marketRegime", "observedAt"],
+        report.analysis.marketRegime.observedAt,
+      ],
       ...(report.analysis.candidateEvaluation === undefined
         ? []
-        : [["candidateEvaluation.observedAt", report.analysis.candidateEvaluation.observedAt]]),
+        : [[
+            ["analysis", "candidateEvaluation", "observedAt"],
+            report.analysis.candidateEvaluation.observedAt,
+          ] as const]),
       ...report.analysis.externalContext.map((source, index) => [
-        `externalContext.${index}.retrievedAt`,
+        ["analysis", "externalContext", index, "retrievedAt"] as const,
         source.retrievedAt,
-      ]),
-    ] as const
-    for (const [field, observedAt] of observations) {
+      ] as const),
+      ...(report.result.outcome === "PRELIMINARY_RESEARCH"
+        ? report.result.evidence.flatMap((claim, index) =>
+            claim.kind === "SOURCED_FACT"
+              ? [[
+                  ["result", "evidence", index, "observedAt"] as const,
+                  claim.observedAt,
+                ] as const]
+              : [],
+          )
+        : []),
+    ]
+    for (const [path, observedAt] of observations) {
       if (Date.parse(observedAt) > asOf) {
         refinement.addIssue({
           code: "custom",
-          path: ["analysis", ...field.split(".")],
+          path: [...path],
           message: "Retained analysis cannot contain future observations",
         })
       }
