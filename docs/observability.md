@@ -77,8 +77,10 @@ Tracing deliberately excludes:
 - token-level, tool-step, filesystem, HTTP, and automatic SDK instrumentation.
 
 Telemetry configuration and `PHOENIX_API_KEY` are removed from the managed
-OpenCode child environment. SQLite remains the authoritative research record;
-trace identifiers are not written into the ledger in this phase.
+OpenCode child environment, where `OTEL_SDK_DISABLED=true` is then forced to
+prevent preloaded or transitive instrumentation from tracing agent content.
+SQLite remains the authoritative research record; trace identifiers are not
+written into the ledger in this phase.
 
 Detailed OpenCode event adaptation and token/tool metadata belong to the next
 tracing increment. Evaluation datasets, scorers, and prompt/skill comparisons

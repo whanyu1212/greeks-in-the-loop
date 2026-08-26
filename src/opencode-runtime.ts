@@ -112,7 +112,11 @@ export function createOpencodeEnvironment(
       delete childEnvironment[name]
     }
   }
-  return { ...childEnvironment, XDG_CONFIG_HOME: configHome }
+  return {
+    ...childEnvironment,
+    OTEL_SDK_DISABLED: "true",
+    XDG_CONFIG_HOME: configHome,
+  }
 }
 
 /**

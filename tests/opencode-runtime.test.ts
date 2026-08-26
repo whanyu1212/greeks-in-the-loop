@@ -26,6 +26,7 @@ describe("createOpencodeEnvironment", () => {
 
     expect(environment).toEqual({
       HOME: "/tmp/home",
+      OTEL_SDK_DISABLED: "true",
       PATH: "/usr/bin",
       XDG_CONFIG_HOME: "/tmp/runtime-config",
     })
