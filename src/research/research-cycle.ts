@@ -17,6 +17,10 @@ import type {
   OptionQuoteProvider,
 } from "../market-data/alpaca-option-quotes.js"
 import {
+  NOOP_RESEARCH_CYCLE_TRACE,
+  type ResearchCycleTrace,
+} from "../observability/research-telemetry.js"
+import {
   newYorkLocalTime,
   type ResearchEligibilityV1,
 } from "../scheduling/research-eligibility.js"
@@ -61,6 +65,7 @@ export type ProcessResearchCycleOptions = Readonly<{
     decision: ProposedTradeDecisionV1,
     context: Parameters<typeof deriveTradeIntentV1>[1],
   ) => TradeIntentDerivationResult
+  trace?: ResearchCycleTrace
 }>
 
 export type ProcessedResearchCycle = Readonly<{
@@ -208,6 +213,7 @@ const recordOutcome = async (
   sink: ResearchCycleOutcomeSink,
   signal: AbortSignal,
   metadata: TerminalRecordMetadata = {},
+  trace: ResearchCycleTrace = NOOP_RESEARCH_CYCLE_TRACE,
 ): Promise<ProcessedResearchCycle> => {
   signal.throwIfAborted()
   const boundedOutcome = boundTerminalOutcome(outcome)
@@ -224,7 +230,7 @@ const recordOutcome = async (
       ? {}
       : { researchReport: metadata.researchReport }),
   }
-  await sink.record(record, signal)
+  await trace.run("ledger.cycle.terminalize", () => sink.record(record, signal))
   return {
     outcome: boundedOutcome,
     report: `Research cycle outcome: ${boundedOutcome.status}`,
@@ -253,78 +259,67 @@ export async function processResearchCycle({
   getEligibility,
   now = () => new Date(),
   deriveIntent = deriveTradeIntentV1,
+  trace = NOOP_RESEARCH_CYCLE_TRACE,
 }: ProcessResearchCycleOptions): Promise<ProcessedResearchCycle> {
   signal.throwIfAborted()
-
-  if (Buffer.byteLength(rawResponse, "utf8") > MAX_RESEARCH_RESPONSE_BYTES) {
+  const parsed = await trace.run("research.report.parse", () => {
+    if (Buffer.byteLength(rawResponse, "utf8") > MAX_RESEARCH_RESPONSE_BYTES) {
+      return {
+        success: false as const,
+        issues: [{ code: "RESPONSE_TOO_LARGE" as const, path: [] as const }],
+      }
+    }
+    let input: unknown
+    try {
+      input = JSON.parse(rawResponse)
+    } catch {
+      return {
+        success: false as const,
+        issues: [{ code: "MALFORMED_JSON" as const, path: [] as const }],
+      }
+    }
+    const report = researchReportV2Schema.safeParse(input)
+    if (!report.success) {
+      return { success: false as const, issues: schemaIssues(report.error.issues) }
+    }
+    if (
+      Buffer.byteLength(JSON.stringify({ researchReport: report.data }), "utf8") >
+      MAX_LEDGER_EVENT_PAYLOAD_BYTES
+    ) {
+      return {
+        success: false as const,
+        issues: [{ code: "RESPONSE_TOO_LARGE" as const, path: [] as const }],
+      }
+    }
+    return { success: true as const, report: report.data }
+  })
+  if (!parsed.success) {
     return recordOutcome(
       {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
         status: "DECISION_REJECTED",
-        issues: [{ code: "RESPONSE_TOO_LARGE", path: [] }],
+        issues: parsed.issues,
       },
       outcomeSink,
       signal,
+      {},
+      trace,
     )
   }
 
-  let input: unknown
-  try {
-    input = JSON.parse(rawResponse)
-  } catch {
-    return recordOutcome(
-      {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "DECISION_REJECTED",
-        issues: [{ code: "MALFORMED_JSON", path: [] }],
-      },
-      outcomeSink,
-      signal,
-    )
-  }
-
-  const parsedReport = researchReportV2Schema.safeParse(input)
-  if (!parsedReport.success) {
-    return recordOutcome(
-      {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "DECISION_REJECTED",
-        issues: schemaIssues(parsedReport.error.issues),
-      },
-      outcomeSink,
-      signal,
-    )
-  }
-
-  if (
-    Buffer.byteLength(
-      JSON.stringify({
-        researchReport: parsedReport.data,
-      }),
-      "utf8",
-    ) > MAX_LEDGER_EVENT_PAYLOAD_BYTES
-  ) {
-    return recordOutcome(
-      {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "DECISION_REJECTED",
-        issues: [{ code: "RESPONSE_TOO_LARGE", path: [] }],
-      },
-      outcomeSink,
-      signal,
-    )
-  }
-
-  const researchReport = parsedReport.data
+  const researchReport = parsed.report
   const result = researchReport.result
   const recordReportOutcome = (
     outcome: ResearchCycleOutcomeV1,
     metadata: TerminalRecordMetadata = {},
   ) =>
-    recordOutcome(outcome, outcomeSink, signal, {
-      ...metadata,
-      researchReport,
-    })
+    recordOutcome(
+      outcome,
+      outcomeSink,
+      signal,
+      { ...metadata, researchReport },
+      trace,
+    )
   const processingEvaluatedAt = now()
   const cycleStartTime = Date.parse(cycleStartedAt)
   if (
@@ -365,24 +360,31 @@ export async function processResearchCycle({
   }
 
   if (result.outcome === "PRELIMINARY_RESEARCH") {
-    const eligibility = getEligibility()
-    const eligibilityTime = Date.parse(eligibility.evaluatedAt)
-    const futureObservationIndex = result.evidence.findIndex(
-      (claim) =>
-        claim.kind === "SOURCED_FACT" &&
-        Date.parse(claim.observedAt) > eligibilityTime,
+    const preliminaryIssuePath = await trace.run(
+      "research.decision.validate",
+      () => {
+        const eligibility = getEligibility()
+        const eligibilityTime = Date.parse(eligibility.evaluatedAt)
+        const futureObservationIndex = result.evidence.findIndex(
+          (claim) =>
+            claim.kind === "SOURCED_FACT" &&
+            Date.parse(claim.observedAt) > eligibilityTime,
+        )
+        if (
+          eligibility.researchEligible &&
+          eligibility.sessionDate === result.targetSessionDate &&
+          Number.isFinite(eligibilityTime) &&
+          Date.parse(researchReport.analysis.asOf) <= eligibilityTime &&
+          futureObservationIndex < 0
+        ) {
+          return undefined
+        }
+        return futureObservationIndex >= 0
+          ? ["evidence", futureObservationIndex, "observedAt"] as const
+          : ["targetSessionDate"] as const
+      },
     )
-    if (
-      !eligibility.researchEligible ||
-      eligibility.sessionDate !== result.targetSessionDate ||
-      !Number.isFinite(eligibilityTime) ||
-      Date.parse(researchReport.analysis.asOf) > eligibilityTime ||
-      futureObservationIndex >= 0
-    ) {
-      const issuePath =
-        futureObservationIndex >= 0
-          ? ["evidence", futureObservationIndex, "observedAt"]
-          : ["targetSessionDate"]
+    if (preliminaryIssuePath !== undefined) {
       return recordReportOutcome(
         {
           outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
@@ -390,7 +392,7 @@ export async function processResearchCycle({
           issues: [
             {
               code: "CONTEXT_INVALID",
-              path: issuePath,
+              path: preliminaryIssuePath,
             },
           ],
         },
@@ -407,10 +409,12 @@ export async function processResearchCycle({
   }
 
   if (result.outcome === "NO_ACTION") {
-    const validation = validateResearchDecisionV1(result, {
-      evaluatedAt: processingEvaluatedAt.toISOString(),
-      snapshots: {},
-    })
+    const validation = await trace.run("research.decision.validate", () =>
+      validateResearchDecisionV1(result, {
+        evaluatedAt: processingEvaluatedAt.toISOString(),
+        snapshots: {},
+      }),
+    )
     if (!validation.success) {
       return recordReportOutcome(
         {
@@ -431,9 +435,9 @@ export async function processResearchCycle({
     )
   }
 
-  const evidencePreflight = validateResearchDecisionV1(
-    result,
-    PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
+  const evidencePreflight = await trace.run(
+    "research.decision.validate",
+    () => validateResearchDecisionV1(result, PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT),
   )
   if (!evidencePreflight.success) {
     return recordReportOutcome(
@@ -492,11 +496,13 @@ export async function processResearchCycle({
   }
 
   signal.throwIfAborted()
-  const quoteConfirmation = await quoteProvider.confirmQuotes({
-    longContractSymbol: result.candidate.longLeg.contractSymbol,
-    shortContractSymbol: result.candidate.shortLeg.contractSymbol,
-    signal,
-  })
+  const quoteConfirmation = await trace.run("market.option_quotes.confirm", () =>
+    quoteProvider.confirmQuotes({
+      longContractSymbol: result.candidate.longLeg.contractSymbol,
+      shortContractSymbol: result.candidate.shortLeg.contractSymbol,
+      signal,
+    }),
+  )
   signal.throwIfAborted()
 
   if (!quoteConfirmation.success) {
@@ -569,13 +575,15 @@ export async function processResearchCycle({
     )
   }
 
-  const validation = validateResearchDecisionV1(result, {
-    evaluatedAt: quoteConfirmation.snapshot.evaluatedAt,
-    snapshots: {
-      [PROPOSAL_QUOTE_SNAPSHOT_REF]:
-        quoteConfirmation.snapshot.snapshotMetadata,
-    },
-  })
+  const validation = await trace.run("research.decision.validate", () =>
+    validateResearchDecisionV1(result, {
+      evaluatedAt: quoteConfirmation.snapshot.evaluatedAt,
+      snapshots: {
+        [PROPOSAL_QUOTE_SNAPSHOT_REF]:
+          quoteConfirmation.snapshot.snapshotMetadata,
+      },
+    }),
+  )
   if (!validation.success) {
     return recordReportOutcome(
       {
@@ -596,13 +604,16 @@ export async function processResearchCycle({
       { evidenceSnapshots },
     )
   }
+  const proposedDecision = validation.data
 
-  const derivation = deriveIntent(validation.data, {
-    quoteSnapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
-    evaluatedAt: quoteConfirmation.snapshot.evaluatedAt,
-    longQuote: quoteConfirmation.snapshot.longQuote,
-    shortQuote: quoteConfirmation.snapshot.shortQuote,
-  })
+  const derivation = await trace.run("research.intent.derive", () =>
+    deriveIntent(proposedDecision, {
+      quoteSnapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
+      evaluatedAt: quoteConfirmation.snapshot.evaluatedAt,
+      longQuote: quoteConfirmation.snapshot.longQuote,
+      shortQuote: quoteConfirmation.snapshot.shortQuote,
+    }),
+  )
   if (!derivation.success) {
     return recordReportOutcome(
       {
@@ -612,7 +623,7 @@ export async function processResearchCycle({
       },
       {
         evidenceSnapshots,
-        validatedDecision: validation.data,
+        validatedDecision: proposedDecision,
       },
     )
   }
@@ -621,12 +632,12 @@ export async function processResearchCycle({
     {
       outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
       status: "INTENT_DERIVED",
-      decision: validation.data,
+      decision: proposedDecision,
       intent: derivation.intent,
     },
     {
       evidenceSnapshots,
-      validatedDecision: validation.data,
+      validatedDecision: proposedDecision,
     },
   )
 }
