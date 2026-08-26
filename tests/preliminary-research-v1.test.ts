@@ -60,4 +60,31 @@ describe("PreliminaryResearchV1", () => {
       }).success,
     ).toBe(false)
   })
+
+  it.each([
+    {
+      longLeg: { contractSymbol: "SPY260918C00655000", strike: 655 },
+      shortLeg: { contractSymbol: "SPY260918C00650000", strike: 650 },
+    },
+    {
+      longLeg: { contractSymbol: "SPY260918C00650000", strike: 650 },
+      shortLeg: { contractSymbol: "SPY260918C00650000", strike: 650 },
+    },
+    {
+      longLeg: { contractSymbol: "SPY260925C00650000", strike: 650 },
+      shortLeg: { contractSymbol: "SPY260918C00655000", strike: 655 },
+    },
+  ])("rejects an internally inconsistent candidate identity", (legs) => {
+    expect(
+      preliminaryResearchV1Schema.safeParse({
+        ...preliminary,
+        candidate: {
+          underlying: "SPY",
+          structure: "BULL_CALL_SPREAD",
+          expiration: "2026-09-18",
+          ...legs,
+        },
+      }).success,
+    ).toBe(false)
+  })
 })

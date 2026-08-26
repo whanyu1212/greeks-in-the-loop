@@ -96,8 +96,8 @@ export function evaluateResearchEligibility({
   if (!Number.isFinite(evaluatedMilliseconds)) {
     throw new Error("Evaluation time is invalid")
   }
-  if (!timeOfDay.test(premarketStartEt)) {
-    throw new Error("Pre-market research start must use HH:MM")
+  if (!timeOfDay.test(premarketStartEt) || premarketStartEt >= "09:30") {
+    throw new Error("Pre-market research start must use HH:MM before 09:30 ET")
   }
   if (session === undefined || newYorkDate(evaluatedAt) !== session.date) {
     return {

@@ -96,6 +96,18 @@ describe("research eligibility", () => {
     })
   })
 
+  it.each(["09:30", "15:00", "invalid"])(
+    "rejects an invalid pre-market start during startup validation: %s",
+    (premarketStartEt) => {
+      expect(() =>
+        evaluateResearchEligibility({
+          evaluatedAt: new Date("2026-08-25T10:00:00.000Z"),
+          premarketStartEt,
+        }),
+      ).toThrow("Pre-market research start must use HH:MM before 09:30 ET")
+    },
+  )
+
   it("honors New York daylight-saving offsets", () => {
     const winter = {
       date: "2026-01-15",
