@@ -5,6 +5,8 @@ import type {
   ResearchDecisionV1,
   ResearchDecisionValidationIssue,
 } from "../contracts/research-decision-v1.js"
+import type { PreliminaryResearchV1 } from "../contracts/preliminary-research-v1.js"
+import type { ResearchReportV2 } from "../contracts/research-report-v2.js"
 import type {
   TradeIntentDerivationReason,
   TradeIntentV1,
@@ -25,8 +27,14 @@ export type DecisionRejectionIssue =
 export type IntentDerivationRejectionReason =
   | OptionQuoteConfirmationFailureCode
   | TradeIntentDerivationReason
+  | "MARKET_WINDOW_INELIGIBLE"
 
 export type ResearchCycleOutcomeV1 =
+  | {
+      outcomeVersion: typeof RESEARCH_CYCLE_OUTCOME_VERSION
+      status: "PRELIMINARY_RESEARCH_RETAINED"
+      research: PreliminaryResearchV1
+    }
   | {
       outcomeVersion: typeof RESEARCH_CYCLE_OUTCOME_VERSION
       status: "VALIDATED_NO_ACTION"
@@ -55,12 +63,15 @@ export type ResearchCycleEvidenceSnapshotReferenceV1 = Readonly<{
   source: string
   retrievedAt: string
   freshUntil: string
+  temporalClass?: "LIVE" | "DELAYED" | "PRIOR_CLOSE"
 }>
 
 export type ResearchCycleTerminalRecordV1 = Readonly<{
   outcome: ResearchCycleOutcomeV1
   evidenceSnapshots: readonly ResearchCycleEvidenceSnapshotReferenceV1[]
   validatedDecision?: ResearchDecisionV1
+  preliminaryResearch?: PreliminaryResearchV1
+  researchReport?: ResearchReportV2
 }>
 
 export type ResearchCycleOutcomeSink = Readonly<{

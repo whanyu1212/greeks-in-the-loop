@@ -4,6 +4,8 @@ import type {
   NoActionDecisionV1,
   ProposedTradeDecisionV1,
 } from "../src/contracts/research-decision-v1.js"
+import type { PreliminaryResearchV1 } from "../src/contracts/preliminary-research-v1.js"
+import type { ResearchReportV2 } from "../src/contracts/research-report-v2.js"
 import type { TradeIntentV1 } from "../src/contracts/trade-intent-v1.js"
 import type {
   LedgerEventV1,
@@ -23,6 +25,67 @@ const noActionDecision: NoActionDecisionV1 = {
   outcome: "NO_ACTION",
   reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
   evidence: [],
+}
+
+const researchReport: ResearchReportV2 = {
+  reportVersion: "2.0.0",
+  result: noActionDecision,
+  analysis: {
+    provenance: "AGENT_REPORTED",
+    asOf: TIMESTAMP,
+    accountChecks: {
+      verification: "AGENT_REPORTED",
+      observedAt: TIMESTAMP,
+      accountStatus: "ACTIVE",
+      optionsTradingApproved: true,
+      conflictingStrategyExposure: false,
+    },
+    marketRegime: {
+      verification: "AGENT_REPORTED",
+      temporalClass: "LIVE",
+      observedAt: TIMESTAMP,
+      signal: "MIXED",
+      dailySessionCount: 50,
+      intradayBarCount: 30,
+    },
+    externalContext: [
+      {
+        sourceId: "exa-1",
+        provider: "EXA",
+        verification: "AGENT_REPORTED",
+        title: "Current context",
+        url: "https://example.com/context",
+        publishedAt: "2026-08-26T09:00:00.000Z",
+        retrievedAt: TIMESTAMP,
+        summary: "Current market context was reviewed.",
+        relevance: "NEUTRAL",
+      },
+    ],
+    supportingFactors: [],
+    contradictingFactors: [],
+    conflicts: [],
+  },
+}
+
+const preliminaryResearch: PreliminaryResearchV1 = {
+  contractVersion: "1.0.0",
+  strategyVersion: "1.0.0",
+  outcome: "PRELIMINARY_RESEARCH",
+  targetSessionDate: "2026-08-26",
+  direction: "UNDETERMINED",
+  thesis: "Prior-close observations warrant a fresh regular-session check.",
+  invalidation: ["Reject if live evidence is unavailable."],
+  evidence: [
+    {
+      claimId: "prior-close-1",
+      kind: "SOURCED_FACT",
+      claim: "The prior session supplied the latest completed daily bar.",
+      provider: "ALPACA",
+      temporalClass: "PRIOR_CLOSE",
+      observedAt: "2026-08-25T20:00:00.000Z",
+    },
+  ],
+  requiresRefresh: true,
 }
 
 const proposedDecision: ProposedTradeDecisionV1 = {
@@ -169,6 +232,22 @@ const terminalMappingCases: readonly {
   eventTypes: readonly LedgerEventV1["eventType"][]
 }[] = [
   {
+    name: "retained preliminary research",
+    record: {
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "PRELIMINARY_RESEARCH_RETAINED",
+        research: preliminaryResearch,
+      },
+      evidenceSnapshots: [],
+      preliminaryResearch,
+    },
+    eventTypes: [
+      "PRELIMINARY_RESEARCH_RECORDED",
+      "RESEARCH_CYCLE_COMPLETED",
+    ],
+  },
+  {
     name: "validated no action",
     record: {
       outcome: {
@@ -178,8 +257,10 @@ const terminalMappingCases: readonly {
       },
       evidenceSnapshots: [],
       validatedDecision: noActionDecision,
+      researchReport,
     },
     eventTypes: [
+      "RESEARCH_REPORT_RECORDED",
       "RESEARCH_DECISION_VALIDATED",
       "RESEARCH_CYCLE_COMPLETED",
     ],

@@ -52,4 +52,24 @@ describe("research agent request construction", () => {
     expect(prompt).toContain("all current account, market, quote, and freshness facts must be refreshed")
     expect(prompt).toContain(JSON.stringify(context))
   })
+
+  it("renders application-authoritative staged eligibility", () => {
+    const prompt = buildResearchCyclePrompt(
+      1,
+      new Date("2026-08-25T12:00:00.000Z"),
+      undefined,
+      undefined,
+      {
+        evaluatedAt: "2026-08-25T12:00:00.000Z",
+        sessionDate: "2026-08-25",
+        researchEligible: true,
+        tradeIntentEligible: false,
+        reason: "OUTSIDE_TRADE_INTENT_WINDOW",
+      },
+    )
+
+    expect(prompt).toContain("Application-authoritative")
+    expect(prompt).toContain('"tradeIntentEligible":false')
+    expect(prompt).toContain("Do not return PROPOSE_TRADE")
+  })
 })

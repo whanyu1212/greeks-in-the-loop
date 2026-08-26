@@ -5,6 +5,7 @@ import type {
   StoredLedgerEventV1,
 } from "../event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
+import type { PreliminaryResearchV1 } from "../contracts/preliminary-research-v1.js"
 
 export const RESEARCH_CONTEXT_VERSION = "1.0.0" as const
 export const MAX_RESEARCH_CONTEXT_EVENTS = 500
@@ -65,6 +66,7 @@ export type ResearchContextEvidenceReferenceV1 = Readonly<{
   source: string
   retrievedAt: string
   freshUntil: string
+  temporalClass?: "LIVE" | "DELAYED" | "PRIOR_CLOSE"
 }>
 
 export type ResearchContextInterruptionV1 = Readonly<{
@@ -76,8 +78,23 @@ export type ResearchContextInterruptionV1 = Readonly<{
 
 export type ResearchContextRefreshMarkerV1 = Readonly<{
   cycleId: string
-  reason: "STALE_EVIDENCE" | "INTERRUPTED_CYCLE"
+  reason: "STALE_EVIDENCE" | "INTERRUPTED_CYCLE" | "PRELIMINARY_RESEARCH"
   snapshotRef?: string
+}>
+
+export type ResearchContextPreliminaryResearchV1 = Readonly<{
+  cycleId: string
+  occurredAt: string
+  targetSessionDate: string
+  direction: PreliminaryResearchV1["direction"]
+  candidate?: PreliminaryResearchV1["candidate"]
+  sourcedObservations: readonly Readonly<{
+    claimId: string
+    provider: "ALPACA" | "FMP" | "EXA"
+    temporalClass: "LIVE" | "DELAYED" | "PRIOR_CLOSE"
+    observedAt: string
+  }>[]
+  requiresRefresh: true
 }>
 
 export type ResearchContextV1 = Readonly<{
@@ -85,6 +102,7 @@ export type ResearchContextV1 = Readonly<{
   generatedAt: string
   nextCycleNumber: number
   latestValidatedProposal?: ResearchContextProposalV1
+  latestPreliminaryResearch?: ResearchContextPreliminaryResearchV1
   recentTerminalOutcomes: readonly ResearchContextTerminalOutcomeV1[]
   recurringRejectionCounts: readonly ResearchContextRejectionCountV1[]
   evidenceReferences: Readonly<
@@ -175,7 +193,12 @@ export function projectResearchContextV1(
     orderedInput.length > MAX_RESEARCH_CONTEXT_EVENTS
   const cycleNumbers = new Map<string, number>()
   let latestCycleNumber = options.latestCycleNumber ?? 0
-  let latestValidatedProposal: ResearchContextProposalV1 | undefined
+  let latestValidatedProposal:
+    | (ResearchContextProposalV1 & { sequence: number })
+    | undefined
+  let latestPreliminaryResearch:
+    | (ResearchContextPreliminaryResearchV1 & { sequence: number })
+    | undefined
   const terminalOutcomes: Array<ResearchContextTerminalOutcomeV1 & {
     sequence: number
   }> = []
@@ -241,8 +264,33 @@ export function projectResearchContextV1(
         source: event.payload.source,
         retrievedAt: event.payload.retrievedAt,
         freshUntil: event.payload.freshUntil,
+        ...(event.payload.temporalClass === undefined
+          ? {}
+          : { temporalClass: event.payload.temporalClass }),
         sequence: event.sequence,
       })
+      continue
+    }
+    if (event.eventType === "PRELIMINARY_RESEARCH_RECORDED") {
+      latestPreliminaryResearch = {
+        cycleId,
+        occurredAt: event.occurredAt,
+        targetSessionDate: event.payload.research.targetSessionDate,
+        direction: event.payload.research.direction,
+        ...(event.payload.research.candidate === undefined
+          ? {}
+          : { candidate: event.payload.research.candidate }),
+        sourcedObservations: event.payload.research.evidence
+          .filter((claim) => claim.kind === "SOURCED_FACT")
+          .map(({ claimId, provider, temporalClass, observedAt }) => ({
+            claimId,
+            provider,
+            temporalClass,
+            observedAt,
+          })),
+        requiresRefresh: true,
+        sequence: event.sequence,
+      }
       continue
     }
     if (event.eventType === "RESEARCH_DECISION_REJECTED") {
@@ -274,8 +322,16 @@ export function projectResearchContextV1(
       expiration: decision.candidate.expiration,
       longContractSymbol: decision.candidate.longLeg.contractSymbol,
       shortContractSymbol: decision.candidate.shortLeg.contractSymbol,
+      sequence: event.sequence,
     }
   }
+
+  const pendingPreliminaryResearch =
+    latestPreliminaryResearch !== undefined &&
+    (latestValidatedProposal === undefined ||
+      latestPreliminaryResearch.sequence > latestValidatedProposal.sequence)
+      ? latestPreliminaryResearch
+      : undefined
 
   const newestFirst = <T extends { sequence: number }>(values: readonly T[]) =>
     [...values].sort((left, right) => right.sequence - left.sequence)
@@ -302,6 +358,15 @@ export function projectResearchContextV1(
     .sort((left, right) => right.count - left.count || left.code.localeCompare(right.code))
     .slice(0, MAX_RESEARCH_CONTEXT_REJECTION_COUNTS)
   let retainedRefreshes: SequencedRefreshMarker[] = [
+    ...(pendingPreliminaryResearch === undefined
+      ? []
+      : [
+          {
+            cycleId: pendingPreliminaryResearch.cycleId,
+            reason: "PRELIMINARY_RESEARCH" as const,
+            sequence: pendingPreliminaryResearch.sequence,
+          },
+        ]),
     ...retainedEvidence
       .filter(({ freshUntil }) => Date.parse(freshUntil) < generatedAt)
       .map(({ cycleId, snapshotRef, sequence }) => ({
@@ -326,7 +391,7 @@ export function projectResearchContextV1(
   const refreshMarkerCount =
     [...evidenceReferences.values()].filter(
       ({ freshUntil }) => Date.parse(freshUntil) < generatedAt,
-    ).length + interruptions.length
+    ).length + interruptions.length + (pendingPreliminaryResearch === undefined ? 0 : 1)
 
   const omitted = {
     terminalOutcomes: Math.max(0, terminalOutcomes.length - retainedOutcomes.length),
@@ -356,7 +421,33 @@ export function projectResearchContextV1(
       nextCycleNumber: latestCycleNumber + 1,
       ...(latestValidatedProposal === undefined
         ? {}
-        : { latestValidatedProposal }),
+        : {
+            latestValidatedProposal: {
+              cycleId: latestValidatedProposal.cycleId,
+              direction: latestValidatedProposal.direction,
+              underlying: latestValidatedProposal.underlying,
+              structure: latestValidatedProposal.structure,
+              expiration: latestValidatedProposal.expiration,
+              longContractSymbol: latestValidatedProposal.longContractSymbol,
+              shortContractSymbol: latestValidatedProposal.shortContractSymbol,
+            },
+          }),
+      ...(pendingPreliminaryResearch === undefined
+        ? {}
+        : {
+            latestPreliminaryResearch: {
+              cycleId: pendingPreliminaryResearch.cycleId,
+              occurredAt: pendingPreliminaryResearch.occurredAt,
+              targetSessionDate: pendingPreliminaryResearch.targetSessionDate,
+              direction: pendingPreliminaryResearch.direction,
+              ...(pendingPreliminaryResearch.candidate === undefined
+                ? {}
+                : { candidate: pendingPreliminaryResearch.candidate }),
+              sourcedObservations:
+                pendingPreliminaryResearch.sourcedObservations,
+              requiresRefresh: true as const,
+            },
+          }),
       recentTerminalOutcomes: retainedOutcomes.map(
         ({ sequence: _sequence, ...outcome }) => outcome,
       ),

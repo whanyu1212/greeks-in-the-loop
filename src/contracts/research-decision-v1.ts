@@ -13,6 +13,7 @@ export const NO_ACTION_REASON_CODES = [
   "NO_ELIGIBLE_SPREAD",
   "CANDIDATE_CHANGED",
   "EXACT_RISK_INPUTS_UNAVAILABLE",
+  "REQUIRED_EXA_EVIDENCE_UNAVAILABLE",
   "CONTRACT_UNREPRESENTABLE",
 ] as const
 
@@ -88,7 +89,7 @@ const parseOptionContractSymbol = (symbol: string) => {
   }
 }
 
-const candidateSchema = z
+export const researchCandidateV1Schema = z
   .object({
     underlying: z.literal("SPY"),
     structure: z.enum(["BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"]),
@@ -120,7 +121,7 @@ const proposedTradeDecisionV1Schema = z
     outcome: z.literal("PROPOSE_TRADE"),
     direction: z.enum(["BULLISH", "BEARISH"]),
     thesis: boundedText,
-    candidate: candidateSchema,
+    candidate: researchCandidateV1Schema,
     invalidation: z.array(boundedText).min(1).max(16),
     evidence: z.array(evidenceClaimSchema).min(1).max(64),
   })
@@ -199,6 +200,7 @@ export const researchDecisionV1Schema = z.discriminatedUnion("outcome", [
 export type ResearchDecisionV1 = z.infer<typeof researchDecisionV1Schema>
 export type NoActionDecisionV1 = z.infer<typeof noActionDecisionV1Schema>
 export type ProposedTradeDecisionV1 = z.infer<typeof proposedTradeDecisionV1Schema>
+export type ResearchCandidateV1 = z.infer<typeof researchCandidateV1Schema>
 
 const evidenceSnapshotMetadataSchema = z
   .object({

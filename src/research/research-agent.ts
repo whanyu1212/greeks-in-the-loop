@@ -1,4 +1,5 @@
 import type { ResearchContextV1 } from "./research-context-v1.js"
+import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
 
 /**
  * Fixed identity and request construction for the unattended research agent.
@@ -28,10 +29,20 @@ export function buildResearchCyclePrompt(
   startedAt: Date,
   operatorObjective?: string,
   durableContext?: ResearchContextV1,
+  eligibility?: ResearchEligibilityV1,
 ) {
   return [
     `Run structured research cycle ${cycle} at ${startedAt.toISOString()}.`,
     "Inspect observable paper-account state first without claiming reconciliation or risk approval, then inspect only the evidence needed to identify the highest-ranked eligible defined-risk options candidate or conclude NO_ACTION.",
+    eligibility
+      ? [
+          "Application-authoritative research and trade-intent eligibility follows. Do not override it with model reasoning or provider prose.",
+          JSON.stringify(eligibility),
+          eligibility.tradeIntentEligible
+            ? "A fresh PROPOSE_TRADE may be returned if every strategy requirement passes."
+            : "Do not return PROPOSE_TRADE. Return PRELIMINARY_RESEARCH for useful findings that require refresh, or NO_ACTION when no useful finding exists.",
+        ].join("\n")
+      : undefined,
     operatorObjective ? `Current operator objective: ${operatorObjective}` : undefined,
     durableContext
       ? [
