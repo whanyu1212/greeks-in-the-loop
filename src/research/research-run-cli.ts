@@ -1,4 +1,6 @@
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
+
+import { parse as parseEnv } from "dotenv"
 
 import { createSqliteLedgerStore } from "../event-ledger/sqlite-ledger-store.js"
 import {
@@ -19,7 +21,7 @@ const usage = `Usage: pnpm research:run [options]
 Read a completed research run from the authoritative SQLite ledger.
 
 Options:
-  --ledger <path>   Ledger path (default: RESEARCH_LEDGER_PATH or .state/research-ledger.sqlite)
+  --ledger <path>   Ledger path (default: RESEARCH_LEDGER_PATH from the environment or .env)
   --cycle <id>      Cycle to read (default: latest completed cycle)
   --export          Write the JSON artifact and print its path
   --root <path>     Artifact root used with --export (default: workspace/research)
@@ -27,8 +29,19 @@ Options:
   --help            Show this help
 `
 
+const fileEnv = (() => {
+  try {
+    return parseEnv(readFileSync(".env"))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}
+    throw error
+  }
+})()
+
 const parseOptions = (args: readonly string[]): Options => {
-  let ledgerPath = process.env.RESEARCH_LEDGER_PATH ?? ".state/research-ledger.sqlite"
+  let ledgerPath =
+    (process.env.RESEARCH_LEDGER_PATH ?? fileEnv.RESEARCH_LEDGER_PATH)?.trim() ||
+    ".state/research-ledger.sqlite"
   let cycleId: string | undefined
   let exportArtifact = false
   let root: string | undefined
