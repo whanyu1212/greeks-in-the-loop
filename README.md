@@ -46,7 +46,7 @@ Run an isolated one-cycle smoke test without touching the default ledger. Settin
 RESEARCH_LEDGER_PATH=.state/manual-dry-run.sqlite AGENT_PREMARKET_START_ET=07:00 AGENT_CYCLE_TIMEOUT_MS=300000 pnpm agent:once
 ```
 
-This is a dry run with respect to trading, not data access or local storage: it uses live read-only providers as the cycle requires and writes the isolated SQLite ledger plus a JSON artifact. Substantive research requires Exa; FMP context is optional. Use a new `RESEARCH_LEDGER_PATH` when testing a branch whose migrations differ from an existing local ledger.
+This is a dry run with respect to trading, not data access or local storage: it uses live read-only providers as the cycle requires and writes the isolated SQLite ledger plus a JSON export derived from that ledger. Substantive research requires Exa; FMP context is optional. Use a new `RESEARCH_LEDGER_PATH` when testing a branch whose migrations differ from an existing local ledger.
 
 Build and run the compiled worker:
 
@@ -70,15 +70,21 @@ The worker creates a fresh OpenCode session for every cycle and shuts down clean
 
 The append-only SQLite event ledger defaults to `.state/research-ledger.sqlite`; override it with `RESEARCH_LEDGER_PATH` only when the worker retains exclusive write ownership. On startup, incomplete cycles are marked `PROCESS_RESTART`, cycle numbering resumes from durable history, and a bounded context projection is rebuilt for the next prompt. Prior evidence is planning context only and must be refreshed. OpenCode session memory is never authoritative durable state.
 
-Every completed eligible cycle also writes its validated outcome and, when the agent returned a valid contract, the full bounded [`ResearchReportV2`](docs/research-report-v2.md) dossier as inspection-only JSON under `workspace/research/<session-date>/cycle-<number>-<cycle-id>.json`. The dossier retains normalized account checks, market-regime calculations, option diagnostics, mandatory timestamped Exa context, supporting and contradicting factors, and conflicts. Agent-reported analysis remains distinct from application-confirmed quotes. The artifact never contains the raw model response and is not authoritative; a write failure does not undo the durable ledger outcome.
+Every completed eligible cycle is projected into a versioned `ResearchRunV1` after the worker rereads its committed events. The projection consolidates cycle identity and timing, initial eligibility, evidence snapshot references, the validated outcome and intermediate records, the full bounded [`ResearchReportV2`](docs/research-report-v2.md), and ledger sequence metadata. A byte-for-byte regenerable inspection-only JSON export is then written under `workspace/research/<session-date>/cycle-<number>-<cycle-id>.json`. SQLite is the sole source of truth: the worker never builds the export from a separate in-memory result, and an export failure does not undo the committed ledger outcome.
 
 ## Inspect a run
 
-List generated reports and open one with `jq`:
+Show the latest completed run directly from an isolated ledger, or select a cycle:
 
 ```bash
-rg --files workspace/research | sort
-jq . workspace/research/<session-date>/cycle-<number>-<cycle-id>.json
+pnpm research:run -- --ledger .state/manual-dry-run.sqlite
+pnpm research:run -- --ledger .state/manual-dry-run.sqlite --cycle <cycle-id>
+```
+
+Regenerate its human-readable JSON export from SQLite (`--force` replaces an existing export):
+
+```bash
+pnpm research:run -- --ledger .state/manual-dry-run.sqlite --export --force
 ```
 
 Inspect the event timeline or the validated JSON payloads in a ledger:
@@ -100,16 +106,16 @@ SQLite stores an append-only event stream in `ledger_events`. Each row contains 
 
 | Data | SQLite | JSON artifact | Notes |
 | --- | --- | --- | --- |
-| Session and cycle lifecycle | Yes | Cycle identity only | Includes starts, completion status, interruptions, and bounded interruption reasons. |
+| Session and cycle lifecycle | Yes | Yes | Includes cycle/session identity, timing, initial eligibility, completion status, and ledger sequence metadata. Interruptions remain in SQLite but are not exported as completed runs. |
 | Full bounded `ResearchReportV2` | Yes, as `RESEARCH_REPORT_RECORDED` | Yes | Includes agent-reported account checks, market regime and indicators, optional candidate Greeks/liquidity diagnostics, Exa citations, optional FMP context, supporting and contradicting factors, and conflicts. |
 | Preliminary research | Yes, as `PRELIMINARY_RESEARCH_RECORDED` | Yes, inside the outcome/report | Retains thesis, direction, candidate identity when present, invalidations, evidence, and the mandatory-refresh marker. It cannot directly become a trade intent. |
 | Validated decision | Yes, as `RESEARCH_DECISION_VALIDATED` | Yes, inside the outcome/report | Records `NO_ACTION` or the validated proposal contract. |
-| Evidence snapshot reference | Yes, as `EVIDENCE_SNAPSHOT_REFERENCED` | Through the outcome where applicable | Stores reference, provider, source, retrieval/freshness timestamps, and temporal class—not the raw provider response. |
+| Evidence snapshot reference | Yes, as `EVIDENCE_SNAPSHOT_REFERENCED` | Yes, as a consolidated list | Stores reference, provider, source, retrieval/freshness timestamps, and temporal class—not the raw provider response. |
 | Confirmed exact-leg option quotes | Only after successful intent derivation, inside `TRADE_INTENT_DERIVED` | Yes, inside the derived outcome | Stores each OCC symbol, indicative feed label, bid and ask in integer cents per share, and provider timestamp. If quote confirmation or intent derivation fails, exact bid/ask values are not retained. |
 | Derived spread economics | Only after successful intent derivation | Yes, inside the derived outcome | Includes evaluated time, entry limit, width, maximum loss/profit, and deterministic stop/target marks. It is still non-executable. |
 | Rejections | Yes | Yes, inside the outcome | Stores bounded reason codes or validation issue codes/paths, not rejected raw content. |
 
-The JSON artifact is intended for humans and downstream inspection. The SQLite ledger is the authoritative restart/audit record; artifact-write failure does not roll back a committed ledger outcome.
+The JSON artifact is a deterministic `ResearchRunV1` view intended for humans and downstream inspection. It can be deleted and regenerated from SQLite. The SQLite ledger is the authoritative restart/audit record; artifact-write failure does not roll back a committed ledger outcome.
 
 The project intentionally does **not** retain raw model responses, hidden reasoning, full OpenCode transcripts, raw Alpaca/FMP/Exa responses, credentials, or secret-bearing URLs. The bounded report is the retained analysis record, and all its observations remain labeled `AGENT_REPORTED`; only application-confirmed quotes and deterministic intent calculations cross that trust boundary.
 

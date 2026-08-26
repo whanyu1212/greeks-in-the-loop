@@ -5,6 +5,10 @@ import type {
   ResearchCycleTerminalRecordV1,
 } from "../research/research-cycle-outcome-v1.js"
 import {
+  researchEligibilityV1Schema,
+  type ResearchEligibilityV1,
+} from "../scheduling/research-eligibility.js"
+import {
   LEDGER_EVENT_VERSION,
   type LedgerEventV1,
 } from "./ledger-event-v1.js"
@@ -48,7 +52,17 @@ export type ResearchLifecycleRecorder = Readonly<{
       sessionId: string
       cycleNumber: number
       signal?: AbortSignal
-    }>,
+    }> &
+      (
+        | Readonly<{
+            sessionDate: string
+            initialEligibility: ResearchEligibilityV1
+          }>
+        | Readonly<{
+            sessionDate?: undefined
+            initialEligibility?: undefined
+          }>
+      ),
   ): Promise<ActiveResearchCycle>
 }>
 
@@ -214,7 +228,13 @@ export function createResearchLifecycleRecorder({
       )
     },
 
-    async startCycle({ sessionId, cycleNumber, signal }) {
+    async startCycle({
+      sessionId,
+      cycleNumber,
+      sessionDate,
+      initialEligibility,
+      signal,
+    }) {
       signal?.throwIfAborted()
       const identity: ResearchCycleIdentity = {
         cycleId: idFactory(),
@@ -234,7 +254,16 @@ export function createResearchLifecycleRecorder({
             correlationId: identity.correlationId,
             cycleId: identity.cycleId,
             sessionId: identity.sessionId,
-            payload: { cycleNumber: identity.cycleNumber },
+            payload: {
+              cycleNumber: identity.cycleNumber,
+              ...(sessionDate === undefined ? {} : { sessionDate }),
+              ...(initialEligibility === undefined
+                ? {}
+                : {
+                    initialEligibility:
+                      researchEligibilityV1Schema.parse(initialEligibility),
+                  }),
+            },
           },
           signal,
         ),

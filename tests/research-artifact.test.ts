@@ -5,7 +5,12 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 
 import type { ResearchReportV2 } from "../src/contracts/research-report-v2.js"
-import { writeResearchCycleArtifact } from "../src/research/research-artifact.js"
+import {
+  projectResearchRunV1,
+  type ResearchRunV1,
+  writeResearchRunArtifact,
+} from "../src/research/research-artifact.js"
+import type { StoredLedgerEventV1 } from "../src/event-ledger/ledger-event-v1.js"
 import type { ResearchCycleOutcomeV1 } from "../src/research/research-cycle-outcome-v1.js"
 
 const temporaryDirectories: string[] = []
@@ -17,6 +22,76 @@ afterEach(() => {
 })
 
 describe("research cycle artifact", () => {
+  it("projects the complete run from the committed ledger timeline", () => {
+    const decision = {
+      contractVersion: "1.0.0" as const,
+      strategyVersion: "1.0.0" as const,
+      outcome: "NO_ACTION" as const,
+      reasonCodes: ["SIGNAL_NOT_ACTIONABLE" as const],
+      evidence: [],
+    }
+    const base = {
+      eventVersion: "1.0.0" as const,
+      occurredAt: "2026-08-26T12:00:00.000Z",
+      recordedAt: "2026-08-26T12:00:00.001Z",
+      correlationId: "correlation-1",
+      cycleId: "cycle-1",
+      sessionId: "session-1",
+    }
+    const events: StoredLedgerEventV1[] = [
+      {
+        ...base,
+        sequence: 2,
+        eventId: "event-start",
+        eventType: "RESEARCH_CYCLE_STARTED",
+        payload: {
+          cycleNumber: 1,
+          sessionDate: "2026-08-26",
+          initialEligibility: {
+            evaluatedAt: "2026-08-26T12:00:00.000Z",
+            sessionDate: "2026-08-26",
+            researchEligible: true,
+            tradeIntentEligible: false,
+            reason: "OUTSIDE_TRADE_INTENT_WINDOW",
+          },
+        },
+      },
+      {
+        ...base,
+        sequence: 3,
+        eventId: "event-decision",
+        causationEventId: "event-start",
+        eventType: "RESEARCH_DECISION_VALIDATED",
+        payload: { decision },
+      },
+      {
+        ...base,
+        sequence: 4,
+        eventId: "event-completed",
+        causationEventId: "event-decision",
+        eventType: "RESEARCH_CYCLE_COMPLETED",
+        payload: { status: "VALIDATED_NO_ACTION" },
+      },
+    ]
+
+    expect(projectResearchRunV1(events)).toMatchObject({
+      runVersion: "1.0.0",
+      cycle: {
+        cycleId: "cycle-1",
+        cycleNumber: 1,
+        sessionDate: "2026-08-26",
+      },
+      initialEligibility: { researchEligible: true },
+      validatedDecision: decision,
+      outcome: { status: "VALIDATED_NO_ACTION", decision },
+      ledger: {
+        firstSequence: 2,
+        lastSequence: 4,
+        terminalEventId: "event-completed",
+      },
+    })
+  })
+
   it("writes the full validated outcome to a unique inspection-only JSON file", async () => {
     const root = mkdtempSync(join(tmpdir(), "research-artifact-test-"))
     temporaryDirectories.push(root)
@@ -84,25 +159,35 @@ describe("research cycle artifact", () => {
       },
     }
 
-    const path = await writeResearchCycleArtifact({
-      cycleId: "cycle-1",
-      cycleNumber: 1,
-      sessionDate: "2026-08-26",
+    const run: ResearchRunV1 = {
+      runVersion: "1.0.0",
+      cycle: {
+        cycleId: "cycle-1",
+        cycleNumber: 1,
+        correlationId: "correlation-1",
+        sessionId: "session-1",
+        sessionDate: "2026-08-26",
+        startedAt: "2026-08-26T12:00:00.000Z",
+        completedAt: "2026-08-26T12:05:00.000Z",
+      },
+      evidenceSnapshots: [],
       outcome,
       researchReport,
+      preliminaryResearch: outcome.research,
+      ledger: {
+        firstSequence: 2,
+        lastSequence: 5,
+        terminalEventId: "event-5",
+      },
+    }
+    const path = await writeResearchRunArtifact({
+      run,
       root,
-      now: () => new Date("2026-08-26T12:05:00.000Z"),
     })
 
     expect(path).toBe(join(root, "2026-08-26", "cycle-1-cycle-1.json"))
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
-      artifactVersion: "1.0.0",
-      generatedAt: "2026-08-26T12:05:00.000Z",
-      sessionDate: "2026-08-26",
-      cycleId: "cycle-1",
-      cycleNumber: 1,
-      outcome,
-      researchReport,
+      ...run,
     })
   })
 
@@ -120,15 +205,32 @@ describe("research cycle artifact", () => {
         evidence: [],
       },
     }
-    const options = {
-      cycleId: "cycle-1",
-      cycleNumber: 1,
-      sessionDate: "2026-08-26",
+    const run: ResearchRunV1 = {
+      runVersion: "1.0.0",
+      cycle: {
+        cycleId: "cycle-1",
+        cycleNumber: 1,
+        correlationId: "correlation-1",
+        sessionId: "session-1",
+        sessionDate: "2026-08-26",
+        startedAt: "2026-08-26T12:00:00.000Z",
+        completedAt: "2026-08-26T12:05:00.000Z",
+      },
+      evidenceSnapshots: [],
       outcome,
+      validatedDecision: outcome.decision,
+      ledger: {
+        firstSequence: 2,
+        lastSequence: 4,
+        terminalEventId: "event-4",
+      },
+    }
+    const options = {
+      run,
       root,
     }
 
-    await writeResearchCycleArtifact(options)
-    await expect(writeResearchCycleArtifact(options)).rejects.toThrow()
+    await writeResearchRunArtifact(options)
+    await expect(writeResearchRunArtifact(options)).rejects.toThrow()
   })
 })
