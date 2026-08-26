@@ -12,7 +12,7 @@ const calendarDaySchema = z
     close: z.string().min(1).max(64),
   })
   .passthrough()
-const calendarResponseSchema = z.array(calendarDaySchema).max(8)
+const calendarResponseSchema = z.array(calendarDaySchema).max(16)
 const localTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/u
 
 export type MarketCalendar = Readonly<{
@@ -68,8 +68,11 @@ export function createAlpacaCalendarClient(
   return {
     async getSession(date, signal) {
       const parsedDate = z.iso.date().parse(date)
+      const lookbackStart = new Date(
+        Date.parse(`${parsedDate}T00:00:00.000Z`) - 14 * 86_400_000,
+      ).toISOString().slice(0, 10)
       const url = new URL("/v2/calendar", baseUrl)
-      url.searchParams.set("start", parsedDate)
+      url.searchParams.set("start", lookbackStart)
       url.searchParams.set("end", parsedDate)
 
       let response: Response
@@ -98,6 +101,13 @@ export function createAlpacaCalendarClient(
       }
       const parsed = calendarResponseSchema.safeParse(body)
       if (!parsed.success) throw new Error("Alpaca calendar response is invalid")
+      const dates = parsed.data.map(({ date: sessionDate }) => sessionDate)
+      if (
+        new Set(dates).size !== dates.length ||
+        dates.some((sessionDate) => sessionDate > parsedDate)
+      ) {
+        throw new Error("Alpaca calendar response is invalid")
+      }
       const matchingDays = parsed.data.filter((day) => day.date === parsedDate)
       if (matchingDays.length === 0) return undefined
       if (matchingDays.length !== 1) {
@@ -109,6 +119,9 @@ export function createAlpacaCalendarClient(
         date: day.date,
         open: parseSessionTimestamp(day.date, day.open),
         close: parseSessionTimestamp(day.date, day.close),
+        previousSessionDates: dates
+          .filter((sessionDate) => sessionDate < parsedDate)
+          .sort(),
       }
       if (Date.parse(session.open) >= Date.parse(session.close)) {
         throw new Error("Alpaca calendar response is invalid")

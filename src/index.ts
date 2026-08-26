@@ -220,13 +220,18 @@ try {
           newYorkDate(eligibilityEvaluatedAt),
           calendarSignal,
         )
+        const initialEligibility = evaluateResearchEligibility({
+          evaluatedAt: new Date(),
+          ...(session === undefined ? {} : { session }),
+          premarketStartEt,
+        })
         const getEligibility = () =>
           evaluateResearchEligibility({
             evaluatedAt: new Date(),
             ...(session === undefined ? {} : { session }),
             premarketStartEt,
+            tradeIntentWindow: initialEligibility.tradeIntentWindow ?? null,
           })
-        const initialEligibility = getEligibility()
         if (!initialEligibility.researchEligible) {
           return `Research cycle skipped: ${initialEligibility.reason ?? "RESEARCH_WINDOW_INELIGIBLE"}`
         }
@@ -353,6 +358,7 @@ try {
 
               const processed = await processResearchCycle({
                 rawResponse: text,
+                cycleStartedAt: cycle.startedAt,
                 signal,
                 quoteProvider,
                 outcomeSink: cycle.outcomeSink,

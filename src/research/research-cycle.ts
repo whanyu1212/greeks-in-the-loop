@@ -51,6 +51,7 @@ const PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT = {
 
 export type ProcessResearchCycleOptions = Readonly<{
   rawResponse: string
+  cycleStartedAt: string
   signal: AbortSignal
   quoteProvider: OptionQuoteProvider
   outcomeSink: ResearchCycleOutcomeSink
@@ -146,6 +147,27 @@ const proposalHistoryIssuePath = (
   ) {
     return ["analysis", "candidateEvaluation", "dte"]
   }
+  const previousSessionDates = eligibility.previousSessionDates
+  if (previousSessionDates === undefined || previousSessionDates.length < 2) {
+    return ["analysis", "candidateEvaluation", "legs", 0, "openInterestDate"]
+  }
+  const eligibleOpenInterestDates = new Set([
+    sessionDate,
+    ...previousSessionDates.slice(-2),
+  ])
+  const staleOpenInterestIndex =
+    report.analysis.candidateEvaluation.legs.findIndex(
+      ({ openInterestDate }) => !eligibleOpenInterestDates.has(openInterestDate),
+    )
+  if (staleOpenInterestIndex >= 0) {
+    return [
+      "analysis",
+      "candidateEvaluation",
+      "legs",
+      staleOpenInterestIndex,
+      "openInterestDate",
+    ]
+  }
   return undefined
 }
 
@@ -224,6 +246,7 @@ const recordOutcome = async (
  */
 export async function processResearchCycle({
   rawResponse,
+  cycleStartedAt,
   signal,
   quoteProvider,
   outcomeSink,
@@ -303,14 +326,41 @@ export async function processResearchCycle({
       researchReport,
     })
   const processingEvaluatedAt = now()
+  const cycleStartTime = Date.parse(cycleStartedAt)
   if (
     !Number.isFinite(processingEvaluatedAt.getTime()) ||
+    !Number.isFinite(cycleStartTime) ||
+    cycleStartTime > processingEvaluatedAt.getTime() ||
     Date.parse(researchReport.analysis.asOf) > processingEvaluatedAt.getTime()
   ) {
     return recordReportOutcome({
       outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
       status: "DECISION_REJECTED",
       issues: [{ code: "CONTEXT_INVALID", path: ["analysis", "asOf"] }],
+    })
+  }
+  const exaSources = researchReport.analysis.externalContext.filter(
+    ({ provider }) => provider === "EXA",
+  )
+  if (
+    exaSources.length > 0 &&
+    !exaSources.some(({ retrievedAt }) => {
+      const retrievedTime = Date.parse(retrievedAt)
+      return (
+        retrievedTime >= cycleStartTime &&
+        retrievedTime <= processingEvaluatedAt.getTime()
+      )
+    })
+  ) {
+    return recordReportOutcome({
+      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+      status: "DECISION_REJECTED",
+      issues: [
+        {
+          code: "CONTEXT_INVALID",
+          path: ["analysis", "externalContext"],
+        },
+      ],
     })
   }
 

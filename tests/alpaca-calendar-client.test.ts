@@ -11,7 +11,11 @@ const response = (body: unknown, status = 200) =>
 describe("Alpaca calendar client", () => {
   it("exposes only one read-only session lookup", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      response([{ date: "2026-08-25", open: "09:30", close: "16:00" }]),
+      response([
+        { date: "2026-08-21", open: "09:30", close: "16:00" },
+        { date: "2026-08-24", open: "09:30", close: "16:00" },
+        { date: "2026-08-25", open: "09:30", close: "16:00" },
+      ]),
     )
     const calendar = createAlpacaCalendarClient({
       apiKey: "key",
@@ -27,11 +31,12 @@ describe("Alpaca calendar client", () => {
       date: "2026-08-25",
       open: "2026-08-25T13:30:00.000Z",
       close: "2026-08-25T20:00:00.000Z",
+      previousSessionDates: ["2026-08-21", "2026-08-24"],
     })
     const [requestUrl, init] = fetchMock.mock.calls[0]!
     const url = new URL(String(requestUrl))
     expect(url.pathname).toBe("/v2/calendar")
-    expect(url.searchParams.get("start")).toBe("2026-08-25")
+    expect(url.searchParams.get("start")).toBe("2026-08-11")
     expect(url.searchParams.get("end")).toBe("2026-08-25")
     expect(init).toMatchObject({ method: "GET", redirect: "error" })
     expect(init).not.toHaveProperty("body")

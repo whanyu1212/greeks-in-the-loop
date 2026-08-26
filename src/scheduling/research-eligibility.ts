@@ -4,6 +4,12 @@ export type MarketSessionV1 = Readonly<{
   date: string
   open: string
   close: string
+  previousSessionDates?: readonly string[]
+}>
+
+export type TradeIntentWindowV1 = Readonly<{
+  slotStartedAt: string
+  deadline: string
 }>
 
 export type ResearchEligibilityV1 = Readonly<{
@@ -11,6 +17,8 @@ export type ResearchEligibilityV1 = Readonly<{
   sessionDate?: string
   researchEligible: boolean
   tradeIntentEligible: boolean
+  tradeIntentWindow?: TradeIntentWindowV1
+  previousSessionDates?: readonly string[]
   reason?: "NO_MARKET_SESSION" | "OUTSIDE_RESEARCH_WINDOW" | "OUTSIDE_TRADE_INTENT_WINDOW"
 }>
 
@@ -18,6 +26,7 @@ export type EvaluateResearchEligibilityOptions = Readonly<{
   evaluatedAt: Date
   session?: MarketSessionV1
   premarketStartEt?: string
+  tradeIntentWindow?: TradeIntentWindowV1 | null
 }>
 
 const timeOfDay = /^(?:[01]\d|2[0-3]):[0-5]\d$/u
@@ -81,6 +90,7 @@ export function evaluateResearchEligibility({
   evaluatedAt,
   session,
   premarketStartEt = DEFAULT_PREMARKET_RESEARCH_START_ET,
+  tradeIntentWindow,
 }: EvaluateResearchEligibilityOptions): ResearchEligibilityV1 {
   const evaluatedMilliseconds = evaluatedAt.getTime()
   if (!Number.isFinite(evaluatedMilliseconds)) {
@@ -128,13 +138,40 @@ export function evaluateResearchEligibility({
   const configuredEntryCutoff = newYorkLocalTime(session.date, "15:00").getTime()
   const sessionCutoff = close - 60 * 60 * 1_000
   const entryCutoff = Math.min(configuredEntryCutoff, sessionCutoff)
+  let activeWindow: TradeIntentWindowV1 | undefined
+  if (tradeIntentWindow === undefined) {
+    if (
+      evaluatedMilliseconds >= open &&
+      slotAge >= 0 &&
+      slotAge <= 119_999 &&
+      slot.getTime() >= entryStart &&
+      slot.getTime() < entryCutoff
+    ) {
+      activeWindow = {
+        slotStartedAt: slot.toISOString(),
+        deadline: new Date(
+          Math.min(slot.getTime() + 5 * 60 * 1_000, entryCutoff),
+        ).toISOString(),
+      }
+    }
+  } else if (tradeIntentWindow !== null) {
+    const slotStartedAt = Date.parse(tradeIntentWindow.slotStartedAt)
+    const deadline = Date.parse(tradeIntentWindow.deadline)
+    if (
+      !Number.isFinite(slotStartedAt) ||
+      !Number.isFinite(deadline) ||
+      slotStartedAt < entryStart ||
+      slotStartedAt >= entryCutoff ||
+      deadline !== Math.min(slotStartedAt + 5 * 60 * 1_000, entryCutoff)
+    ) {
+      throw new Error("Trade-intent window is invalid")
+    }
+    activeWindow = tradeIntentWindow
+  }
   const tradeIntentEligible =
-    evaluatedMilliseconds >= open &&
-    slotAge >= 0 &&
-    slotAge <= 119_999 &&
-    slot.getTime() >= entryStart &&
-    slot.getTime() < entryCutoff &&
-    evaluatedMilliseconds < slot.getTime() + 5 * 60 * 1_000 &&
+    activeWindow !== undefined &&
+    evaluatedMilliseconds >= Date.parse(activeWindow.slotStartedAt) &&
+    evaluatedMilliseconds < Date.parse(activeWindow.deadline) &&
     evaluatedMilliseconds < entryCutoff
 
   return {
@@ -142,6 +179,10 @@ export function evaluateResearchEligibility({
     sessionDate: session.date,
     researchEligible: true,
     tradeIntentEligible,
+    ...(activeWindow === undefined ? {} : { tradeIntentWindow: activeWindow }),
+    ...(session.previousSessionDates === undefined
+      ? {}
+      : { previousSessionDates: [...session.previousSessionDates] }),
     ...(tradeIntentEligible
       ? {}
       : { reason: "OUTSIDE_TRADE_INTENT_WINDOW" as const }),

@@ -9,6 +9,7 @@ const regularSession: MarketSessionV1 = {
   date: "2026-08-25",
   open: "2026-08-25T13:30:00.000Z",
   close: "2026-08-25T20:00:00.000Z",
+  previousSessionDates: ["2026-08-21", "2026-08-24"],
 }
 
 const evaluate = (timestamp: string, session: MarketSessionV1 = regularSession) =>
@@ -34,6 +35,43 @@ describe("research eligibility", () => {
     expect(evaluate("2026-08-25T14:00:00.000Z").tradeIntentEligible).toBe(true)
     expect(evaluate("2026-08-25T14:01:59.999Z").tradeIntentEligible).toBe(true)
     expect(evaluate("2026-08-25T14:02:00.000Z").tradeIntentEligible).toBe(false)
+  })
+
+  it("preserves the original slot for the five-minute completion window", () => {
+    const started = evaluate("2026-08-25T14:01:59.999Z")
+    expect(started.tradeIntentEligible).toBe(true)
+    expect(started.tradeIntentWindow).toEqual({
+      slotStartedAt: "2026-08-25T14:00:00.000Z",
+      deadline: "2026-08-25T14:05:00.000Z",
+    })
+
+    expect(
+      evaluateResearchEligibility({
+        evaluatedAt: new Date("2026-08-25T14:04:59.999Z"),
+        session: regularSession,
+        premarketStartEt: "08:00",
+        tradeIntentWindow: started.tradeIntentWindow!,
+      }).tradeIntentEligible,
+    ).toBe(true)
+    expect(
+      evaluateResearchEligibility({
+        evaluatedAt: new Date("2026-08-25T14:05:00.000Z"),
+        session: regularSession,
+        premarketStartEt: "08:00",
+        tradeIntentWindow: started.tradeIntentWindow!,
+      }).tradeIntentEligible,
+    ).toBe(false)
+  })
+
+  it("does not open a new trade-intent window later in the same cycle", () => {
+    expect(
+      evaluateResearchEligibility({
+        evaluatedAt: new Date("2026-08-25T14:15:00.000Z"),
+        session: regularSession,
+        premarketStartEt: "08:00",
+        tradeIntentWindow: null,
+      }).tradeIntentEligible,
+    ).toBe(false)
   })
 
   it("uses early close when it is earlier than the configured entry cutoff", () => {

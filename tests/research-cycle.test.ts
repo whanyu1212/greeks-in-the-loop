@@ -24,6 +24,8 @@ const noAction = {
   reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
 } as const
 
+const previousSessionDates = ["2026-08-21", "2026-08-24"] as const
+
 const proposal = {
   contractVersion: "1.0.0",
   strategyVersion: "1.0.0",
@@ -228,6 +230,7 @@ const setup = () => {
     sessionDate: "2026-08-25",
     researchEligible: true,
     tradeIntentEligible: true,
+    previousSessionDates,
   }))
   const deriveIntent = vi.fn<
     (
@@ -263,6 +266,7 @@ const setup = () => {
   }))
 
   return {
+    cycleStartedAt: "2026-08-25T11:45:00.000Z",
     outcomes,
     records,
     outcomeSink,
@@ -527,6 +531,80 @@ describe("processResearchCycle", () => {
     expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
   })
 
+  it.each(["2026-08-20", "2026-08-26"])(
+    "rejects open interest dated outside the current or two prior sessions: %s",
+    async (openInterestDate) => {
+      const dependencies = setup()
+      const report = researchReport(proposal)
+      const candidateEvaluation = report.analysis.candidateEvaluation!
+      const result = await processResearchCycle({
+        rawResponse: JSON.stringify({
+          ...report,
+          analysis: {
+            ...report.analysis,
+            candidateEvaluation: {
+              ...candidateEvaluation,
+              legs: [
+                { ...candidateEvaluation.legs[0], openInterestDate },
+                candidateEvaluation.legs[1],
+              ],
+            },
+          },
+        }),
+        signal: new AbortController().signal,
+        ...dependencies,
+      })
+
+      expect(result.outcome).toMatchObject({
+        status: "DECISION_REJECTED",
+        issues: [
+          {
+            code: "CONTEXT_INVALID",
+            path: [
+              "analysis",
+              "candidateEvaluation",
+              "legs",
+              0,
+              "openInterestDate",
+            ],
+          },
+        ],
+      })
+      expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
+    },
+  )
+
+  it("rejects Exa evidence retrieved before the application-owned cycle start", async () => {
+    const dependencies = setup()
+    const report = researchReport(proposal)
+    const result = await processResearchCycle({
+      rawResponse: JSON.stringify({
+        ...report,
+        analysis: {
+          ...report.analysis,
+          externalContext: report.analysis.externalContext.map((item) => ({
+            ...item,
+            publishedAt: "2026-08-25T10:00:00.000Z",
+            retrievedAt: "2026-08-25T11:44:59.999Z",
+          })),
+        },
+      }),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toMatchObject({
+      status: "DECISION_REJECTED",
+      issues: [
+        {
+          code: "CONTEXT_INVALID",
+          path: ["analysis", "externalContext"],
+        },
+      ],
+    })
+    expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
+  })
+
   it("rechecks market-regime freshness after quote confirmation", async () => {
     const dependencies = setup()
     dependencies.confirmQuotes.mockResolvedValue({
@@ -635,12 +713,14 @@ describe("processResearchCycle", () => {
         sessionDate: "2026-08-25",
         researchEligible: true,
         tradeIntentEligible: true,
+        previousSessionDates,
       })
       .mockReturnValueOnce({
         evaluatedAt: "2026-08-25T14:31:00.000Z",
         sessionDate: "2026-08-25",
         researchEligible: true,
         tradeIntentEligible: false,
+        previousSessionDates,
         reason: "OUTSIDE_TRADE_INTENT_WINDOW",
       })
 
@@ -1076,6 +1156,7 @@ describe("processResearchCycle", () => {
 
     const result = await processResearchCycle({
       rawResponse: serializeReport(proposal),
+      cycleStartedAt: dependencies.cycleStartedAt,
       signal: new AbortController().signal,
       quoteProvider: dependencies.quoteProvider,
       outcomeSink: dependencies.outcomeSink,
