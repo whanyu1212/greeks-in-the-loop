@@ -65,14 +65,14 @@ Use the OTLP HTTP/protobuf endpoint for the AX region that stores the traces:
 | EU | `https://otlp.eu-west-1a.arize.com/v1/traces` |
 | CA | `https://otlp.ca-central-1a.arize.com/v1/traces` |
 
-AX's HTTP exporter requires the hyphenated `arize-space-id` and
-`arize-api-key` headers. Configure them through the existing OTel header
+AX's HTTP exporter accepts the API key through `authorization` and the Space ID
+through `arize-space-id`. Configure them through the existing OTel header
 setting; this application does not read `ARIZE_*` convenience variables or use
 an Arize-specific SDK:
 
 ```bash
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://otlp.arize.com/v1/traces
-OTEL_EXPORTER_OTLP_TRACES_HEADERS=arize-space-id=YOUR_SPACE_ID,arize-api-key=YOUR_API_KEY
+OTEL_EXPORTER_OTLP_TRACES_HEADERS=authorization=YOUR_API_KEY,arize-space-id=YOUR_SPACE_ID
 ```
 
 After saving the settings in `.env`, run `pnpm agent:once` and confirm that the
