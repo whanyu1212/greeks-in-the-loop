@@ -68,7 +68,7 @@
 }
 ```
 
-`candidateEvaluation` is required for a proposal and omitted when no candidate was evaluated. A proposal requires an active account, options trading approval, no conflicting strategy exposure, and a `LIVE` market regime observed no more than 60 seconds before application evaluation and rechecked after quote confirmation. It must retain all five market-regime metrics; their documented SMA/VWAP ordering, the signal label, and the diagnostic leg symbols must all match the decision.
+`candidateEvaluation` is required for a proposal and omitted when no candidate was evaluated. A proposal requires active, approved, non-conflicting account checks observed within five minutes of application evaluation and rechecked after quote confirmation. Its `LIVE` market regime must be observed within 60 seconds at both boundaries, retain exactly 50 daily sessions, and report exactly the completed regular-session one-minute intervals implied by the application session date and snapshot instant. All five market-regime metrics and their documented SMA/VWAP ordering must support the signal. Candidate diagnostics share the market snapshot instant, match the decision legs and application-calculated DTE, and satisfy the 14–30 DTE, delta, volume, and open-interest prefilters.
 
 Substantive research requires at least one Exa item with `sourceId`, provider `EXA`, verification `AGENT_REPORTED`, `title`, HTTP(S) `url`, `publishedAt`, `retrievedAt`, `summary`, and `relevance` (`SUPPORTS`, `CONTRADICTS`, or `NEUTRAL`). Optional FMP items use provider `FMP`, `dataset`, `observedAt`, and the shared retrieval, summary, and relevance fields. FMP cannot satisfy the Exa requirement.
 

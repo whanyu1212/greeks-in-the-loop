@@ -239,6 +239,20 @@ export const researchReportV2Schema = z
         message: "A proposal requires a live market regime",
       })
     }
+    if (report.analysis.marketRegime.dailySessionCount !== 50) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["analysis", "marketRegime", "dailySessionCount"],
+        message: "A proposal requires exactly 50 completed daily sessions",
+      })
+    }
+    if (report.analysis.marketRegime.intradayBarCount === 0) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["analysis", "marketRegime", "intradayBarCount"],
+        message: "A proposal requires completed intraday bars",
+      })
+    }
     for (const metric of [
       "dailyClose",
       "sma20",
@@ -295,6 +309,20 @@ export const researchReportV2Schema = z
       })
       return
     }
+    if (evaluation.observedAt !== report.analysis.marketRegime.observedAt) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["analysis", "candidateEvaluation", "observedAt"],
+        message: "Candidate diagnostics must share the market snapshot instant",
+      })
+    }
+    if (evaluation.dte < 14 || evaluation.dte > 30) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["analysis", "candidateEvaluation", "dte"],
+        message: "A proposal requires 14 to 30 calendar days to expiration",
+      })
+    }
     const expectedSymbols = new Map([
       ["LONG", report.result.candidate.longLeg.contractSymbol],
       ["SHORT", report.result.candidate.shortLeg.contractSymbol],
@@ -305,6 +333,32 @@ export const researchReportV2Schema = z
           code: "custom",
           path: ["analysis", "candidateEvaluation", "legs", index, "contractSymbol"],
           message: "Candidate diagnostics must match the proposed legs",
+        })
+      }
+      const absoluteDelta = Math.abs(leg.delta)
+      const deltaEligible =
+        leg.role === "LONG"
+          ? absoluteDelta >= 0.45 && absoluteDelta <= 0.6
+          : absoluteDelta >= 0.2 && absoluteDelta <= 0.35
+      if (!deltaEligible) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["analysis", "candidateEvaluation", "legs", index, "delta"],
+          message: "Candidate delta is outside the strategy prefilter",
+        })
+      }
+      if (leg.volume < 100) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["analysis", "candidateEvaluation", "legs", index, "volume"],
+          message: "Candidate volume is below the strategy prefilter",
+        })
+      }
+      if (leg.openInterest < 500) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["analysis", "candidateEvaluation", "legs", index, "openInterest"],
+          message: "Candidate open interest is below the strategy prefilter",
         })
       }
     })

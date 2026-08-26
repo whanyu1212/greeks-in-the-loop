@@ -16,7 +16,10 @@ import { MAX_LEDGER_EVENT_PAYLOAD_BYTES } from "../event-ledger/ledger-event-v1.
 import type {
   OptionQuoteProvider,
 } from "../market-data/alpaca-option-quotes.js"
-import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
+import {
+  newYorkLocalTime,
+  type ResearchEligibilityV1,
+} from "../scheduling/research-eligibility.js"
 import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
   type ResearchCycleOutcomeSink,
@@ -29,6 +32,7 @@ export const PROPOSAL_QUOTE_SNAPSHOT_REF =
 export const MAX_RESEARCH_RESPONSE_BYTES = 64 * 1024
 const MAX_TERMINAL_REJECTION_DETAILS = 64
 const MAX_PROPOSAL_MARKET_REGIME_AGE_MS = 60_000
+const MAX_PROPOSAL_ACCOUNT_CHECK_AGE_MS = 5 * 60_000
 
 // This context validates proposal evidence topology and restricts every sourced
 // fact to the application-owned quote alias before any provider request. Real
@@ -74,19 +78,75 @@ const schemaIssues = (
     ),
   }))
 
+const observationIsFresh = (
+  observedAt: string,
+  evaluatedAt: string,
+  maximumAgeMs: number,
+) => {
+  const evaluationTime = Date.parse(evaluatedAt)
+  const observationTime = Date.parse(observedAt)
+  const age = evaluationTime - observationTime
+  return (
+    Number.isFinite(evaluationTime) &&
+    Number.isFinite(observationTime) &&
+    age >= 0 &&
+    age <= maximumAgeMs
+  )
+}
+
 const proposalMarketRegimeIsFresh = (
   report: ResearchReportV2,
   evaluatedAt: string,
-) => {
-  const evaluationTime = Date.parse(evaluatedAt)
-  const observedAt = Date.parse(report.analysis.marketRegime.observedAt)
-  const age = evaluationTime - observedAt
-  return (
-    Number.isFinite(evaluationTime) &&
-    Number.isFinite(observedAt) &&
-    age >= 0 &&
-    age <= MAX_PROPOSAL_MARKET_REGIME_AGE_MS
+) =>
+  observationIsFresh(
+    report.analysis.marketRegime.observedAt,
+    evaluatedAt,
+    MAX_PROPOSAL_MARKET_REGIME_AGE_MS,
   )
+
+const proposalAccountChecksAreFresh = (
+  report: ResearchReportV2,
+  evaluatedAt: string,
+) =>
+  observationIsFresh(
+    report.analysis.accountChecks.observedAt,
+    evaluatedAt,
+    MAX_PROPOSAL_ACCOUNT_CHECK_AGE_MS,
+  )
+
+const proposalHistoryIssuePath = (
+  report: ResearchReportV2,
+  eligibility: ResearchEligibilityV1,
+): readonly (string | number)[] | undefined => {
+  const sessionDate = eligibility.sessionDate
+  if (sessionDate === undefined) return ["analysis", "marketRegime", "observedAt"]
+
+  const observedAt = Date.parse(report.analysis.marketRegime.observedAt)
+  const sessionOpen = newYorkLocalTime(sessionDate, "09:30").getTime()
+  const expectedIntradayBars = Math.floor((observedAt - sessionOpen) / 60_000)
+  if (
+    !Number.isFinite(observedAt) ||
+    expectedIntradayBars <= 0 ||
+    report.analysis.marketRegime.intradayBarCount !== expectedIntradayBars
+  ) {
+    return ["analysis", "marketRegime", "intradayBarCount"]
+  }
+
+  if (report.analysis.candidateEvaluation === undefined) {
+    return ["analysis", "candidateEvaluation"]
+  }
+  const sessionDay = Date.parse(`${sessionDate}T00:00:00.000Z`)
+  const expirationDay = Date.parse(`${report.result.outcome === "PROPOSE_TRADE"
+    ? report.result.candidate.expiration
+    : sessionDate}T00:00:00.000Z`)
+  const expectedDte = (expirationDay - sessionDay) / 86_400_000
+  if (
+    !Number.isInteger(expectedDte) ||
+    report.analysis.candidateEvaluation.dte !== expectedDte
+  ) {
+    return ["analysis", "candidateEvaluation", "dte"]
+  }
+  return undefined
 }
 
 const boundTerminalOutcome = (
@@ -357,6 +417,29 @@ export async function processResearchCycle({
       ],
     })
   }
+  if (!proposalAccountChecksAreFresh(researchReport, proposalEligibility.evaluatedAt)) {
+    return recordReportOutcome({
+      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+      status: "DECISION_REJECTED",
+      issues: [
+        {
+          code: "CONTEXT_INVALID",
+          path: ["analysis", "accountChecks", "observedAt"],
+        },
+      ],
+    })
+  }
+  const historyIssuePath = proposalHistoryIssuePath(
+    researchReport,
+    proposalEligibility,
+  )
+  if (historyIssuePath !== undefined) {
+    return recordReportOutcome({
+      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+      status: "DECISION_REJECTED",
+      issues: [{ code: "CONTEXT_INVALID", path: historyIssuePath }],
+    })
+  }
 
   signal.throwIfAborted()
   const quoteConfirmation = await quoteProvider.confirmQuotes({
@@ -398,6 +481,26 @@ export async function processResearchCycle({
           {
             code: "CONTEXT_INVALID",
             path: ["analysis", "marketRegime", "observedAt"],
+          },
+        ],
+      },
+      { evidenceSnapshots },
+    )
+  }
+  if (
+    !proposalAccountChecksAreFresh(
+      researchReport,
+      quoteConfirmation.snapshot.evaluatedAt,
+    )
+  ) {
+    return recordReportOutcome(
+      {
+        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+        status: "DECISION_REJECTED",
+        issues: [
+          {
+            code: "CONTEXT_INVALID",
+            path: ["analysis", "accountChecks", "observedAt"],
           },
         ],
       },

@@ -394,6 +394,10 @@ describe("processResearchCycle", () => {
             ...report.analysis.marketRegime,
             observedAt: "2026-08-25T13:00:00.000Z",
           },
+          candidateEvaluation: {
+            ...report.analysis.candidateEvaluation,
+            observedAt: "2026-08-25T13:00:00.000Z",
+          },
         },
       }),
       signal: new AbortController().signal,
@@ -411,6 +415,116 @@ describe("processResearchCycle", () => {
     })
     expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+  })
+
+  it("rejects stale proposal account checks", async () => {
+    const dependencies = setup()
+    const report = researchReport(proposal)
+    const result = await processResearchCycle({
+      rawResponse: JSON.stringify({
+        ...report,
+        analysis: {
+          ...report.analysis,
+          accountChecks: {
+            ...report.analysis.accountChecks,
+            observedAt: "2026-08-25T13:00:00.000Z",
+          },
+        },
+      }),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toMatchObject({
+      status: "DECISION_REJECTED",
+      issues: [
+        {
+          code: "CONTEXT_INVALID",
+          path: ["analysis", "accountChecks", "observedAt"],
+        },
+      ],
+    })
+    expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
+  })
+
+  it("requires complete daily and intraday histories for proposals", async () => {
+    const report = researchReport(proposal)
+    for (const marketRegime of [
+      { ...report.analysis.marketRegime, dailySessionCount: 49 },
+      { ...report.analysis.marketRegime, intradayBarCount: 59 },
+    ]) {
+      const dependencies = setup()
+      const result = await processResearchCycle({
+        rawResponse: JSON.stringify({
+          ...report,
+          analysis: { ...report.analysis, marketRegime },
+        }),
+        signal: new AbortController().signal,
+        ...dependencies,
+      })
+
+      expect(result.outcome.status).toBe("DECISION_REJECTED")
+      expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
+    }
+  })
+
+  it("requires candidate DTE, delta, volume, and open-interest prefilters", async () => {
+    const report = researchReport(proposal)
+    const evaluation = report.analysis.candidateEvaluation!
+    const longLeg = evaluation.legs[0]
+    const shortLeg = evaluation.legs[1]
+    const invalidEvaluations = [
+      { ...evaluation, dte: 13 },
+      { ...evaluation, legs: [{ ...longLeg, delta: 0.44 }, shortLeg] },
+      { ...evaluation, legs: [longLeg, { ...shortLeg, delta: 0.36 }] },
+      { ...evaluation, legs: [{ ...longLeg, volume: 99 }, shortLeg] },
+      { ...evaluation, legs: [longLeg, { ...shortLeg, openInterest: 499 }] },
+    ]
+
+    for (const candidateEvaluation of invalidEvaluations) {
+      const dependencies = setup()
+      const result = await processResearchCycle({
+        rawResponse: JSON.stringify({
+          ...report,
+          analysis: { ...report.analysis, candidateEvaluation },
+        }),
+        signal: new AbortController().signal,
+        ...dependencies,
+      })
+
+      expect(result.outcome.status).toBe("DECISION_REJECTED")
+      expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
+    }
+  })
+
+  it("verifies retained DTE against the application session date", async () => {
+    const dependencies = setup()
+    const report = researchReport(proposal)
+    const result = await processResearchCycle({
+      rawResponse: JSON.stringify({
+        ...report,
+        analysis: {
+          ...report.analysis,
+          candidateEvaluation: {
+            ...report.analysis.candidateEvaluation,
+            dte: 20,
+          },
+        },
+      }),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toMatchObject({
+      status: "DECISION_REJECTED",
+      issues: [
+        {
+          code: "CONTEXT_INVALID",
+          path: ["analysis", "candidateEvaluation", "dte"],
+        },
+      ],
+    })
+    expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
   })
 
   it("rechecks market-regime freshness after quote confirmation", async () => {
