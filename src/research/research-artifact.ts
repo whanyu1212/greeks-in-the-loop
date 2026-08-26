@@ -9,7 +9,10 @@ import type { ResearchReportV2 } from "../contracts/research-report-v2.js"
 import type { TradeIntentV1 } from "../contracts/trade-intent-v1.js"
 import type { StoredLedgerEventV1 } from "../event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
-import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
+import {
+  newYorkDate,
+  type ResearchEligibilityV1,
+} from "../scheduling/research-eligibility.js"
 
 export const RESEARCH_RUN_VERSION = "1.0.0" as const
 export const DEFAULT_RESEARCH_ARTIFACT_ROOT = "workspace/research" as const
@@ -56,7 +59,7 @@ export type ResearchRunV1 = Readonly<{
     sessionId: string
     startedAt: string
     completedAt: string
-    sessionDate?: string
+    sessionDate: string
   }>
   initialEligibility?: ResearchEligibilityV1
   evidenceSnapshots: readonly Readonly<{
@@ -192,7 +195,8 @@ export function projectResearchRunV1(
       sessionId,
       startedAt: start.occurredAt,
       completedAt: completed.occurredAt,
-      ...(start.payload.sessionDate === undefined ? {} : { sessionDate: start.payload.sessionDate }),
+      sessionDate:
+        start.payload.sessionDate ?? newYorkDate(new Date(start.occurredAt)),
     },
     ...(start.payload.initialEligibility === undefined ? {} : { initialEligibility: start.payload.initialEligibility }),
     evidenceSnapshots: events

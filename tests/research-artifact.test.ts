@@ -90,6 +90,20 @@ describe("research cycle artifact", () => {
         terminalEventId: "event-completed",
       },
     })
+
+    const [start, ...remainingEvents] = events
+    if (start?.eventType !== "RESEARCH_CYCLE_STARTED") {
+      throw new Error("Expected a cycle-start fixture")
+    }
+    const legacyRun = projectResearchRunV1([
+      {
+        ...start,
+        payload: { cycleNumber: start.payload.cycleNumber },
+      },
+      ...remainingEvents,
+    ])
+    expect(legacyRun.cycle.sessionDate).toBe("2026-08-26")
+    expect(legacyRun.initialEligibility).toBeUndefined()
   })
 
   it("writes the full validated outcome to a unique inspection-only JSON file", async () => {
