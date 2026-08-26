@@ -27,7 +27,10 @@ import {
   buildResearchCyclePrompt,
   RESEARCH_AGENT_NAME,
 } from "./research/research-agent.js"
-import { writeResearchCycleArtifact } from "./research/research-artifact.js"
+import {
+  loadResearchRunV1,
+  writeResearchRunArtifact,
+} from "./research/research-artifact.js"
 import {
   loadResearchContextV1,
   reconstructResearchContextV1,
@@ -294,6 +297,8 @@ try {
           cycle = await lifecycleRecorder.startCycle({
             sessionId,
             cycleNumber,
+            sessionDate,
+            initialEligibility,
             signal: abortController.signal,
           })
         } catch (error) {
@@ -381,15 +386,8 @@ try {
             },
           })
           try {
-            const artifactPath = await writeResearchCycleArtifact({
-              cycleId: cycle.cycleId,
-              cycleNumber,
-              sessionDate,
-              outcome: processed.outcome,
-              ...(processed.researchReport === undefined
-                ? {}
-                : { researchReport: processed.researchReport }),
-            })
+            const run = await loadResearchRunV1(ledgerStore, cycle.cycleId)
+            const artifactPath = await writeResearchRunArtifact({ run })
             return `${processed.report}\nResearch artifact: ${artifactPath}`
           } catch {
             console.error(

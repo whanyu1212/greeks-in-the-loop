@@ -368,6 +368,37 @@ describe("createResearchLifecycleRecorder", () => {
     ])
   })
 
+  it("records the session date and initial eligibility with a new cycle", async () => {
+    const state = setup()
+    await state.recorder.startCycle({
+      sessionId: "session-1",
+      cycleNumber: 7,
+      sessionDate: "2026-08-26",
+      initialEligibility: {
+        evaluatedAt: TIMESTAMP,
+        sessionDate: "2026-08-26",
+        researchEligible: true,
+        tradeIntentEligible: false,
+        previousSessionDates: ["2026-08-25"],
+        reason: "OUTSIDE_TRADE_INTENT_WINDOW",
+      },
+      signal,
+    })
+
+    expect(state.events[0]).toMatchObject({
+      eventType: "RESEARCH_CYCLE_STARTED",
+      payload: {
+        cycleNumber: 7,
+        sessionDate: "2026-08-26",
+        initialEligibility: {
+          evaluatedAt: TIMESTAMP,
+          researchEligible: true,
+          previousSessionDates: ["2026-08-25"],
+        },
+      },
+    })
+  })
+
   it.each(terminalMappingCases)(
     "maps $name to one atomic causal batch",
     async ({ record, eventTypes }) => {

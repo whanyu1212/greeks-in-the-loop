@@ -1,3 +1,5 @@
+import { z } from "zod"
+
 export const DEFAULT_PREMARKET_RESEARCH_START_ET = "08:00" as const
 
 export type MarketSessionV1 = Readonly<{
@@ -7,19 +9,50 @@ export type MarketSessionV1 = Readonly<{
   previousSessionDates?: readonly string[]
 }>
 
+const eligibilityTimestamp = z.iso.datetime({ offset: true, precision: 3 })
+
+export const tradeIntentWindowV1Schema = z
+  .object({
+    slotStartedAt: eligibilityTimestamp,
+    deadline: eligibilityTimestamp,
+  })
+  .strict()
+
 export type TradeIntentWindowV1 = Readonly<{
   slotStartedAt: string
   deadline: string
 }>
 
+export const researchEligibilityV1Schema = z
+  .object({
+    evaluatedAt: eligibilityTimestamp,
+    sessionDate: z.iso.date().optional(),
+    researchEligible: z.boolean(),
+    tradeIntentEligible: z.boolean(),
+    tradeIntentWindow: tradeIntentWindowV1Schema.optional(),
+    previousSessionDates: z.array(z.iso.date()).max(16).optional(),
+    reason: z
+      .enum([
+        "NO_MARKET_SESSION",
+        "OUTSIDE_RESEARCH_WINDOW",
+        "OUTSIDE_TRADE_INTENT_WINDOW",
+      ])
+      .optional(),
+  })
+  .strict()
+
 export type ResearchEligibilityV1 = Readonly<{
   evaluatedAt: string
-  sessionDate?: string
+  sessionDate?: string | undefined
   researchEligible: boolean
   tradeIntentEligible: boolean
-  tradeIntentWindow?: TradeIntentWindowV1
-  previousSessionDates?: readonly string[]
-  reason?: "NO_MARKET_SESSION" | "OUTSIDE_RESEARCH_WINDOW" | "OUTSIDE_TRADE_INTENT_WINDOW"
+  tradeIntentWindow?: TradeIntentWindowV1 | undefined
+  previousSessionDates?: readonly string[] | undefined
+  reason?:
+    | "NO_MARKET_SESSION"
+    | "OUTSIDE_RESEARCH_WINDOW"
+    | "OUTSIDE_TRADE_INTENT_WINDOW"
+    | undefined
 }>
 
 export type EvaluateResearchEligibilityOptions = Readonly<{

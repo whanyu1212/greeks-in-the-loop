@@ -4,6 +4,7 @@ import { researchDecisionV1Schema } from "../contracts/research-decision-v1.js"
 import { preliminaryResearchV1Schema } from "../contracts/preliminary-research-v1.js"
 import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
 import { researchReportV2Schema } from "../contracts/research-report-v2.js"
+import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
 
 export const LEDGER_EVENT_VERSION = "1.0.0" as const
 export const MAX_LEDGER_EVENT_PAYLOAD_BYTES = 64 * 1024
@@ -44,8 +45,33 @@ const payloadSchemas = {
   RESEARCH_CYCLE_STARTED: z
     .object({
       cycleNumber: z.number().int().positive(),
+      sessionDate: z.iso.date().optional(),
+      initialEligibility: researchEligibilityV1Schema.optional(),
     })
-    .strict(),
+    .strict()
+    .superRefine((payload, refinement) => {
+      if (
+        (payload.sessionDate === undefined) !==
+        (payload.initialEligibility === undefined)
+      ) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["initialEligibility"],
+          message: "Cycle context must be recorded together",
+        })
+      }
+      if (
+        payload.initialEligibility !== undefined &&
+        (payload.initialEligibility.sessionDate !== payload.sessionDate ||
+          !payload.initialEligibility.researchEligible)
+      ) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["initialEligibility"],
+          message: "Cycle eligibility must match its eligible session",
+        })
+      }
+    }),
   EVIDENCE_SNAPSHOT_REFERENCED: z
     .object({
       snapshotRef: identifier,
