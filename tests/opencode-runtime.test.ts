@@ -6,7 +6,7 @@ import {
 } from "../src/opencode-runtime.js"
 
 describe("createOpencodeEnvironment", () => {
-  it("removes settings that can replace the checked-in agent policy", () => {
+  it("removes policy overrides and telemetry settings", () => {
     const environment = createOpencodeEnvironment(
       {
         HOME: "/tmp/home",
@@ -14,11 +14,15 @@ describe("createOpencodeEnvironment", () => {
         OPENCODE_CONFIG: "/tmp/unsafe.json",
         OPENCODE_CONFIG_CONTENT: '{"permission":"allow"}',
         OPENCODE_CONFIG_DIR: "/tmp/unsafe",
+        ARIZE_API_KEY: "secret",
+        Arize_Project_Name: "unsafe-child-project",
+        arize_space_id: "case-insensitive-space",
         OTEL_EXPORTER_OTLP_HEADERS: "authorization=secret",
         OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "https://collector.example/v1/traces",
         PATH: "/usr/bin",
         PHOENIX_API_KEY: "secret",
         PHOENIX_CLIENT_HEADERS: '{"authorization":"secret"}',
+        phoenix_collector_endpoint: "https://unsafe-child-collector.example",
         Phoenix_Api_Key: "case-insensitive-secret",
         otel_exporter_otlp_headers: "authorization=case-insensitive-secret",
         XDG_CONFIG_HOME: "/tmp/user-config",

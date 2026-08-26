@@ -97,6 +97,7 @@ describe("startResearchTelemetry", () => {
     expect(createSdk).toHaveBeenCalledWith({
       url: "https://traces.example/custom",
       headers: { authorization: "Bearer token", "x-tenant": "team" },
+      projectName: "greeks-in-the-loop",
       timeoutMillis: 5_000,
     })
     expect(start).toHaveBeenCalledOnce()
@@ -121,6 +122,7 @@ describe("startResearchTelemetry", () => {
     expect(createSdk).toHaveBeenCalledWith({
       url: "https://generic.example/otel/v1/traces",
       headers: { authorization: "Bearer generic" },
+      projectName: "greeks-in-the-loop",
       timeoutMillis: 1_234,
     })
   })

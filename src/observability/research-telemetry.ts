@@ -6,13 +6,16 @@ import {
   type Tracer,
 } from "@opentelemetry/api"
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto"
+import { resourceFromAttributes } from "@opentelemetry/resources"
 import { NodeSDK } from "@opentelemetry/sdk-node"
 import {
   OpenInferenceSpanKind,
+  SEMRESATTRS_PROJECT_NAME,
   SemanticConventions,
 } from "@arizeai/openinference-semantic-conventions"
 
 const SERVICE_NAME = "greeks-in-the-loop"
+const PROJECT_NAME = SERVICE_NAME
 const DEFAULT_EXPORT_TIMEOUT_MS = 2_000
 const MAX_EXPORT_TIMEOUT_MS = 5_000
 const MAX_ENDPOINT_LENGTH = 2_048
@@ -102,6 +105,7 @@ export type ResearchTelemetryDependencies = Readonly<{
   createSdk?: (config: Readonly<{
     url: string
     headers: Record<string, string>
+    projectName: string
     timeoutMillis: number
   }>) => TelemetrySdk
   getTracer?: () => Tracer
@@ -201,13 +205,16 @@ const resolveTimeout = (settings: ResearchTelemetrySettings) => {
 }
 
 const defaultCreateSdk: NonNullable<ResearchTelemetryDependencies["createSdk"]> =
-  ({ url, headers, timeoutMillis }) => {
+  ({ url, headers, projectName, timeoutMillis }) => {
     const exporter = new OTLPTraceExporter({ url, headers, timeoutMillis })
     return new NodeSDK({
       autoDetectResources: false,
       instrumentations: [],
       logRecordProcessors: [],
       metricReaders: [],
+      resource: resourceFromAttributes({
+        [SEMRESATTRS_PROJECT_NAME]: projectName,
+      }),
       serviceName: SERVICE_NAME,
       spanLimits: {
         attributeCountLimit: 24,
@@ -253,7 +260,12 @@ export function startResearchTelemetry(
   const createSdk = dependencies.createSdk ?? defaultCreateSdk
   let sdk: TelemetrySdk
   try {
-    sdk = createSdk({ url, headers, timeoutMillis })
+    sdk = createSdk({
+      url,
+      headers,
+      projectName: PROJECT_NAME,
+      timeoutMillis,
+    })
     sdk.start()
   } catch {
     warn("OpenTelemetry tracing could not be started; continuing without tracing")
