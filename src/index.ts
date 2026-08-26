@@ -212,9 +212,13 @@ try {
       signal: abortController.signal,
       runCycle: async (attempt) => {
         const eligibilityEvaluatedAt = new Date()
+        const calendarSignal = AbortSignal.any([
+          abortController.signal,
+          AbortSignal.timeout(cycleTimeoutMs),
+        ])
         const session = await calendar.getSession(
           newYorkDate(eligibilityEvaluatedAt),
-          abortController.signal,
+          calendarSignal,
         )
         const getEligibility = () =>
           evaluateResearchEligibility({
