@@ -81,4 +81,25 @@ describe("runAgentLoop", () => {
     expect(cycles).toBe(1)
     expect(runCycle).toHaveBeenCalledOnce()
   })
+
+  it("propagates a fatal cycle failure without retrying", async () => {
+    const fatal = new Error("ledger unavailable")
+    const runCycle = vi.fn(async () => {
+      throw fatal
+    })
+    const onError = vi.fn()
+
+    await expect(
+      runAgentLoop({
+        intervalMs: 1,
+        maxCycles: 10,
+        signal: new AbortController().signal,
+        runCycle,
+        onError,
+        isFatalError: (error) => error === fatal,
+      }),
+    ).rejects.toBe(fatal)
+    expect(runCycle).toHaveBeenCalledOnce()
+    expect(onError).not.toHaveBeenCalled()
+  })
 })

@@ -6,8 +6,10 @@ import {
   researchDecisionV1Schema,
   validateResearchDecisionV1,
   type ProposedTradeDecisionV1,
+  type ResearchDecisionV1,
   type ResearchDecisionValidationIssue,
 } from "../contracts/research-decision-v1.js"
+import { MAX_LEDGER_EVENT_PAYLOAD_BYTES } from "../event-ledger/ledger-event-v1.js"
 import type {
   OptionQuoteProvider,
 } from "../market-data/alpaca-option-quotes.js"
@@ -15,11 +17,13 @@ import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
   type ResearchCycleOutcomeSink,
   type ResearchCycleOutcomeV1,
+  type ResearchCycleTerminalRecordV1,
 } from "./research-cycle-outcome-v1.js"
 
 export const PROPOSAL_QUOTE_SNAPSHOT_REF =
   "alpaca-proposal-quotes-v1" as const
 export const MAX_RESEARCH_RESPONSE_BYTES = 64 * 1024
+const MAX_TERMINAL_REJECTION_DETAILS = 64
 
 // This context validates proposal evidence topology and restricts every sourced
 // fact to the application-owned quote alias before any provider request. Real
@@ -63,6 +67,29 @@ const schemaIssues = (
     ),
   }))
 
+const boundTerminalOutcome = (
+  outcome: ResearchCycleOutcomeV1,
+): ResearchCycleOutcomeV1 => {
+  if (outcome.status === "DECISION_REJECTED") {
+    return {
+      ...outcome,
+      issues: outcome.issues.slice(0, MAX_TERMINAL_REJECTION_DETAILS),
+    }
+  }
+  if (outcome.status === "INTENT_DERIVATION_REJECTED") {
+    return {
+      ...outcome,
+      reasons: outcome.reasons.slice(0, MAX_TERMINAL_REJECTION_DETAILS),
+    }
+  }
+  return outcome
+}
+
+type TerminalRecordMetadata = Readonly<{
+  evidenceSnapshots?: ResearchCycleTerminalRecordV1["evidenceSnapshots"]
+  validatedDecision?: ResearchDecisionV1
+}>
+
 /**
  * Records one bounded cycle outcome before returning it to the scheduler.
  *
@@ -74,12 +101,21 @@ const recordOutcome = async (
   outcome: ResearchCycleOutcomeV1,
   sink: ResearchCycleOutcomeSink,
   signal: AbortSignal,
+  metadata: TerminalRecordMetadata = {},
 ): Promise<ProcessedResearchCycle> => {
   signal.throwIfAborted()
-  await sink.record(outcome, signal)
+  const boundedOutcome = boundTerminalOutcome(outcome)
+  const record: ResearchCycleTerminalRecordV1 = {
+    outcome: boundedOutcome,
+    evidenceSnapshots: metadata.evidenceSnapshots ?? [],
+    ...(metadata.validatedDecision === undefined
+      ? {}
+      : { validatedDecision: metadata.validatedDecision }),
+  }
+  await sink.record(record, signal)
   return {
-    outcome,
-    report: `Research cycle outcome: ${outcome.status}`,
+    outcome: boundedOutcome,
+    report: `Research cycle outcome: ${boundedOutcome.status}`,
   }
 }
 
@@ -143,6 +179,23 @@ export async function processResearchCycle({
     )
   }
 
+  if (
+    Buffer.byteLength(
+      JSON.stringify({ decision: parsedDecision.data }),
+      "utf8",
+    ) > MAX_LEDGER_EVENT_PAYLOAD_BYTES
+  ) {
+    return recordOutcome(
+      {
+        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+        status: "DECISION_REJECTED",
+        issues: [{ code: "RESPONSE_TOO_LARGE", path: [] }],
+      },
+      outcomeSink,
+      signal,
+    )
+  }
+
   if (parsedDecision.data.outcome === "NO_ACTION") {
     const validation = validateResearchDecisionV1(parsedDecision.data, {
       evaluatedAt: now().toISOString(),
@@ -168,6 +221,7 @@ export async function processResearchCycle({
       },
       outcomeSink,
       signal,
+      { validatedDecision: validation.data },
     )
   }
 
@@ -209,6 +263,13 @@ export async function processResearchCycle({
     )
   }
 
+  const evidenceSnapshots: ResearchCycleTerminalRecordV1["evidenceSnapshots"] = [
+    {
+      snapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
+      ...quoteConfirmation.snapshot.snapshotMetadata,
+    },
+  ]
+
   const validation = validateResearchDecisionV1(parsedDecision.data, {
     evaluatedAt: quoteConfirmation.snapshot.evaluatedAt,
     snapshots: {
@@ -225,6 +286,7 @@ export async function processResearchCycle({
       },
       outcomeSink,
       signal,
+      { evidenceSnapshots },
     )
   }
   if (validation.data.outcome !== "PROPOSE_TRADE") {
@@ -236,6 +298,7 @@ export async function processResearchCycle({
       },
       outcomeSink,
       signal,
+      { evidenceSnapshots },
     )
   }
 
@@ -254,6 +317,10 @@ export async function processResearchCycle({
       },
       outcomeSink,
       signal,
+      {
+        evidenceSnapshots,
+        validatedDecision: validation.data,
+      },
     )
   }
 
@@ -266,5 +333,9 @@ export async function processResearchCycle({
     },
     outcomeSink,
     signal,
+    {
+      evidenceSnapshots,
+      validatedDecision: validation.data,
+    },
   )
 }

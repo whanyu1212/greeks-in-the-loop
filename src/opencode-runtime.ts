@@ -123,6 +123,7 @@ export async function startOpencode({
   signal,
   timeoutMs,
 }: StartOpencodeOptions): Promise<OpencodeRuntime> {
+  signal.throwIfAborted()
   const configHome = mkdtempSync(join(tmpdir(), "greeks-opencode-"))
   const childEnvironment = createOpencodeEnvironment(
     globalThis.process.env,
@@ -189,6 +190,7 @@ export async function startOpencode({
     process.once("exit", onExit)
     process.once("error", onError)
     signal.addEventListener("abort", onAbort, { once: true })
+    if (signal.aborted) onAbort()
   })
 
   const client = createOpencodeClient({ baseUrl: url, directory: globalThis.process.cwd() })
@@ -226,6 +228,10 @@ export async function startOpencode({
   }
   const onAbort = () => void close()
   signal.addEventListener("abort", onAbort, { once: true })
+  if (signal.aborted) {
+    await close()
+    signal.throwIfAborted()
+  }
 
   return { client, url, close }
 }

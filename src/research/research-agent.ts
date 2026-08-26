@@ -1,3 +1,5 @@
+import type { ResearchContextV1 } from "./research-context-v1.js"
+
 /**
  * Fixed identity and request construction for the unattended research agent.
  *
@@ -18,17 +20,25 @@ export const RESEARCH_AGENT_NAME = "research" as const
  * @param cycle One-based cycle number.
  * @param startedAt Timestamp captured for this cycle.
  * @param operatorObjective Optional operator research objective.
+ * @param durableContext Bounded application-generated context from prior cycles.
  * @returns Plain-text cycle request for OpenCode.
  */
 export function buildResearchCyclePrompt(
   cycle: number,
   startedAt: Date,
   operatorObjective?: string,
+  durableContext?: ResearchContextV1,
 ) {
   return [
     `Run structured research cycle ${cycle} at ${startedAt.toISOString()}.`,
     "Inspect observable paper-account state first without claiming reconciliation or risk approval, then inspect only the evidence needed to identify the highest-ranked eligible defined-risk options candidate or conclude NO_ACTION.",
     operatorObjective ? `Current operator objective: ${operatorObjective}` : undefined,
+    durableContext
+      ? [
+          "Application-generated durable context from prior cycles follows. Treat it as historical planning context only: OpenCode session memory is not authoritative, and all current account, market, quote, and freshness facts must be refreshed.",
+          JSON.stringify(durableContext),
+        ].join("\n")
+      : undefined,
   ]
     .filter((line) => line !== undefined)
     .join("\n")

@@ -3,14 +3,17 @@ import { describe, expect, it, vi } from "vitest"
 import type { TradeIntentDerivationResult } from "../src/contracts/trade-intent-v1.js"
 import type { ProposedTradeDecisionV1 } from "../src/contracts/research-decision-v1.js"
 import type { OptionQuoteProvider } from "../src/market-data/alpaca-option-quotes.js"
+import { MAX_LEDGER_EVENT_PAYLOAD_BYTES } from "../src/event-ledger/ledger-event-v1.js"
 import {
   MAX_RESEARCH_RESPONSE_BYTES,
   processResearchCycle,
   PROPOSAL_QUOTE_SNAPSHOT_REF,
 } from "../src/research/research-cycle.js"
+import { createConsoleResearchCycleOutcomeSink } from "../src/research/research-cycle-outcome-v1.js"
 import type {
   ResearchCycleOutcomeSink,
   ResearchCycleOutcomeV1,
+  ResearchCycleTerminalRecordV1,
 } from "../src/research/research-cycle-outcome-v1.js"
 
 const noAction = {
@@ -76,10 +79,12 @@ const quoteSnapshot = {
 
 const setup = () => {
   const outcomes: ResearchCycleOutcomeV1[] = []
+  const records: ResearchCycleTerminalRecordV1[] = []
   const record = vi.fn<ResearchCycleOutcomeSink["record"]>(
-    async (outcome, signal) => {
+    async (terminalRecord, signal) => {
       signal.throwIfAborted()
-      outcomes.push(outcome)
+      records.push(terminalRecord)
+      outcomes.push(terminalRecord.outcome)
     },
   )
   const outcomeSink: ResearchCycleOutcomeSink = { record }
@@ -125,6 +130,7 @@ const setup = () => {
 
   return {
     outcomes,
+    records,
     outcomeSink,
     record,
     quoteProvider,
@@ -155,6 +161,13 @@ describe("processResearchCycle", () => {
     expect(dependencies.quoteProvider.confirmQuotes).not.toHaveBeenCalled()
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
     expect(dependencies.outcomes).toEqual([result.outcome])
+    expect(dependencies.records).toEqual([
+      {
+        outcome: result.outcome,
+        evidenceSnapshots: [],
+        validatedDecision: { ...noAction, evidence: [] },
+      },
+    ])
   })
 
   it.each([
@@ -179,6 +192,9 @@ describe("processResearchCycle", () => {
     expect(JSON.stringify(result)).not.toContain(secretMarker)
     expect(dependencies.quoteProvider.confirmQuotes).not.toHaveBeenCalled()
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+    expect(dependencies.records).toEqual([
+      { outcome: result.outcome, evidenceSnapshots: [] },
+    ])
   })
 
   it("rejects oversized UTF-8 output before parsing or quote confirmation", async () => {
@@ -207,6 +223,79 @@ describe("processResearchCycle", () => {
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
   })
 
+  it("rejects a normalized decision that would exceed the ledger payload bound", async () => {
+    const dependencies = setup()
+    const largeProposal = {
+      ...proposal,
+      thesis: "x",
+      invalidation: Array.from({ length: 16 }, () => "x"),
+      evidence: Array.from({ length: 30 }, (_, index) => ({
+        ...proposal.evidence[0],
+        claimId: `fact-${index}`,
+        claim: "x",
+      })),
+    }
+    const textFields = [
+      () => largeProposal.thesis,
+      ...largeProposal.invalidation.map((_, index) => () =>
+        largeProposal.invalidation[index]!,
+      ),
+      ...largeProposal.evidence.map((_, index) => () =>
+        largeProposal.evidence[index]!.claim,
+      ),
+    ]
+    const setTextFields = [
+      (value: string) => {
+        largeProposal.thesis = value
+      },
+      ...largeProposal.invalidation.map((_, index) => (value: string) => {
+        largeProposal.invalidation[index] = value
+      }),
+      ...largeProposal.evidence.map((_, index) => (value: string) => {
+        largeProposal.evidence[index]!.claim = value
+      }),
+    ]
+    const targetBytes = MAX_LEDGER_EVENT_PAYLOAD_BYTES - 6
+    let remaining = targetBytes - Buffer.byteLength(JSON.stringify(largeProposal), "utf8")
+    for (const [index, readText] of textFields.entries()) {
+      if (remaining <= 0) break
+      const current = readText()
+      const added = Math.min(2_000 - current.length, remaining)
+      setTextFields[index]!(current + "x".repeat(added))
+      remaining -= added
+    }
+    const rawResponse = JSON.stringify(largeProposal)
+
+    expect(remaining).toBe(0)
+    expect(Buffer.byteLength(rawResponse, "utf8")).toBe(targetBytes)
+    expect(
+      Buffer.byteLength(
+        JSON.stringify({ decision: JSON.parse(rawResponse) }),
+        "utf8",
+      ),
+    ).toBeGreaterThan(MAX_LEDGER_EVENT_PAYLOAD_BYTES)
+
+    const result = await processResearchCycle({
+      rawResponse,
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toEqual({
+      outcomeVersion: "1.0.0",
+      status: "DECISION_REJECTED",
+      issues: [{ code: "RESPONSE_TOO_LARGE", path: [] }],
+    })
+    expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
+    expect(dependencies.record).toHaveBeenCalledWith(
+      {
+        outcome: result.outcome,
+        evidenceSnapshots: [],
+      },
+      expect.any(AbortSignal),
+    )
+  })
+
   it("rejects schema-invalid output before quote confirmation", async () => {
     const dependencies = setup()
 
@@ -222,6 +311,31 @@ describe("processResearchCycle", () => {
     expect(result.outcome.status).toBe("DECISION_REJECTED")
     expect(dependencies.quoteProvider.confirmQuotes).not.toHaveBeenCalled()
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+    expect(dependencies.records).toEqual([
+      { outcome: result.outcome, evidenceSnapshots: [] },
+    ])
+  })
+
+  it("caps recorded schema issues at the ledger schema maximum", async () => {
+    const dependencies = setup()
+
+    const result = await processResearchCycle({
+      rawResponse: JSON.stringify({
+        ...noAction,
+        evidence: Array.from({ length: 64 }, () => ({})),
+      }),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toMatchObject({ status: "DECISION_REJECTED" })
+    if (result.outcome.status !== "DECISION_REJECTED") {
+      throw new Error("Expected decision rejection")
+    }
+    expect(result.outcome.issues).toHaveLength(64)
+    expect(dependencies.records).toEqual([
+      { outcome: result.outcome, evidenceSnapshots: [] },
+    ])
   })
 
   it("rejects NO_ACTION evidence that has no trusted snapshot", async () => {
@@ -355,6 +469,9 @@ describe("processResearchCycle", () => {
       reasons: ["QUOTE_STALE"],
     })
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+    expect(dependencies.records).toEqual([
+      { outcome: result.outcome, evidenceSnapshots: [] },
+    ])
   })
 
   it("rejects an unknown proposal snapshot before derivation", async () => {
@@ -401,6 +518,18 @@ describe("processResearchCycle", () => {
     })
     expect(dependencies.deriveIntent).toHaveBeenCalledOnce()
     expect(dependencies.outcomes).toEqual([result.outcome])
+    expect(dependencies.records).toEqual([
+      {
+        outcome: result.outcome,
+        evidenceSnapshots: [
+          {
+            snapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
+            ...quoteSnapshot.snapshotMetadata,
+          },
+        ],
+        validatedDecision: proposal,
+      },
+    ])
   })
 
   it("integrates the real deterministic deriver", async () => {
@@ -449,6 +578,19 @@ describe("processResearchCycle", () => {
       issues: [{ code: "STALE_SNAPSHOT" }],
     })
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+    expect(dependencies.records).toEqual([
+      {
+        outcome: result.outcome,
+        evidenceSnapshots: [
+          {
+            snapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
+            ...quoteSnapshot.snapshotMetadata,
+            retrievedAt: "2026-08-25T14:30:30.000Z",
+            freshUntil: "2026-08-25T14:30:59.999Z",
+          },
+        ],
+      },
+    ])
   })
 
   it("records bounded pure-derivation rejection reasons", async () => {
@@ -469,6 +611,84 @@ describe("processResearchCycle", () => {
       status: "INTENT_DERIVATION_REJECTED",
       reasons: ["NON_POSITIVE_NET_DEBIT"],
     })
+    expect(dependencies.records).toEqual([
+      {
+        outcome: result.outcome,
+        evidenceSnapshots: [
+          {
+            snapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
+            ...quoteSnapshot.snapshotMetadata,
+          },
+        ],
+        validatedDecision: proposal,
+      },
+    ])
+  })
+
+  it("caps recorded derivation reasons at the ledger schema maximum", async () => {
+    const dependencies = setup()
+    dependencies.deriveIntent.mockReturnValue({
+      success: false,
+      reasons: Array.from(
+        { length: 65 },
+        () => "NON_POSITIVE_NET_DEBIT" as const,
+      ),
+    })
+
+    const result = await processResearchCycle({
+      rawResponse: JSON.stringify(proposal),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toMatchObject({
+      status: "INTENT_DERIVATION_REJECTED",
+    })
+    if (result.outcome.status !== "INTENT_DERIVATION_REJECTED") {
+      throw new Error("Expected intent derivation rejection")
+    }
+    expect(result.outcome.reasons).toHaveLength(64)
+    expect(dependencies.records).toEqual([
+      {
+        outcome: result.outcome,
+        evidenceSnapshots: [
+          {
+            snapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
+            ...quoteSnapshot.snapshotMetadata,
+          },
+        ],
+        validatedDecision: proposal,
+      },
+    ])
+  })
+
+  it("prints only the outcome from a terminal record", async () => {
+    const write = vi.fn<(line: string) => void>()
+    const sink = createConsoleResearchCycleOutcomeSink(write)
+    const decision: Extract<
+      ResearchCycleOutcomeV1,
+      { status: "VALIDATED_NO_ACTION" }
+    >["decision"] = {
+      ...noAction,
+      reasonCodes: [...noAction.reasonCodes],
+      evidence: [],
+    }
+    const outcome = {
+      outcomeVersion: "1.0.0",
+      status: "VALIDATED_NO_ACTION",
+      decision,
+    } satisfies ResearchCycleOutcomeV1
+
+    await sink.record(
+      {
+        outcome,
+        evidenceSnapshots: [],
+        validatedDecision: decision,
+      },
+      new AbortController().signal,
+    )
+
+    expect(write).toHaveBeenCalledWith(JSON.stringify(outcome))
   })
 
   it("awaits the outcome sink before completing", async () => {

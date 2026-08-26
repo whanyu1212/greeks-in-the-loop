@@ -4,6 +4,7 @@ import { researchDecisionV1Schema } from "../contracts/research-decision-v1.js"
 import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
 
 export const LEDGER_EVENT_VERSION = "1.0.0" as const
+export const MAX_LEDGER_EVENT_PAYLOAD_BYTES = 64 * 1024
 
 export const LEDGER_EVENT_TYPES = [
   "OPENCODE_SESSION_STARTED",
@@ -100,7 +101,13 @@ const payloadSchemas = {
     .strict(),
   RESEARCH_CYCLE_INTERRUPTED: z
     .object({
-      reason: z.enum(["TIMEOUT", "CANCELLED", "SHUTDOWN", "PROCESS_RESTART"]),
+      reason: z.enum([
+        "TIMEOUT",
+        "CANCELLED",
+        "SHUTDOWN",
+        "PROCESS_RESTART",
+        "FAILED",
+      ]),
     })
     .strict(),
 } as const

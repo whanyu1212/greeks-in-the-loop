@@ -137,7 +137,7 @@ describe("createSqliteLedgerStore", () => {
           correlationId: "correlation-2",
         },
       ),
-    ).rejects.toThrow("causation must reference the same correlation")
+    ).rejects.toThrow("cycle identity must match its cycle start")
 
     await store.close()
   })
@@ -306,11 +306,25 @@ describe("createSqliteLedgerStore", () => {
     ).resolves.toMatchObject([{ eventId: "event-2", sequence: 2 }])
 
     await expect(
+      store.list({ beforeSequence: 3, direction: "DESC", limit: 10 }),
+    ).resolves.toMatchObject([
+      { eventId: "event-2", sequence: 2 },
+      { eventId: "event-1", sequence: 1 },
+    ])
+
+    await expect(
+      store.list({ afterSequence: 1, beforeSequence: 3, limit: 10 }),
+    ).resolves.toMatchObject([{ eventId: "event-2", sequence: 2 }])
+
+    await expect(
       store.list({ sessionId: "ses_other", cycleId: "cycle-2", limit: 10 }),
     ).resolves.toMatchObject([{ eventId: "event-3" }])
 
     await expect(store.list({ limit: 0 })).rejects.toThrow()
     await expect(store.list({ limit: 1_001 })).rejects.toThrow()
+    await expect(
+      store.list({ direction: "DROP TABLE ledger_events" as "ASC", limit: 1 }),
+    ).rejects.toThrow()
 
     await store.close()
   })

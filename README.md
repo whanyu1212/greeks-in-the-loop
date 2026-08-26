@@ -40,7 +40,9 @@ Run continuously at the configured interval:
 pnpm agent
 ```
 
-The worker creates one persistent OpenCode session for its lifetime and shuts down cleanly on `SIGINT` or `SIGTERM`. Every cycle selects the checked-in `research` agent; this identity cannot be overridden through `.env`. Each cycle records exactly one bounded outcome: `VALIDATED_NO_ACTION`, `DECISION_REJECTED`, `INTENT_DERIVATION_REJECTED`, or `INTENT_DERIVED`. The current sink writes JSON lines to standard output; durable storage is deferred to issue #13.
+The worker creates a fresh OpenCode session for every cycle and shuts down cleanly on `SIGINT` or `SIGTERM`. Every cycle selects the checked-in `research` agent; this identity cannot be overridden through `.env`. Each cycle durably records exactly one bounded outcome: `VALIDATED_NO_ACTION`, `DECISION_REJECTED`, `INTENT_DERIVATION_REJECTED`, or `INTENT_DERIVED`.
+
+The append-only SQLite event ledger defaults to `.state/research-ledger.sqlite`; override it with `RESEARCH_LEDGER_PATH` only when the worker retains exclusive write ownership. On startup, incomplete cycles are marked `PROCESS_RESTART`, cycle numbering resumes from durable history, and a bounded context projection is rebuilt for the next prompt. Prior evidence is planning context only and must be refreshed. OpenCode session memory is never authoritative durable state.
 
 ## Research procedure
 

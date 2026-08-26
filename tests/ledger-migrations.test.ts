@@ -7,6 +7,44 @@ import {
   type LedgerMigration,
 } from "../src/event-ledger/migrations.js"
 
+type DirectEvent = Readonly<{
+  eventId: string
+  eventType: string
+  correlationId?: string
+  causationEventId?: string
+  cycleId?: string
+  sessionId?: string
+}>
+
+const insertDirectEvent = (
+  database: Database.Database,
+  {
+    eventId,
+    eventType,
+    correlationId = "correlation-1",
+    causationEventId,
+    cycleId,
+    sessionId = "session-1",
+  }: DirectEvent,
+) =>
+  database
+    .prepare(`
+      INSERT INTO ledger_events (
+        event_id, event_version, event_type, occurred_at, recorded_at,
+        correlation_id, causation_event_id, cycle_id, session_id, payload_json
+      ) VALUES (?, '1.0.0', ?, ?, ?, ?, ?, ?, ?, '{}')
+    `)
+    .run(
+      eventId,
+      eventType,
+      "2026-08-25T14:30:00.000Z",
+      "2026-08-25T14:30:00.000Z",
+      correlationId,
+      causationEventId ?? null,
+      cycleId ?? null,
+      sessionId,
+    )
+
 describe("applyLedgerMigrations", () => {
   it("applies the current schema idempotently", () => {
     const database = new Database(":memory:")
@@ -24,6 +62,10 @@ describe("applyLedgerMigrations", () => {
     expect(migrations).toEqual([
       {
         migration_id: "001_initial_ledger",
+        applied_at: "2026-08-25T14:30:00.000Z",
+      },
+      {
+        migration_id: "002_research_lifecycle_integrity",
         applied_at: "2026-08-25T14:30:00.000Z",
       },
     ])
@@ -47,6 +89,7 @@ describe("applyLedgerMigrations", () => {
         ...LEDGER_MIGRATIONS[0]!,
         sql: `${LEDGER_MIGRATIONS[0]!.sql}\nSELECT 1;`,
       },
+      LEDGER_MIGRATIONS[1]!,
     ]
 
     expect(() => applyLedgerMigrations(database, modified)).toThrow(
@@ -129,5 +172,250 @@ describe("applyLedgerMigrations", () => {
     ).toThrow("Ledger migrations must have unique ascending identifiers")
 
     database.close()
+  })
+})
+
+describe("research lifecycle integrity migration", () => {
+  it("installs partial uniqueness for one start and one terminal per cycle", () => {
+    const database = new Database(":memory:")
+    applyLedgerMigrations(database)
+
+    const indexes = database
+      .prepare(`
+        SELECT name, sql
+        FROM sqlite_master
+        WHERE type = 'index'
+          AND name IN (
+            'ledger_events_one_cycle_start',
+            'ledger_events_one_cycle_terminal'
+          )
+        ORDER BY name
+      `)
+      .all() as { name: string; sql: string }[]
+    expect(indexes).toHaveLength(2)
+    expect(indexes.every(({ sql }) => sql.includes("WHERE event_type"))).toBe(true)
+
+    insertDirectEvent(database, {
+      eventId: "start-1",
+      eventType: "RESEARCH_CYCLE_STARTED",
+      cycleId: "cycle-1",
+    })
+    expect(() =>
+      insertDirectEvent(database, {
+        eventId: "start-2",
+        eventType: "RESEARCH_CYCLE_STARTED",
+        cycleId: "cycle-1",
+      }),
+    ).toThrow("UNIQUE constraint failed: ledger_events.cycle_id")
+
+    insertDirectEvent(database, {
+      eventId: "terminal-1",
+      eventType: "RESEARCH_CYCLE_COMPLETED",
+      causationEventId: "start-1",
+      cycleId: "cycle-1",
+    })
+    expect(() =>
+      insertDirectEvent(database, {
+        eventId: "terminal-2",
+        eventType: "RESEARCH_CYCLE_INTERRUPTED",
+        causationEventId: "start-1",
+        cycleId: "cycle-1",
+      }),
+    ).toThrow("cannot append after a cycle terminal event")
+
+    database.close()
+  })
+
+  it("rejects missing starts and correlation or session identity drift", () => {
+    const database = new Database(":memory:")
+    applyLedgerMigrations(database)
+
+    expect(() =>
+      insertDirectEvent(database, {
+        eventId: "orphan",
+        eventType: "RESEARCH_DECISION_REJECTED",
+        cycleId: "cycle-missing",
+      }),
+    ).toThrow("cycle event requires a cycle start")
+
+    insertDirectEvent(database, {
+      eventId: "start-1",
+      eventType: "RESEARCH_CYCLE_STARTED",
+      cycleId: "cycle-1",
+    })
+    expect(() =>
+      insertDirectEvent(database, {
+        eventId: "drift-correlation",
+        eventType: "RESEARCH_DECISION_REJECTED",
+        correlationId: "correlation-2",
+        cycleId: "cycle-1",
+      }),
+    ).toThrow("cycle identity must match its cycle start")
+    expect(() =>
+      insertDirectEvent(database, {
+        eventId: "drift-session",
+        eventType: "RESEARCH_DECISION_REJECTED",
+        cycleId: "cycle-1",
+        sessionId: "session-2",
+      }),
+    ).toThrow("cycle identity must match its cycle start")
+
+    database.close()
+  })
+
+  it("rejects cross-cycle causation even within one correlation", () => {
+    const database = new Database(":memory:")
+    applyLedgerMigrations(database)
+
+    for (const cycleId of ["cycle-1", "cycle-2"]) {
+      insertDirectEvent(database, {
+        eventId: `start-${cycleId}`,
+        eventType: "RESEARCH_CYCLE_STARTED",
+        cycleId,
+      })
+    }
+    insertDirectEvent(database, {
+      eventId: "cycle-1-evidence",
+      eventType: "EVIDENCE_SNAPSHOT_REFERENCED",
+      causationEventId: "start-cycle-1",
+      cycleId: "cycle-1",
+    })
+
+    expect(() =>
+      insertDirectEvent(database, {
+        eventId: "cycle-2-decision",
+        eventType: "RESEARCH_DECISION_VALIDATED",
+        causationEventId: "cycle-1-evidence",
+        cycleId: "cycle-2",
+      }),
+    ).toThrow("causation must reference the same research cycle")
+
+    insertDirectEvent(database, {
+      eventId: "session-parent",
+      eventType: "OPENCODE_SESSION_STARTED",
+      correlationId: "correlation-1",
+    })
+    expect(() =>
+      insertDirectEvent(database, {
+        eventId: "cycle-2-session-cause",
+        eventType: "RESEARCH_DECISION_VALIDATED",
+        causationEventId: "session-parent",
+        cycleId: "cycle-2",
+      }),
+    ).toThrow("causation must reference the same research cycle")
+
+    database.close()
+  })
+
+  it("rejects every event appended after completion or interruption", () => {
+    const database = new Database(":memory:")
+    applyLedgerMigrations(database)
+
+    for (const [cycleId, terminalType] of [
+      ["cycle-completed", "RESEARCH_CYCLE_COMPLETED"],
+      ["cycle-interrupted", "RESEARCH_CYCLE_INTERRUPTED"],
+    ] as const) {
+      const startId = `start-${cycleId}`
+      insertDirectEvent(database, {
+        eventId: startId,
+        eventType: "RESEARCH_CYCLE_STARTED",
+        cycleId,
+      })
+      insertDirectEvent(database, {
+        eventId: `terminal-${cycleId}`,
+        eventType: terminalType,
+        causationEventId: startId,
+        cycleId,
+      })
+      expect(() =>
+        insertDirectEvent(database, {
+          eventId: `late-${cycleId}`,
+          eventType: "EVIDENCE_SNAPSHOT_REFERENCED",
+          causationEventId: startId,
+          cycleId,
+        }),
+      ).toThrow("cannot append after a cycle terminal event")
+    }
+
+    database.close()
+  })
+
+  it("refuses to certify invalid history when upgrading a populated v1 ledger", () => {
+    const invalidHistories: readonly ((database: Database.Database) => void)[] = [
+      (database) => {
+        insertDirectEvent(database, {
+          eventId: "orphan",
+          eventType: "RESEARCH_DECISION_REJECTED",
+          cycleId: "cycle-orphan",
+        })
+      },
+      (database) => {
+        insertDirectEvent(database, {
+          eventId: "start-drift",
+          eventType: "RESEARCH_CYCLE_STARTED",
+          cycleId: "cycle-drift",
+        })
+        insertDirectEvent(database, {
+          eventId: "event-drift",
+          eventType: "RESEARCH_DECISION_REJECTED",
+          correlationId: "correlation-2",
+          cycleId: "cycle-drift",
+        })
+      },
+      (database) => {
+        insertDirectEvent(database, {
+          eventId: "start-cross-1",
+          eventType: "RESEARCH_CYCLE_STARTED",
+          cycleId: "cycle-cross-1",
+        })
+        insertDirectEvent(database, {
+          eventId: "start-cross-2",
+          eventType: "RESEARCH_CYCLE_STARTED",
+          cycleId: "cycle-cross-2",
+        })
+        insertDirectEvent(database, {
+          eventId: "event-cross",
+          eventType: "RESEARCH_DECISION_REJECTED",
+          causationEventId: "start-cross-1",
+          cycleId: "cycle-cross-2",
+        })
+      },
+      (database) => {
+        insertDirectEvent(database, {
+          eventId: "start-late",
+          eventType: "RESEARCH_CYCLE_STARTED",
+          cycleId: "cycle-late",
+        })
+        insertDirectEvent(database, {
+          eventId: "terminal-late",
+          eventType: "RESEARCH_CYCLE_COMPLETED",
+          causationEventId: "start-late",
+          cycleId: "cycle-late",
+        })
+        insertDirectEvent(database, {
+          eventId: "event-late",
+          eventType: "RESEARCH_DECISION_REJECTED",
+          causationEventId: "terminal-late",
+          cycleId: "cycle-late",
+        })
+      },
+    ]
+
+    for (const populate of invalidHistories) {
+      const database = new Database(":memory:")
+      applyLedgerMigrations(database, LEDGER_MIGRATIONS.slice(0, 1))
+      populate(database)
+
+      expect(() => applyLedgerMigrations(database)).toThrow(
+        "CHECK constraint failed: valid = 1",
+      )
+      expect(
+        database
+          .prepare("SELECT migration_id FROM ledger_migrations ORDER BY migration_id")
+          .pluck()
+          .all(),
+      ).toEqual(["001_initial_ledger"])
+      database.close()
+    }
   })
 })
