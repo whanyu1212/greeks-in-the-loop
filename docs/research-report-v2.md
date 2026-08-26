@@ -68,7 +68,7 @@
 }
 ```
 
-`candidateEvaluation` is required for a proposal and omitted when no candidate was evaluated. A proposal must retain all five market-regime metrics, and its signal and diagnostic leg symbols must match its decision.
+`candidateEvaluation` is required for a proposal and omitted when no candidate was evaluated. A proposal requires an active account, options trading approval, no conflicting strategy exposure, and a `LIVE` market regime. It must retain all five market-regime metrics, and its signal and diagnostic leg symbols must match its decision.
 
 Substantive research requires at least one Exa item with `sourceId`, provider `EXA`, verification `AGENT_REPORTED`, `title`, HTTP(S) `url`, `publishedAt`, `retrievedAt`, `summary`, and `relevance` (`SUPPORTS`, `CONTRADICTS`, or `NEUTRAL`). Optional FMP items use provider `FMP`, `dataset`, `observedAt`, and the shared retrieval, summary, and relevance fields. FMP cannot satisfy the Exa requirement.
 

@@ -117,7 +117,7 @@ If any snapshot-forming input is stale and a read-only refresh is available, dis
    - Put the existing decision or preliminary contract in `result` and the retained normalized dossier in `analysis`.
    - Set all analysis provenance and verification labels to `AGENT_REPORTED`. Include account checks, market-regime values and counts, candidate diagnostics when applicable, Exa citations, optional FMP dataset observations, supporting and contradicting factors, and conflicts.
    - Follow the exact bounded field shape in `docs/research-report-v2.md`. Retained underlying market-regime metrics are allowed; never include model-authored option entry/debit prices, quantity, maximum loss, buying power, exits, approval, order type, time in force, or broker parameters.
-   - For a proposal, include at least one `SOURCED_FACT` with snapshotRef `alpaca-proposal-quotes-v1` for the exact legs.
+   - For a proposal, report an active account, options trading approval, no conflicting strategy exposure, and a `LIVE` market regime. Include at least one `SOURCED_FACT` with snapshotRef `alpaca-proposal-quotes-v1` for the exact legs.
    - Every `INFERENCE.basedOn` entry must reference a sourced-fact `claimId`.
    - When no valid proposal survives, emit `NO_ACTION` with the most specific supported reason code.
    - When research is useful but trade intent is ineligible, emit `PRELIMINARY_RESEARCH` for the supplied session date with `requiresRefresh: true`. Every sourced fact must include its provider, observation timestamp, and temporal class; do not use snapshot references or executable fields in this branch.

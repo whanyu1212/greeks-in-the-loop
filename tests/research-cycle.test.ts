@@ -351,6 +351,64 @@ describe("processResearchCycle", () => {
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
   })
 
+  it("rejects a proposal backed by a non-live market regime", async () => {
+    const dependencies = setup()
+    const report = researchReport(proposal)
+    const result = await processResearchCycle({
+      rawResponse: JSON.stringify({
+        ...report,
+        analysis: {
+          ...report.analysis,
+          marketRegime: {
+            ...report.analysis.marketRegime,
+            temporalClass: "PRIOR_CLOSE",
+          },
+        },
+      }),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toMatchObject({
+      status: "DECISION_REJECTED",
+      issues: [
+        {
+          code: "SCHEMA_INVALID",
+          path: ["analysis", "marketRegime", "temporalClass"],
+        },
+      ],
+    })
+    expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
+    expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { accountStatus: "INACTIVE" },
+    { optionsTradingApproved: false },
+    { conflictingStrategyExposure: true },
+  ])("rejects a proposal with ineligible account checks: %o", async (override) => {
+    const dependencies = setup()
+    const report = researchReport(proposal)
+    const result = await processResearchCycle({
+      rawResponse: JSON.stringify({
+        ...report,
+        analysis: {
+          ...report.analysis,
+          accountChecks: {
+            ...report.analysis.accountChecks,
+            ...override,
+          },
+        },
+      }),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toMatchObject({ status: "DECISION_REJECTED" })
+    expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
+    expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+  })
+
   it("rechecks eligibility after quotes and refuses late intent derivation", async () => {
     const dependencies = setup()
     dependencies.getEligibility

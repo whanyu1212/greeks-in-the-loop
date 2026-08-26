@@ -210,6 +210,35 @@ export const researchReportV2Schema = z
     }
 
     if (report.result.outcome !== "PROPOSE_TRADE") return
+    const accountChecks = report.analysis.accountChecks
+    if (accountChecks.accountStatus !== "ACTIVE") {
+      refinement.addIssue({
+        code: "custom",
+        path: ["analysis", "accountChecks", "accountStatus"],
+        message: "A proposal requires an active account",
+      })
+    }
+    if (!accountChecks.optionsTradingApproved) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["analysis", "accountChecks", "optionsTradingApproved"],
+        message: "A proposal requires options trading approval",
+      })
+    }
+    if (accountChecks.conflictingStrategyExposure) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["analysis", "accountChecks", "conflictingStrategyExposure"],
+        message: "A proposal cannot retain conflicting strategy exposure",
+      })
+    }
+    if (report.analysis.marketRegime.temporalClass !== "LIVE") {
+      refinement.addIssue({
+        code: "custom",
+        path: ["analysis", "marketRegime", "temporalClass"],
+        message: "A proposal requires a live market regime",
+      })
+    }
     for (const metric of [
       "dailyClose",
       "sma20",
