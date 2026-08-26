@@ -261,6 +261,31 @@ export const researchReportV2Schema = z
         message: "The retained market signal must match the proposal direction",
       })
     }
+    const { dailyClose, sma20, sma50, sessionVwap, spotMidpoint } =
+      report.analysis.marketRegime
+    if (
+      dailyClose !== undefined &&
+      sma20 !== undefined &&
+      sma50 !== undefined &&
+      sessionVwap !== undefined &&
+      spotMidpoint !== undefined
+    ) {
+      const metricsSupportDirection =
+        report.result.direction === "BULLISH"
+          ? dailyClose > sma20 &&
+            sma20 > sma50 &&
+            spotMidpoint > sessionVwap
+          : dailyClose < sma20 &&
+            sma20 < sma50 &&
+            spotMidpoint < sessionVwap
+      if (!metricsSupportDirection) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["analysis", "marketRegime", "signal"],
+          message: "The retained metrics must support the proposal direction",
+        })
+      }
+    }
     const evaluation = report.analysis.candidateEvaluation
     if (evaluation === undefined) {
       refinement.addIssue({

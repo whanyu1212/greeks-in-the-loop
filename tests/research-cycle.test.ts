@@ -382,6 +382,110 @@ describe("processResearchCycle", () => {
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
   })
 
+  it("rejects a stale market regime even when it is labeled live", async () => {
+    const dependencies = setup()
+    const report = researchReport(proposal)
+    const result = await processResearchCycle({
+      rawResponse: JSON.stringify({
+        ...report,
+        analysis: {
+          ...report.analysis,
+          marketRegime: {
+            ...report.analysis.marketRegime,
+            observedAt: "2026-08-25T13:00:00.000Z",
+          },
+        },
+      }),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toMatchObject({
+      status: "DECISION_REJECTED",
+      issues: [
+        {
+          code: "CONTEXT_INVALID",
+          path: ["analysis", "marketRegime", "observedAt"],
+        },
+      ],
+    })
+    expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
+    expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+  })
+
+  it("rechecks market-regime freshness after quote confirmation", async () => {
+    const dependencies = setup()
+    dependencies.confirmQuotes.mockResolvedValue({
+      success: true,
+      snapshot: {
+        ...quoteSnapshot,
+        evaluatedAt: "2026-08-25T14:31:31.000Z",
+        snapshotMetadata: {
+          ...quoteSnapshot.snapshotMetadata,
+          retrievedAt: "2026-08-25T14:31:31.000Z",
+          freshUntil: "2026-08-25T14:32:01.000Z",
+        },
+        longQuote: {
+          ...quoteSnapshot.longQuote,
+          providerTimestamp: "2026-08-25T14:31:30.000000000Z",
+        },
+        shortQuote: {
+          ...quoteSnapshot.shortQuote,
+          providerTimestamp: "2026-08-25T14:31:31.000000000Z",
+        },
+      },
+    })
+
+    const result = await processResearchCycle({
+      rawResponse: serializeReport(proposal),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toMatchObject({
+      status: "DECISION_REJECTED",
+      issues: [
+        {
+          code: "CONTEXT_INVALID",
+          path: ["analysis", "marketRegime", "observedAt"],
+        },
+      ],
+    })
+    expect(dependencies.confirmQuotes).toHaveBeenCalledOnce()
+    expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+  })
+
+  it("rejects a proposal whose retained metrics contradict its signal", async () => {
+    const dependencies = setup()
+    const report = researchReport(proposal)
+    const result = await processResearchCycle({
+      rawResponse: JSON.stringify({
+        ...report,
+        analysis: {
+          ...report.analysis,
+          marketRegime: {
+            ...report.analysis.marketRegime,
+            dailyClose: 630,
+          },
+        },
+      }),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toMatchObject({
+      status: "DECISION_REJECTED",
+      issues: [
+        {
+          code: "SCHEMA_INVALID",
+          path: ["analysis", "marketRegime", "signal"],
+        },
+      ],
+    })
+    expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
+    expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+  })
+
   it.each([
     { accountStatus: "INACTIVE" },
     { optionsTradingApproved: false },
@@ -413,13 +517,13 @@ describe("processResearchCycle", () => {
     const dependencies = setup()
     dependencies.getEligibility
       .mockReturnValueOnce({
-        evaluatedAt: "2026-08-25T14:01:59.999Z",
+        evaluatedAt: "2026-08-25T14:30:59.999Z",
         sessionDate: "2026-08-25",
         researchEligible: true,
         tradeIntentEligible: true,
       })
       .mockReturnValueOnce({
-        evaluatedAt: "2026-08-25T14:02:00.000Z",
+        evaluatedAt: "2026-08-25T14:31:00.000Z",
         sessionDate: "2026-08-25",
         researchEligible: true,
         tradeIntentEligible: false,
@@ -1077,21 +1181,21 @@ describe("processResearchCycle", () => {
     const second = setup()
     const secondSnapshot = {
       ...quoteSnapshot,
-      evaluatedAt: "2026-08-25T14:32:00.000Z",
+      evaluatedAt: "2026-08-25T14:31:30.000Z",
       snapshotMetadata: {
         ...quoteSnapshot.snapshotMetadata,
-        retrievedAt: "2026-08-25T14:32:00.000Z",
-        freshUntil: "2026-08-25T14:32:30.000Z",
+        retrievedAt: "2026-08-25T14:31:30.000Z",
+        freshUntil: "2026-08-25T14:32:00.000Z",
       },
       longQuote: {
         ...quoteSnapshot.longQuote,
         contractSymbol: secondProposal.candidate.longLeg.contractSymbol,
-        providerTimestamp: "2026-08-25T14:31:30.000000000Z",
+        providerTimestamp: "2026-08-25T14:31:29.000000000Z",
       },
       shortQuote: {
         ...quoteSnapshot.shortQuote,
         contractSymbol: secondProposal.candidate.shortLeg.contractSymbol,
-        providerTimestamp: "2026-08-25T14:31:31.000000000Z",
+        providerTimestamp: "2026-08-25T14:31:30.000000000Z",
       },
     } as const
     second.confirmQuotes.mockResolvedValue({

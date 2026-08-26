@@ -28,6 +28,7 @@ export const PROPOSAL_QUOTE_SNAPSHOT_REF =
   "alpaca-proposal-quotes-v1" as const
 export const MAX_RESEARCH_RESPONSE_BYTES = 64 * 1024
 const MAX_TERMINAL_REJECTION_DETAILS = 64
+const MAX_PROPOSAL_MARKET_REGIME_AGE_MS = 60_000
 
 // This context validates proposal evidence topology and restricts every sourced
 // fact to the application-owned quote alias before any provider request. Real
@@ -72,6 +73,21 @@ const schemaIssues = (
       typeof part === "symbol" ? String(part) : part,
     ),
   }))
+
+const proposalMarketRegimeIsFresh = (
+  report: ResearchReportV2,
+  evaluatedAt: string,
+) => {
+  const evaluationTime = Date.parse(evaluatedAt)
+  const observedAt = Date.parse(report.analysis.marketRegime.observedAt)
+  const age = evaluationTime - observedAt
+  return (
+    Number.isFinite(evaluationTime) &&
+    Number.isFinite(observedAt) &&
+    age >= 0 &&
+    age <= MAX_PROPOSAL_MARKET_REGIME_AGE_MS
+  )
+}
 
 const boundTerminalOutcome = (
   outcome: ResearchCycleOutcomeV1,
@@ -319,7 +335,8 @@ export async function processResearchCycle({
     )
   }
 
-  if (!getEligibility().tradeIntentEligible) {
+  const proposalEligibility = getEligibility()
+  if (!proposalEligibility.tradeIntentEligible) {
     return recordReportOutcome(
       {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
@@ -327,6 +344,18 @@ export async function processResearchCycle({
         reasons: ["MARKET_WINDOW_INELIGIBLE"],
       },
     )
+  }
+  if (!proposalMarketRegimeIsFresh(researchReport, proposalEligibility.evaluatedAt)) {
+    return recordReportOutcome({
+      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+      status: "DECISION_REJECTED",
+      issues: [
+        {
+          code: "CONTEXT_INVALID",
+          path: ["analysis", "marketRegime", "observedAt"],
+        },
+      ],
+    })
   }
 
   signal.throwIfAborted()
@@ -354,6 +383,27 @@ export async function processResearchCycle({
       temporalClass: "LIVE",
     },
   ]
+
+  if (
+    !proposalMarketRegimeIsFresh(
+      researchReport,
+      quoteConfirmation.snapshot.evaluatedAt,
+    )
+  ) {
+    return recordReportOutcome(
+      {
+        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+        status: "DECISION_REJECTED",
+        issues: [
+          {
+            code: "CONTEXT_INVALID",
+            path: ["analysis", "marketRegime", "observedAt"],
+          },
+        ],
+      },
+      { evidenceSnapshots },
+    )
+  }
 
   if (!getEligibility().tradeIntentEligible) {
     return recordReportOutcome(
