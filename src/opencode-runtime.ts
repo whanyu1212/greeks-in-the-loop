@@ -87,7 +87,7 @@ const killProcessTree = (process: ChildProcess, signal: NodeJS.Signals) => {
 }
 
 /**
- * Removes environment settings that could replace the checked-in agent policy.
+ * Removes policy overrides and telemetry settings from the managed child.
  *
  * @param environment Parent process environment.
  * @returns Environment inherited by the managed OpenCode process.
@@ -106,9 +106,9 @@ export function createOpencodeEnvironment(
   for (const name of Object.keys(childEnvironment)) {
     const normalizedName = name.toUpperCase()
     if (
+      normalizedName.startsWith("ARIZE_") ||
       normalizedName.startsWith("OTEL_") ||
-      normalizedName === "PHOENIX_API_KEY" ||
-      normalizedName === "PHOENIX_CLIENT_HEADERS"
+      normalizedName.startsWith("PHOENIX_")
     ) {
       delete childEnvironment[name]
     }

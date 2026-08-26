@@ -52,11 +52,36 @@ See the official [Phoenix endpoint](https://arize.com/docs/phoenix/learn/faqs/wh
 [authentication](https://arize.com/docs/phoenix/deployment/authentication), and
 [project routing](https://arize.com/docs/phoenix/tracing/how-to-tracing/setup-tracing/setup-projects)
 documentation. Arize AX can use the same OpenTelemetry/OpenInference spans;
-copy the regional endpoint and authentication headers from the official
-[AX tracing setup](https://arize.com/docs/ax/instrument/set-up-tracing). Confirm
-that the selected AX endpoint accepts OTLP HTTP/protobuf rather than configuring
-the gRPC exporter examples, because this worker intentionally supports one
-transport in this PR.
+the worker sets both `service.name` and `openinference.project.name` to the fixed
+application identity `greeks-in-the-loop`.
+
+### Arize AX managed tracing
+
+Use the OTLP HTTP/protobuf endpoint for the AX region that stores the traces:
+
+| Region | Trace endpoint |
+| --- | --- |
+| US | `https://otlp.arize.com/v1/traces` |
+| EU | `https://otlp.eu-west-1a.arize.com/v1/traces` |
+| CA | `https://otlp.ca-central-1a.arize.com/v1/traces` |
+
+AX's HTTP exporter accepts the API key through `authorization` and the Space ID
+through `arize-space-id`. Configure them through the existing OTel header
+setting; this application does not read `ARIZE_*` convenience variables or use
+an Arize-specific SDK:
+
+```bash
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://otlp.arize.com/v1/traces
+OTEL_EXPORTER_OTLP_TRACES_HEADERS=authorization=YOUR_API_KEY,arize-space-id=YOUR_SPACE_ID
+```
+
+After saving the settings in `.env`, run `pnpm agent:once` and confirm that the
+`research.cycle` trace appears under `greeks-in-the-loop` without prompt,
+response, or tool content. See the official
+[AX manual instrumentation](https://arize.com/docs/ax/instrument/manual-instrumentation)
+guide for current endpoints and authentication requirements. Monitor ingestion
+and retention against the selected AX plan before deciding whether sampling is
+needed.
 
 ## What is emitted
 
@@ -76,11 +101,12 @@ Tracing deliberately excludes:
 - provider URLs, request/response bodies, headers, and credentials;
 - token-level, tool-step, filesystem, HTTP, and automatic SDK instrumentation.
 
-Telemetry configuration and `PHOENIX_API_KEY` are removed from the managed
-OpenCode child environment, where `OTEL_SDK_DISABLED=true` is then forced to
-prevent preloaded or transitive instrumentation from tracing agent content.
-SQLite remains the authoritative research record; trace identifiers are not
-written into the ledger in this phase.
+Variables prefixed by `OTEL_`, `ARIZE_`, or `PHOENIX_` are removed from the
+managed OpenCode child environment, where
+`OTEL_SDK_DISABLED=true` is then forced to prevent preloaded or transitive
+instrumentation from tracing agent content. SQLite remains the authoritative
+research record; trace identifiers are not written into the ledger in this
+phase.
 
 Detailed OpenCode event adaptation and token/tool metadata belong to the next
 tracing increment. Evaluation datasets, scorers, and prompt/skill comparisons
