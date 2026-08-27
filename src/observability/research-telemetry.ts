@@ -14,6 +14,8 @@ import {
   SemanticConventions,
 } from "@arizeai/openinference-semantic-conventions"
 
+import type { OpenCodeInvocationSummary } from "./opencode-telemetry-summary.js"
+
 const SERVICE_NAME = "greeks-in-the-loop"
 const PROJECT_NAME = SERVICE_NAME
 const DEFAULT_EXPORT_TIMEOUT_MS = 2_000
@@ -22,6 +24,7 @@ const MAX_ENDPOINT_LENGTH = 2_048
 const MAX_HEADERS_LENGTH = 8_192
 const MAX_HEADER_COUNT = 16
 const MAX_ATTRIBUTE_LENGTH = 128
+const OPENCODE_TOOL_SPAN_NAME = "opencode.tool"
 
 export const RESEARCH_TRACE_OPERATIONS = [
   "research.eligibility",
@@ -52,11 +55,20 @@ export const RESEARCH_TRACE_ATTRIBUTE_KEYS = {
   cycleId: "research.cycle.id",
   cycleNumber: "research.cycle.number",
   agentName: "research.agent.name",
+  promptVersion: "research.prompt.version",
+  skillName: "research.skill.name",
+  skillVersion: "research.skill.version",
   strategyVersion: "research.strategy.version",
   decisionContractVersion: "research.decision.contract.version",
   reportVersion: "research.report.version",
   outcome: "research.cycle.outcome",
   skipReason: "research.cycle.skip_reason",
+  responseError: "research.opencode.response_error",
+  toolCallCount: "research.opencode.tool.count",
+  toolErrorCount: "research.opencode.tool.error_count",
+  toolIncompleteCount: "research.opencode.tool.incomplete_count",
+  toolOmittedCount: "research.opencode.tool.omitted_count",
+  toolOutcome: "research.opencode.tool.outcome",
 } as const
 
 export type ResearchTelemetrySettings = Readonly<{
@@ -71,6 +83,9 @@ export type ResearchTelemetrySettings = Readonly<{
 
 export type ResearchTraceVersions = Readonly<{
   agentName: string
+  promptVersion: string
+  skillName: string
+  skillVersion: string
   strategyVersion: string
   decisionContractVersion: string
   reportVersion: string
@@ -82,7 +97,7 @@ export type ResearchCycleTrace = Readonly<{
     cycleNumber: number
     sessionId: string
   }>) => void
-  setModel: (model: Readonly<{ providerId: string; modelId: string }>) => void
+  recordOpenCodeResult: (summary: OpenCodeInvocationSummary) => void
   setOutcome: (outcome: string, skipReason?: string) => void
   run: <T>(operation: ResearchTraceOperation, work: () => T | Promise<T>) => Promise<T>
 }>
@@ -114,7 +129,7 @@ export type ResearchTelemetryDependencies = Readonly<{
 
 const noOpCycleTrace: ResearchCycleTrace = {
   identify: () => undefined,
-  setModel: () => undefined,
+  recordOpenCodeResult: () => undefined,
   setOutcome: () => undefined,
   run: async (_operation, work) => work(),
 }
@@ -226,9 +241,19 @@ const defaultCreateSdk: NonNullable<ResearchTelemetryDependencies["createSdk"]> 
     })
   }
 
-const endSpan = (span: Span, failed: boolean) => {
+const endSpan = (span: Span, failed: boolean, endedAt?: number) => {
   span.setStatus({ code: failed ? SpanStatusCode.ERROR : SpanStatusCode.OK })
-  span.end()
+  span.end(endedAt)
+}
+
+const setSafeCountAttribute = (
+  span: Span,
+  key: string,
+  value: number | undefined,
+) => {
+  if (value !== undefined && Number.isSafeInteger(value) && value >= 0) {
+    span.setAttribute(key, value)
+  }
 }
 
 /**
@@ -302,6 +327,9 @@ export function startResearchTelemetry(
           [SemanticConventions.OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.AGENT,
           [RESEARCH_TRACE_ATTRIBUTE_KEYS.attemptNumber]: attempt,
           [RESEARCH_TRACE_ATTRIBUTE_KEYS.agentName]: versions.agentName,
+          [RESEARCH_TRACE_ATTRIBUTE_KEYS.promptVersion]: versions.promptVersion,
+          [RESEARCH_TRACE_ATTRIBUTE_KEYS.skillName]: versions.skillName,
+          [RESEARCH_TRACE_ATTRIBUTE_KEYS.skillVersion]: versions.skillVersion,
           [RESEARCH_TRACE_ATTRIBUTE_KEYS.strategyVersion]: versions.strategyVersion,
           [RESEARCH_TRACE_ATTRIBUTE_KEYS.decisionContractVersion]:
             versions.decisionContractVersion,
@@ -309,17 +337,87 @@ export function startResearchTelemetry(
         } satisfies Attributes)
 
         let activeChildSpan: Span | undefined
+        let activeChildReportedFailure = false
         const cycleTrace: ResearchCycleTrace = {
           identify: ({ cycleId, cycleNumber, sessionId }) => {
             setSafeAttribute(rootSpan, RESEARCH_TRACE_ATTRIBUTE_KEYS.cycleId, cycleId)
             rootSpan.setAttribute(RESEARCH_TRACE_ATTRIBUTE_KEYS.cycleNumber, cycleNumber)
             setSafeAttribute(rootSpan, SemanticConventions.SESSION_ID, sessionId)
           },
-          setModel: ({ providerId, modelId }) => {
+          recordOpenCodeResult: (summary) => {
             for (const span of [rootSpan, activeChildSpan]) {
               if (span === undefined) continue
-              setSafeAttribute(span, SemanticConventions.LLM_PROVIDER, providerId)
-              setSafeAttribute(span, SemanticConventions.LLM_MODEL_NAME, modelId)
+              setSafeAttribute(
+                span,
+                SemanticConventions.LLM_PROVIDER,
+                summary.providerId,
+              )
+              setSafeAttribute(
+                span,
+                SemanticConventions.LLM_MODEL_NAME,
+                summary.modelId,
+              )
+            }
+            if (activeChildSpan === undefined) return
+            activeChildReportedFailure = summary.responseError
+            setSafeCountAttribute(
+              activeChildSpan,
+              SemanticConventions.LLM_TOKEN_COUNT_PROMPT,
+              summary.inputTokenCount,
+            )
+            setSafeCountAttribute(
+              activeChildSpan,
+              SemanticConventions.LLM_TOKEN_COUNT_COMPLETION,
+              summary.outputTokenCount,
+            )
+            setSafeCountAttribute(
+              activeChildSpan,
+              SemanticConventions.LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING,
+              summary.reasoningTokenCount,
+            )
+            setSafeCountAttribute(
+              activeChildSpan,
+              SemanticConventions.LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ,
+              summary.cacheReadTokenCount,
+            )
+            setSafeCountAttribute(
+              activeChildSpan,
+              SemanticConventions.LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE,
+              summary.cacheWriteTokenCount,
+            )
+            activeChildSpan.setAttributes({
+              [RESEARCH_TRACE_ATTRIBUTE_KEYS.responseError]:
+                summary.responseError,
+              [RESEARCH_TRACE_ATTRIBUTE_KEYS.toolCallCount]:
+                summary.toolCallCount,
+              [RESEARCH_TRACE_ATTRIBUTE_KEYS.toolErrorCount]:
+                summary.toolErrorCount,
+              [RESEARCH_TRACE_ATTRIBUTE_KEYS.toolIncompleteCount]:
+                summary.toolIncompleteCount,
+              [RESEARCH_TRACE_ATTRIBUTE_KEYS.toolOmittedCount]:
+                summary.omittedToolCallCount,
+            })
+            for (const tool of summary.toolCalls) {
+              const options =
+                tool.startedAt === undefined
+                  ? {}
+                  : { startTime: tool.startedAt }
+              tracer.startActiveSpan(OPENCODE_TOOL_SPAN_NAME, options, (span) => {
+                span.setAttribute(
+                  SemanticConventions.OPENINFERENCE_SPAN_KIND,
+                  OpenInferenceSpanKind.TOOL,
+                )
+                setSafeAttribute(span, SemanticConventions.TOOL_NAME, tool.name)
+                span.setAttribute(
+                  RESEARCH_TRACE_ATTRIBUTE_KEYS.toolOutcome,
+                  tool.outcome,
+                )
+                endSpan(
+                  span,
+                  tool.outcome !== "completed",
+                  tool.endedAt,
+                )
+              })
             }
           },
           setOutcome: (outcome, skipReason) => {
@@ -340,13 +438,16 @@ export function startResearchTelemetry(
               )
               let failed = true
               const previousActiveChildSpan = activeChildSpan
+              const previousReportedFailure = activeChildReportedFailure
               activeChildSpan = span
+              activeChildReportedFailure = false
               try {
                 const result = await childWork()
-                failed = false
+                failed = activeChildReportedFailure
                 return result
               } finally {
                 activeChildSpan = previousActiveChildSpan
+                activeChildReportedFailure = previousReportedFailure
                 endSpan(span, failed)
               }
             }),

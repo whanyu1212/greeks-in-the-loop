@@ -91,15 +91,27 @@ parsing, decision validation, quote confirmation, intent derivation, ledger
 terminalization, and artifact projection when those operations run.
 
 The allowlisted attributes are limited to attempt/cycle/session identifiers,
-agent and contract versions, bounded outcome or skip reason, and provider/model
-identifiers. Span status records success or failure without exception text.
+agent, prompt, skill, strategy, and contract versions, bounded outcome or skip
+reason, provider/model identifiers, token counts, and bounded tool metadata.
+Prompt and skill versions are checked-in constants and must be incremented when
+their behavior changes so AX experiments can group comparable runs.
+
+After `session.prompt` completes, the worker reduces its typed assistant message
+and finalized tool parts to a content-free summary. The prompt span records
+OpenInference input, output, reasoning, and cache token counts plus aggregate
+tool completion/error counts and a content-free assistant-error flag. Up to 32
+fixed-name `opencode.tool` child spans record validated timing, an allowlisted
+tool name, and `completed`, `error`, or `incomplete` status. Configured Alpaca,
+FMP, Exa, `trusted_time`, `read`, and `skill` names are retained; every unknown
+name becomes `other`.
 
 Tracing deliberately excludes:
 
 - prompts, model responses, reports, decisions, evidence, quotes, and artifacts;
 - exception messages and stack traces;
 - provider URLs, request/response bodies, headers, and credentials;
-- token-level, tool-step, filesystem, HTTP, and automatic SDK instrumentation.
+- token content, tool arguments/results, filesystem paths, HTTP payloads, and
+  automatic SDK instrumentation.
 
 Variables prefixed by `OTEL_`, `ARIZE_`, or `PHOENIX_` are removed from the
 managed OpenCode child environment, where
@@ -108,8 +120,12 @@ instrumentation from tracing agent content. SQLite remains the authoritative
 research record; trace identifiers are not written into the ledger in this
 phase.
 
-Detailed OpenCode event adaptation and token/tool metadata belong to the next
-tracing increment. Deterministic offline run evaluation is documented in
-[Offline research evaluation](research-evaluation.md); LLM judging, evaluation
-datasets, AX publication, and prompt/skill comparisons remain separate
-increments.
+The worker deliberately uses the finalized `session.prompt` response instead of
+opening the SDK's live SSE event stream. The response exposes the same completed
+assistant and tool records needed for comparison without adding stream retries,
+cross-session routing, or another shutdown path. SQLite remains authoritative;
+these operational measurements are not written into research artifacts.
+
+Deterministic offline run evaluation is documented in
+[Offline research evaluation](research-evaluation.md). LLM judging, evaluation
+datasets, and AX evaluation publication remain separate increments.

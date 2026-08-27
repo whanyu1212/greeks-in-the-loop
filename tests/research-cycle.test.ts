@@ -744,7 +744,7 @@ describe("processResearchCycle", () => {
     const operations: string[] = []
     const trace: ResearchCycleTrace = {
       identify: () => undefined,
-      setModel: () => undefined,
+      recordOpenCodeResult: () => undefined,
       setOutcome: () => undefined,
       run: async (operation, work) => {
         operations.push(operation)
