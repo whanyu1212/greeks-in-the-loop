@@ -22,6 +22,7 @@ export const RESEARCH_RUN_EVALUATION_VERSION = "1.0.0" as const
 export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "RUN_VERSION_INVALID",
   "REPORT_CONTRACT_INVALID",
+  "RESEARCH_REPORT_MISSING",
   "OUTCOME_CONTRACT_INVALID",
   "REPORT_RESULT_MISMATCH",
   "OUTCOME_RECORD_MISMATCH",
@@ -30,12 +31,16 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "SOURCE_RETRIEVAL_OUTSIDE_CYCLE",
   "SNAPSHOT_RETRIEVAL_OUTSIDE_CYCLE",
   "INTENT_EVALUATION_OUTSIDE_CYCLE",
+  "REPORT_AS_OF_AFTER_INTENT",
+  "ACCOUNT_CHECKS_STALE_AT_INTENT",
+  "MARKET_REGIME_STALE_AT_INTENT",
   "UNGROUNDED_INFERENCE",
   "UNKNOWN_SNAPSHOT_REFERENCE",
   "SNAPSHOT_FROM_FUTURE",
   "STALE_SNAPSHOT",
   "QUOTE_SNAPSHOT_PROVENANCE_INVALID",
   "CANDIDATE_IDENTITY_MISMATCH",
+  "CANDIDATE_DTE_MISMATCH",
   "INELIGIBLE_CYCLE_DERIVED_INTENT",
   "INTENT_ELIGIBILITY_CONTEXT_INVALID",
   "INTENT_ELIGIBILITY_CONTEXT_MISSING",
@@ -161,6 +166,16 @@ export function evaluateResearchRunV1(
     contractIssues.push("REPORT_CONTRACT_INVALID")
   }
   if (
+    run.researchReport === undefined &&
+    [
+      "PRELIMINARY_RESEARCH_RETAINED",
+      "VALIDATED_NO_ACTION",
+      "INTENT_DERIVED",
+    ].includes(run.outcome.status)
+  ) {
+    contractIssues.push("RESEARCH_REPORT_MISSING")
+  }
+  if (
     run.preliminaryResearch !== undefined &&
     !preliminaryResearchV1Schema.safeParse(run.preliminaryResearch).success
   ) {
@@ -263,6 +278,30 @@ export function evaluateResearchRunV1(
       !timestampWithin(run.outcome.intent.evaluatedAt, cycleStart, cycleEnd)
     ) {
       temporalIssues.push("INTENT_EVALUATION_OUTSIDE_CYCLE")
+    }
+  }
+  if (
+    run.outcome.status === "INTENT_DERIVED" &&
+    parsedReport?.success === true
+  ) {
+    const intentEvaluatedAt = Date.parse(run.outcome.intent.evaluatedAt)
+    const reportAsOf = Date.parse(parsedReport.data.analysis.asOf)
+    const accountObservedAt = Date.parse(
+      parsedReport.data.analysis.accountChecks.observedAt,
+    )
+    const marketObservedAt = Date.parse(
+      parsedReport.data.analysis.marketRegime.observedAt,
+    )
+    if (reportAsOf > intentEvaluatedAt) {
+      temporalIssues.push("REPORT_AS_OF_AFTER_INTENT")
+    }
+    const accountAge = intentEvaluatedAt - accountObservedAt
+    if (accountAge < 0 || accountAge > 5 * 60 * 1_000) {
+      temporalIssues.push("ACCOUNT_CHECKS_STALE_AT_INTENT")
+    }
+    const marketAge = intentEvaluatedAt - marketObservedAt
+    if (marketAge < 0 || marketAge > 60_000) {
+      temporalIssues.push("MARKET_REGIME_STALE_AT_INTENT")
     }
   }
 
@@ -379,6 +418,22 @@ export function evaluateResearchRunV1(
     }
   } else if (diagnostics !== undefined) {
     candidateIssues.push("CANDIDATE_IDENTITY_MISMATCH")
+  }
+  if (
+    diagnostics !== undefined &&
+    canonicalCandidate !== undefined &&
+    run.initialEligibility?.sessionDate !== undefined
+  ) {
+    const sessionDay = Date.parse(
+      `${run.initialEligibility.sessionDate}T00:00:00.000Z`,
+    )
+    const expirationDay = Date.parse(
+      `${canonicalCandidate.expiration}T00:00:00.000Z`,
+    )
+    const expectedDte = (expirationDay - sessionDay) / 86_400_000
+    if (!Number.isInteger(expectedDte) || diagnostics.dte !== expectedDte) {
+      candidateIssues.push("CANDIDATE_DTE_MISMATCH")
+    }
   }
 
   if (run.outcome.status === "INTENT_DERIVED") {

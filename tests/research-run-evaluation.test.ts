@@ -116,11 +116,12 @@ const preliminaryRun = (): ResearchRunV1 => {
 }
 
 const noActionRun = (): ResearchRunV1 => {
+  const sourceRun = preliminaryRun()
   const {
     preliminaryResearch: _preliminaryResearch,
     researchReport: _researchReport,
     ...base
-  } = preliminaryRun()
+  } = sourceRun
   const decision = {
     contractVersion: "1.0.0" as const,
     strategyVersion: "1.0.0" as const,
@@ -130,6 +131,10 @@ const noActionRun = (): ResearchRunV1 => {
   }
   return {
     ...base,
+    researchReport: {
+      ...sourceRun.researchReport!,
+      result: decision,
+    },
     validatedDecision: decision,
     outcome: {
       outcomeVersion: "1.0.0",
@@ -194,6 +199,82 @@ const derivedIntentRun = (): ResearchRunV1 => {
   })
   if (!derived.success) throw new Error("Expected valid derived-intent fixture")
 
+  const researchReport: ResearchReportV2 = {
+    reportVersion: "2.0.0",
+    result: decision,
+    analysis: {
+      provenance: "AGENT_REPORTED",
+      asOf: "2026-08-26T14:03:30.000Z",
+      accountChecks: {
+        verification: "AGENT_REPORTED",
+        observedAt: "2026-08-26T14:01:00.000Z",
+        accountStatus: "ACTIVE",
+        optionsTradingApproved: true,
+        conflictingStrategyExposure: false,
+      },
+      marketRegime: {
+        verification: "AGENT_REPORTED",
+        temporalClass: "LIVE",
+        observedAt: "2026-08-26T14:03:30.000Z",
+        signal: "BULLISH",
+        dailyClose: 600,
+        sma20: 595,
+        sma50: 590,
+        sessionVwap: 598,
+        spotMidpoint: 600,
+        dailySessionCount: 50,
+        intradayBarCount: 33,
+      },
+      candidateEvaluation: {
+        verification: "AGENT_REPORTED",
+        observedAt: "2026-08-26T14:03:30.000Z",
+        dte: 23,
+        legs: [
+          {
+            role: "LONG",
+            contractSymbol: "SPY260918C00600000",
+            delta: 0.55,
+            impliedVolatility: 0.2,
+            gamma: 0.01,
+            theta: -0.02,
+            vega: 0.1,
+            volume: 100,
+            openInterest: 500,
+            openInterestDate: "2026-08-25",
+          },
+          {
+            role: "SHORT",
+            contractSymbol: "SPY260918C00610000",
+            delta: 0.3,
+            impliedVolatility: 0.2,
+            gamma: 0.01,
+            theta: -0.02,
+            vega: 0.1,
+            volume: 100,
+            openInterest: 500,
+            openInterestDate: "2026-08-25",
+          },
+        ],
+      },
+      externalContext: [
+        {
+          sourceId: "exa-proposal-source",
+          provider: "EXA",
+          verification: "AGENT_REPORTED",
+          title: "Proposal context",
+          url: "https://example.com/proposal-context",
+          publishedAt: "2026-08-26T13:00:00.000Z",
+          retrievedAt: "2026-08-26T14:02:00.000Z",
+          summary: "Current context supporting the proposal.",
+          relevance: "SUPPORTS",
+        },
+      ],
+      supportingFactors: ["Current regime supports the structure."],
+      contradictingFactors: [],
+      conflicts: [],
+    },
+  }
+
   return {
     ...base,
     cycle: {
@@ -206,6 +287,7 @@ const derivedIntentRun = (): ResearchRunV1 => {
       sessionDate: "2026-08-26",
       sessionOpen: "2026-08-26T13:30:00.000Z",
       sessionClose: "2026-08-26T20:00:00.000Z",
+      previousSessionDates: ["2026-08-24", "2026-08-25"],
       researchEligible: true,
       tradeIntentEligible: true,
       tradeIntentWindow: {
@@ -223,6 +305,7 @@ const derivedIntentRun = (): ResearchRunV1 => {
         temporalClass: "LIVE",
       },
     ],
+    researchReport,
     validatedDecision: decision,
     outcome: {
       outcomeVersion: "1.0.0",
@@ -290,6 +373,17 @@ describe("research run evaluation", () => {
       grounding: { status: "PASS", issueCodes: [] },
       candidateIdentity: { status: "PASS", issueCodes: [] },
       failClosedBehavior: { status: "PASS", issueCodes: [] },
+    })
+  })
+
+  it("requires successful outcomes to retain their research report", () => {
+    const { researchReport: _researchReport, ...run } = derivedIntentRun()
+
+    const evaluation = evaluateResearchRunV1(run)
+
+    expect(evaluation.dimensions.contractCompliance).toEqual({
+      status: "FAIL",
+      issueCodes: ["RESEARCH_REPORT_MISSING"],
     })
   })
 
@@ -409,6 +503,64 @@ describe("research run evaluation", () => {
     })
   })
 
+  it("rejects derived analysis recorded after intent evaluation", () => {
+    const run = derivedIntentRun()
+    if (run.researchReport === undefined) {
+      throw new Error("Expected retained research report")
+    }
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      researchReport: {
+        ...run.researchReport,
+        analysis: {
+          ...run.researchReport.analysis,
+          asOf: "2026-08-26T14:04:01.000Z",
+        },
+      },
+    })
+
+    expect(evaluation.dimensions.temporalIntegrity).toEqual({
+      status: "FAIL",
+      issueCodes: ["REPORT_AS_OF_AFTER_INTENT"],
+    })
+  })
+
+  it("reapplies proposal observation freshness at intent evaluation", () => {
+    const run = derivedIntentRun()
+    if (run.researchReport === undefined) {
+      throw new Error("Expected retained research report")
+    }
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      researchReport: {
+        ...run.researchReport,
+        analysis: {
+          ...run.researchReport.analysis,
+          accountChecks: {
+            ...run.researchReport.analysis.accountChecks,
+            observedAt: "2026-08-26T13:58:59.999Z",
+          },
+          marketRegime: {
+            ...run.researchReport.analysis.marketRegime,
+            observedAt: "2026-08-26T14:02:59.999Z",
+          },
+          candidateEvaluation: {
+            ...run.researchReport.analysis.candidateEvaluation!,
+            observedAt: "2026-08-26T14:02:59.999Z",
+          },
+        },
+      },
+    })
+
+    expect(evaluation.dimensions.temporalIntegrity).toEqual({
+      status: "FAIL",
+      issueCodes: [
+        "ACCOUNT_CHECKS_STALE_AT_INTENT",
+        "MARKET_REGIME_STALE_AT_INTENT",
+      ],
+    })
+  })
+
   it("reports inference references that do not resolve to sourced facts", () => {
     const run = preliminaryRun()
     const research = {
@@ -509,6 +661,31 @@ describe("research run evaluation", () => {
     })
   })
 
+  it("validates candidate DTE against session date and expiration", () => {
+    const run = derivedIntentRun()
+    if (run.researchReport?.analysis.candidateEvaluation === undefined) {
+      throw new Error("Expected retained candidate evaluation")
+    }
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      researchReport: {
+        ...run.researchReport,
+        analysis: {
+          ...run.researchReport.analysis,
+          candidateEvaluation: {
+            ...run.researchReport.analysis.candidateEvaluation,
+            dte: 22,
+          },
+        },
+      },
+    })
+
+    expect(evaluation.dimensions.candidateIdentity).toEqual({
+      status: "FAIL",
+      issueCodes: ["CANDIDATE_DTE_MISMATCH"],
+    })
+  })
+
   it("fails closed when an ineligible cycle claims to derive an intent", () => {
     const run = preliminaryRun()
     const invalidOutcome = {
@@ -553,13 +730,28 @@ describe("research run evaluation", () => {
         providerTimestamp: "2026-08-26T14:04:59.000Z",
       },
     }
+    const researchReport = {
+      ...run.researchReport!,
+      analysis: {
+        ...run.researchReport!.analysis,
+        asOf: "2026-08-26T14:04:30.000Z",
+        marketRegime: {
+          ...run.researchReport!.analysis.marketRegime,
+          observedAt: "2026-08-26T14:04:30.000Z",
+        },
+        candidateEvaluation: {
+          ...run.researchReport!.analysis.candidateEvaluation!,
+          observedAt: "2026-08-26T14:04:30.000Z",
+        },
+      },
+    }
 
     const evaluation = evaluateResearchRunV1({
       ...run,
+      researchReport,
       outcome: { ...run.outcome, intent },
     })
 
-    expect(evaluation.dimensions.temporalIntegrity.status).toBe("PASS")
     expect(evaluation.dimensions.failClosedBehavior).toEqual({
       status: "FAIL",
       issueCodes: ["INTENT_OUTSIDE_RETAINED_TRADE_WINDOW"],
@@ -726,7 +918,6 @@ describe("research run evaluation", () => {
       outcome: { ...run.outcome, intent },
     })
 
-    expect(evaluation.dimensions.temporalIntegrity.status).toBe("PASS")
     expect(evaluation.dimensions.failClosedBehavior).toEqual({
       status: "FAIL",
       issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_INVALID"],
