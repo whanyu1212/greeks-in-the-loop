@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -69,6 +69,25 @@ afterEach(() => {
 })
 
 describe("createSqliteLedgerStore", () => {
+  it("supports query-only access without changing the ledger", async () => {
+    const path = createTemporaryPath()
+    const writer = createSqliteLedgerStore({ path })
+    await writer.migrate()
+    await writer.append(cycleStarted("event-1"))
+    await writer.close()
+    const before = readFileSync(path)
+
+    const reader = createSqliteLedgerStore({ path, readonly: true })
+    await expect(reader.list({ limit: 10 })).resolves.toHaveLength(1)
+    await expect(reader.migrate()).rejects.toThrow("Ledger store is read-only")
+    await expect(reader.append(cycleStarted("event-2"))).rejects.toThrow(
+      "Ledger store is read-only",
+    )
+    await reader.close()
+
+    expect(readFileSync(path)).toEqual(before)
+  })
+
   it("appends ordered events and reads them by ID", async () => {
     const store = createSqliteLedgerStore({
       path: ":memory:",

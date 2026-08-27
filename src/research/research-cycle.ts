@@ -34,14 +34,14 @@ import {
 export const PROPOSAL_QUOTE_SNAPSHOT_REF =
   "alpaca-proposal-quotes-v1" as const
 export const MAX_RESEARCH_RESPONSE_BYTES = 64 * 1024
-const MAX_TERMINAL_REJECTION_DETAILS = 64
+export const MAX_TERMINAL_REJECTION_DETAILS = 64
 const MAX_PROPOSAL_MARKET_REGIME_AGE_MS = 60_000
 const MAX_PROPOSAL_ACCOUNT_CHECK_AGE_MS = 5 * 60_000
 
 // This context validates proposal evidence topology and restricts every sourced
 // fact to the application-owned quote alias before any provider request. Real
 // quote timestamps replace it for the authoritative post-fetch validation.
-const PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT = {
+export const PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT = {
   evaluatedAt: "2000-01-01T00:00:00.000Z",
   snapshots: {
     [PROPOSAL_QUOTE_SNAPSHOT_REF]: {
@@ -100,7 +100,7 @@ const observationIsFresh = (
   )
 }
 
-const proposalMarketRegimeIsFresh = (
+export const proposalMarketRegimeIsFresh = (
   report: ResearchReportV2,
   evaluatedAt: string,
 ) =>
@@ -110,7 +110,7 @@ const proposalMarketRegimeIsFresh = (
     MAX_PROPOSAL_MARKET_REGIME_AGE_MS,
   )
 
-const proposalAccountChecksAreFresh = (
+export const proposalAccountChecksAreFresh = (
   report: ResearchReportV2,
   evaluatedAt: string,
 ) =>
@@ -120,7 +120,7 @@ const proposalAccountChecksAreFresh = (
     MAX_PROPOSAL_ACCOUNT_CHECK_AGE_MS,
   )
 
-const proposalHistoryIssuePath = (
+export const proposalHistoryIssuePath = (
   report: ResearchReportV2,
   eligibility: ResearchEligibilityV1,
 ): readonly (string | number)[] | undefined => {
