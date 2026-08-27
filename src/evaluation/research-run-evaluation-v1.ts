@@ -34,6 +34,8 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "REPORT_AS_OF_AFTER_INTENT",
   "ACCOUNT_CHECKS_STALE_AT_INTENT",
   "MARKET_REGIME_STALE_AT_INTENT",
+  "INTRADAY_BAR_COUNT_MISMATCH",
+  "DUPLICATE_CLAIM_ID",
   "UNGROUNDED_INFERENCE",
   "UNKNOWN_SNAPSHOT_REFERENCE",
   "SNAPSHOT_FROM_FUTURE",
@@ -41,6 +43,7 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "QUOTE_SNAPSHOT_PROVENANCE_INVALID",
   "CANDIDATE_IDENTITY_MISMATCH",
   "CANDIDATE_DTE_MISMATCH",
+  "OPEN_INTEREST_HISTORY_INVALID",
   "INELIGIBLE_CYCLE_DERIVED_INTENT",
   "INTENT_ELIGIBILITY_CONTEXT_INVALID",
   "INTENT_ELIGIBILITY_CONTEXT_MISSING",
@@ -303,6 +306,23 @@ export function evaluateResearchRunV1(
     if (marketAge < 0 || marketAge > 60_000) {
       temporalIssues.push("MARKET_REGIME_STALE_AT_INTENT")
     }
+    const sessionDate = run.initialEligibility?.sessionDate
+    const expectedIntradayBars =
+      sessionDate === undefined
+        ? Number.NaN
+        : Math.floor(
+            (marketObservedAt -
+              newYorkLocalTime(sessionDate, "09:30").getTime()) /
+              60_000,
+          )
+    if (
+      !Number.isFinite(marketObservedAt) ||
+      expectedIntradayBars <= 0 ||
+      parsedReport.data.analysis.marketRegime.intradayBarCount !==
+        expectedIntradayBars
+    ) {
+      temporalIssues.push("INTRADAY_BAR_COUNT_MISMATCH")
+    }
   }
 
   const evidence = reportResult?.evidence ?? retainedResult?.evidence ?? []
@@ -313,6 +333,12 @@ export function evaluateResearchRunV1(
     claim.kind === "INFERENCE" ? [claim] : [],
   )
   const sourcedFactIds = new Set(sourcedFacts.map(({ claimId }) => claimId))
+  if (
+    run.outcome.status === "INTENT_DERIVED" &&
+    new Set(evidence.map(({ claimId }) => claimId)).size !== evidence.length
+  ) {
+    groundingIssues.push("DUPLICATE_CLAIM_ID")
+  }
   const groundedInferenceCount = inferences.filter(({ basedOn }) =>
     basedOn.every((claimId) => sourcedFactIds.has(claimId)),
   ).length
@@ -433,6 +459,30 @@ export function evaluateResearchRunV1(
     const expectedDte = (expirationDay - sessionDay) / 86_400_000
     if (!Number.isInteger(expectedDte) || diagnostics.dte !== expectedDte) {
       candidateIssues.push("CANDIDATE_DTE_MISMATCH")
+    }
+  }
+  if (run.outcome.status === "INTENT_DERIVED" && diagnostics !== undefined) {
+    const sessionDate = run.initialEligibility?.sessionDate
+    const previousSessionDates = run.initialEligibility?.previousSessionDates
+    if (
+      sessionDate === undefined ||
+      previousSessionDates === undefined ||
+      previousSessionDates.length < 2
+    ) {
+      candidateIssues.push("OPEN_INTEREST_HISTORY_INVALID")
+    } else {
+      const eligibleOpenInterestDates = new Set([
+        sessionDate,
+        ...previousSessionDates.slice(-2),
+      ])
+      if (
+        diagnostics.legs.some(
+          ({ openInterestDate }) =>
+            !eligibleOpenInterestDates.has(openInterestDate),
+        )
+      ) {
+        candidateIssues.push("OPEN_INTEREST_HISTORY_INVALID")
+      }
     }
   }
 

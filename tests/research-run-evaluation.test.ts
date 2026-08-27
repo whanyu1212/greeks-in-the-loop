@@ -543,6 +543,7 @@ describe("research run evaluation", () => {
           marketRegime: {
             ...run.researchReport.analysis.marketRegime,
             observedAt: "2026-08-26T14:02:59.999Z",
+            intradayBarCount: 32,
           },
           candidateEvaluation: {
             ...run.researchReport.analysis.candidateEvaluation!,
@@ -558,6 +559,31 @@ describe("research run evaluation", () => {
         "ACCOUNT_CHECKS_STALE_AT_INTENT",
         "MARKET_REGIME_STALE_AT_INTENT",
       ],
+    })
+  })
+
+  it("recomputes proposal intraday bars from the retained observation time", () => {
+    const run = derivedIntentRun()
+    if (run.researchReport === undefined) {
+      throw new Error("Expected retained research report")
+    }
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      researchReport: {
+        ...run.researchReport,
+        analysis: {
+          ...run.researchReport.analysis,
+          marketRegime: {
+            ...run.researchReport.analysis.marketRegime,
+            intradayBarCount: 32,
+          },
+        },
+      },
+    })
+
+    expect(evaluation.dimensions.temporalIntegrity).toEqual({
+      status: "FAIL",
+      issueCodes: ["INTRADAY_BAR_COUNT_MISMATCH"],
     })
   })
 
@@ -584,6 +610,46 @@ describe("research run evaluation", () => {
     expect(evaluation.dimensions.grounding).toEqual({
       status: "FAIL",
       issueCodes: ["UNGROUNDED_INFERENCE"],
+    })
+  })
+
+  it("rejects duplicate evidence claim identifiers for a derived intent", () => {
+    const run = derivedIntentRun()
+    if (
+      run.researchReport === undefined ||
+      run.validatedDecision?.outcome !== "PROPOSE_TRADE" ||
+      run.outcome.status !== "INTENT_DERIVED"
+    ) {
+      throw new Error("Expected a derived-intent fixture")
+    }
+    const firstEvidence = run.validatedDecision.evidence[0]
+    if (firstEvidence === undefined) {
+      throw new Error("Expected retained evidence")
+    }
+    const duplicatedEvidence = [
+      ...run.validatedDecision.evidence,
+      { ...firstEvidence },
+    ]
+    const decision: ProposedTradeDecisionV1 = {
+      ...run.validatedDecision,
+      evidence: duplicatedEvidence,
+    }
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      researchReport: {
+        ...run.researchReport,
+        result: decision,
+      },
+      validatedDecision: decision,
+      outcome: {
+        ...run.outcome,
+        decision,
+      },
+    })
+
+    expect(evaluation.dimensions.grounding).toEqual({
+      status: "FAIL",
+      issueCodes: ["DUPLICATE_CLAIM_ID"],
     })
   })
 
@@ -683,6 +749,55 @@ describe("research run evaluation", () => {
     expect(evaluation.dimensions.candidateIdentity).toEqual({
       status: "FAIL",
       issueCodes: ["CANDIDATE_DTE_MISMATCH"],
+    })
+  })
+
+  it.each([
+    {
+      name: "missing prior sessions",
+      previousSessionDates: undefined,
+      openInterestDate: "2026-08-25",
+    },
+    {
+      name: "stale leg date",
+      previousSessionDates: ["2026-08-24", "2026-08-25"],
+      openInterestDate: "2026-08-21",
+    },
+  ])("rejects $name in retained open-interest history", (fixture) => {
+    const run = derivedIntentRun()
+    if (
+      run.initialEligibility === undefined ||
+      run.researchReport?.analysis.candidateEvaluation === undefined
+    ) {
+      throw new Error("Expected retained proposal history")
+    }
+    const candidateEvaluation = run.researchReport.analysis.candidateEvaluation
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      initialEligibility: {
+        ...run.initialEligibility,
+        previousSessionDates: fixture.previousSessionDates,
+      },
+      researchReport: {
+        ...run.researchReport,
+        analysis: {
+          ...run.researchReport.analysis,
+          candidateEvaluation: {
+            ...candidateEvaluation,
+            legs: candidateEvaluation.legs.map(
+              (leg) => ({
+                ...leg,
+                openInterestDate: fixture.openInterestDate,
+              }),
+            ) as typeof candidateEvaluation.legs,
+          },
+        },
+      },
+    })
+
+    expect(evaluation.dimensions.candidateIdentity).toEqual({
+      status: "FAIL",
+      issueCodes: ["OPEN_INTEREST_HISTORY_INVALID"],
     })
   })
 
