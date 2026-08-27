@@ -9,12 +9,21 @@ import type { ResearchReportV2 } from "../contracts/research-report-v2.js"
 import type { TradeIntentV1 } from "../contracts/trade-intent-v1.js"
 import type { StoredLedgerEventV1 } from "../event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
+import type {
+  RiskBreakerTransitionV1,
+  ShadowRiskDecisionV1,
+} from "../risk/shadow-risk-v1.js"
 import {
   newYorkDate,
   type ResearchEligibilityV1,
 } from "../scheduling/research-eligibility.js"
 
-export const RESEARCH_RUN_VERSION = "1.0.0" as const
+export const LEGACY_RESEARCH_RUN_VERSION = "1.0.0" as const
+export const RESEARCH_RUN_VERSION = "1.1.0" as const
+export const SUPPORTED_RESEARCH_RUN_VERSIONS = [
+  LEGACY_RESEARCH_RUN_VERSION,
+  RESEARCH_RUN_VERSION,
+] as const
 export const DEFAULT_RESEARCH_ARTIFACT_ROOT = "workspace/research" as const
 
 type RejectionIssue = Readonly<{
@@ -51,7 +60,7 @@ export type ResearchRunOutcomeV1 =
     }>
 
 export type ResearchRunV1 = Readonly<{
-  runVersion: typeof RESEARCH_RUN_VERSION
+  runVersion: (typeof SUPPORTED_RESEARCH_RUN_VERSIONS)[number]
   cycle: Readonly<{
     cycleId: string
     cycleNumber: number
@@ -73,6 +82,10 @@ export type ResearchRunV1 = Readonly<{
   preliminaryResearch?: PreliminaryResearchV1
   researchReport?: ResearchReportV2
   validatedDecision?: ResearchDecisionV1
+  shadowRisk?: Readonly<{
+    decision: ShadowRiskDecisionV1
+    breakerTransitions: readonly RiskBreakerTransitionV1[]
+  }>
   outcome: ResearchRunOutcomeV1
   ledger: Readonly<{
     firstSequence: number
@@ -156,6 +169,18 @@ export function projectResearchRunV1(
     events.filter((event) => event.eventType === "TRADE_INTENT_DERIVED"),
     "trade-intent",
   )
+  const riskEvent = optionalOne(
+    events.filter(
+      (event) => event.eventType === "RISK_SHADOW_DECISION_RECORDED",
+    ),
+    "shadow-risk-decision",
+  )
+  const breakerEvents = events.filter(
+    (event) => event.eventType === "RISK_BREAKER_LATCHED",
+  )
+  if (riskEvent === undefined && breakerEvents.length > 0) {
+    throw new Error("Breaker transitions require a shadow-risk decision")
+  }
 
   let outcome: ResearchRunOutcomeV1
   switch (completed.payload.status) {
@@ -182,12 +207,18 @@ export function projectResearchRunV1(
       outcome = { outcomeVersion: "1.0.0", status: completed.payload.status, decision: decisionEvent.payload.decision, intent: intentEvent.payload.intent }
       break
   }
+  if (riskEvent !== undefined && outcome.status !== "INTENT_DERIVED") {
+    throw new Error("Shadow risk requires a derived trade intent")
+  }
 
   const cycleId = start.cycleId
   const sessionId = start.sessionId
   if (cycleId === undefined || sessionId === undefined) throw new Error("Research cycle identity is incomplete")
   return {
-    runVersion: RESEARCH_RUN_VERSION,
+    runVersion:
+      riskEvent === undefined
+        ? LEGACY_RESEARCH_RUN_VERSION
+        : RESEARCH_RUN_VERSION,
     cycle: {
       cycleId,
       cycleNumber: start.payload.cycleNumber,
@@ -205,6 +236,14 @@ export function projectResearchRunV1(
     ...(preliminaryEvent === undefined ? {} : { preliminaryResearch: preliminaryEvent.payload.research }),
     ...(reportEvent === undefined ? {} : { researchReport: reportEvent.payload.report }),
     ...(decisionEvent === undefined ? {} : { validatedDecision: decisionEvent.payload.decision }),
+    ...(riskEvent === undefined
+      ? {}
+      : {
+          shadowRisk: {
+            decision: riskEvent.payload.decision,
+            breakerTransitions: breakerEvents.map((event) => event.payload),
+          },
+        }),
     outcome,
     ledger: {
       firstSequence: start.sequence,

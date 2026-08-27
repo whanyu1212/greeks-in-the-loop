@@ -6,7 +6,7 @@
 | --- | --- |
 | Evaluation version | `1.0.0` |
 | Rule version | `1.0.0` |
-| Runtime status | Pure engine and read-only live risk-state capture implemented; worker invocation and shadow persistence pending |
+| Runtime status | Live worker invocation, bounded shadow persistence, and breaker latching implemented |
 
 The risk engine is the deterministic boundary between a non-executable
 `TradeIntentV1` and future broker execution. It answers whether one intent is
@@ -44,27 +44,30 @@ exposes only `capture(input)` and performs GET-only Alpaca reads for account,
 positions, open nested orders, same-day nested order history, exact option
 contracts, and exact option snapshots from the indicative feed.
 
-The provider records one application evaluation timestamp across account,
-contract, quote, and reconciliation output. It double-reads positions and open
-orders around the account, contract, snapshot, and history reads. If those
-broker observations differ, reconciliation remains typed but is marked
-inconsistent with `BROKER_STATE_CHANGED`.
+The provider preserves conservative observation times for account, contract,
+quote, and reconciliation state. It double-reads positions and open orders
+around the account, contract, snapshot, and history reads, and validates quote
+freshness against the completed capture timeline. If broker observations or
+same-day history change during capture, reconciliation remains typed but is
+marked inconsistent with `BROKER_STATE_CHANGED`.
 
 Reconciliation recognizes only a flat account, exactly one supported SPY debit
 spread position, or exactly one supported open multileg day limit order. Unknown
 positions, unmatched option exposure, unknown open orders, duplicate broker
 records, and multiple pending entries fail closed by setting `consistent=false`
 and returning bounded reason codes. Same-day entry count is the max of durable
-control state and normalized same-day Alpaca option-entry orders observed no
-later than capture start.
+control state and normalized same-day Alpaca option-entry orders observed by
+the bounded evaluation cutoff.
 
 `DurableRiskControlStateV1` carries the same-day entry count plus daily and
-competition breaker latches into capture. PR1 accepts this durable state as an
-input; a later runtime integration is responsible for projecting it from the
-ledger. Malformed provider data, missing option quotes or metrics, stale quotes,
-and unsafe timestamps return bounded capture reasons without raw API payloads or
-credentials. Monetary account and quote values must parse as exact cents; PR1
-does not round provider values into risk input.
+competition breaker latches into capture. The worker projects daily latches for
+the current trading date and carries competition latches forward across dates.
+Shadow approvals never increment the submitted-entry count; read-only Alpaca
+order history remains authoritative until execution events exist. Malformed
+provider data, missing option quotes or metrics, stale quotes, and unsafe
+timestamps return bounded capture reasons without raw API payloads or
+credentials. Monetary account and quote values must parse as exact cents; the
+provider does not round values into risk input.
 
 ## Fixed entry rules
 
@@ -113,10 +116,18 @@ valid gates fail, all applicable codes are returned once. Schema-invalid input
 returns only `RISK_INPUT_INVALID` and a null evaluation timestamp because no
 caller-supplied time was trusted.
 
-## Deferred integration
+## Shadow runtime
 
-Separate changes must project durable control state from the ledger, invoke the
-engine from the worker, persist versioned risk events and breaker transitions,
-and recheck time-sensitive gates immediately before submission. Broker
-execution, position protection, and breaker reset behavior remain outside this
-module.
+Every successfully derived research intent enters the shadow-risk service
+before its cycle is completed. The service captures current state, refreshes the
+intent from the capture's exact quotes, recomputes eligibility, and invokes the
+same pure evaluator used by replay. Capture and refresh failures become bounded
+fail-closed decisions. The original intent, shadow decision, newly latched
+breakers, and completion are committed as one causal SQLite batch.
+
+Research artifacts expose the decision, exact versions and reasons, refreshed
+intent, observation timestamps, and reconciliation codes. They intentionally
+omit account balances, positions, orders, and raw provider responses. Shadow
+approval grants no execution authority. Broker submission, immediate
+pre-submit rechecks, position protection, and manual breaker reset behavior
+remain deferred.

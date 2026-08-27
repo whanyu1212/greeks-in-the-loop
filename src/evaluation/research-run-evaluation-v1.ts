@@ -10,7 +10,7 @@ import {
 import { researchReportV2Schema } from "../contracts/research-report-v2.js"
 import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
 import {
-  RESEARCH_RUN_VERSION,
+  SUPPORTED_RESEARCH_RUN_VERSIONS,
   type ResearchRunV1,
 } from "../research/research-artifact.js"
 import {
@@ -313,7 +313,7 @@ export function evaluateResearchRunV1(
   const candidateIssues: EvaluationIssueCode[] = []
   const failClosedIssues: EvaluationIssueCode[] = []
 
-  if (run.runVersion !== RESEARCH_RUN_VERSION) {
+  if (!SUPPORTED_RESEARCH_RUN_VERSIONS.includes(run.runVersion)) {
     contractIssues.push("RUN_VERSION_INVALID")
   }
 

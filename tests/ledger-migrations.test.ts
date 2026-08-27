@@ -14,6 +14,7 @@ type DirectEvent = Readonly<{
   causationEventId?: string
   cycleId?: string
   sessionId?: string
+  payload?: unknown
 }>
 
 const insertDirectEvent = (
@@ -25,6 +26,7 @@ const insertDirectEvent = (
     causationEventId,
     cycleId,
     sessionId = "session-1",
+    payload = {},
   }: DirectEvent,
 ) =>
   database
@@ -32,7 +34,7 @@ const insertDirectEvent = (
       INSERT INTO ledger_events (
         event_id, event_version, event_type, occurred_at, recorded_at,
         correlation_id, causation_event_id, cycle_id, session_id, payload_json
-      ) VALUES (?, '1.0.0', ?, ?, ?, ?, ?, ?, ?, '{}')
+      ) VALUES (?, '1.0.0', ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       eventId,
@@ -43,6 +45,7 @@ const insertDirectEvent = (
       causationEventId ?? null,
       cycleId ?? null,
       sessionId,
+      JSON.stringify(payload),
     )
 
 describe("applyLedgerMigrations", () => {
@@ -68,6 +71,10 @@ describe("applyLedgerMigrations", () => {
         migration_id: "002_research_lifecycle_integrity",
         applied_at: "2026-08-25T14:30:00.000Z",
       },
+      {
+        migration_id: "003_shadow_risk_integrity",
+        applied_at: "2026-08-25T14:30:00.000Z",
+      },
     ])
     expect(
       database
@@ -90,6 +97,7 @@ describe("applyLedgerMigrations", () => {
         sql: `${LEDGER_MIGRATIONS[0]!.sql}\nSELECT 1;`,
       },
       LEDGER_MIGRATIONS[1]!,
+      LEDGER_MIGRATIONS[2]!,
     ]
 
     expect(() => applyLedgerMigrations(database, modified)).toThrow(
@@ -417,5 +425,82 @@ describe("research lifecycle integrity migration", () => {
       ).toEqual(["001_initial_ledger"])
       database.close()
     }
+  })
+})
+
+describe("shadow risk integrity migration", () => {
+  it("requires one shadow decision between a trade intent and completion", () => {
+    const database = new Database(":memory:")
+    applyLedgerMigrations(database)
+    insertDirectEvent(database, {
+      eventId: "start-risk",
+      eventType: "RESEARCH_CYCLE_STARTED",
+      cycleId: "cycle-risk",
+    })
+    insertDirectEvent(database, {
+      eventId: "intent-risk",
+      eventType: "TRADE_INTENT_DERIVED",
+      causationEventId: "start-risk",
+      cycleId: "cycle-risk",
+    })
+
+    expect(() =>
+      insertDirectEvent(database, {
+        eventId: "completion-without-risk",
+        eventType: "RESEARCH_CYCLE_COMPLETED",
+        causationEventId: "intent-risk",
+        cycleId: "cycle-risk",
+        payload: { status: "INTENT_DERIVED" },
+      }),
+    ).toThrow("derived intent completion requires shadow risk")
+
+    insertDirectEvent(database, {
+      eventId: "risk-decision",
+      eventType: "RISK_SHADOW_DECISION_RECORDED",
+      causationEventId: "intent-risk",
+      cycleId: "cycle-risk",
+    })
+    expect(() =>
+      insertDirectEvent(database, {
+        eventId: "risk-decision-duplicate",
+        eventType: "RISK_SHADOW_DECISION_RECORDED",
+        causationEventId: "intent-risk",
+        cycleId: "cycle-risk",
+      }),
+    ).toThrow("UNIQUE constraint failed: ledger_events.cycle_id")
+    insertDirectEvent(database, {
+      eventId: "completion-with-risk",
+      eventType: "RESEARCH_CYCLE_COMPLETED",
+      causationEventId: "risk-decision",
+      cycleId: "cycle-risk",
+      payload: { status: "INTENT_DERIVED" },
+    })
+    database.close()
+  })
+
+  it("allows legacy completed intents when upgrading an existing ledger", () => {
+    const database = new Database(":memory:")
+    applyLedgerMigrations(database, LEDGER_MIGRATIONS.slice(0, 2))
+    insertDirectEvent(database, {
+      eventId: "legacy-start",
+      eventType: "RESEARCH_CYCLE_STARTED",
+      cycleId: "legacy-cycle",
+    })
+    insertDirectEvent(database, {
+      eventId: "legacy-intent",
+      eventType: "TRADE_INTENT_DERIVED",
+      causationEventId: "legacy-start",
+      cycleId: "legacy-cycle",
+    })
+    insertDirectEvent(database, {
+      eventId: "legacy-completion",
+      eventType: "RESEARCH_CYCLE_COMPLETED",
+      causationEventId: "legacy-intent",
+      cycleId: "legacy-cycle",
+      payload: { status: "INTENT_DERIVED" },
+    })
+
+    expect(() => applyLedgerMigrations(database)).not.toThrow()
+    database.close()
   })
 })

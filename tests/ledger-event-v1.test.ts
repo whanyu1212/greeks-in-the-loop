@@ -24,7 +24,7 @@ describe("LedgerEventV1", () => {
     expect(ledgerEventV1Schema.parse(baseEvent)).toEqual(baseEvent)
   })
 
-  it("defines only current research-to-intent event types", () => {
+  it("defines only current research and shadow-risk event types", () => {
     expect(LEDGER_EVENT_TYPES).toEqual([
       "OPENCODE_SESSION_STARTED",
       "RESEARCH_CYCLE_STARTED",
@@ -37,6 +37,8 @@ describe("LedgerEventV1", () => {
       "TRADE_INTENT_DERIVATION_REJECTED",
       "RESEARCH_CYCLE_COMPLETED",
       "RESEARCH_CYCLE_INTERRUPTED",
+      "RISK_SHADOW_DECISION_RECORDED",
+      "RISK_BREAKER_LATCHED",
     ])
   })
 

@@ -226,11 +226,29 @@ const setup = () => {
     }),
   )
   const quoteProvider: OptionQuoteProvider = { confirmQuotes }
+  const evaluateShadowRisk = vi.fn(async () => ({
+    decision: {
+      decisionVersion: "1.0.0" as const,
+      mode: "SHADOW" as const,
+      evaluationVersion: "1.0.0" as const,
+      ruleVersion: "1.0.0" as const,
+      stage: "STATE_CAPTURE_FAILED" as const,
+      outcome: "REJECTED" as const,
+      evaluatedAt: null,
+      captureReasonCodes: ["CAPTURE_INTERNAL_INVALID" as const],
+    },
+    breakerTransitions: [],
+  }))
+  const shadowRiskEvaluator = { evaluate: evaluateShadowRisk }
   const getEligibility = vi.fn<() => ResearchEligibilityV1>(() => ({
     evaluatedAt: "2026-08-25T14:31:00.000Z",
     sessionDate: "2026-08-25",
     researchEligible: true,
     tradeIntentEligible: true,
+    tradeIntentWindow: {
+      slotStartedAt: "2026-08-25T14:30:00.000Z",
+      deadline: "2026-08-25T14:35:00.000Z",
+    },
     previousSessionDates,
   }))
   const deriveIntent = vi.fn<
@@ -273,6 +291,8 @@ const setup = () => {
     outcomeSink,
     record,
     quoteProvider,
+    shadowRiskEvaluator,
+    evaluateShadowRisk,
     confirmQuotes,
     deriveIntent,
     getEligibility,
@@ -1166,6 +1186,7 @@ describe("processResearchCycle", () => {
         ],
         validatedDecision: proposal,
         researchReport: result.researchReport,
+        shadowRisk: result.shadowRisk,
       },
     ])
   })
@@ -1178,6 +1199,7 @@ describe("processResearchCycle", () => {
       cycleStartedAt: dependencies.cycleStartedAt,
       signal: new AbortController().signal,
       quoteProvider: dependencies.quoteProvider,
+      shadowRiskEvaluator: dependencies.shadowRiskEvaluator,
       outcomeSink: dependencies.outcomeSink,
       getEligibility: dependencies.getEligibility,
     })

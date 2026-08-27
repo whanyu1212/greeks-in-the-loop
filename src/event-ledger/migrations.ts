@@ -196,6 +196,61 @@ export const LEDGER_MIGRATIONS: readonly LedgerMigration[] = [
       END;
     `,
   },
+  {
+    id: "003_shadow_risk_integrity",
+    sql: `
+      CREATE UNIQUE INDEX ledger_events_one_shadow_risk_decision
+        ON ledger_events(cycle_id)
+        WHERE event_type = 'RISK_SHADOW_DECISION_RECORDED';
+
+      CREATE TRIGGER ledger_events_risk_follows_intent
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.event_type = 'RISK_SHADOW_DECISION_RECORDED'
+      BEGIN
+        SELECT CASE
+          WHEN NEW.cycle_id IS NULL OR NOT EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE event_id = NEW.causation_event_id
+              AND cycle_id = NEW.cycle_id
+              AND event_type = 'TRADE_INTENT_DERIVED'
+          )
+          THEN RAISE(ABORT, 'shadow risk decision must follow its trade intent')
+        END;
+      END;
+
+      CREATE TRIGGER ledger_events_breaker_follows_risk
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.event_type = 'RISK_BREAKER_LATCHED'
+      BEGIN
+        SELECT CASE
+          WHEN NEW.cycle_id IS NULL OR NOT EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE cycle_id = NEW.cycle_id
+              AND event_type = 'RISK_SHADOW_DECISION_RECORDED'
+          )
+          THEN RAISE(ABORT, 'breaker latch must follow a shadow risk decision')
+        END;
+      END;
+
+      CREATE TRIGGER ledger_events_intent_completion_requires_risk
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.event_type = 'RESEARCH_CYCLE_COMPLETED'
+        AND json_extract(NEW.payload_json, '$.status') = 'INTENT_DERIVED'
+      BEGIN
+        SELECT CASE
+          WHEN NOT EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE cycle_id = NEW.cycle_id
+              AND event_type = 'RISK_SHADOW_DECISION_RECORDED'
+          )
+          THEN RAISE(ABORT, 'derived intent completion requires shadow risk')
+        END;
+      END;
+    `,
+  },
 ]
 
 const checksum = (sql: string) =>

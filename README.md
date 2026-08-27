@@ -2,13 +2,13 @@
 
 Read-only paper-trading research agent built with the OpenCode SDK, Alpaca, Financial Modeling Prep, and Exa.
 
-The worker is intentionally non-executing. Its dedicated `research` agent can inspect read-only paper-account and market data, gather FMP and Exa evidence, write artifacts under `workspace/`, and emit a validated `ResearchDecisionV1` or non-executable `PreliminaryResearchV1`. Preliminary findings are durably carried forward for mandatory refresh. Only an eligible regular-session proposal is confirmed against a fresh, application-owned Alpaca indicative quote snapshot and deterministically converted into a non-executable `TradeIntentV1` for future risk evaluation.
+The worker is intentionally non-executing. Its dedicated `research` agent can inspect read-only paper-account and market data, gather FMP and Exa evidence, write artifacts under `workspace/`, and emit a validated `ResearchDecisionV1` or non-executable `PreliminaryResearchV1`. Preliminary findings are durably carried forward for mandatory refresh. Only an eligible regular-session proposal is confirmed against a fresh, application-owned Alpaca indicative quote snapshot and deterministically converted into a non-executable `TradeIntentV1`. The application then captures read-only broker state, refreshes the intent, and records a deterministic shadow-risk approval or rejection without submitting an order.
 
 The research agent is deny-by-default: broker mutations, generic shell execution, source edits, external-directory access, subagents, and unreviewed tools are unavailable. The managed runtime ignores user-global OpenCode plugins and MCP configuration, and each project MCP process receives only its own credentials. Risk and execution authority remain outside OpenCode.
 
 ## Strategy
 
-The frozen MVP strategy is documented in [SPY Directional Debit Spreads](docs/strategy-v1.md). It assumes the project will remain on the free Alpaca Basic data tier. The specification defines future risk and execution behavior; the current worker remains non-executing and produces pre-risk intents only.
+The frozen MVP strategy is documented in [SPY Directional Debit Spreads](docs/strategy-v1.md). It assumes the project will remain on the free Alpaca Basic data tier. The specification defines future execution behavior; the current worker remains non-executing and evaluates every live intent in shadow mode.
 
 ## Requirements
 
@@ -88,7 +88,7 @@ The anytime command intentionally ignores `RESEARCH_LEDGER_PATH` unless it is
 needed to detect an unsafe collision. Its default ledger is isolated so dry-run
 research cannot enter the normal worker's durable prompt context.
 
-Every completed eligible cycle is projected into a versioned `ResearchRunV1` after the worker rereads its committed events. The projection consolidates cycle identity and timing, initial eligibility, evidence snapshot references, the validated outcome and intermediate records, the full bounded [`ResearchReportV2`](docs/research-report-v2.md), and ledger sequence metadata. A byte-for-byte regenerable inspection-only JSON export is then written under `workspace/research/<session-date>/cycle-<number>-<cycle-id>.json`. SQLite is the sole source of truth: the worker never builds the export from a separate in-memory result, and an export failure does not undo the committed ledger outcome.
+Every completed eligible cycle is projected into a versioned `ResearchRunV1` after the worker rereads its committed events. The projection consolidates cycle identity and timing, initial eligibility, evidence snapshot references, the validated outcome and intermediate records, the full bounded [`ResearchReportV2`](docs/research-report-v2.md), any shadow-risk decision and breaker transitions, and ledger sequence metadata. A byte-for-byte regenerable inspection-only JSON export is then written under `workspace/research/<session-date>/cycle-<number>-<cycle-id>.json`. SQLite is the sole source of truth: the worker never builds the export from a separate in-memory result, and an export failure does not undo the committed ledger outcome.
 
 ## Inspect a run
 
@@ -131,6 +131,8 @@ SQLite stores an append-only event stream in `ledger_events`. Each row contains 
 | Evidence snapshot reference | Yes, as `EVIDENCE_SNAPSHOT_REFERENCED` | Yes, as a consolidated list | Stores reference, provider, source, retrieval/freshness timestamps, and temporal class—not the raw provider response. |
 | Confirmed exact-leg option quotes | Only after successful intent derivation, inside `TRADE_INTENT_DERIVED` | Yes, inside the derived outcome | Stores each OCC symbol, indicative feed label, bid and ask in integer cents per share, and provider timestamp. If quote confirmation or intent derivation fails, exact bid/ask values are not retained. |
 | Derived spread economics | Only after successful intent derivation | Yes, inside the derived outcome | Includes evaluated time, entry limit, width, maximum loss/profit, and deterministic stop/target marks. It is still non-executable. |
+| Shadow-risk decision | For every live derived intent, as `RISK_SHADOW_DECISION_RECORDED` | Yes, in the `shadowRisk` section | Stores exact decision/evaluation/rule versions, outcome or bounded failure reasons, refreshed intent, observation timestamps, and reconciliation codes. Account balances, positions, orders, and raw responses are omitted. |
+| Breaker transitions | When newly activated, as `RISK_BREAKER_LATCHED` | Yes, in the `shadowRisk` section | Daily latches apply to their trading date; competition latches carry forward. Shadow approval never counts as an order submission. |
 | Rejections | Yes | Yes, inside the outcome | Stores bounded reason codes or validation issue codes/paths, not rejected raw content. |
 
 The JSON artifact is a deterministic `ResearchRunV1` view intended for humans and downstream inspection. It can be deleted and regenerated from SQLite. The SQLite ledger is the authoritative restart/audit record; artifact-write failure does not roll back a committed ledger outcome.
@@ -193,7 +195,7 @@ Every unattended cycle loads the project-local `spy-debit-spread-research` skill
 
 ## Security boundary
 
-OpenCode permissions enforce the agent's tool and workspace boundary. Application code independently validates `ResearchDecisionV1`, retrieves trusted option quotes, and derives `TradeIntentV1`. Prompt instructions describe desired behavior but are not treated as an authorization control.
+OpenCode permissions enforce the agent's tool and workspace boundary. Application code independently validates `ResearchDecisionV1`, retrieves trusted option quotes, derives `TradeIntentV1`, and evaluates it through a capture-only risk-state port. The shadow path has no broker mutation or order-construction interface. Prompt instructions describe desired behavior but are not treated as an authorization control.
 
 Generated artifacts are ignored by Git and may be written only under `workspace/`. Generic shell access is intentionally disabled because OpenCode command permissions do not provide a filesystem or environment sandbox.
 

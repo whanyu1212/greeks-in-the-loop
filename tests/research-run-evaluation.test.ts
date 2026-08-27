@@ -323,6 +323,17 @@ const derivedIntentRun = (): ResearchRunV1 => {
 }
 
 describe("research run evaluation", () => {
+  it("accepts the additive shadow-risk research run version", () => {
+    const evaluation = evaluateResearchRunV1({
+      ...noActionRun(),
+      runVersion: "1.1.0",
+    })
+
+    expect(evaluation.dimensions.contractCompliance.issueCodes).not.toContain(
+      "RUN_VERSION_INVALID",
+    )
+  })
+
   it("evaluates a healthy preliminary run deterministically", () => {
     const run = preliminaryRun()
     const first = evaluateResearchRunV1(run)
