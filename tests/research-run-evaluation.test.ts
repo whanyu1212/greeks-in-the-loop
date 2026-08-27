@@ -197,12 +197,13 @@ const derivedIntentRun = (): ResearchRunV1 => {
     ...base,
     cycle: {
       ...base.cycle,
-      startedAt: "2026-08-26T14:00:00.000Z",
+      startedAt: "2026-08-26T14:00:31.000Z",
       completedAt: "2026-08-26T14:05:00.000Z",
     },
     initialEligibility: {
       evaluatedAt: "2026-08-26T14:00:30.000Z",
       sessionDate: "2026-08-26",
+      sessionClose: "2026-08-26T20:00:00.000Z",
       researchEligible: true,
       tradeIntentEligible: true,
       tradeIntentWindow: {
@@ -545,6 +546,46 @@ describe("research run evaluation", () => {
     })
   })
 
+  it("rejects initial eligibility recorded after the cycle starts", () => {
+    const run = derivedIntentRun()
+    if (run.initialEligibility === undefined) {
+      throw new Error("Expected retained eligibility")
+    }
+
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      initialEligibility: {
+        ...run.initialEligibility,
+        evaluatedAt: "2026-08-26T14:00:32.000Z",
+      },
+    })
+
+    expect(evaluation.dimensions.failClosedBehavior).toEqual({
+      status: "FAIL",
+      issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_INVALID"],
+    })
+  })
+
+  it("uses the retained session close for the entry cutoff", () => {
+    const run = derivedIntentRun()
+    if (run.initialEligibility === undefined) {
+      throw new Error("Expected retained eligibility")
+    }
+
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      initialEligibility: {
+        ...run.initialEligibility,
+        sessionClose: "2026-08-26T15:00:00.000Z",
+      },
+    })
+
+    expect(evaluation.dimensions.failClosedBehavior).toEqual({
+      status: "FAIL",
+      issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_INVALID"],
+    })
+  })
+
   it("rejects a retained trade window with impossible runtime boundaries", () => {
     const run = derivedIntentRun()
     if (run.initialEligibility?.tradeIntentWindow === undefined) {
@@ -593,12 +634,13 @@ describe("research run evaluation", () => {
       ...run,
       cycle: {
         ...run.cycle,
-        startedAt: "2026-08-26T19:00:00.000Z",
+        startedAt: "2026-08-26T19:00:31.000Z",
         completedAt: "2026-08-26T19:05:00.000Z",
       },
       initialEligibility: {
         ...run.initialEligibility,
         evaluatedAt: "2026-08-26T19:00:30.000Z",
+        sessionClose: "2026-08-26T20:00:00.000Z",
         tradeIntentWindow: {
           slotStartedAt: "2026-08-26T19:00:00.000Z",
           deadline: "2026-08-26T19:05:00.000Z",

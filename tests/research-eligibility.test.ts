@@ -40,6 +40,7 @@ describe("research eligibility", () => {
   it("preserves the original slot for the five-minute completion window", () => {
     const started = evaluate("2026-08-25T14:01:59.999Z")
     expect(started.tradeIntentEligible).toBe(true)
+    expect(started.sessionClose).toBe("2026-08-25T20:00:00.000Z")
     expect(started.tradeIntentWindow).toEqual({
       slotStartedAt: "2026-08-25T14:00:00.000Z",
       deadline: "2026-08-25T14:05:00.000Z",

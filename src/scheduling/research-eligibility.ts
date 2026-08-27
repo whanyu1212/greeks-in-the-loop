@@ -27,6 +27,7 @@ export const researchEligibilityV1Schema = z
   .object({
     evaluatedAt: eligibilityTimestamp,
     sessionDate: z.iso.date().optional(),
+    sessionClose: eligibilityTimestamp.optional(),
     researchEligible: z.boolean(),
     tradeIntentEligible: z.boolean(),
     tradeIntentWindow: tradeIntentWindowV1Schema.optional(),
@@ -44,6 +45,7 @@ export const researchEligibilityV1Schema = z
 export type ResearchEligibilityV1 = Readonly<{
   evaluatedAt: string
   sessionDate?: string | undefined
+  sessionClose?: string | undefined
   researchEligible: boolean
   tradeIntentEligible: boolean
   tradeIntentWindow?: TradeIntentWindowV1 | undefined
@@ -159,6 +161,7 @@ export function evaluateResearchEligibility({
     return {
       evaluatedAt: evaluatedAt.toISOString(),
       sessionDate: session.date,
+      sessionClose: new Date(close).toISOString(),
       researchEligible: false,
       tradeIntentEligible: false,
       reason: "OUTSIDE_RESEARCH_WINDOW",
@@ -210,6 +213,7 @@ export function evaluateResearchEligibility({
   return {
     evaluatedAt: evaluatedAt.toISOString(),
     sessionDate: session.date,
+    sessionClose: new Date(close).toISOString(),
     researchEligible: true,
     tradeIntentEligible,
     ...(activeWindow === undefined ? {} : { tradeIntentWindow: activeWindow }),

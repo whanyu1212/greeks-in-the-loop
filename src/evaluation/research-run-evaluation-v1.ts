@@ -352,6 +352,8 @@ export function evaluateResearchRunV1(
       failClosedIssues.push("INELIGIBLE_CYCLE_DERIVED_INTENT")
     } else if (eligibility.tradeIntentWindow === undefined) {
       failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_MISSING")
+    } else if (eligibility.sessionClose === undefined) {
+      failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_MISSING")
     } else {
       const eligibilityEvaluatedAt = Date.parse(eligibility.evaluatedAt)
       const intentEvaluatedAt = Date.parse(run.outcome.intent.evaluatedAt)
@@ -359,6 +361,7 @@ export function evaluateResearchRunV1(
         eligibility.tradeIntentWindow.slotStartedAt,
       )
       const deadline = Date.parse(eligibility.tradeIntentWindow.deadline)
+      const sessionClose = Date.parse(eligibility.sessionClose)
       const sessionDate = eligibility.sessionDate
       const slotDate = new Date(slotStartedAt)
       const slotIsQuarterHour =
@@ -366,21 +369,34 @@ export function evaluateResearchRunV1(
         slotDate.getUTCMinutes() % 15 === 0 &&
         slotDate.getUTCSeconds() === 0 &&
         slotDate.getUTCMilliseconds() === 0
+      const entryCutoff =
+        sessionDate === undefined || !Number.isFinite(sessionClose)
+          ? Number.NaN
+          : Math.min(
+              newYorkLocalTime(sessionDate, "15:00").getTime(),
+              sessionClose - 60 * 60 * 1_000,
+            )
       const slotMatchesSession =
         sessionDate !== undefined &&
         Number.isFinite(slotStartedAt) &&
+        Number.isFinite(sessionClose) &&
         newYorkDate(slotDate) === sessionDate &&
+        newYorkDate(new Date(sessionClose)) === sessionDate &&
         slotStartedAt >= newYorkLocalTime(sessionDate, "10:00").getTime() &&
-        slotStartedAt < newYorkLocalTime(sessionDate, "15:00").getTime()
+        slotStartedAt < entryCutoff
       const eligibilityContextValid =
+        eligibility.researchEligible &&
+        eligibility.reason === undefined &&
         Number.isFinite(eligibilityEvaluatedAt) &&
+        Number.isFinite(cycleStart) &&
         Number.isFinite(slotStartedAt) &&
         Number.isFinite(deadline) &&
         slotIsQuarterHour &&
         slotMatchesSession &&
-        deadline === slotStartedAt + 5 * 60 * 1_000 &&
+        deadline === Math.min(slotStartedAt + 5 * 60 * 1_000, entryCutoff) &&
         eligibilityEvaluatedAt >= slotStartedAt &&
-        eligibilityEvaluatedAt - slotStartedAt <= 119_999
+        eligibilityEvaluatedAt - slotStartedAt <= 119_999 &&
+        eligibilityEvaluatedAt <= cycleStart
       if (!eligibilityContextValid) {
         failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_INVALID")
       }
