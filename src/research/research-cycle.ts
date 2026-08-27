@@ -222,8 +222,7 @@ const recordOutcome = async (
 ): Promise<ProcessedResearchCycle> => {
   signal.throwIfAborted()
   const boundedOutcome = boundTerminalOutcome(outcome)
-  const record = {
-    outcome: boundedOutcome,
+  const commonRecord = {
     evidenceSnapshots: metadata.evidenceSnapshots ?? [],
     ...(metadata.validatedDecision === undefined
       ? {}
@@ -234,10 +233,23 @@ const recordOutcome = async (
     ...(metadata.researchReport === undefined
       ? {}
       : { researchReport: metadata.researchReport }),
-    ...(metadata.shadowRisk === undefined
-      ? {}
-      : { shadowRisk: metadata.shadowRisk }),
-  } as ResearchCycleTerminalRecordV1
+  }
+  let record: ResearchCycleTerminalRecordV1
+  if (boundedOutcome.status === "INTENT_DERIVED") {
+    if (metadata.shadowRisk === undefined) {
+      throw new Error("Derived intent outcome requires shadow risk")
+    }
+    record = {
+      ...commonRecord,
+      outcome: boundedOutcome,
+      shadowRisk: metadata.shadowRisk,
+    }
+  } else {
+    if (metadata.shadowRisk !== undefined) {
+      throw new Error("Shadow risk requires a derived intent outcome")
+    }
+    record = { ...commonRecord, outcome: boundedOutcome }
+  }
   await trace.run("ledger.cycle.terminalize", () => sink.record(record, signal))
   return {
     outcome: boundedOutcome,
