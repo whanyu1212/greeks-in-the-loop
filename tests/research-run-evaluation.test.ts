@@ -454,4 +454,34 @@ describe("research run evaluation", () => {
       ],
     })
   })
+
+  it("rejects an intent evaluated at the retained trade-window deadline", () => {
+    const run = derivedIntentRun()
+    if (run.outcome.status !== "INTENT_DERIVED") {
+      throw new Error("Expected a derived-intent fixture")
+    }
+    const intent = {
+      ...run.outcome.intent,
+      evaluatedAt: "2026-08-26T12:05:00.000Z",
+      longQuote: {
+        ...run.outcome.intent.longQuote,
+        providerTimestamp: "2026-08-26T12:04:59.000Z",
+      },
+      shortQuote: {
+        ...run.outcome.intent.shortQuote,
+        providerTimestamp: "2026-08-26T12:04:59.000Z",
+      },
+    }
+
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      outcome: { ...run.outcome, intent },
+    })
+
+    expect(evaluation.dimensions.temporalIntegrity.status).toBe("PASS")
+    expect(evaluation.dimensions.failClosedBehavior).toEqual({
+      status: "FAIL",
+      issueCodes: ["INTENT_OUTSIDE_RETAINED_TRADE_WINDOW"],
+    })
+  })
 })
