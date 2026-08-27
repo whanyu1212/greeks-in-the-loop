@@ -1,0 +1,324 @@
+import { describe, expect, it, vi } from "vitest"
+
+import {
+  createAlpacaRiskStateProvider,
+  type RiskStateCaptureFailureCode,
+} from "../src/risk/alpaca-risk-state-provider.js"
+import { DURABLE_RISK_CONTROL_STATE_VERSION } from "../src/risk/risk-state-v1.js"
+
+const sessionDate = "2026-08-27"
+const evaluatedAt = new Date("2026-08-27T14:30:30.000Z")
+const longSymbol = "SPY260918C00600000"
+const shortSymbol = "SPY260918C00605000"
+const signal = new AbortController().signal
+
+const response = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  })
+
+const account = {
+  status: "ACTIVE",
+  trading_blocked: false,
+  account_blocked: false,
+  trade_suspended_by_user: false,
+  options_approved_level: 3,
+  options_trading_level: 3,
+  buying_power: "100000.00",
+  equity: "100000.00",
+  last_equity: "100000.00",
+}
+
+const contract = (symbol: string) => ({
+  symbol,
+  status: "active",
+  tradable: true,
+  style: "american",
+  size: "100",
+  open_interest: "750",
+  open_interest_date: "2026-08-26",
+})
+
+const optionSnapshot = (delta: number) => ({
+  latestQuote: {
+    bp: "2.00",
+    ap: "2.10",
+    t: "2026-08-27T14:30:00.123456789Z",
+  },
+  greeks: { delta, gamma: 0.02, theta: -0.04, vega: 0.12 },
+  impliedVolatility: 0.25,
+  dailyBar: { t: "2026-08-27T13:30:00Z", v: 250 },
+})
+
+const snapshots = {
+  snapshots: {
+    [longSymbol]: optionSnapshot(0.5),
+    [shortSymbol]: optionSnapshot(0.3),
+  },
+}
+
+const openingOrder = (overrides: Record<string, unknown> = {}) => ({
+  id: "order-1",
+  asset_class: "us_option",
+  submitted_at: "2026-08-27T14:29:00.000Z",
+  status: "rejected",
+  order_class: "mleg",
+  type: "limit",
+  time_in_force: "day",
+  qty: "1",
+  legs: [
+    { symbol: longSymbol, ratio_qty: "1", position_intent: "buy_to_open" },
+    { symbol: shortSymbol, ratio_qty: "1", position_intent: "sell_to_open" },
+  ],
+  ...overrides,
+})
+
+const input = {
+  sessionDate,
+  slotStartedAt: "2026-08-27T14:30:00.000Z",
+  longContractSymbol: longSymbol,
+  shortContractSymbol: shortSymbol,
+  durableControl: {
+    stateVersion: DURABLE_RISK_CONTROL_STATE_VERSION,
+    tradingDate: sessionDate,
+    entriesSubmittedToday: 0,
+    dailyBreakerActive: false,
+    competitionBreakerActive: false,
+  },
+  signal,
+} as const
+
+const router = (overrides: Readonly<{
+  account?: unknown
+  positions?: (call: number) => unknown
+  openOrders?: (call: number) => unknown
+  history?: unknown
+  snapshots?: unknown
+}> = {}) => {
+  let positionsCall = 0
+  let openOrdersCall = 0
+  return vi.fn<typeof fetch>(async (resource, init) => {
+    const url = new URL(String(resource))
+    expect(init?.method).toBe("GET")
+    expect(init?.redirect).toBe("error")
+    if (url.pathname === "/v2/account") return response(overrides.account ?? account)
+    if (url.pathname === "/v2/positions") {
+      positionsCall += 1
+      return response(overrides.positions?.(positionsCall) ?? [])
+    }
+    if (url.pathname === "/v2/orders") {
+      if (url.searchParams.get("status") === "open") {
+        openOrdersCall += 1
+        return response(overrides.openOrders?.(openOrdersCall) ?? [])
+      }
+      return response(overrides.history ?? [])
+    }
+    if (url.pathname === `/v2/options/contracts/${longSymbol}`) {
+      return response(contract(longSymbol))
+    }
+    if (url.pathname === `/v2/options/contracts/${shortSymbol}`) {
+      return response(contract(shortSymbol))
+    }
+    if (url.pathname === "/v1beta1/options/snapshots") {
+      expect(url.searchParams.get("symbols")).toBe(`${longSymbol},${shortSymbol}`)
+      expect(url.searchParams.get("feed")).toBe("indicative")
+      return response(overrides.snapshots ?? snapshots)
+    }
+    return response({}, 404)
+  })
+}
+
+const provider = (fetchImplementation: typeof fetch) =>
+  createAlpacaRiskStateProvider({
+    apiKey: "test-key",
+    secretKey: "test-secret",
+    fetch: fetchImplementation,
+    now: () => evaluatedAt,
+  })
+
+const expectFailure = async (
+  fetchImplementation: typeof fetch,
+  expected: RiskStateCaptureFailureCode,
+) => {
+  const result = await provider(fetchImplementation).capture(input)
+  expect(result).toEqual({ success: false, reasons: [expected] })
+}
+
+describe("Alpaca risk-state provider", () => {
+  it("exposes only one read-only capture operation", () => {
+    expect(Object.keys(provider(router()))).toEqual(["capture"])
+  })
+
+  it("coordinates application-verified account, contract, quote, and flat portfolio state", async () => {
+    const fetchImplementation = router()
+    const result = await provider(fetchImplementation).capture(input)
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.snapshot).toMatchObject({
+      evaluatedAt: evaluatedAt.toISOString(),
+      quoteSnapshot: {
+        evaluatedAt: evaluatedAt.toISOString(),
+        snapshotMetadata: {
+          provider: "ALPACA",
+          source: "options-snapshots-indicative",
+          retrievedAt: evaluatedAt.toISOString(),
+        },
+      },
+      account: {
+        observedAt: evaluatedAt.toISOString(),
+        status: "ACTIVE",
+        tradingRestricted: false,
+        multilegOptionsApproved: true,
+        buyingPowerCents: 10_000_000,
+      },
+      portfolio: {
+        observedAt: evaluatedAt.toISOString(),
+        consistent: true,
+      },
+      contracts: {
+        slotStartedAt: input.slotStartedAt,
+        observedAt: evaluatedAt.toISOString(),
+        legs: [
+          { role: "LONG", volume: 250, volumeDate: sessionDate },
+          { role: "SHORT", volume: 250, volumeDate: sessionDate },
+        ],
+      },
+      reconciliationReasonCodes: [],
+    })
+    expect(fetchImplementation).toHaveBeenCalledTimes(9)
+    for (const [resource, init] of fetchImplementation.mock.calls) {
+      expect(String(resource)).not.toContain("test-key")
+      expect(String(resource)).not.toContain("test-secret")
+      expect(init?.headers).toEqual({
+        "APCA-API-KEY-ID": "test-key",
+        "APCA-API-SECRET-KEY": "test-secret",
+      })
+    }
+  })
+
+  it("sets reconciliation inconsistent when broker state changes during capture", async () => {
+    const longPosition = {
+      asset_class: "us_option",
+      symbol: longSymbol,
+      qty: "1",
+      side: "long",
+    }
+    const shortPosition = {
+      asset_class: "us_option",
+      symbol: shortSymbol,
+      qty: "1",
+      side: "short",
+    }
+    const result = await provider(router({
+      positions: (call) => call === 1 ? [] : [longPosition, shortPosition],
+    })).capture(input)
+    expect(result.success && result.snapshot.portfolio).toMatchObject({
+      consistent: false,
+      openStrategyPositionCount: 1,
+    })
+    expect(result.success && result.snapshot.reconciliationReasonCodes).toEqual([
+      "BROKER_STATE_CHANGED",
+    ])
+  })
+
+  it("reconciles valid unrelated fractional exposure as inconsistent state", async () => {
+    const result = await provider(router({
+      positions: () => [{
+        asset_class: "us_equity",
+        symbol: "SPY",
+        qty: "0.25",
+        side: "long",
+      }],
+    })).capture(input)
+    expect(result.success && result.snapshot.portfolio).toMatchObject({
+      consistent: false,
+      openStrategyPositionCount: 0,
+    })
+    expect(result.success && result.snapshot.reconciliationReasonCodes).toEqual([
+      "UNKNOWN_POSITION",
+    ])
+  })
+
+  it("counts only same-day submitted entries observed by capture start", async () => {
+    const result = await provider(router({
+      history: [
+        openingOrder({ id: "previous-day", submitted_at: "2026-08-26T18:00:00.000Z" }),
+        openingOrder({ id: "observed" }),
+        openingOrder({ id: "after-capture", submitted_at: "2026-08-27T14:30:31.000Z" }),
+      ],
+    })).capture(input)
+    expect(result.success && result.snapshot.portfolio.entriesSubmittedToday).toBe(1)
+  })
+
+  it("fails closed on malformed account money", async () => {
+    await expectFailure(
+      router({ account: { ...account, buying_power: "100.001" } }),
+      "ACCOUNT_RESPONSE_INVALID",
+    )
+  })
+
+  it("returns bounded failures without raw payloads or credentials", async () => {
+    const fetchImplementation = router({
+      account: {
+        ...account,
+        buying_power: "test-secret-100.001",
+      },
+    })
+    const result = await provider(fetchImplementation).capture(input)
+    expect(result).toEqual({
+      success: false,
+      reasons: ["ACCOUNT_RESPONSE_INVALID"],
+    })
+    expect(JSON.stringify(result)).not.toContain("test-secret")
+  })
+
+  it("fails closed when required option metrics are absent", async () => {
+    const missingGreeks = structuredClone(snapshots) as Record<string, any>
+    delete missingGreeks.snapshots[longSymbol].greeks
+    await expectFailure(
+      router({ snapshots: missingGreeks }),
+      "OPTION_METRICS_UNAVAILABLE",
+    )
+  })
+
+  it("rejects stale quotes with a bounded reason", async () => {
+    const stale = structuredClone(snapshots) as Record<string, any>
+    stale.snapshots[longSymbol].latestQuote.t = "2026-08-27T14:28:00.000Z"
+    await expectFailure(router({ snapshots: stale }), "OPTION_QUOTE_STALE")
+  })
+
+  it("validates input before any network request", async () => {
+    const fetchImplementation = router()
+    const result = await provider(fetchImplementation).capture({
+      ...input,
+      shortContractSymbol: longSymbol,
+    })
+    expect(result).toEqual({
+      success: false,
+      reasons: ["CAPTURE_INPUT_INVALID"],
+    })
+    expect(fetchImplementation).not.toHaveBeenCalled()
+  })
+
+  it("propagates cancellation without converting it into a provider failure", async () => {
+    const controller = new AbortController()
+    const reason = new Error("cancelled")
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async () => {
+      controller.abort(reason)
+      throw reason
+    })
+    await expect(provider(fetchImplementation).capture({
+      ...input,
+      signal: controller.signal,
+    })).rejects.toBe(reason)
+  })
+
+  it("rejects unsafe production base URLs", () => {
+    expect(() => createAlpacaRiskStateProvider({
+      apiKey: "test-key",
+      secretKey: "test-secret",
+      tradingBaseUrl: "http://paper-api.alpaca.markets",
+    })).toThrow("ALPACA_TRADING_BASE_URL")
+  })
+})

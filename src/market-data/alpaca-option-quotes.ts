@@ -17,7 +17,7 @@ const SPY_OPTION_SYMBOL_PATTERN = /^SPY\d{6}[CP]\d{8}$/u
 export const ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE =
   "options-snapshots-indicative" as const
 
-const latestQuoteSchema = z
+export const alpacaLatestOptionQuoteSchema = z
   .object({
     bp: z.union([z.number(), z.string()]),
     ap: z.union([z.number(), z.string()]),
@@ -27,7 +27,7 @@ const latestQuoteSchema = z
 
 const optionSnapshotSchema = z
   .object({
-    latestQuote: latestQuoteSchema,
+    latestQuote: alpacaLatestOptionQuoteSchema,
   })
   .passthrough()
 
@@ -130,9 +130,9 @@ const normalizeBaseUrl = (
  * @param evaluatedAtNanoseconds Application evaluation instant.
  * @returns A confirmed quote and its freshness deadline, or a bounded reason.
  */
-const parseQuote = (
+export const normalizeAlpacaOptionQuote = (
   contractSymbol: string,
-  quote: z.infer<typeof latestQuoteSchema>,
+  quote: z.infer<typeof alpacaLatestOptionQuoteSchema>,
   evaluatedAtNanoseconds: bigint,
 ):
   | {
@@ -277,14 +277,14 @@ export function createAlpacaOptionQuoteProvider(
       const evaluatedAt = evaluatedAtDate.toISOString()
       const evaluatedAtNanoseconds =
         BigInt(evaluatedAtMilliseconds) * 1_000_000n
-      const longQuote = parseQuote(
+      const longQuote = normalizeAlpacaOptionQuote(
         longContractSymbol,
         longSnapshot.latestQuote,
         evaluatedAtNanoseconds,
       )
       if (!longQuote.success) return failure(longQuote.reason)
 
-      const shortQuote = parseQuote(
+      const shortQuote = normalizeAlpacaOptionQuote(
         shortContractSymbol,
         shortSnapshot.latestQuote,
         evaluatedAtNanoseconds,
