@@ -73,10 +73,15 @@ export const normalizedBrokerOrderV1Schema = z
     orderClass: z.string().min(1).max(64),
     orderType: z.string().min(1).max(64),
     timeInForce: z.string().min(1).max(64),
-    quantity: positiveProviderNumber,
+    quantity: positiveProviderNumber.optional(),
+    notional: positiveProviderNumber.optional(),
     legs: z.array(normalizedBrokerOrderLegV1Schema).max(4),
   })
   .strict()
+  .refine(
+    ({ quantity, notional }) => quantity !== undefined || notional !== undefined,
+    { message: "Broker order requires quantity or notional" },
+  )
 
 export type NormalizedBrokerPositionV1 = Readonly<
   z.infer<typeof normalizedBrokerPositionV1Schema>

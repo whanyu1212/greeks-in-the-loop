@@ -103,12 +103,13 @@ const input = {
 const router = (overrides: Readonly<{
   account?: unknown
   positions?: (call: number) => unknown
-  openOrders?: (call: number) => unknown
-  history?: unknown
+  openOrders?: (call: number, url: URL) => unknown
+  history?: unknown | ((call: number, url: URL) => unknown)
   snapshots?: unknown
 }> = {}) => {
   let positionsCall = 0
   let openOrdersCall = 0
+  let historyCall = 0
   return vi.fn<typeof fetch>(async (resource, init) => {
     const url = new URL(String(resource))
     expect(init?.method).toBe("GET")
@@ -121,9 +122,14 @@ const router = (overrides: Readonly<{
     if (url.pathname === "/v2/orders") {
       if (url.searchParams.get("status") === "open") {
         openOrdersCall += 1
-        return response(overrides.openOrders?.(openOrdersCall) ?? [])
+        return response(overrides.openOrders?.(openOrdersCall, url) ?? [])
       }
-      return response(overrides.history ?? [])
+      historyCall += 1
+      return response(
+        typeof overrides.history === "function"
+          ? overrides.history(historyCall, url)
+          : overrides.history ?? [],
+      )
     }
     if (url.pathname === `/v2/options/contracts/${longSymbol}`) {
       return response(contract(longSymbol))
@@ -289,6 +295,62 @@ describe("Alpaca risk-state provider", () => {
       history: [closingOrder()],
     })).capture(input)
     expect(result.success && result.snapshot.portfolio.entriesSubmittedToday).toBe(0)
+  })
+
+  it("accepts valid notional orders without treating them as option entries", async () => {
+    const notionalOrder = {
+      id: "notional-order",
+      asset_class: "us_equity",
+      submitted_at: "2026-08-27T14:29:00.000Z",
+      status: "accepted",
+      order_class: "simple",
+      type: "market",
+      time_in_force: "day",
+      qty: null,
+      notional: "100.00",
+    }
+    const result = await provider(router({
+      openOrders: () => [notionalOrder],
+      history: [notionalOrder],
+    })).capture(input)
+    expect(result.success && result.snapshot.portfolio).toMatchObject({
+      consistent: false,
+      entriesSubmittedToday: 0,
+    })
+    expect(result.success && result.snapshot.reconciliationReasonCodes).toEqual([
+      "UNKNOWN_OPEN_ORDER",
+      "UNMATCHED_PENDING_ENTRY",
+    ])
+  })
+
+  it("paginates order history with the supported timestamp cursor", async () => {
+    const firstPage = Array.from({ length: 500 }, (_, index) => ({
+      id: `equity-order-${index}`,
+      asset_class: "us_equity",
+      submitted_at: new Date(
+        Date.parse("2026-08-27T13:00:00.000Z") + index,
+      ).toISOString(),
+      status: "filled",
+      order_class: "simple",
+      type: "market",
+      time_in_force: "day",
+      qty: "1",
+    }))
+    const lastTimestamp = firstPage.at(-1)?.submitted_at
+    const historyUrls: URL[] = []
+    const result = await provider(router({
+      history: (call: number, url: URL) => {
+        historyUrls.push(new URL(url))
+        return call === 1 ? firstPage : []
+      },
+    })).capture(input)
+    expect(result.success).toBe(true)
+    expect(historyUrls).toHaveLength(2)
+    expect(historyUrls[1]?.searchParams.get("after")).toBe(lastTimestamp)
+    expect(historyUrls[1]?.searchParams.get("until")).toBe(
+      evaluatedAt.toISOString(),
+    )
+    expect(historyUrls[1]?.searchParams.has("after_order_id")).toBe(false)
   })
 
   it("fails closed on malformed account money", async () => {

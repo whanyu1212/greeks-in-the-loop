@@ -102,6 +102,7 @@ const rawOrderSchema = z
     type: z.string().nullish(),
     time_in_force: z.string().nullish(),
     qty: decimal.nullish(),
+    notional: decimal.nullish(),
     legs: z.array(rawOrderLegSchema).max(4).nullish(),
   })
   .passthrough()
@@ -310,7 +311,12 @@ const normalizeOrder = (
 ): NormalizedBrokerOrderV1 | undefined => {
   const submittedAt = canonicalTimestamp(raw.submitted_at ?? raw.created_at ?? "")
   const quantity = positiveNumber(raw.qty)
-  if (submittedAt === undefined || quantity === undefined || raw.id.length === 0) {
+  const notional = positiveNumber(raw.notional)
+  if (
+    submittedAt === undefined ||
+    (quantity === undefined && notional === undefined) ||
+    raw.id.length === 0
+  ) {
     return undefined
   }
   const legs = (raw.legs ?? []).map((leg) => {
@@ -332,6 +338,7 @@ const normalizeOrder = (
     orderType: (raw.type ?? "unknown").toLowerCase(),
     timeInForce: (raw.time_in_force ?? "unknown").toLowerCase(),
     quantity,
+    notional,
     legs,
   })
   return parsed.success ? parsed.data : undefined
@@ -511,19 +518,15 @@ export function createAlpacaRiskStateProvider(
       ? "OPEN_ORDERS_RESPONSE_INVALID"
       : "ORDER_HISTORY_RESPONSE_INVALID"
     const retained: NormalizedBrokerOrderV1[] = []
-    let afterOrderId: string | undefined
+    let afterTimestamp = historyAfter
     for (let page = 0; page < MAX_ORDER_PAGES; page += 1) {
       const url = new URL("/v2/orders", tradingBaseUrl)
       url.searchParams.set("status", kind === "OPEN" ? "open" : "all")
       url.searchParams.set("limit", String(ORDER_PAGE_SIZE))
       url.searchParams.set("nested", "true")
       url.searchParams.set("direction", "asc")
-      if (afterOrderId === undefined) {
-        if (historyAfter !== undefined) url.searchParams.set("after", historyAfter)
-        if (historyUntil !== undefined) url.searchParams.set("until", historyUntil)
-      } else {
-        url.searchParams.set("after_order_id", afterOrderId)
-      }
+      if (afterTimestamp !== undefined) url.searchParams.set("after", afterTimestamp)
+      if (historyUntil !== undefined) url.searchParams.set("until", historyUntil)
       const raw = await getJson(url, signal, requestFailure, responseFailure)
       const parsed = z.array(rawOrderSchema).max(ORDER_PAGE_SIZE).safeParse(raw)
       if (!parsed.success) throw new CaptureFailure(responseFailure)
@@ -533,11 +536,14 @@ export function createAlpacaRiskStateProvider(
       }
       retained.push(...normalized as NormalizedBrokerOrderV1[])
       if (parsed.data.length < ORDER_PAGE_SIZE) return retained
-      const nextId = parsed.data.at(-1)?.id
-      if (nextId === undefined || nextId === afterOrderId) {
+      const nextTimestamp = normalized.at(-1)?.submittedAt
+      if (
+        nextTimestamp === undefined ||
+        (afterTimestamp !== undefined && nextTimestamp <= afterTimestamp)
+      ) {
         throw new CaptureFailure("ORDER_HISTORY_INCOMPLETE")
       }
-      afterOrderId = nextId
+      afterTimestamp = nextTimestamp
     }
     throw new CaptureFailure("ORDER_HISTORY_INCOMPLETE")
   }
