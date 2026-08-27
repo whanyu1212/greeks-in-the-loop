@@ -577,6 +577,10 @@ describe("research run evaluation", () => {
   it("matches intent-rejection reasons to retained quote and proposal records", () => {
     const run = derivedIntentRun()
     const { validatedDecision: _validatedDecision, ...withoutDecision } = run
+    const {
+      tradeIntentWindow: _tradeIntentWindow,
+      ...initiallyIneligible
+    } = run.initialEligibility!
     const quoteFailure = evaluateResearchRunV1({
       ...run,
       outcome: {
@@ -610,6 +614,31 @@ describe("research run evaluation", () => {
         reasons: ["QUOTE_REQUEST_FAILED", "QUOTE_RESPONSE_INVALID"],
       },
     })
+    const ineligibleQuoteFailure = evaluateResearchRunV1({
+      ...withoutDecision,
+      initialEligibility: {
+        ...initiallyIneligible,
+        tradeIntentEligible: false,
+      },
+      evidenceSnapshots: [],
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["QUOTE_REQUEST_FAILED"],
+      },
+    })
+    const ineligibleDerivationFailure = evaluateResearchRunV1({
+      ...run,
+      initialEligibility: {
+        ...initiallyIneligible,
+        tradeIntentEligible: false,
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["NON_POSITIVE_NET_DEBIT"],
+      },
+    })
 
     expect(quoteFailure.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
@@ -621,6 +650,14 @@ describe("research run evaluation", () => {
     expect(
       multipleQuoteFailures.dimensions.contractCompliance.issueCodes,
     ).toContain("OUTCOME_RECORD_MISMATCH")
+    for (const evaluation of [
+      ineligibleQuoteFailure,
+      ineligibleDerivationFailure,
+    ]) {
+      expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+        "OUTCOME_RECORD_MISMATCH",
+      )
+    }
   })
 
   it("requires reachable issues for report-free decision rejections", () => {
@@ -1184,6 +1221,54 @@ describe("research run evaluation", () => {
 
     expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
     expect(misattributed.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+  })
+
+  it("checks trade eligibility before proposal freshness rejections", () => {
+    const run = derivedIntentRun()
+    if (run.researchReport === undefined || run.initialEligibility === undefined) {
+      throw new Error("Expected a proposal report and eligibility fixture")
+    }
+    const {
+      validatedDecision: _validatedDecision,
+      evidenceSnapshots: _evidenceSnapshots,
+      ...base
+    } = run
+    const {
+      tradeIntentWindow: _tradeIntentWindow,
+      ...initiallyIneligible
+    } = run.initialEligibility
+    const evaluation = evaluateResearchRunV1({
+      ...base,
+      initialEligibility: {
+        ...initiallyIneligible,
+        tradeIntentEligible: false,
+      },
+      evidenceSnapshots: [],
+      researchReport: {
+        ...run.researchReport,
+        analysis: {
+          ...run.researchReport.analysis,
+          accountChecks: {
+            ...run.researchReport.analysis.accountChecks,
+            observedAt: "2026-08-26T13:58:00.000Z",
+          },
+        },
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [
+          {
+            code: "CONTEXT_INVALID",
+            path: ["analysis", "accountChecks", "observedAt"],
+          },
+        ],
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
     )
   })

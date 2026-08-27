@@ -390,6 +390,9 @@ export function evaluateResearchRunV1(
       ? new Date(Math.max(eligibilityEvaluatedAt, reportAsOf)).toISOString()
       : undefined
   })()
+  const hasRetainedEligibleTradeWindow =
+    run.initialEligibility?.tradeIntentEligible === true &&
+    run.initialEligibility.tradeIntentWindow !== undefined
   const retainedResult = run.preliminaryResearch ?? run.validatedDecision
   const validRetainedResult =
     parsedPreliminaryResearch?.success === true
@@ -415,6 +418,7 @@ export function evaluateResearchRunV1(
   const expectedPreQuoteDecisionRejectionIssues = (() => {
     if (
       proposalPreflightValidation?.success !== true ||
+      !hasRetainedEligibleTradeWindow ||
       validReport === undefined ||
       run.initialEligibility === undefined ||
       retainedProposalEvaluationLowerBound === undefined
@@ -655,16 +659,17 @@ export function evaluateResearchRunV1(
         ])
       const proposalRejectionIssuesMatch =
         proposalPreflightValidation?.success !== true ||
-        (expectedPreQuoteDecisionRejectionIssues === undefined
-          ? [
-              ["analysis", "marketRegime", "observedAt"],
-              ["analysis", "accountChecks", "observedAt"],
-            ].some((path) =>
-              rejectionIssuesMatch([
-                { code: "CONTEXT_INVALID", path },
-              ]),
-            )
-          : rejectionIssuesMatch(expectedPreQuoteDecisionRejectionIssues))
+        (hasRetainedEligibleTradeWindow &&
+          (expectedPreQuoteDecisionRejectionIssues === undefined
+            ? [
+                ["analysis", "marketRegime", "observedAt"],
+                ["analysis", "accountChecks", "observedAt"],
+              ].some((path) =>
+                rejectionIssuesMatch([
+                  { code: "CONTEXT_INVALID", path },
+                ]),
+              )
+            : rejectionIssuesMatch(expectedPreQuoteDecisionRejectionIssues)))
       if (
         run.preliminaryResearch !== undefined ||
         run.validatedDecision !== undefined ||
@@ -690,7 +695,8 @@ export function evaluateResearchRunV1(
           (parsedReport?.success !== true ||
             parsedReport.data.result.outcome !== "PROPOSE_TRADE")) ||
         (canonicalRetainedQuoteSnapshot !== undefined &&
-          (expectedSnapshotDecisionRejectionIssues === undefined ||
+          (!hasRetainedEligibleTradeWindow ||
+            expectedSnapshotDecisionRejectionIssues === undefined ||
             !rejectionIssuesMatch(expectedSnapshotDecisionRejectionIssues)))
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
@@ -718,23 +724,26 @@ export function evaluateResearchRunV1(
       )
       const cycleCompletedAt = Date.parse(run.cycle.completedAt)
       const retainedTradeWindowCanExpireByCompletion =
-        run.initialEligibility?.tradeIntentEligible !== true ||
-        !Number.isFinite(retainedWindowDeadline) ||
-        !Number.isFinite(cycleCompletedAt) ||
-        cycleCompletedAt >= retainedWindowDeadline
+        hasRetainedEligibleTradeWindow &&
+        (!Number.isFinite(retainedWindowDeadline) ||
+          !Number.isFinite(cycleCompletedAt) ||
+          cycleCompletedAt >= retainedWindowDeadline)
       const postQuoteMarketWindowRejectionPlausible =
         hasCanonicalQuoteSnapshot && retainedTradeWindowCanExpireByCompletion
       const rejectionRecordsMatch =
         (quoteConfirmationRejection &&
+          hasRetainedEligibleTradeWindow &&
           run.validatedDecision === undefined &&
           run.evidenceSnapshots.length === 0) ||
         (derivationRejected &&
+          hasRetainedEligibleTradeWindow &&
           hasValidatedProposal &&
           hasCanonicalQuoteSnapshot) ||
         (marketWindowRejected &&
           run.validatedDecision === undefined &&
           ((run.evidenceSnapshots.length === 0 &&
-            retainedTradeWindowCanExpireByCompletion) ||
+            (!hasRetainedEligibleTradeWindow ||
+              retainedTradeWindowCanExpireByCompletion)) ||
             postQuoteMarketWindowRejectionPlausible))
       if (
         (parsedReport?.success === true &&
