@@ -444,6 +444,7 @@ export function evaluateResearchRunV1(
       }
       break
     case "DECISION_REJECTED":
+      const rejectedIssues = run.outcome.issues
       const parsedRejectedReport =
         parsedReport?.success === true ? parsedReport.data : undefined
       const parsedRejectedResult = parsedRejectedReport?.result
@@ -461,6 +462,37 @@ export function evaluateResearchRunV1(
             claim.kind !== "SOURCED_FACT" ||
             Date.parse(claim.observedAt) <= Date.parse(run.cycle.completedAt),
         )
+      const preliminaryFutureObservationIndex =
+        parsedRejectedResult?.outcome === "PRELIMINARY_RESEARCH"
+          ? parsedRejectedResult.evidence.findIndex(
+              (claim) =>
+                claim.kind === "SOURCED_FACT" &&
+                Date.parse(claim.observedAt) >
+                  Date.parse(run.cycle.completedAt),
+            )
+          : -1
+      const expectedPreliminaryDecisionRejectionIssues =
+        parsedRejectedResult?.outcome !== "PRELIMINARY_RESEARCH"
+          ? undefined
+          : preliminaryFutureObservationIndex >= 0
+            ? [
+                {
+                  code: "CONTEXT_INVALID" as const,
+                  path: [
+                    "evidence",
+                    preliminaryFutureObservationIndex,
+                    "observedAt",
+                  ],
+                },
+              ]
+            : run.cycle.sessionDate !== parsedRejectedResult.targetSessionDate
+              ? [
+                  {
+                    code: "CONTEXT_INVALID" as const,
+                    path: ["targetSessionDate"],
+                  },
+                ]
+              : undefined
       const noActionValidation =
         parsedRejectedResult?.outcome === "NO_ACTION"
           ? validateResearchDecisionV1(parsedRejectedResult, {
@@ -469,11 +501,31 @@ export function evaluateResearchRunV1(
             })
           : undefined
       const noActionCouldBeRetained = noActionValidation?.success === true
+      const proposalRejectionIssuesMatch =
+        proposalPreflightValidation?.success !== true ||
+        (expectedPreQuoteDecisionRejectionIssues === undefined
+          ? [
+              ["analysis", "marketRegime", "observedAt"],
+              ["analysis", "accountChecks", "observedAt"],
+            ].some((path) =>
+              isDeepStrictEqual(rejectedIssues, [
+                { code: "CONTEXT_INVALID", path },
+              ]),
+            )
+          : isDeepStrictEqual(
+              rejectedIssues,
+              expectedPreQuoteDecisionRejectionIssues,
+            ))
       if (
         run.preliminaryResearch !== undefined ||
         run.validatedDecision !== undefined ||
         (run.evidenceSnapshots.length === 0 &&
           (preliminaryCouldBeRetained || noActionCouldBeRetained)) ||
+        (expectedPreliminaryDecisionRejectionIssues !== undefined &&
+          !isDeepStrictEqual(
+            run.outcome.issues,
+            expectedPreliminaryDecisionRejectionIssues,
+          )) ||
         (run.evidenceSnapshots.length === 0 &&
           noActionValidation?.success === false &&
           !isDeepStrictEqual(
@@ -485,11 +537,7 @@ export function evaluateResearchRunV1(
             run.outcome.issues,
             proposalPreflightValidation.issues,
           )) ||
-        (expectedPreQuoteDecisionRejectionIssues !== undefined &&
-          !isDeepStrictEqual(
-            run.outcome.issues,
-            expectedPreQuoteDecisionRejectionIssues,
-          )) ||
+        !proposalRejectionIssuesMatch ||
         (run.evidenceSnapshots.length > 0 &&
           (parsedReport?.success !== true ||
             parsedReport.data.result.outcome !== "PROPOSE_TRADE")) ||

@@ -983,6 +983,82 @@ describe("research run evaluation", () => {
     )
   })
 
+  it("bounds all-pass snapshot-free proposal rejections to plausible freshness", () => {
+    const run = derivedIntentRun()
+    const {
+      validatedDecision: _validatedDecision,
+      evidenceSnapshots: _evidenceSnapshots,
+      ...base
+    } = run
+    const arbitraryRejection = evaluateResearchRunV1({
+      ...base,
+      evidenceSnapshots: [],
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{ code: "CONTEXT_INVALID", path: ["result"] }],
+      },
+    })
+    const plausibleLaterStaleness = evaluateResearchRunV1({
+      ...base,
+      evidenceSnapshots: [],
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [
+          {
+            code: "CONTEXT_INVALID",
+            path: ["analysis", "marketRegime", "observedAt"],
+          },
+        ],
+      },
+    })
+
+    expect(arbitraryRejection.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+    expect(plausibleLaterStaleness.dimensions.contractCompliance.status).toBe(
+      "PASS",
+    )
+  })
+
+  it("requires exact issues for rejected preliminary reports", () => {
+    const run = preliminaryRun()
+    if (
+      run.preliminaryResearch === undefined ||
+      run.researchReport === undefined
+    ) {
+      throw new Error("Expected a preliminary report fixture")
+    }
+    const { preliminaryResearch: _preliminaryResearch, ...base } = run
+    const research: PreliminaryResearchV1 = {
+      ...run.preliminaryResearch,
+      targetSessionDate: "2026-08-27",
+    }
+    const rejectedRun = {
+      ...base,
+      researchReport: { ...run.researchReport, result: research },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{ code: "CONTEXT_INVALID", path: ["targetSessionDate"] }],
+      },
+    } as ResearchRunV1
+    const evaluation = evaluateResearchRunV1(rejectedRun)
+    const misattributed = evaluateResearchRunV1({
+      ...rejectedRun,
+      outcome: {
+        ...rejectedRun.outcome,
+        issues: [{ code: "CONTEXT_INVALID", path: ["evidence"] }],
+      },
+    } as ResearchRunV1)
+
+    expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
+    expect(misattributed.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+  })
+
   it("returns contract failure instead of throwing for malformed retained results", () => {
     const runs = [
       {
