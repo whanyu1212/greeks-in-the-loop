@@ -491,6 +491,9 @@ describe("Alpaca risk-state provider", () => {
       consistent: false,
       entriesSubmittedToday: 1,
     })
+    expect(result.success && result.snapshot.account.observedAt).toBe(
+      requestStartedAt.toISOString(),
+    )
     expect(result.success && result.snapshot.reconciliationReasonCodes).toEqual([
       "BROKER_STATE_CHANGED",
     ])

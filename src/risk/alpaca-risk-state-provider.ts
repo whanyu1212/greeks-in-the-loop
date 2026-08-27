@@ -708,7 +708,10 @@ export function createAlpacaRiskStateProvider(
 
         const accountRaw = rawAccountSchema.safeParse(rawAccount)
         if (!accountRaw.success) throw new CaptureFailure("ACCOUNT_RESPONSE_INVALID")
-        const account = normalizeAccount(accountRaw.data, evaluatedAt)
+        const account = normalizeAccount(
+          accountRaw.data,
+          requestStartedAt.toISOString(),
+        )
         if (account === undefined) throw new CaptureFailure("ACCOUNT_RESPONSE_INVALID")
 
         const longContractRaw = rawContractSchema.safeParse(rawLongContract)
