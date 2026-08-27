@@ -12,7 +12,7 @@ import {
   parseRfc3339Nanoseconds,
 } from "../shared/value-normalization.js"
 
-const QUOTE_FRESHNESS_NANOSECONDS = 60_000_000_000n
+export const ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS = 60_000_000_000n
 const SPY_OPTION_SYMBOL_PATTERN = /^SPY\d{6}[CP]\d{8}$/u
 export const ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE =
   "options-snapshots-indicative" as const
@@ -164,7 +164,7 @@ const parseQuote = (
   }
 
   const freshUntilNanoseconds =
-    providerTimestampNanoseconds + QUOTE_FRESHNESS_NANOSECONDS
+    providerTimestampNanoseconds + ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS
   if (freshUntilNanoseconds < evaluatedAtNanoseconds) {
     return { success: false, reason: "QUOTE_STALE" }
   }

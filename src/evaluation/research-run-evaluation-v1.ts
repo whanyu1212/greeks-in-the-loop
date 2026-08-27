@@ -10,12 +10,19 @@ import {
   RESEARCH_RUN_VERSION,
   type ResearchRunV1,
 } from "../research/research-artifact.js"
-import { ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE } from "../market-data/alpaca-option-quotes.js"
+import {
+  ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS,
+  ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE,
+} from "../market-data/alpaca-option-quotes.js"
 import { PROPOSAL_QUOTE_SNAPSHOT_REF } from "../research/research-cycle.js"
 import {
   newYorkDate,
   newYorkLocalTime,
 } from "../scheduling/research-eligibility.js"
+import {
+  floorNanosecondsToIsoMilliseconds,
+  parseRfc3339Nanoseconds,
+} from "../shared/value-normalization.js"
 
 export const RESEARCH_RUN_EVALUATION_VERSION = "1.0.0" as const
 
@@ -41,6 +48,7 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "SNAPSHOT_FROM_FUTURE",
   "STALE_SNAPSHOT",
   "QUOTE_SNAPSHOT_PROVENANCE_INVALID",
+  "QUOTE_SNAPSHOT_METADATA_MISMATCH",
   "CANDIDATE_IDENTITY_MISMATCH",
   "CANDIDATE_DTE_MISMATCH",
   "OPEN_INTEREST_HISTORY_INVALID",
@@ -362,6 +370,26 @@ export function evaluateResearchRunV1(
   }
   if (run.outcome.status === "INTENT_DERIVED") {
     const intentEvaluatedAt = Date.parse(run.outcome.intent.evaluatedAt)
+    const parsedIntent = tradeIntentV1Schema.safeParse(run.outcome.intent)
+    const longQuoteTimestamp = parsedIntent.success
+      ? parseRfc3339Nanoseconds(
+          parsedIntent.data.longQuote.providerTimestamp,
+        )
+      : undefined
+    const shortQuoteTimestamp = parsedIntent.success
+      ? parseRfc3339Nanoseconds(
+          parsedIntent.data.shortQuote.providerTimestamp,
+        )
+      : undefined
+    const expectedFreshUntil =
+      longQuoteTimestamp === undefined || shortQuoteTimestamp === undefined
+        ? undefined
+        : floorNanosecondsToIsoMilliseconds(
+            (longQuoteTimestamp < shortQuoteTimestamp
+              ? longQuoteTimestamp
+              : shortQuoteTimestamp) +
+              ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS,
+          )
     const snapshotsByReference = new Map(
       run.evidenceSnapshots.map((snapshot) => [snapshot.snapshotRef, snapshot]),
     )
@@ -381,6 +409,16 @@ export function evaluateResearchRunV1(
       }
       if (Date.parse(snapshot.freshUntil) < intentEvaluatedAt) {
         groundingIssues.push("STALE_SNAPSHOT")
+      }
+      if (
+        Date.parse(snapshot.retrievedAt) <= intentEvaluatedAt &&
+        Date.parse(snapshot.freshUntil) >= intentEvaluatedAt &&
+        parsedIntent.success &&
+        (snapshot.retrievedAt !== parsedIntent.data.evaluatedAt ||
+          expectedFreshUntil === undefined ||
+          snapshot.freshUntil !== expectedFreshUntil)
+      ) {
+        groundingIssues.push("QUOTE_SNAPSHOT_METADATA_MISMATCH")
       }
     }
     if (

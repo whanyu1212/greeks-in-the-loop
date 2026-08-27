@@ -300,7 +300,7 @@ const derivedIntentRun = (): ResearchRunV1 => {
         snapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
         provider: "ALPACA",
         source: "options-snapshots-indicative",
-        retrievedAt: "2026-08-26T14:03:59.000Z",
+        retrievedAt: "2026-08-26T14:04:00.000Z",
         freshUntil: "2026-08-26T14:04:59.000Z",
         temporalClass: "LIVE",
       },
@@ -473,6 +473,34 @@ describe("research run evaluation", () => {
     expect(evaluation.dimensions.grounding).toEqual({
       status: "FAIL",
       issueCodes: [snapshot.issueCode],
+    })
+  })
+
+  it.each([
+    {
+      name: "was retrieved before quote evaluation",
+      retrievedAt: "2026-08-26T14:03:58.000Z",
+      freshUntil: "2026-08-26T14:04:59.000Z",
+    },
+    {
+      name: "has an unrelated freshness deadline",
+      retrievedAt: "2026-08-26T14:04:00.000Z",
+      freshUntil: "2026-08-26T14:05:00.000Z",
+    },
+  ])("rejects quote metadata that $name", (snapshot) => {
+    const run = derivedIntentRun()
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      evidenceSnapshots: run.evidenceSnapshots.map((retained) => ({
+        ...retained,
+        retrievedAt: snapshot.retrievedAt,
+        freshUntil: snapshot.freshUntil,
+      })),
+    })
+
+    expect(evaluation.dimensions.grounding).toEqual({
+      status: "FAIL",
+      issueCodes: ["QUOTE_SNAPSHOT_METADATA_MISMATCH"],
     })
   })
 
