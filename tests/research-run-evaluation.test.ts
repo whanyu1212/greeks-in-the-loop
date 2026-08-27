@@ -1183,6 +1183,7 @@ describe("research run evaluation", () => {
     } = run
     const rejectedRun = {
       ...base,
+      cycle: { ...base.cycle, completedAt: "2026-08-26T14:04:00.000Z" },
       evidenceSnapshots: [],
       researchReport: {
         ...run.researchReport,
@@ -1218,10 +1219,26 @@ describe("research run evaluation", () => {
         ],
       },
     } as ResearchRunV1)
+    const laterMarketStaleness = evaluateResearchRunV1({
+      ...rejectedRun,
+      cycle: run.cycle,
+      outcome: {
+        ...rejectedRun.outcome,
+        issues: [
+          {
+            code: "CONTEXT_INVALID",
+            path: ["analysis", "marketRegime", "observedAt"],
+          },
+        ],
+      },
+    } as ResearchRunV1)
 
     expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
     expect(misattributed.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
+    )
+    expect(laterMarketStaleness.dimensions.contractCompliance.status).toBe(
+      "PASS",
     )
   })
 

@@ -392,7 +392,8 @@ export function evaluateResearchRunV1(
   })()
   const hasRetainedEligibleTradeWindow =
     run.initialEligibility?.tradeIntentEligible === true &&
-    run.initialEligibility.tradeIntentWindow !== undefined
+    run.initialEligibility.tradeIntentWindow !== undefined &&
+    run.initialEligibility.sessionDate === run.cycle.sessionDate
   const retainedResult = run.preliminaryResearch ?? run.validatedDecision
   const validRetainedResult =
     parsedPreliminaryResearch?.success === true
@@ -757,11 +758,40 @@ export function evaluateResearchRunV1(
       const proposalRejectionIssuesMatch =
         proposalPreflightValidation?.success !== true ||
         (hasRetainedEligibleTradeWindow &&
-          (expectedPreQuoteDecisionRejectionIssues === undefined
-            ? plausibleLaterProposalRejectionIssues.some((issues) =>
-                rejectionIssuesMatch(issues),
-              )
-            : rejectionIssuesMatch(expectedPreQuoteDecisionRejectionIssues)))
+          (() => {
+            const expectedPriority =
+              expectedPreQuoteDecisionRejectionIssues === undefined
+                ? 2
+                : isDeepStrictEqual(
+                      expectedPreQuoteDecisionRejectionIssues[0]?.path,
+                      ["analysis", "marketRegime", "observedAt"],
+                    )
+                  ? 0
+                  : isDeepStrictEqual(
+                        expectedPreQuoteDecisionRejectionIssues[0]?.path,
+                        ["analysis", "accountChecks", "observedAt"],
+                      )
+                    ? 1
+                    : 2
+            const possibleIssues = [
+              ...(expectedPreQuoteDecisionRejectionIssues === undefined
+                ? []
+                : [expectedPreQuoteDecisionRejectionIssues]),
+              ...plausibleLaterProposalRejectionIssues.filter((issues) => {
+                const priority = isDeepStrictEqual(issues[0]?.path, [
+                  "analysis",
+                  "marketRegime",
+                  "observedAt",
+                ])
+                  ? 0
+                  : 1
+                return priority <= expectedPriority
+              }),
+            ]
+            return possibleIssues.some((issues) =>
+              rejectionIssuesMatch(issues),
+            )
+          })())
       if (
         run.preliminaryResearch !== undefined ||
         run.validatedDecision !== undefined ||
