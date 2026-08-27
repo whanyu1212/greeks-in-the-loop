@@ -849,17 +849,33 @@ describe("research run evaluation", () => {
         },
       ],
     }
-    const evaluation = evaluateResearchRunV1({
+    const rejectedRun = {
       ...base,
       researchReport: { ...run.researchReport, result: invalidDecision },
       outcome: {
         outcomeVersion: "1.0.0",
         status: "DECISION_REJECTED",
-        issues: [{ code: "UNKNOWN_SNAPSHOT", path: ["evidence", 0] }],
+        issues: [
+          {
+            code: "UNKNOWN_SNAPSHOT",
+            path: ["evidence", 0, "snapshotRef"],
+          },
+        ],
+      },
+    } as ResearchRunV1
+    const evaluation = evaluateResearchRunV1(rejectedRun)
+    const misattributed = evaluateResearchRunV1({
+      ...rejectedRun,
+      outcome: {
+        ...rejectedRun.outcome,
+        issues: [{ code: "UNKNOWN_SNAPSHOT", path: ["evidence"] }],
       },
     } as ResearchRunV1)
 
     expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
+    expect(misattributed.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
   })
 
   it("returns contract failure instead of throwing for malformed retained results", () => {

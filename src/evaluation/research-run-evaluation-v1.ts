@@ -391,17 +391,25 @@ export function evaluateResearchRunV1(
             claim.kind !== "SOURCED_FACT" ||
             Date.parse(claim.observedAt) <= Date.parse(run.cycle.completedAt),
         )
-      const noActionCouldBeRetained =
-        parsedRejectedResult?.outcome === "NO_ACTION" &&
-        validateResearchDecisionV1(parsedRejectedResult, {
-          evaluatedAt: run.cycle.completedAt,
-          snapshots: {},
-        }).success
+      const noActionValidation =
+        parsedRejectedResult?.outcome === "NO_ACTION"
+          ? validateResearchDecisionV1(parsedRejectedResult, {
+              evaluatedAt: run.cycle.completedAt,
+              snapshots: {},
+            })
+          : undefined
+      const noActionCouldBeRetained = noActionValidation?.success === true
       if (
         run.preliminaryResearch !== undefined ||
         run.validatedDecision !== undefined ||
         (run.evidenceSnapshots.length === 0 &&
           (preliminaryCouldBeRetained || noActionCouldBeRetained)) ||
+        (run.evidenceSnapshots.length === 0 &&
+          noActionValidation?.success === false &&
+          !isDeepStrictEqual(
+            run.outcome.issues,
+            noActionValidation.issues,
+          )) ||
         (run.evidenceSnapshots.length > 0 &&
           (parsedReport?.success !== true ||
             parsedReport.data.result.outcome !== "PROPOSE_TRADE")) ||
