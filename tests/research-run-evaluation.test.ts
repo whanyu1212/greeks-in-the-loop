@@ -763,7 +763,7 @@ describe("research run evaluation", () => {
       ...proposalBase,
       outcome: rejectedOutcome,
     })
-    const staleProposal = evaluateResearchRunV1({
+    const staleProposalBase = {
       ...proposalBase,
       researchReport: {
         ...proposalBase.researchReport!,
@@ -775,8 +775,24 @@ describe("research run evaluation", () => {
           },
         },
       },
+    }
+    const misattributedStaleProposal = evaluateResearchRunV1({
+      ...staleProposalBase,
       outcome: rejectedOutcome,
     })
+    const staleProposal = evaluateResearchRunV1({
+      ...staleProposalBase,
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [
+          {
+            code: "CONTEXT_INVALID",
+            path: ["analysis", "accountChecks", "observedAt"],
+          },
+        ],
+      },
+    } as ResearchRunV1)
 
     expect(missingReport.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
@@ -787,6 +803,9 @@ describe("research run evaluation", () => {
     expect(healthyProposal.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
     )
+    expect(
+      misattributedStaleProposal.dimensions.contractCompliance.issueCodes,
+    ).toContain("OUTCOME_RECORD_MISMATCH")
     expect(staleProposal.dimensions.contractCompliance.status).toBe("PASS")
   })
 

@@ -280,25 +280,36 @@ export function evaluateResearchRunV1(
     isCanonicalProposalQuoteSnapshot(run.evidenceSnapshots[0])
       ? run.evidenceSnapshots[0]
       : undefined
-  const snapshotDecisionRejectionGateFailed = (() => {
+  const expectedSnapshotDecisionRejectionIssues = (() => {
     if (
       run.outcome.status !== "DECISION_REJECTED" ||
       canonicalRetainedQuoteSnapshot === undefined ||
       validReport === undefined ||
       reportResult?.outcome !== "PROPOSE_TRADE"
     ) {
-      return false
+      return undefined
     }
     const evaluatedAt = Date.parse(canonicalRetainedQuoteSnapshot.retrievedAt)
     const accountAge =
       evaluatedAt - Date.parse(validReport.analysis.accountChecks.observedAt)
     const marketAge =
       evaluatedAt - Date.parse(validReport.analysis.marketRegime.observedAt)
-    const freshnessFailed =
-      accountAge < 0 ||
-      accountAge > 5 * 60 * 1_000 ||
-      marketAge < 0 ||
-      marketAge > 60_000
+    if (marketAge < 0 || marketAge > 60_000) {
+      return [
+        {
+          code: "CONTEXT_INVALID" as const,
+          path: ["analysis", "marketRegime", "observedAt"],
+        },
+      ]
+    }
+    if (accountAge < 0 || accountAge > 5 * 60 * 1_000) {
+      return [
+        {
+          code: "CONTEXT_INVALID" as const,
+          path: ["analysis", "accountChecks", "observedAt"],
+        },
+      ]
+    }
     const validation = validateResearchDecisionV1(reportResult, {
       evaluatedAt: canonicalRetainedQuoteSnapshot.retrievedAt,
       snapshots: {
@@ -310,7 +321,7 @@ export function evaluateResearchRunV1(
         },
       },
     })
-    return freshnessFailed || !validation.success
+    return validation.success ? undefined : validation.issues
   })()
   if (
     reportResult !== undefined &&
@@ -395,7 +406,11 @@ export function evaluateResearchRunV1(
           (parsedReport?.success !== true ||
             parsedReport.data.result.outcome !== "PROPOSE_TRADE")) ||
         (canonicalRetainedQuoteSnapshot !== undefined &&
-          !snapshotDecisionRejectionGateFailed)
+          (expectedSnapshotDecisionRejectionIssues === undefined ||
+            !isDeepStrictEqual(
+              run.outcome.issues,
+              expectedSnapshotDecisionRejectionIssues,
+            )))
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
       }
