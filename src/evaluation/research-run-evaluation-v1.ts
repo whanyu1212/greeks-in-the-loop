@@ -16,6 +16,12 @@ import {
 } from "../contracts/research-report-v2.js"
 import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
 import {
+  RESEARCH_AGENT_NAME,
+  RESEARCH_PROMPT_VERSION,
+  RESEARCH_SKILL_NAME,
+  RESEARCH_SKILL_VERSION,
+} from "../research/research-agent.js"
+import {
   RESEARCH_RUN_VERSION,
   SUPPORTED_RESEARCH_RUN_VERSIONS,
   type ResearchRunV1,
@@ -374,7 +380,11 @@ export function evaluateResearchRunV1(
     (run.runVersion !== RESEARCH_RUN_VERSION && run.researchInvocation !== undefined) ||
     (parsedInvocation?.success === false) ||
     (invocation !== undefined &&
-      (invocation.cycleMode !== expectedCycleMode ||
+      (invocation.agentName !== RESEARCH_AGENT_NAME ||
+        invocation.cycleMode !== expectedCycleMode ||
+        invocation.promptVersion !== RESEARCH_PROMPT_VERSION ||
+        invocation.skillName !== RESEARCH_SKILL_NAME ||
+        invocation.skillVersion !== RESEARCH_SKILL_VERSION ||
         invocation.strategyVersion !== STRATEGY_VERSION ||
         invocation.decisionContractVersion !== RESEARCH_DECISION_CONTRACT_VERSION ||
         invocation.reportVersion !== RESEARCH_REPORT_VERSION))

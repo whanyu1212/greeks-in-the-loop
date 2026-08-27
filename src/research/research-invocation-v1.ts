@@ -62,6 +62,9 @@ export const researchInvocationV1Schema = z
         const retainedIncompleteCount = tools.calls.filter(
           ({ outcome }) => outcome === "incomplete",
         ).length
+        const omittedErrorCount = tools.errorCount - retainedErrorCount
+        const omittedIncompleteCount =
+          tools.incompleteCount - retainedIncompleteCount
         if (tools.totalCount !== tools.calls.length + tools.omittedCount) {
           refinement.addIssue({
             code: "custom",
@@ -74,7 +77,8 @@ export const researchInvocationV1Schema = z
           tools.errorCount < retainedErrorCount ||
           tools.incompleteCount < retainedIncompleteCount ||
           tools.errorCount > retainedErrorCount + tools.omittedCount ||
-          tools.incompleteCount > retainedIncompleteCount + tools.omittedCount
+          tools.incompleteCount > retainedIncompleteCount + tools.omittedCount ||
+          omittedErrorCount + omittedIncompleteCount > tools.omittedCount
         ) {
           refinement.addIssue({
             code: "custom",

@@ -387,6 +387,26 @@ describe("research run evaluation", () => {
     )
   })
 
+  it.each([
+    { agentName: "other-agent" },
+    { promptVersion: "0.0.0" },
+    { skillName: "other-skill" },
+    { skillVersion: "0.0.0" },
+  ])("rejects mismatched runtime provenance", (override) => {
+    const evaluation = evaluateResearchRunV1({
+      ...noActionRun(),
+      runVersion: "1.2.0",
+      researchInvocation: {
+        ...currentInvocation,
+        ...override,
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
+    )
+  })
+
   it("evaluates a healthy preliminary run deterministically", () => {
     const run = preliminaryRun()
     const first = evaluateResearchRunV1(run)

@@ -80,6 +80,13 @@ describe("ResearchInvocationV1", () => {
       omittedCount: 1,
       calls: [{ name: "other", outcome: "completed" as const }],
     },
+    {
+      totalCount: 3,
+      errorCount: 2,
+      incompleteCount: 1,
+      omittedCount: 2,
+      calls: [{ name: "other", outcome: "completed" as const }],
+    },
   ])("rejects inconsistent tool aggregates", (tools) => {
     const result = researchInvocationV1Schema.safeParse({
       invocationVersion: "1.0.0",
