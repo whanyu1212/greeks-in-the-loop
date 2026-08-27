@@ -1,6 +1,7 @@
 import type { ResearchContextV1 } from "./research-context-v1.js"
 import {
   DRY_RUN_ANYTIME_RESEARCH_MODE,
+  DRY_RUN_ANYTIME_SHADOW_MODE,
   type ResearchEligibilityV1,
 } from "../scheduling/research-eligibility.js"
 
@@ -14,11 +15,11 @@ import {
 /** Checked-in OpenCode primary agent used by every unattended cycle. */
 export const RESEARCH_AGENT_NAME = "research" as const
 /** Increment when the system prompt or cycle-request behavior changes. */
-export const RESEARCH_PROMPT_VERSION = "1.1.0" as const
+export const RESEARCH_PROMPT_VERSION = "1.3.0" as const
 /** Checked-in skill selected by the research agent policy. */
 export const RESEARCH_SKILL_NAME = "spy-debit-spread-research" as const
 /** Increment when the selected skill's research behavior changes. */
-export const RESEARCH_SKILL_VERSION = "1.0.0" as const
+export const RESEARCH_SKILL_VERSION = "1.1.0" as const
 
 /**
  * Builds the user-authored portion of one structured research cycle.
@@ -48,6 +49,8 @@ export function buildResearchCyclePrompt(
           "Application-authoritative research and trade-intent eligibility follows. Do not override it with model reasoning or provider prose.",
           eligibility.researchMode === DRY_RUN_ANYTIME_RESEARCH_MODE
             ? "This is a research-only anytime dry run. Never return PROPOSE_TRADE; return PRELIMINARY_RESEARCH or NO_ACTION."
+            : eligibility.researchMode === DRY_RUN_ANYTIME_SHADOW_MODE
+              ? "This is a non-executing shadow anytime dry run. A fresh PROPOSE_TRADE may be returned for deterministic shadow-risk evaluation if every strategy requirement other than the production time window passes."
             : undefined,
           JSON.stringify(eligibility),
           eligibility.tradeIntentEligible

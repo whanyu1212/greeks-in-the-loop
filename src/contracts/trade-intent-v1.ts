@@ -5,6 +5,7 @@ import { calculateDebitSpreadEconomicsV1 } from "./debit-spread-economics-v1.js"
 import {
   RESEARCH_DECISION_CONTRACT_VERSION,
   STRATEGY_VERSION,
+  strategyVersionSchema,
   type ProposedTradeDecisionV1,
 } from "./research-decision-v1.js"
 
@@ -92,7 +93,7 @@ export const tradeIntentV1Schema = z
   .object({
     contractVersion: z.literal(TRADE_INTENT_CONTRACT_VERSION),
     decisionContractVersion: z.literal(RESEARCH_DECISION_CONTRACT_VERSION),
-    strategyVersion: z.literal(STRATEGY_VERSION),
+    strategyVersion: strategyVersionSchema,
     direction: z.enum(["BULLISH", "BEARISH"]),
     structure: z.enum(["BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"]),
     expiration: expirationDate,
@@ -270,6 +271,9 @@ export function deriveTradeIntentV1(
   decision: ProposedTradeDecisionV1,
   context: TradeIntentDerivationContext,
 ): TradeIntentDerivationResult {
+  if (decision.strategyVersion !== STRATEGY_VERSION) {
+    return { success: false, reasons: ["DERIVATION_INPUT_INVALID"] }
+  }
   const parsedContext = derivationContextSchema.safeParse(context)
   if (!parsedContext.success) {
     return { success: false, reasons: ["DERIVATION_INPUT_INVALID"] }

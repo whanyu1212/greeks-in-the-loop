@@ -3,8 +3,8 @@ name: spy-debit-spread-research
 description: Research one SPY directional debit-spread decision using authoritative Alpaca facts, optional FMP context, mandatory Exa context, explicit freshness checks, and a fail-closed ResearchReportV2 output.
 compatibility: opencode
 metadata:
-  skill-version: "1.0.0"
-  strategy-version: "1.0.0"
+  skill-version: "1.1.0"
+  strategy-version: "1.1.0"
   contract-version: "1.0.0"
 ---
 
@@ -109,7 +109,7 @@ If any snapshot-forming input is stale and a read-only refresh is available, dis
 7. **Challenge and recheck the candidate**
    - State at least one concrete invalidation condition.
    - After the snapshot is frozen at `observed_at`, make a final read-only Alpaca clock request. Immediately after that response completes, call `trusted_time` and use its result as `approval_evaluated_at`; do not use the clock payload's timestamp as a substitute for response-completion time.
-   - Recheck quote and latest-bar age, the `slot + 5 minutes` deadline, the entry cutoff, and the returned open-market state against `approval_evaluated_at`. If a trustworthy local completion timestamp is unavailable, or data became stale or late while researching, return `NO_ACTION`.
+   - Recheck quote and latest-bar age, the application-supplied trade-intent deadline (`slot + 10 minutes` in standard mode), the entry cutoff, and the returned open-market state against `approval_evaluated_at`. A shadow-anytime dry run has no production slot deadline. If a trustworthy local completion timestamp is unavailable, or data became stale or late while researching, return `NO_ACTION`.
    - Prefer `NO_ACTION` when evidence is weak, contradictory, stale, or incomplete.
    - If refreshed facts change direction, legs, or eligibility, return `CANDIDATE_CHANGED`.
 

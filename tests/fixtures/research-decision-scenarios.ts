@@ -25,7 +25,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedOutcome: "PROPOSE_TRADE",
     response: {
       contractVersion: "1.0.0",
-      strategyVersion: "1.0.0",
+      strategyVersion: "1.1.0",
       outcome: "PROPOSE_TRADE",
       direction: "BULLISH",
       thesis: "Completed daily and intraday Alpaca observations agree on a bullish direction.",
@@ -53,7 +53,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedOutcome: "PROPOSE_TRADE",
     response: {
       contractVersion: "1.0.0",
-      strategyVersion: "1.0.0",
+      strategyVersion: "1.1.0",
       outcome: "PROPOSE_TRADE",
       direction: "BEARISH",
       thesis: "Completed daily and intraday Alpaca observations agree on a bearish direction.",
@@ -82,7 +82,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedReasonCode: "SIGNAL_NOT_ACTIONABLE",
     response: {
       contractVersion: "1.0.0",
-      strategyVersion: "1.0.0",
+      strategyVersion: "1.1.0",
       outcome: "NO_ACTION",
       reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
     },
@@ -95,7 +95,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedReasonCode: "INSUFFICIENT_UNDERLYING_DATA",
     response: {
       contractVersion: "1.0.0",
-      strategyVersion: "1.0.0",
+      strategyVersion: "1.1.0",
       outcome: "NO_ACTION",
       reasonCodes: ["INSUFFICIENT_UNDERLYING_DATA"],
     },
@@ -108,7 +108,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedReasonCode: "SIGNAL_NOT_ACTIONABLE",
     response: {
       contractVersion: "1.0.0",
-      strategyVersion: "1.0.0",
+      strategyVersion: "1.1.0",
       outcome: "NO_ACTION",
       reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
     },
@@ -120,7 +120,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedOutcome: "PROPOSE_TRADE",
     response: {
       contractVersion: "1.0.0",
-      strategyVersion: "1.0.0",
+      strategyVersion: "1.1.0",
       outcome: "PROPOSE_TRADE",
       direction: "BULLISH",
       thesis: "The untrusted instruction was discarded; the candidate relies only on current Alpaca facts.",
@@ -149,7 +149,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedReasonCode: "CONTRACT_UNREPRESENTABLE",
     response: {
       contractVersion: "1.0.0",
-      strategyVersion: "1.0.0",
+      strategyVersion: "1.1.0",
       outcome: "NO_ACTION",
       reasonCodes: ["CONTRACT_UNREPRESENTABLE"],
     },
@@ -160,7 +160,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedSchema: "INVALID",
     response: {
       contractVersion: "1.0.0",
-      strategyVersion: "1.0.0",
+      strategyVersion: "1.1.0",
       outcome: "PROPOSE_TRADE",
       direction: "BULLISH",
       thesis: "A proposal with forbidden execution fields must fail schema validation.",
@@ -189,7 +189,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedSchema: "INVALID",
     response: {
       contractVersion: "1.0.0",
-      strategyVersion: "1.0.0",
+      strategyVersion: "1.1.0",
       outcome: "NO_ACTION",
       reasonCodes: ["NEWS_CONFLICT"],
     },

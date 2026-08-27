@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH,
+  DEFAULT_ANYTIME_SHADOW_LEDGER_PATH,
   DEFAULT_RESEARCH_LEDGER_PATH,
   parseAgentOptions,
 } from "../src/agent-options.js"
@@ -22,11 +23,13 @@ describe("parseAgentOptions", () => {
     expect(parseAgentOptions([])).toEqual({
       once: false,
       researchAnytime: false,
+      shadowAnytime: false,
       ledgerPath: DEFAULT_RESEARCH_LEDGER_PATH,
     })
     expect(parseAgentOptions(["--once"], ".state/configured.sqlite")).toEqual({
       once: true,
       researchAnytime: false,
+      shadowAnytime: false,
       ledgerPath: ".state/configured.sqlite",
     })
   })
@@ -40,7 +43,22 @@ describe("parseAgentOptions", () => {
     ).toEqual({
       once: true,
       researchAnytime: true,
+      shadowAnytime: false,
       ledgerPath: DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH,
+    })
+  })
+
+  it("uses a dedicated ledger for one-cycle anytime shadow evaluation", () => {
+    expect(
+      parseAgentOptions(
+        ["--once", "--shadow-anytime"],
+        ".state/production.sqlite",
+      ),
+    ).toEqual({
+      once: true,
+      researchAnytime: false,
+      shadowAnytime: true,
+      ledgerPath: DEFAULT_ANYTIME_SHADOW_LEDGER_PATH,
     })
   })
 
@@ -62,6 +80,16 @@ describe("parseAgentOptions", () => {
     expect(() => parseAgentOptions(["--research-anytime"])).toThrow(
       "--research-anytime requires --once",
     )
+    expect(() => parseAgentOptions(["--shadow-anytime"])).toThrow(
+      "--shadow-anytime requires --once",
+    )
+    expect(() =>
+      parseAgentOptions([
+        "--once",
+        "--research-anytime",
+        "--shadow-anytime",
+      ]),
+    ).toThrow("mutually exclusive")
     expect(() =>
       parseAgentOptions(
         ["--once", "--research-anytime", "--ledger", ".state/live.sqlite"],
@@ -70,6 +98,9 @@ describe("parseAgentOptions", () => {
     ).toThrow("cannot use the configured production ledger")
     expect(() =>
       parseAgentOptions(["--ledger", DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH]),
+    ).toThrow("reserved anytime dry-run ledger")
+    expect(() =>
+      parseAgentOptions(["--ledger", DEFAULT_ANYTIME_SHADOW_LEDGER_PATH]),
     ).toThrow("reserved anytime dry-run ledger")
     expect(() => parseAgentOptions(["--ledger"])).toThrow(
       "--ledger requires a value",

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   DRY_RUN_ANYTIME_RESEARCH_MODE,
+  DRY_RUN_ANYTIME_SHADOW_MODE,
   evaluateResearchEligibility,
   researchEligibilityV1Schema,
   type MarketSessionV1,
@@ -35,23 +36,23 @@ describe("research eligibility", () => {
 
   it("enforces the existing quarter-hour slot boundaries", () => {
     expect(evaluate("2026-08-25T14:00:00.000Z").tradeIntentEligible).toBe(true)
-    expect(evaluate("2026-08-25T14:01:59.999Z").tradeIntentEligible).toBe(true)
-    expect(evaluate("2026-08-25T14:02:00.000Z").tradeIntentEligible).toBe(false)
+    expect(evaluate("2026-08-25T14:04:59.999Z").tradeIntentEligible).toBe(true)
+    expect(evaluate("2026-08-25T14:05:00.000Z").tradeIntentEligible).toBe(false)
   })
 
-  it("preserves the original slot for the five-minute completion window", () => {
-    const started = evaluate("2026-08-25T14:01:59.999Z")
+  it("preserves the original slot for the ten-minute completion window", () => {
+    const started = evaluate("2026-08-25T14:04:59.999Z")
     expect(started.tradeIntentEligible).toBe(true)
     expect(started.sessionOpen).toBe("2026-08-25T13:30:00.000Z")
     expect(started.sessionClose).toBe("2026-08-25T20:00:00.000Z")
     expect(started.tradeIntentWindow).toEqual({
       slotStartedAt: "2026-08-25T14:00:00.000Z",
-      deadline: "2026-08-25T14:05:00.000Z",
+      deadline: "2026-08-25T14:10:00.000Z",
     })
 
     expect(
       evaluateResearchEligibility({
-        evaluatedAt: new Date("2026-08-25T14:04:59.999Z"),
+        evaluatedAt: new Date("2026-08-25T14:09:59.999Z"),
         session: regularSession,
         premarketStartEt: "08:00",
         tradeIntentWindow: started.tradeIntentWindow!,
@@ -59,7 +60,7 @@ describe("research eligibility", () => {
     ).toBe(true)
     expect(
       evaluateResearchEligibility({
-        evaluatedAt: new Date("2026-08-25T14:05:00.000Z"),
+        evaluatedAt: new Date("2026-08-25T14:10:00.000Z"),
         session: regularSession,
         premarketStartEt: "08:00",
         tradeIntentWindow: started.tradeIntentWindow!,
@@ -163,6 +164,43 @@ describe("research eligibility", () => {
       researchMode: DRY_RUN_ANYTIME_RESEARCH_MODE,
       reason: "NO_MARKET_SESSION",
     })
+  })
+
+  it.each([
+    "2026-08-25T04:00:00.000Z",
+    "2026-08-25T14:07:00.000Z",
+    "2026-08-26T03:59:59.999Z",
+  ])("allows full shadow dry runs throughout a trading date: %s", (timestamp) => {
+    const eligibility = evaluateResearchEligibility({
+      evaluatedAt: new Date(timestamp),
+      session: regularSession,
+      premarketStartEt: "08:00",
+      researchMode: DRY_RUN_ANYTIME_SHADOW_MODE,
+    })
+    expect(eligibility).toMatchObject({
+      sessionDate: regularSession.date,
+      researchEligible: true,
+      tradeIntentEligible: true,
+      researchMode: DRY_RUN_ANYTIME_SHADOW_MODE,
+    })
+    expect(eligibility.reason).toBeUndefined()
+    expect(eligibility.tradeIntentWindow?.slotStartedAt).toBe(timestamp)
+  })
+
+  it("preserves the synthetic shadow window across eligibility rechecks", () => {
+    const started = evaluateResearchEligibility({
+      evaluatedAt: new Date("2026-08-25T14:07:00.000Z"),
+      session: regularSession,
+      researchMode: DRY_RUN_ANYTIME_SHADOW_MODE,
+    })
+    const rechecked = evaluateResearchEligibility({
+      evaluatedAt: new Date("2026-08-25T14:12:00.000Z"),
+      session: regularSession,
+      tradeIntentWindow: started.tradeIntentWindow!,
+      researchMode: DRY_RUN_ANYTIME_SHADOW_MODE,
+    })
+    expect(rechecked.tradeIntentEligible).toBe(true)
+    expect(rechecked.tradeIntentWindow).toEqual(started.tradeIntentWindow)
   })
 
   it("rejects contradictory anytime dry-run eligibility records", () => {

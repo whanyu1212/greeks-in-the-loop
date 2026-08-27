@@ -17,7 +17,7 @@ const intent = (() => {
   return {
     contractVersion: "1.0.0",
     decisionContractVersion: "1.0.0",
-    strategyVersion: "1.0.0",
+    strategyVersion: "1.1.0",
     direction: "BULLISH",
     structure: "BULL_CALL_SPREAD",
     expiration: "2026-09-11",

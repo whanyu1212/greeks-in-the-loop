@@ -1,7 +1,13 @@
 import { z } from "zod"
 
 export const RESEARCH_DECISION_CONTRACT_VERSION = "1.0.0" as const
-export const STRATEGY_VERSION = "1.0.0" as const
+export const LEGACY_STRATEGY_VERSION = "1.0.0" as const
+export const STRATEGY_VERSION = "1.1.0" as const
+export const SUPPORTED_STRATEGY_VERSIONS = [
+  LEGACY_STRATEGY_VERSION,
+  STRATEGY_VERSION,
+] as const
+export const strategyVersionSchema = z.enum(SUPPORTED_STRATEGY_VERSIONS)
 
 export const NO_ACTION_REASON_CODES = [
   "MARKET_WINDOW_INELIGIBLE",
@@ -146,7 +152,7 @@ export const researchCandidateV1Schema = z
 const noActionDecisionV1Schema = z
   .object({
     contractVersion: z.literal(RESEARCH_DECISION_CONTRACT_VERSION),
-    strategyVersion: z.literal(STRATEGY_VERSION),
+    strategyVersion: strategyVersionSchema,
     outcome: z.literal("NO_ACTION"),
     reasonCodes: z
       .array(z.enum(NO_ACTION_REASON_CODES))
@@ -160,7 +166,7 @@ const noActionDecisionV1Schema = z
 const proposedTradeDecisionV1Schema = z
   .object({
     contractVersion: z.literal(RESEARCH_DECISION_CONTRACT_VERSION),
-    strategyVersion: z.literal(STRATEGY_VERSION),
+    strategyVersion: strategyVersionSchema,
     outcome: z.literal("PROPOSE_TRADE"),
     direction: z.enum(["BULLISH", "BEARISH"]),
     thesis: boundedText,

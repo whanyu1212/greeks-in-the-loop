@@ -22,7 +22,7 @@ const shortSymbol = "SPY260918C00605000"
 
 const decision: ProposedTradeDecisionV1 = {
   contractVersion: "1.0.0",
-  strategyVersion: "1.0.0",
+  strategyVersion: "1.1.0",
   outcome: "PROPOSE_TRADE",
   direction: "BULLISH",
   thesis: "Daily and intraday direction agree.",

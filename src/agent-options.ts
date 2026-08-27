@@ -10,10 +10,13 @@ export const DEFAULT_RESEARCH_LEDGER_PATH =
   ".state/research-ledger.sqlite" as const
 export const DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH =
   ".state/research-anytime.sqlite" as const
+export const DEFAULT_ANYTIME_SHADOW_LEDGER_PATH =
+  ".state/shadow-anytime.sqlite" as const
 
 export type AgentOptions = Readonly<{
   once: boolean
   researchAnytime: boolean
+  shadowAnytime: boolean
   ledgerPath: string
 }>
 
@@ -136,6 +139,7 @@ export function parseAgentOptions(
 ): AgentOptions {
   let once = false
   let researchAnytime = false
+  let shadowAnytime = false
   let cliLedgerPath: string | undefined
 
   for (let index = 0; index < args.length; index += 1) {
@@ -147,6 +151,10 @@ export function parseAgentOptions(
     }
     if (argument === "--research-anytime") {
       researchAnytime = true
+      continue
+    }
+    if (argument === "--shadow-anytime") {
+      shadowAnytime = true
       continue
     }
     if (argument === "--ledger") {
@@ -164,6 +172,12 @@ export function parseAgentOptions(
   if (researchAnytime && !once) {
     throw new Error("--research-anytime requires --once")
   }
+  if (shadowAnytime && !once) {
+    throw new Error("--shadow-anytime requires --once")
+  }
+  if (researchAnytime && shadowAnytime) {
+    throw new Error("--research-anytime and --shadow-anytime are mutually exclusive")
+  }
 
   const normalLedgerPath =
     configuredLedgerPath?.trim() || DEFAULT_RESEARCH_LEDGER_PATH
@@ -171,23 +185,29 @@ export function parseAgentOptions(
     cliLedgerPath ??
     (researchAnytime
       ? DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH
+      : shadowAnytime
+        ? DEFAULT_ANYTIME_SHADOW_LEDGER_PATH
       : normalLedgerPath)
   if (
-    researchAnytime &&
+    (researchAnytime || shadowAnytime) &&
     ledgerTargetsMatch(ledgerPath, normalLedgerPath)
   ) {
     throw new Error(
-      "--research-anytime cannot use the configured production ledger",
+      "Anytime dry runs cannot use the configured production ledger",
     )
   }
   if (
     !researchAnytime &&
-    ledgerTargetsMatch(ledgerPath, DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH)
+    !shadowAnytime &&
+    [
+      DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH,
+      DEFAULT_ANYTIME_SHADOW_LEDGER_PATH,
+    ].some((reservedPath) => ledgerTargetsMatch(ledgerPath, reservedPath))
   ) {
     throw new Error(
       "Standard agent runs cannot use the reserved anytime dry-run ledger",
     )
   }
 
-  return { once, researchAnytime, ledgerPath }
+  return { once, researchAnytime, shadowAnytime, ledgerPath }
 }

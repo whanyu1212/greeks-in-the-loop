@@ -6,7 +6,7 @@ const noAction = {
   reportVersion: "2.0.0",
   result: {
     contractVersion: "1.0.0",
-    strategyVersion: "1.0.0",
+    strategyVersion: "1.1.0",
     outcome: "NO_ACTION",
     reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
   },
@@ -112,7 +112,7 @@ describe("ResearchReportV2", () => {
       ...noAction,
       result: {
         contractVersion: "1.0.0",
-        strategyVersion: "1.0.0",
+        strategyVersion: "1.1.0",
         outcome: "PRELIMINARY_RESEARCH",
         targetSessionDate: "2026-08-26",
         direction: "UNDETERMINED",

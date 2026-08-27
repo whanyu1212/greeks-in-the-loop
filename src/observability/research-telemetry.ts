@@ -86,7 +86,7 @@ export type ResearchTelemetrySettings = Readonly<{
 
 export type ResearchTraceVersions = Readonly<{
   agentName: string
-  cycleMode: "STANDARD" | "DRY_RUN_ANYTIME"
+  cycleMode: "STANDARD" | "DRY_RUN_ANYTIME" | "DRY_RUN_SHADOW_ANYTIME"
   promptVersion: string
   skillName: string
   skillVersion: string

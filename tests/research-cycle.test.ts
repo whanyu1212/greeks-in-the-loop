@@ -20,7 +20,7 @@ import type {
 
 const noAction = {
   contractVersion: "1.0.0",
-  strategyVersion: "1.0.0",
+  strategyVersion: "1.1.0",
   outcome: "NO_ACTION",
   reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
 } as const
@@ -29,7 +29,7 @@ const previousSessionDates = ["2026-08-21", "2026-08-24"] as const
 
 const proposal = {
   contractVersion: "1.0.0",
-  strategyVersion: "1.0.0",
+  strategyVersion: "1.1.0",
   outcome: "PROPOSE_TRADE",
   direction: "BULLISH",
   thesis: "Daily and intraday direction agree.",
@@ -59,7 +59,7 @@ const proposal = {
 
 const preliminary = {
   contractVersion: "1.0.0",
-  strategyVersion: "1.0.0",
+  strategyVersion: "1.1.0",
   outcome: "PRELIMINARY_RESEARCH",
   targetSessionDate: "2026-08-25",
   direction: "BULLISH",
@@ -265,7 +265,7 @@ const setup = () => {
     intent: {
       contractVersion: "1.0.0",
       decisionContractVersion: "1.0.0",
-      strategyVersion: "1.0.0",
+      strategyVersion: "1.1.0",
       direction: "BULLISH",
       structure: "BULL_CALL_SPREAD",
       expiration: "2026-09-18",
@@ -376,6 +376,28 @@ describe("processResearchCycle", () => {
     })
     expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+  })
+
+  it("rejects a legacy strategy version from new agent output", async () => {
+    const dependencies = setup()
+
+    const result = await processResearchCycle({
+      rawResponse: serializeReport({
+        ...proposal,
+        strategyVersion: "1.0.0",
+      }),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toEqual({
+      outcomeVersion: "1.0.0",
+      status: "DECISION_REJECTED",
+      issues: [
+        { code: "SCHEMA_INVALID", path: ["result", "strategyVersion"] },
+      ],
+    })
+    expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
   })
 
   it("rejects a proposal backed by a non-live market regime", async () => {
@@ -1189,6 +1211,73 @@ describe("processResearchCycle", () => {
         shadowRisk: result.shadowRisk,
       },
     ])
+  })
+
+  it("reports bounded stage outputs without research prose or quote prices", async () => {
+    const dependencies = setup()
+    const stageEvents: Array<{
+      stage: string
+      status: string
+      details: Record<string, unknown>
+    }> = []
+
+    await processResearchCycle({
+      rawResponse: serializeReport(proposal),
+      signal: new AbortController().signal,
+      ...dependencies,
+      stageReporter: {
+        report(stage, status, details = {}) {
+          stageEvents.push({ stage, status, details: { ...details } })
+        },
+      },
+    })
+
+    expect(stageEvents.map(({ stage }) => stage)).toEqual([
+      "research.report",
+      "quotes.confirm",
+      "decision.validate",
+      "intent.derive",
+      "risk.evaluate",
+      "ledger.commit",
+      "cycle.outcome",
+    ])
+    const serialized = JSON.stringify(stageEvents)
+    expect(serialized).not.toContain(proposal.thesis)
+    expect(serialized).not.toContain("bidCentsPerShare")
+    expect(serialized).not.toContain("askCentsPerShare")
+  })
+
+  it("chains an anytime shadow proposal into deterministic risk", async () => {
+    const dependencies = setup()
+    dependencies.getEligibility.mockReturnValue({
+      evaluatedAt: "2026-08-25T14:31:00.000Z",
+      sessionDate: "2026-08-25",
+      researchEligible: true,
+      tradeIntentEligible: true,
+      tradeIntentWindow: {
+        slotStartedAt: "2026-08-25T14:31:00.000Z",
+        deadline: "2026-08-26T14:31:00.000Z",
+      },
+      previousSessionDates,
+      researchMode: "DRY_RUN_SHADOW_ANYTIME",
+    })
+
+    const result = await processResearchCycle({
+      rawResponse: serializeReport(proposal),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome.status).toBe("INTENT_DERIVED")
+    expect(dependencies.evaluateShadowRisk).toHaveBeenCalledOnce()
+    expect(dependencies.evaluateShadowRisk).toHaveBeenCalledWith(
+      expect.objectContaining({
+        captureEligibility: expect.objectContaining({
+          researchMode: "DRY_RUN_SHADOW_ANYTIME",
+          tradeIntentEligible: true,
+        }),
+      }),
+    )
   })
 
   it("integrates the real deterministic deriver", async () => {

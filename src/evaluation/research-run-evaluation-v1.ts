@@ -4,6 +4,8 @@ import { z } from "zod"
 
 import { preliminaryResearchV1Schema } from "../contracts/preliminary-research-v1.js"
 import {
+  LEGACY_STRATEGY_VERSION,
+  STRATEGY_VERSION,
   researchDecisionV1Schema,
   validateResearchDecisionV1,
 } from "../contracts/research-decision-v1.js"
@@ -27,8 +29,11 @@ import {
 } from "../research/research-cycle.js"
 import {
   DRY_RUN_ANYTIME_RESEARCH_MODE,
+  DRY_RUN_ANYTIME_SHADOW_MODE,
   newYorkDate,
   newYorkLocalTime,
+  TRADE_INTENT_START_GRACE_MS,
+  TRADE_INTENT_WINDOW_DURATION_MS,
 } from "../scheduling/research-eligibility.js"
 import {
   floorNanosecondsToIsoMilliseconds,
@@ -183,6 +188,7 @@ const isEvaluableEvidenceClaim = (
 const retainedTradeWindowContextIsValid = (
   eligibility: NonNullable<ResearchRunV1["initialEligibility"]>,
   cycle: ResearchRunV1["cycle"],
+  strategyVersion: string | undefined,
 ) => {
   const window = eligibility.tradeIntentWindow
   if (
@@ -200,7 +206,37 @@ const retainedTradeWindowContextIsValid = (
   const sessionOpen = Date.parse(eligibility.sessionOpen)
   const sessionClose = Date.parse(eligibility.sessionClose)
   const sessionDate = eligibility.sessionDate
+  if (eligibility.researchMode === DRY_RUN_ANYTIME_SHADOW_MODE) {
+    return (
+      eligibility.researchEligible &&
+      eligibility.tradeIntentEligible &&
+      sessionDate === cycle.sessionDate &&
+      eligibility.reason === undefined &&
+      Number.isFinite(eligibilityEvaluatedAt) &&
+      Number.isFinite(cycleStartedAt) &&
+      Number.isFinite(slotStartedAt) &&
+      Number.isFinite(deadline) &&
+      Number.isFinite(sessionOpen) &&
+      sessionOpen < sessionClose &&
+      newYorkDate(new Date(eligibilityEvaluatedAt)) === sessionDate &&
+      slotStartedAt === eligibilityEvaluatedAt &&
+      eligibilityEvaluatedAt <= cycleStartedAt &&
+      cycleStartedAt < deadline
+    )
+  }
   const slotDate = new Date(slotStartedAt)
+  const tradeIntentTiming =
+    strategyVersion === LEGACY_STRATEGY_VERSION
+      ? {
+          startGraceMs: 2 * 60 * 1_000,
+          windowDurationMs: 5 * 60 * 1_000,
+        }
+      : strategyVersion === STRATEGY_VERSION
+        ? {
+            startGraceMs: TRADE_INTENT_START_GRACE_MS,
+            windowDurationMs: TRADE_INTENT_WINDOW_DURATION_MS,
+          }
+        : undefined
   const slotIsQuarterHour =
     Number.isFinite(slotStartedAt) &&
     slotDate.getUTCMinutes() % 15 === 0 &&
@@ -235,9 +271,11 @@ const retainedTradeWindowContextIsValid = (
     Number.isFinite(deadline) &&
     slotIsQuarterHour &&
     slotMatchesSession &&
-    deadline === Math.min(slotStartedAt + 5 * 60 * 1_000, entryCutoff) &&
+    tradeIntentTiming !== undefined &&
+    deadline ===
+      Math.min(slotStartedAt + tradeIntentTiming.windowDurationMs, entryCutoff) &&
     eligibilityEvaluatedAt >= slotStartedAt &&
-    eligibilityEvaluatedAt - slotStartedAt <= 119_999 &&
+    eligibilityEvaluatedAt - slotStartedAt < tradeIntentTiming.startGraceMs &&
     eligibilityEvaluatedAt <= cycleStartedAt &&
     cycleStartedAt < deadline
   )
@@ -320,6 +358,8 @@ export function evaluateResearchRunV1(
   const initialEligibility = run.initialEligibility
   const isAnytimeDryRun =
     initialEligibility?.researchMode === DRY_RUN_ANYTIME_RESEARCH_MODE
+  const isShadowAnytimeDryRun =
+    initialEligibility?.researchMode === DRY_RUN_ANYTIME_SHADOW_MODE
   if (
     (isAnytimeDryRun &&
       (initialEligibility.researchEligible !== true ||
@@ -327,7 +367,12 @@ export function evaluateResearchRunV1(
         initialEligibility.tradeIntentWindow !== undefined ||
         initialEligibility.reason !== "DRY_RUN_RESEARCH_ONLY")) ||
     (!isAnytimeDryRun &&
-      initialEligibility?.reason === "DRY_RUN_RESEARCH_ONLY")
+      initialEligibility?.reason === "DRY_RUN_RESEARCH_ONLY") ||
+    (isShadowAnytimeDryRun &&
+      (initialEligibility?.researchEligible !== true ||
+        initialEligibility.tradeIntentEligible !== true ||
+        initialEligibility.tradeIntentWindow === undefined ||
+        initialEligibility.reason !== undefined))
   ) {
     contractIssues.push("DRY_RUN_ELIGIBILITY_CONTEXT_INVALID")
   }
@@ -489,9 +534,6 @@ export function evaluateResearchRunV1(
         ).toISOString()
       : undefined
   })()
-  const hasRetainedEligibleTradeWindow =
-    run.initialEligibility !== undefined &&
-    retainedTradeWindowContextIsValid(run.initialEligibility, run.cycle)
   const retainedResult = run.preliminaryResearch ?? run.validatedDecision
   const validRetainedResult =
     parsedPreliminaryResearch?.success === true
@@ -499,6 +541,14 @@ export function evaluateResearchRunV1(
       : parsedValidatedDecision?.success === true
         ? parsedValidatedDecision.data
         : undefined
+  const versionedResult = reportResult ?? validRetainedResult
+  const hasRetainedEligibleTradeWindow =
+    run.initialEligibility !== undefined &&
+    retainedTradeWindowContextIsValid(
+      run.initialEligibility,
+      run.cycle,
+      versionedResult?.strategyVersion,
+    )
   const quoteConfirmationRejection =
     run.outcome.status === "INTENT_DERIVATION_REJECTED" &&
     run.outcome.reasons.length === 1 &&
@@ -1465,7 +1515,13 @@ export function evaluateResearchRunV1(
         eligibility.tradeIntentWindow.slotStartedAt,
       )
       const deadline = Date.parse(eligibility.tradeIntentWindow.deadline)
-      if (!retainedTradeWindowContextIsValid(eligibility, run.cycle)) {
+      if (
+        !retainedTradeWindowContextIsValid(
+          eligibility,
+          run.cycle,
+          versionedResult?.strategyVersion,
+        )
+      ) {
         failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_INVALID")
       }
       if (
@@ -1484,7 +1540,6 @@ export function evaluateResearchRunV1(
     }
   }
 
-  const versionedResult = reportResult ?? validRetainedResult
   const evaluation = {
     evaluationVersion: RESEARCH_RUN_EVALUATION_VERSION,
     cycleId: run.cycle.cycleId,

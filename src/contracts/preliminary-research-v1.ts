@@ -2,7 +2,7 @@ import { z } from "zod"
 
 import {
   researchCandidateV1Schema,
-  STRATEGY_VERSION,
+  strategyVersionSchema,
 } from "./research-decision-v1.js"
 
 export const PRELIMINARY_RESEARCH_CONTRACT_VERSION = "1.0.0" as const
@@ -45,7 +45,7 @@ const preliminaryInferenceSchema = z
 export const preliminaryResearchV1Schema = z
   .object({
     contractVersion: z.literal(PRELIMINARY_RESEARCH_CONTRACT_VERSION),
-    strategyVersion: z.literal(STRATEGY_VERSION),
+    strategyVersion: strategyVersionSchema,
     outcome: z.literal("PRELIMINARY_RESEARCH"),
     targetSessionDate: z.iso.date(),
     direction: z.enum(["BULLISH", "BEARISH", "UNDETERMINED"]),

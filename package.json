@@ -19,6 +19,7 @@
     "agent:mcp": "node scripts/run-isolated-opencode.mjs mcp list",
     "agent:once": "tsx src/index.ts --once",
     "agent:research-anytime": "tsx src/index.ts --once --research-anytime",
+    "agent:shadow-anytime": "tsx src/index.ts --once --shadow-anytime",
     "agent:skills": "node scripts/run-isolated-opencode.mjs debug skill",
     "research:evaluate": "tsx src/evaluation/research-evaluate-cli.ts",
     "research:run": "tsx src/research/research-run-cli.ts",
@@ -41,6 +42,7 @@
     "dotenv": "17.4.2",
     "mcp-remote": "0.1.49",
     "opencode-ai": "1.18.21",
+    "picocolors": "^1.1.1",
     "zod": "4.4.3"
   },
   "devDependencies": {
