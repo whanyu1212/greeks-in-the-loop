@@ -47,6 +47,17 @@ const order = (overrides: Partial<NormalizedBrokerOrderV1> = {}): NormalizedBrok
   ...overrides,
 })
 
+const closingOrder = (overrides: Partial<NormalizedBrokerOrderV1> = {}) =>
+  order({
+    id: "closing-order",
+    status: "filled",
+    legs: [
+      { symbol: longSymbol, ratioQuantity: 1, positionIntent: "SELL_TO_CLOSE" },
+      { symbol: shortSymbol, ratioQuantity: 1, positionIntent: "BUY_TO_CLOSE" },
+    ],
+    ...overrides,
+  })
+
 const reconcile = (overrides: Record<string, unknown> = {}) =>
   reconcileBrokerPortfolioV1({
     observedAt,
@@ -99,6 +110,16 @@ describe("risk-state reconciliation v1", () => {
       consistent: true,
       pendingEntryCount: 1,
       entriesSubmittedToday: 1,
+    })
+  })
+
+  it("does not count recognized closing-only option orders as same-day entries", () => {
+    const result = reconcile({
+      submittedOrders: [closingOrder()],
+    })
+    expect(result.success && result.portfolio).toMatchObject({
+      consistent: true,
+      entriesSubmittedToday: 0,
     })
   })
 

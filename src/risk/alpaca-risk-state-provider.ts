@@ -283,13 +283,14 @@ const normalizePosition = (
 ): NormalizedBrokerPositionV1 | undefined => {
   const quantity = finiteNumber(raw.qty)
   const side = raw.side.toLowerCase()
-  if (quantity === undefined || quantity <= 0 || !["long", "short"].includes(side)) {
+  if (quantity === undefined || quantity === 0 || !["long", "short"].includes(side)) {
     return undefined
   }
+  const absoluteQuantity = Math.abs(quantity)
   const parsed = normalizedBrokerPositionV1Schema.safeParse({
     assetClass: raw.asset_class.toLowerCase(),
     symbol: raw.symbol,
-    signedQuantity: side === "long" ? quantity : -quantity,
+    signedQuantity: side === "long" ? absoluteQuantity : -absoluteQuantity,
   })
   return parsed.success ? parsed.data : undefined
 }

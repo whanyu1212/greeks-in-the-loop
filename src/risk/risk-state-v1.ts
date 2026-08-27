@@ -253,6 +253,18 @@ const isSupportedOpeningOrder = (order: NormalizedBrokerOrderV1) => {
   )
 }
 
+const CLOSING_POSITION_INTENTS = new Set([
+  "BUY_TO_CLOSE",
+  "SELL_TO_CLOSE",
+])
+
+const isRecognizedClosingOnlyOrder = (order: NormalizedBrokerOrderV1) =>
+  order.assetClass === "us_option" &&
+  order.legs.length > 0 &&
+  order.legs.every(({ positionIntent }) =>
+    CLOSING_POSITION_INTENTS.has(positionIntent),
+  )
+
 const OPEN_ORDER_STATUSES = new Set([
   "new",
   "accepted",
@@ -322,7 +334,8 @@ export function reconcileBrokerPortfolioV1(
       .filter(
         (order) =>
           isSupportedOpeningOrder(order) ||
-          order.assetClass === "us_option",
+          (order.assetClass === "us_option" &&
+            !isRecognizedClosingOnlyOrder(order)),
       )
       .map(({ id }) => id),
   ).size

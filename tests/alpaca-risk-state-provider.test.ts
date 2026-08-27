@@ -74,6 +74,17 @@ const openingOrder = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
+const closingOrder = (overrides: Record<string, unknown> = {}) =>
+  openingOrder({
+    id: "closing-order",
+    status: "filled",
+    legs: [
+      { symbol: longSymbol, ratio_qty: "1", position_intent: "sell_to_close" },
+      { symbol: shortSymbol, ratio_qty: "1", position_intent: "buy_to_close" },
+    ],
+    ...overrides,
+  })
+
 const input = {
   sessionDate,
   slotStartedAt: "2026-08-27T14:30:00.000Z",
@@ -222,6 +233,28 @@ describe("Alpaca risk-state provider", () => {
     ])
   })
 
+  it("normalizes Alpaca negative quantity for short positions", async () => {
+    const longPosition = {
+      asset_class: "us_option",
+      symbol: longSymbol,
+      qty: "1",
+      side: "long",
+    }
+    const shortPosition = {
+      asset_class: "us_option",
+      symbol: shortSymbol,
+      qty: "-1",
+      side: "short",
+    }
+    const result = await provider(router({
+      positions: () => [longPosition, shortPosition],
+    })).capture(input)
+    expect(result.success && result.snapshot.portfolio).toMatchObject({
+      consistent: true,
+      openStrategyPositionCount: 1,
+    })
+  })
+
   it("reconciles valid unrelated fractional exposure as inconsistent state", async () => {
     const result = await provider(router({
       positions: () => [{
@@ -249,6 +282,13 @@ describe("Alpaca risk-state provider", () => {
       ],
     })).capture(input)
     expect(result.success && result.snapshot.portfolio.entriesSubmittedToday).toBe(1)
+  })
+
+  it("does not count recognized closing-only option orders as same-day entries", async () => {
+    const result = await provider(router({
+      history: [closingOrder()],
+    })).capture(input)
+    expect(result.success && result.snapshot.portfolio.entriesSubmittedToday).toBe(0)
   })
 
   it("fails closed on malformed account money", async () => {
