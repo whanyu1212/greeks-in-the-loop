@@ -676,7 +676,10 @@ export function createAlpacaRiskStateProvider(
           getOrders(input.signal, "OPEN"),
         ])
         const evaluatedAtDate = now()
-        if (!Number.isFinite(evaluatedAtDate.getTime())) {
+        if (
+          !Number.isFinite(evaluatedAtDate.getTime()) ||
+          evaluatedAtDate.getTime() < requestStartedAt.getTime()
+        ) {
           return { success: false, reasons: ["CAPTURE_TIME_INVALID"] }
         }
         const evaluatedAt = evaluatedAtDate.toISOString()

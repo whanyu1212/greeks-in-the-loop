@@ -449,6 +449,23 @@ describe("Alpaca risk-state provider", () => {
     )
   })
 
+  it("rejects capture when the evaluation clock moves backward", async () => {
+    const fetchImplementation = router()
+    const now = vi.fn()
+      .mockReturnValueOnce(new Date("2026-08-27T14:30:30.000Z"))
+      .mockReturnValueOnce(new Date("2026-08-27T14:30:29.999Z"))
+    const result = await provider(fetchImplementation, now).capture(input)
+    expect(result).toEqual({
+      success: false,
+      reasons: ["CAPTURE_TIME_INVALID"],
+    })
+    expect(fetchImplementation.mock.calls.some(([resource]) => {
+      const url = new URL(String(resource))
+      return url.pathname === "/v2/orders" &&
+        url.searchParams.get("status") === "all"
+    })).toBe(false)
+  })
+
   it("fails closed on malformed account money", async () => {
     await expectFailure(
       router({ account: { ...account, buying_power: "100.001" } }),
