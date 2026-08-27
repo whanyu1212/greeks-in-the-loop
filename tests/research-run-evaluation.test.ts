@@ -652,6 +652,37 @@ describe("research run evaluation", () => {
     },
   )
 
+  it("reapplies proposal freshness checks before quote failures", () => {
+    const run = derivedIntentRun()
+    if (run.researchReport === undefined) {
+      throw new Error("Expected retained research report")
+    }
+    const { validatedDecision: _validatedDecision, ...base } = run
+    const evaluation = evaluateResearchRunV1({
+      ...base,
+      evidenceSnapshots: [],
+      researchReport: {
+        ...run.researchReport,
+        analysis: {
+          ...run.researchReport.analysis,
+          accountChecks: {
+            ...run.researchReport.analysis.accountChecks,
+            observedAt: "2026-08-26T13:54:00.000Z",
+          },
+        },
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["QUOTE_REQUEST_FAILED"],
+      },
+    })
+
+    expect(evaluation.dimensions.temporalIntegrity.issueCodes).toContain(
+      "ACCOUNT_CHECKS_STALE_AT_INTENT",
+    )
+  })
+
   it("validates the snapshot shape retained by decision rejections", () => {
     const run = derivedIntentRun()
     const { validatedDecision: _validatedDecision, ...base } = run
@@ -708,6 +739,24 @@ describe("research run evaluation", () => {
       researchReport: noAction.researchReport,
       outcome: rejectedOutcome,
     })
+    const healthyProposal = evaluateResearchRunV1({
+      ...proposalBase,
+      outcome: rejectedOutcome,
+    })
+    const staleProposal = evaluateResearchRunV1({
+      ...proposalBase,
+      researchReport: {
+        ...proposalBase.researchReport!,
+        analysis: {
+          ...proposalBase.researchReport!.analysis,
+          accountChecks: {
+            ...proposalBase.researchReport!.analysis.accountChecks,
+            observedAt: "2026-08-26T13:58:00.000Z",
+          },
+        },
+      },
+      outcome: rejectedOutcome,
+    })
 
     expect(missingReport.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
@@ -715,6 +764,10 @@ describe("research run evaluation", () => {
     expect(noActionReport.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
     )
+    expect(healthyProposal.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+    expect(staleProposal.dimensions.contractCompliance.status).toBe("PASS")
   })
 
   it("rejects decision-rejected statuses for otherwise retainable reports", () => {

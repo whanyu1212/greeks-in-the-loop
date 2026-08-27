@@ -239,9 +239,9 @@ export function evaluateResearchRunV1(
     contractIssues.push("OUTCOME_CONTRACT_INVALID")
   }
 
-  const reportResult = parsedReport?.success === true
-    ? parsedReport.data.result
-    : undefined
+  const validReport =
+    parsedReport?.success === true ? parsedReport.data : undefined
+  const reportResult = validReport?.result
   const retainedResult = run.preliminaryResearch ?? run.validatedDecision
   const validRetainedResult =
     parsedPreliminaryResearch?.success === true
@@ -255,6 +255,44 @@ export function evaluateResearchRunV1(
     run.outcome.reasons.every((reason) =>
       QUOTE_CONFIRMATION_REJECTION_REASONS.has(reason),
     )
+  const canonicalRetainedQuoteSnapshot =
+    run.evidenceSnapshots.length === 1 &&
+    run.evidenceSnapshots[0] !== undefined &&
+    isCanonicalProposalQuoteSnapshot(run.evidenceSnapshots[0])
+      ? run.evidenceSnapshots[0]
+      : undefined
+  const snapshotDecisionRejectionGateFailed = (() => {
+    if (
+      run.outcome.status !== "DECISION_REJECTED" ||
+      canonicalRetainedQuoteSnapshot === undefined ||
+      validReport === undefined ||
+      reportResult?.outcome !== "PROPOSE_TRADE"
+    ) {
+      return false
+    }
+    const evaluatedAt = Date.parse(canonicalRetainedQuoteSnapshot.retrievedAt)
+    const accountAge =
+      evaluatedAt - Date.parse(validReport.analysis.accountChecks.observedAt)
+    const marketAge =
+      evaluatedAt - Date.parse(validReport.analysis.marketRegime.observedAt)
+    const freshnessFailed =
+      accountAge < 0 ||
+      accountAge > 5 * 60 * 1_000 ||
+      marketAge < 0 ||
+      marketAge > 60_000
+    const validation = validateResearchDecisionV1(reportResult, {
+      evaluatedAt: canonicalRetainedQuoteSnapshot.retrievedAt,
+      snapshots: {
+        [PROPOSAL_QUOTE_SNAPSHOT_REF]: {
+          provider: canonicalRetainedQuoteSnapshot.provider,
+          source: canonicalRetainedQuoteSnapshot.source,
+          retrievedAt: canonicalRetainedQuoteSnapshot.retrievedAt,
+          freshUntil: canonicalRetainedQuoteSnapshot.freshUntil,
+        },
+      },
+    })
+    return freshnessFailed || !validation.success
+  })()
   if (
     reportResult !== undefined &&
     retainedResult !== undefined &&
@@ -336,7 +374,9 @@ export function evaluateResearchRunV1(
           (preliminaryCouldBeRetained || noActionCouldBeRetained)) ||
         (run.evidenceSnapshots.length > 0 &&
           (parsedReport?.success !== true ||
-            parsedReport.data.result.outcome !== "PROPOSE_TRADE"))
+            parsedReport.data.result.outcome !== "PROPOSE_TRADE")) ||
+        (canonicalRetainedQuoteSnapshot !== undefined &&
+          !snapshotDecisionRejectionGateFailed)
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
       }
@@ -430,10 +470,32 @@ export function evaluateResearchRunV1(
       ))
       ? run.evidenceSnapshots[0].retrievedAt
       : undefined
+  const quoteConfirmationEvaluationLowerBound = (() => {
+    if (
+      !quoteConfirmationRejection ||
+      parsedReport?.success !== true ||
+      run.initialEligibility === undefined
+    ) {
+      return undefined
+    }
+    const eligibilityEvaluatedAt = Date.parse(
+      run.initialEligibility.evaluatedAt,
+    )
+    const reportAsOf = Date.parse(parsedReport.data.analysis.asOf)
+    return Number.isFinite(eligibilityEvaluatedAt) && Number.isFinite(reportAsOf)
+      ? new Date(Math.max(eligibilityEvaluatedAt, reportAsOf)).toISOString()
+      : undefined
+  })()
+  const decisionRejectionEvaluatedAt =
+    run.outcome.status === "DECISION_REJECTED"
+      ? canonicalRetainedQuoteSnapshot?.retrievedAt
+      : undefined
   const proposalEvaluatedAt =
     run.outcome.status === "INTENT_DERIVED"
       ? run.outcome.intent.evaluatedAt
-      : postQuoteRejectionEvaluatedAt
+      : postQuoteRejectionEvaluatedAt ??
+        quoteConfirmationEvaluationLowerBound ??
+        decisionRejectionEvaluatedAt
   if (proposalEvaluatedAt !== undefined && parsedReport?.success === true) {
     const evaluatedAt = Date.parse(proposalEvaluatedAt)
     const reportAsOf = Date.parse(parsedReport.data.analysis.asOf)
@@ -738,7 +800,8 @@ export function evaluateResearchRunV1(
   if (
     (run.outcome.status === "INTENT_DERIVED" ||
       postQuoteRejectionEvaluatedAt !== undefined ||
-      quoteConfirmationRejection) &&
+      quoteConfirmationRejection ||
+      decisionRejectionEvaluatedAt !== undefined) &&
     diagnostics !== undefined
   ) {
     const sessionDate = run.initialEligibility?.sessionDate
