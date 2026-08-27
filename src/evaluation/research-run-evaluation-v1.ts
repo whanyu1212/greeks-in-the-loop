@@ -26,6 +26,7 @@ import {
   PROPOSAL_QUOTE_SNAPSHOT_REF,
 } from "../research/research-cycle.js"
 import {
+  DRY_RUN_ANYTIME_RESEARCH_MODE,
   newYorkDate,
   newYorkLocalTime,
 } from "../scheduling/research-eligibility.js"
@@ -68,6 +69,7 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "CANDIDATE_IDENTITY_MISMATCH",
   "CANDIDATE_DTE_MISMATCH",
   "OPEN_INTEREST_HISTORY_INVALID",
+  "DRY_RUN_ELIGIBILITY_CONTEXT_INVALID",
   "INELIGIBLE_CYCLE_DERIVED_INTENT",
   "INTENT_ELIGIBILITY_CONTEXT_INVALID",
   "INTENT_ELIGIBILITY_CONTEXT_MISSING",
@@ -313,6 +315,21 @@ export function evaluateResearchRunV1(
 
   if (run.runVersion !== RESEARCH_RUN_VERSION) {
     contractIssues.push("RUN_VERSION_INVALID")
+  }
+
+  const initialEligibility = run.initialEligibility
+  const isAnytimeDryRun =
+    initialEligibility?.researchMode === DRY_RUN_ANYTIME_RESEARCH_MODE
+  if (
+    (isAnytimeDryRun &&
+      (initialEligibility.researchEligible !== true ||
+        initialEligibility.tradeIntentEligible !== false ||
+        initialEligibility.tradeIntentWindow !== undefined ||
+        initialEligibility.reason !== "DRY_RUN_RESEARCH_ONLY")) ||
+    (!isAnytimeDryRun &&
+      initialEligibility?.reason === "DRY_RUN_RESEARCH_ONLY")
+  ) {
+    contractIssues.push("DRY_RUN_ELIGIBILITY_CONTEXT_INVALID")
   }
 
   const parsedReport =
@@ -655,6 +672,13 @@ export function evaluateResearchRunV1(
       const parsedRejectedReport =
         parsedReport?.success === true ? parsedReport.data : undefined
       const parsedRejectedResult = parsedRejectedReport?.result
+      const rejectedPreliminaryTargetSessionDate =
+        parsedRejectedResult?.outcome === "PRELIMINARY_RESEARCH"
+          ? parsedRejectedResult.targetSessionDate
+          : undefined
+      const preliminaryTargetSessionDateRejectionIssues = [
+        { code: "CONTEXT_INVALID" as const, path: ["targetSessionDate"] },
+      ]
       const preliminaryCouldBeRetained =
         !retainedCommonReportRejectionMatches &&
         parsedRejectedReport !== undefined &&
@@ -784,22 +808,29 @@ export function evaluateResearchRunV1(
           rejectedIssues.length <= MAX_TERMINAL_REJECTION_DETAILS &&
           rejectedIssues.every(({ code }) => code === "SCHEMA_INVALID"))
       const plausibleLaterPreliminaryEligibilityRejection =
-        parsedRejectedResult?.outcome === "PRELIMINARY_RESEARCH" &&
+        rejectedPreliminaryTargetSessionDate !== undefined &&
         expectedPreliminaryDecisionRejectionIssues === undefined &&
+        rejectionIssuesMatch(preliminaryTargetSessionDateRejectionIssues) &&
         (() => {
+          const completedAt = Date.parse(run.cycle.completedAt)
+          if (isAnytimeDryRun) {
+            return (
+              Number.isFinite(completedAt) &&
+              run.cycle.sessionDate === rejectedPreliminaryTargetSessionDate &&
+              newYorkDate(new Date(completedAt)) >
+                rejectedPreliminaryTargetSessionDate
+            )
+          }
+
           const sessionClose = Date.parse(
             run.initialEligibility?.sessionClose ?? "",
           )
-          const completedAt = Date.parse(run.cycle.completedAt)
           return (
             !Number.isFinite(sessionClose) ||
             !Number.isFinite(completedAt) ||
             completedAt >= sessionClose
           )
-        })() &&
-        rejectionIssuesMatch([
-          { code: "CONTEXT_INVALID", path: ["targetSessionDate"] },
-        ])
+        })()
       const plausibleLaterProposalRejectionIssues = (() => {
         if (
           proposalPreflightValidation?.success !== true ||

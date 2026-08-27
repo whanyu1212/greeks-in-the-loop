@@ -380,7 +380,8 @@ describe("createResearchLifecycleRecorder", () => {
         researchEligible: true,
         tradeIntentEligible: false,
         previousSessionDates: ["2026-08-25"],
-        reason: "OUTSIDE_TRADE_INTENT_WINDOW",
+        researchMode: "DRY_RUN_ANYTIME",
+        reason: "DRY_RUN_RESEARCH_ONLY",
       },
       signal,
     })
@@ -394,6 +395,8 @@ describe("createResearchLifecycleRecorder", () => {
           evaluatedAt: TIMESTAMP,
           researchEligible: true,
           previousSessionDates: ["2026-08-25"],
+          researchMode: "DRY_RUN_ANYTIME",
+          reason: "DRY_RUN_RESEARCH_ONLY",
         },
       },
     })

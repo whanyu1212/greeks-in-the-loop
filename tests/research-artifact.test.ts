@@ -52,7 +52,8 @@ describe("research cycle artifact", () => {
             sessionDate: "2026-08-26",
             researchEligible: true,
             tradeIntentEligible: false,
-            reason: "OUTSIDE_TRADE_INTENT_WINDOW",
+            researchMode: "DRY_RUN_ANYTIME",
+            reason: "DRY_RUN_RESEARCH_ONLY",
           },
         },
       },
@@ -81,7 +82,11 @@ describe("research cycle artifact", () => {
         cycleNumber: 1,
         sessionDate: "2026-08-26",
       },
-      initialEligibility: { researchEligible: true },
+      initialEligibility: {
+        researchEligible: true,
+        researchMode: "DRY_RUN_ANYTIME",
+        reason: "DRY_RUN_RESEARCH_ONLY",
+      },
       validatedDecision: decision,
       outcome: { status: "VALIDATED_NO_ACTION", decision },
       ledger: {

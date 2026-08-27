@@ -55,6 +55,7 @@ export const RESEARCH_TRACE_ATTRIBUTE_KEYS = {
   cycleId: "research.cycle.id",
   cycleNumber: "research.cycle.number",
   agentName: "research.agent.name",
+  cycleMode: "research.cycle.mode",
   promptVersion: "research.prompt.version",
   skillName: "research.skill.name",
   skillVersion: "research.skill.version",
@@ -83,6 +84,7 @@ export type ResearchTelemetrySettings = Readonly<{
 
 export type ResearchTraceVersions = Readonly<{
   agentName: string
+  cycleMode: "STANDARD" | "DRY_RUN_ANYTIME"
   promptVersion: string
   skillName: string
   skillVersion: string
@@ -327,6 +329,7 @@ export function startResearchTelemetry(
           [SemanticConventions.OPENINFERENCE_SPAN_KIND]: OpenInferenceSpanKind.AGENT,
           [RESEARCH_TRACE_ATTRIBUTE_KEYS.attemptNumber]: attempt,
           [RESEARCH_TRACE_ATTRIBUTE_KEYS.agentName]: versions.agentName,
+          [RESEARCH_TRACE_ATTRIBUTE_KEYS.cycleMode]: versions.cycleMode,
           [RESEARCH_TRACE_ATTRIBUTE_KEYS.promptVersion]: versions.promptVersion,
           [RESEARCH_TRACE_ATTRIBUTE_KEYS.skillName]: versions.skillName,
           [RESEARCH_TRACE_ATTRIBUTE_KEYS.skillVersion]: versions.skillVersion,

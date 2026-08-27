@@ -12,7 +12,7 @@ import { projectResearchContextV1 } from "../src/research/research-context-v1.js
 describe("research agent request construction", () => {
   it("uses the fixed checked-in agent identity", () => {
     expect(RESEARCH_AGENT_NAME).toBe("research")
-    expect(RESEARCH_PROMPT_VERSION).toBe("1.0.0")
+    expect(RESEARCH_PROMPT_VERSION).toBe("1.1.0")
     expect(RESEARCH_SKILL_NAME).toBe("spy-debit-spread-research")
     expect(RESEARCH_SKILL_VERSION).toBe("1.0.0")
   })
@@ -77,5 +77,26 @@ describe("research agent request construction", () => {
     expect(prompt).toContain("Application-authoritative")
     expect(prompt).toContain('"tradeIntentEligible":false')
     expect(prompt).toContain("Do not return PROPOSE_TRADE")
+  })
+
+  it("labels anytime dry runs as research-only", () => {
+    const prompt = buildResearchCyclePrompt(
+      1,
+      new Date("2026-08-25T23:00:00.000Z"),
+      undefined,
+      undefined,
+      {
+        evaluatedAt: "2026-08-25T23:00:00.000Z",
+        sessionDate: "2026-08-25",
+        researchEligible: true,
+        tradeIntentEligible: false,
+        researchMode: "DRY_RUN_ANYTIME",
+        reason: "DRY_RUN_RESEARCH_ONLY",
+      },
+    )
+
+    expect(prompt).toContain("research-only anytime dry run")
+    expect(prompt).toContain("Never return PROPOSE_TRADE")
+    expect(prompt).toContain('"researchMode":"DRY_RUN_ANYTIME"')
   })
 })

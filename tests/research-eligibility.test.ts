@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  DRY_RUN_ANYTIME_RESEARCH_MODE,
   evaluateResearchEligibility,
+  researchEligibilityV1Schema,
   type MarketSessionV1,
 } from "../src/scheduling/research-eligibility.js"
 
@@ -125,5 +127,61 @@ describe("research eligibility", () => {
       researchEligible: true,
       tradeIntentEligible: false,
     })
+  })
+
+  it.each([
+    "2026-08-25T04:00:00.000Z",
+    "2026-08-25T14:00:00.000Z",
+    "2026-08-26T03:59:59.999Z",
+  ])("allows research-only dry runs throughout a trading date: %s", (timestamp) => {
+    expect(
+      evaluateResearchEligibility({
+        evaluatedAt: new Date(timestamp),
+        session: regularSession,
+        premarketStartEt: "08:00",
+        researchMode: DRY_RUN_ANYTIME_RESEARCH_MODE,
+      }),
+    ).toMatchObject({
+      sessionDate: regularSession.date,
+      researchEligible: true,
+      tradeIntentEligible: false,
+      researchMode: DRY_RUN_ANYTIME_RESEARCH_MODE,
+      reason: "DRY_RUN_RESEARCH_ONLY",
+    })
+  })
+
+  it("keeps anytime dry runs closed on non-session dates", () => {
+    expect(
+      evaluateResearchEligibility({
+        evaluatedAt: new Date("2026-12-25T15:00:00.000Z"),
+        premarketStartEt: "08:00",
+        researchMode: DRY_RUN_ANYTIME_RESEARCH_MODE,
+      }),
+    ).toMatchObject({
+      researchEligible: false,
+      tradeIntentEligible: false,
+      researchMode: DRY_RUN_ANYTIME_RESEARCH_MODE,
+      reason: "NO_MARKET_SESSION",
+    })
+  })
+
+  it("rejects contradictory anytime dry-run eligibility records", () => {
+    expect(
+      researchEligibilityV1Schema.safeParse({
+        evaluatedAt: "2026-08-25T14:00:00.000Z",
+        researchEligible: true,
+        tradeIntentEligible: true,
+        researchMode: DRY_RUN_ANYTIME_RESEARCH_MODE,
+        reason: "DRY_RUN_RESEARCH_ONLY",
+      }).success,
+    ).toBe(false)
+    expect(
+      researchEligibilityV1Schema.safeParse({
+        evaluatedAt: "2026-08-25T14:00:00.000Z",
+        researchEligible: true,
+        tradeIntentEligible: false,
+        reason: "DRY_RUN_RESEARCH_ONLY",
+      }).success,
+    ).toBe(false)
   })
 })

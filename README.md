@@ -40,13 +40,26 @@ Run continuously at `AGENT_INTERVAL_MS` (five minutes by default):
 pnpm agent
 ```
 
-Run an isolated one-cycle smoke test without touching the default ledger. Setting an earlier research-window start is useful when exercising pre-market research; Alpaca's calendar still determines whether the date is a trading session and when the research window closes.
+Run one research-only cycle at any time on the current Alpaca trading date:
 
 ```bash
-RESEARCH_LEDGER_PATH=.state/manual-dry-run.sqlite AGENT_PREMARKET_START_ET=07:00 AGENT_CYCLE_TIMEOUT_MS=300000 pnpm agent:once
+AGENT_CYCLE_TIMEOUT_MS=300000 pnpm agent:research-anytime
 ```
 
-This is a dry run with respect to trading, not data access or local storage: it uses live read-only providers as the cycle requires and writes the isolated SQLite ledger plus a JSON export derived from that ledger. Substantive research requires Exa; FMP context is optional. Use a new `RESEARCH_LEDGER_PATH` when testing a branch whose migrations differ from an existing local ledger.
+This mode bypasses only the time-of-day research window. Alpaca's calendar must
+still identify today in New York as a trading date. The cycle is durably marked
+`DRY_RUN_ANYTIME`, cannot open a trade-intent window, and cannot derive an
+intent even if the model proposes one. It uses live read-only providers and
+writes a dedicated `.state/research-anytime.sqlite` ledger plus the normal JSON
+export. Substantive research requires Exa; FMP context is optional. No `.env`
+change is required.
+
+To use another isolated ledger, pass it explicitly. The command rejects the
+configured production ledger:
+
+```bash
+pnpm agent:research-anytime -- --ledger .state/quality-run.sqlite
+```
 
 Build and run the compiled worker:
 
@@ -71,6 +84,10 @@ The worker creates a fresh OpenCode session for every cycle and shuts down clean
 
 The append-only SQLite event ledger defaults to `.state/research-ledger.sqlite`; override it with `RESEARCH_LEDGER_PATH` only when the worker retains exclusive write ownership. On startup, incomplete cycles are marked `PROCESS_RESTART`, cycle numbering resumes from durable history, and a bounded context projection is rebuilt for the next prompt. Prior evidence is planning context only and must be refreshed. OpenCode session memory is never authoritative durable state.
 
+The anytime command intentionally ignores `RESEARCH_LEDGER_PATH` unless it is
+needed to detect an unsafe collision. Its default ledger is isolated so dry-run
+research cannot enter the normal worker's durable prompt context.
+
 Every completed eligible cycle is projected into a versioned `ResearchRunV1` after the worker rereads its committed events. The projection consolidates cycle identity and timing, initial eligibility, evidence snapshot references, the validated outcome and intermediate records, the full bounded [`ResearchReportV2`](docs/research-report-v2.md), and ledger sequence metadata. A byte-for-byte regenerable inspection-only JSON export is then written under `workspace/research/<session-date>/cycle-<number>-<cycle-id>.json`. SQLite is the sole source of truth: the worker never builds the export from a separate in-memory result, and an export failure does not undo the committed ledger outcome.
 
 ## Inspect a run
@@ -78,27 +95,27 @@ Every completed eligible cycle is projected into a versioned `ResearchRunV1` aft
 Show the latest completed run directly from an isolated ledger, or select a cycle:
 
 ```bash
-pnpm research:run -- --ledger .state/manual-dry-run.sqlite
-pnpm research:run -- --ledger .state/manual-dry-run.sqlite --cycle <cycle-id>
+pnpm research:run -- --ledger .state/research-anytime.sqlite
+pnpm research:run -- --ledger .state/research-anytime.sqlite --cycle <cycle-id>
 ```
 
 Regenerate its human-readable JSON export from SQLite (`--force` replaces an existing export):
 
 ```bash
-pnpm research:run -- --ledger .state/manual-dry-run.sqlite --export --force
+pnpm research:run -- --ledger .state/research-anytime.sqlite --export --force
 ```
 
 Inspect the event timeline or the validated JSON payloads in a ledger:
 
 ```bash
-sqlite3 .state/manual-dry-run.sqlite "SELECT sequence, event_type, occurred_at FROM ledger_events ORDER BY sequence;"
-sqlite3 -json .state/manual-dry-run.sqlite "SELECT sequence, event_type, json(payload_json) AS payload FROM ledger_events ORDER BY sequence;"
+sqlite3 .state/research-anytime.sqlite "SELECT sequence, event_type, occurred_at FROM ledger_events ORDER BY sequence;"
+sqlite3 -json .state/research-anytime.sqlite "SELECT sequence, event_type, json(payload_json) AS payload FROM ledger_events ORDER BY sequence;"
 ```
 
 To inspect exact quotes and calculated spread economics when an intent was successfully derived:
 
 ```bash
-sqlite3 -json .state/manual-dry-run.sqlite "SELECT json(payload_json) AS trade_intent FROM ledger_events WHERE event_type = 'TRADE_INTENT_DERIVED' ORDER BY sequence DESC LIMIT 1;"
+sqlite3 -json .state/research-ledger.sqlite "SELECT json(payload_json) AS trade_intent FROM ledger_events WHERE event_type = 'TRADE_INTENT_DERIVED' ORDER BY sequence DESC LIMIT 1;"
 ```
 
 ## What gets saved
@@ -127,7 +144,8 @@ Evaluate the latest completed run, or select one by cycle ID:
 ```bash
 pnpm research:evaluate
 pnpm research:evaluate -- --cycle <cycle-id>
-pnpm research:evaluate -- --ledger .state/manual-dry-run.sqlite --cycle <cycle-id>
+pnpm research:evaluate -- --ledger .state/research-anytime.sqlite
+pnpm research:evaluate -- --ledger .state/research-anytime.sqlite --cycle <cycle-id>
 ```
 
 The command reads SQLite without changing it and prints a deterministic,
