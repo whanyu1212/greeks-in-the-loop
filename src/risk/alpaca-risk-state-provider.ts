@@ -346,7 +346,7 @@ const normalizeOrder = (
     assetClass: raw.asset_class.toLowerCase(),
     submittedAt,
     status: raw.status.toLowerCase(),
-    orderClass: (raw.order_class ?? "unknown").toLowerCase(),
+    orderClass: (raw.order_class?.trim() || "simple").toLowerCase(),
     orderType: (raw.type ?? "unknown").toLowerCase(),
     timeInForce: (raw.time_in_force ?? "unknown").toLowerCase(),
     quantity,
@@ -675,6 +675,18 @@ export function createAlpacaRiskStateProvider(
             input.signal,
           ),
         ])
+        const historyStartedAt = now()
+        if (
+          !Number.isFinite(historyStartedAt.getTime()) ||
+          historyStartedAt.getTime() < requestStartedAt.getTime()
+        ) {
+          return { success: false, reasons: ["CAPTURE_TIME_INVALID"] }
+        }
+        const submittedOrders = await getOrders(
+          input.signal,
+          "HISTORY",
+          historyAfter,
+        )
         const [finalPositions, finalOpenOrders] = await Promise.all([
           getPositions(input.signal),
           getOrders(input.signal, "OPEN"),
@@ -682,17 +694,11 @@ export function createAlpacaRiskStateProvider(
         const evaluatedAtDate = now()
         if (
           !Number.isFinite(evaluatedAtDate.getTime()) ||
-          evaluatedAtDate.getTime() < requestStartedAt.getTime()
+          evaluatedAtDate.getTime() < historyStartedAt.getTime()
         ) {
           return { success: false, reasons: ["CAPTURE_TIME_INVALID"] }
         }
         const evaluatedAt = evaluatedAtDate.toISOString()
-        const submittedOrders = await getOrders(
-          input.signal,
-          "HISTORY",
-          historyAfter,
-          evaluatedAt,
-        )
 
         const accountRaw = rawAccountSchema.safeParse(rawAccount)
         if (!accountRaw.success) throw new CaptureFailure("ACCOUNT_RESPONSE_INVALID")

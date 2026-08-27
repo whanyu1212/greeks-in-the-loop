@@ -339,6 +339,25 @@ describe("Alpaca risk-state provider", () => {
     ])
   })
 
+  it("normalizes a blank provider order class as a simple order", async () => {
+    const result = await provider(router({
+      history: [{
+        id: "blank-class-order",
+        asset_class: "us_equity",
+        submitted_at: "2026-08-27T14:29:00.000Z",
+        status: "filled",
+        order_class: "",
+        type: "market",
+        time_in_force: "day",
+        qty: "1",
+      }],
+    })).capture(input)
+    expect(result.success && result.snapshot.portfolio).toMatchObject({
+      consistent: true,
+      entriesSubmittedToday: 0,
+    })
+  })
+
   it("paginates order history with the supported timestamp cursor", async () => {
     const firstPage = Array.from({ length: 500 }, (_, index) => ({
       id: `equity-order-${index}`,
@@ -363,9 +382,7 @@ describe("Alpaca risk-state provider", () => {
     expect(result.success).toBe(true)
     expect(historyUrls).toHaveLength(2)
     expect(historyUrls[1]?.searchParams.get("after")).toBe(overlapTimestamp)
-    expect(historyUrls[1]?.searchParams.get("until")).toBe(
-      evaluatedAt.toISOString(),
-    )
+    expect(historyUrls[1]?.searchParams.has("until")).toBe(false)
     expect(historyUrls[1]?.searchParams.has("after_order_id")).toBe(false)
   })
 
@@ -443,7 +460,7 @@ describe("Alpaca risk-state provider", () => {
     })
     const now = vi.fn()
       .mockReturnValueOnce(requestStartedAt)
-      .mockReturnValueOnce(captureFinishedAt)
+      .mockReturnValue(captureFinishedAt)
     const result = await provider(fetchImplementation, now).capture(input)
     expect(result.success && result.snapshot.portfolio).toMatchObject({
       consistent: false,
@@ -452,9 +469,20 @@ describe("Alpaca risk-state provider", () => {
     expect(result.success && result.snapshot.reconciliationReasonCodes).toEqual([
       "BROKER_STATE_CHANGED",
     ])
-    expect(historyUrls[0]?.searchParams.get("until")).toBe(
-      captureFinishedAt.toISOString(),
+    expect(historyUrls[0]?.searchParams.has("until")).toBe(false)
+    const historyCallIndex = fetchImplementation.mock.calls.findIndex(([resource]) => {
+      const url = new URL(String(resource))
+      return url.pathname === "/v2/orders" &&
+        url.searchParams.get("status") === "all"
+    })
+    const finalOpenOrdersCallIndex = fetchImplementation.mock.calls.findLastIndex(
+      ([resource]) => {
+        const url = new URL(String(resource))
+        return url.pathname === "/v2/orders" &&
+          url.searchParams.get("status") === "open"
+      },
     )
+    expect(finalOpenOrdersCallIndex).toBeGreaterThan(historyCallIndex)
   })
 
   it("rejects capture when the evaluation clock moves backward", async () => {
