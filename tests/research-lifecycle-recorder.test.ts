@@ -151,6 +151,20 @@ const intent: TradeIntentV1 = {
   profitTargetMarkHalfCentsPerShare: 601,
 }
 
+const shadowRisk = {
+  decision: {
+    decisionVersion: "1.0.0" as const,
+    mode: "SHADOW" as const,
+    evaluationVersion: "1.0.0" as const,
+    ruleVersion: "1.0.0" as const,
+    stage: "STATE_CAPTURE_FAILED" as const,
+    outcome: "REJECTED" as const,
+    evaluatedAt: null,
+    captureReasonCodes: ["CAPTURE_INTERNAL_INVALID" as const],
+  },
+  breakerTransitions: [],
+}
+
 const evidenceSnapshots = [
   {
     snapshotRef: "snapshot-1",
@@ -311,11 +325,13 @@ const terminalMappingCases: readonly {
       },
       evidenceSnapshots: [evidenceSnapshots[0]],
       validatedDecision: proposedDecision,
+      shadowRisk,
     },
     eventTypes: [
       "EVIDENCE_SNAPSHOT_REFERENCED",
       "RESEARCH_DECISION_VALIDATED",
       "TRADE_INTENT_DERIVED",
+      "RISK_SHADOW_DECISION_RECORDED",
       "RESEARCH_CYCLE_COMPLETED",
     ],
   },
@@ -661,6 +677,17 @@ describe("createResearchLifecycleRecorder", () => {
         },
         evidenceSnapshots: [evidenceSnapshots[0]],
         validatedDecision: proposedDecision,
+        shadowRisk: {
+          ...shadowRisk,
+          breakerTransitions: [
+            {
+              stateVersion: "1.0.0",
+              tradingDate: "2026-08-26",
+              observedAt: TIMESTAMP,
+              breaker: "DAILY",
+            },
+          ],
+        },
       },
       signal,
     )
@@ -671,6 +698,8 @@ describe("createResearchLifecycleRecorder", () => {
       "EVIDENCE_SNAPSHOT_REFERENCED",
       "RESEARCH_DECISION_VALIDATED",
       "TRADE_INTENT_DERIVED",
+      "RISK_SHADOW_DECISION_RECORDED",
+      "RISK_BREAKER_LATCHED",
       "RESEARCH_CYCLE_COMPLETED",
     ])
     assertCausalChain(stored)

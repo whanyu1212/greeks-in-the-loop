@@ -47,6 +47,11 @@ import {
   reconstructResearchContextV1,
 } from "./research/research-context-v1.js"
 import { processResearchCycle } from "./research/research-cycle.js"
+import { createAlpacaRiskStateProvider } from "./risk/alpaca-risk-state-provider.js"
+import {
+  createLedgerDurableRiskControlStateLoader,
+  createShadowRiskEvaluator,
+} from "./risk/shadow-risk-service.js"
 import {
   DEFAULT_PREMARKET_RESEARCH_START_ET,
   DRY_RUN_ANYTIME_RESEARCH_MODE,
@@ -190,6 +195,16 @@ const quoteProvider = createAlpacaOptionQuoteProvider({
     readSetting("ALPACA_MARKET_DATA_BASE_URL")?.trim() ||
     "https://data.alpaca.markets",
 })
+const riskStateProvider = createAlpacaRiskStateProvider({
+  apiKey: alpacaApiKey,
+  secretKey: alpacaSecretKey,
+  dataBaseUrl:
+    readSetting("ALPACA_MARKET_DATA_BASE_URL")?.trim() ||
+    "https://data.alpaca.markets",
+  tradingBaseUrl:
+    readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
+    "https://paper-api.alpaca.markets",
+})
 const calendar = createAlpacaCalendarClient({
   apiKey: alpacaApiKey,
   secretKey: alpacaSecretKey,
@@ -233,6 +248,10 @@ const telemetry = startResearchTelemetry({
 try {
   await ledgerStore.migrate(abortController.signal)
   let researchContext = await reconstructResearchContextV1(ledgerStore)
+  const shadowRiskEvaluator = createShadowRiskEvaluator({
+    provider: riskStateProvider,
+    durableControl: createLedgerDurableRiskControlStateLoader(ledgerStore),
+  })
   const lifecycleRecorder = createResearchLifecycleRecorder({ store: ledgerStore })
   const runtime = await startOpencode({
     port,
@@ -438,6 +457,7 @@ try {
                 cycleStartedAt: cycle.startedAt,
                 signal,
                 quoteProvider,
+                shadowRiskEvaluator,
                 outcomeSink: cycle.outcomeSink,
                 getEligibility,
                 trace: cycleTrace,

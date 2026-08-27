@@ -22,6 +22,94 @@ afterEach(() => {
 })
 
 describe("research cycle artifact", () => {
+  it("integrates a bounded shadow-risk decision and breaker transitions", () => {
+    const base = {
+      eventVersion: "1.0.0",
+      occurredAt: "2026-08-27T14:30:00.000Z",
+      recordedAt: "2026-08-27T14:30:00.001Z",
+      correlationId: "correlation-risk",
+      cycleId: "cycle-risk",
+      sessionId: "session-risk",
+    }
+    const events = [
+      {
+        ...base,
+        sequence: 1,
+        eventId: "risk-start",
+        eventType: "RESEARCH_CYCLE_STARTED",
+        payload: { cycleNumber: 1, sessionDate: "2026-08-27" },
+      },
+      {
+        ...base,
+        sequence: 2,
+        eventId: "risk-decision-source",
+        causationEventId: "risk-start",
+        eventType: "RESEARCH_DECISION_VALIDATED",
+        payload: { decision: { outcome: "PROPOSE_TRADE" } },
+      },
+      {
+        ...base,
+        sequence: 3,
+        eventId: "risk-intent",
+        causationEventId: "risk-decision-source",
+        eventType: "TRADE_INTENT_DERIVED",
+        payload: { intent: { contractVersion: "1.0.0" } },
+      },
+      {
+        ...base,
+        sequence: 4,
+        eventId: "risk-result",
+        causationEventId: "risk-intent",
+        eventType: "RISK_SHADOW_DECISION_RECORDED",
+        payload: {
+          decision: {
+            decisionVersion: "1.0.0",
+            mode: "SHADOW",
+            evaluationVersion: "1.0.0",
+            ruleVersion: "1.0.0",
+            stage: "STATE_CAPTURE_FAILED",
+            outcome: "REJECTED",
+            evaluatedAt: null,
+            captureReasonCodes: ["ACCOUNT_REQUEST_FAILED"],
+          },
+        },
+      },
+      {
+        ...base,
+        sequence: 5,
+        eventId: "risk-breaker",
+        causationEventId: "risk-result",
+        eventType: "RISK_BREAKER_LATCHED",
+        payload: {
+          stateVersion: "1.0.0",
+          tradingDate: "2026-08-27",
+          observedAt: "2026-08-27T14:30:00.000Z",
+          breaker: "DAILY",
+        },
+      },
+      {
+        ...base,
+        sequence: 6,
+        eventId: "risk-completed",
+        causationEventId: "risk-breaker",
+        eventType: "RESEARCH_CYCLE_COMPLETED",
+        payload: { status: "INTENT_DERIVED" },
+      },
+    ] as unknown as StoredLedgerEventV1[]
+
+    expect(projectResearchRunV1(events)).toMatchObject({
+      runVersion: "1.1.0",
+      shadowRisk: {
+        decision: {
+          stage: "STATE_CAPTURE_FAILED",
+          outcome: "REJECTED",
+          captureReasonCodes: ["ACCOUNT_REQUEST_FAILED"],
+        },
+        breakerTransitions: [{ breaker: "DAILY" }],
+      },
+    })
+  })
+
   it("projects the complete run from the committed ledger timeline", () => {
     const decision = {
       contractVersion: "1.0.0" as const,

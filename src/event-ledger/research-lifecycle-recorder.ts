@@ -187,6 +187,21 @@ const completionEvents = (
         eventType: "TRADE_INTENT_DERIVED",
         payload: { intent: outcome.intent },
       })
+      if (record.shadowRisk === undefined) {
+        throw new Error("Derived intent completion requires shadow risk")
+      }
+      append({
+        ...envelope(),
+        eventType: "RISK_SHADOW_DECISION_RECORDED",
+        payload: { decision: record.shadowRisk.decision },
+      })
+      for (const transition of record.shadowRisk.breakerTransitions) {
+        append({
+          ...envelope(),
+          eventType: "RISK_BREAKER_LATCHED",
+          payload: transition,
+        })
+      }
       break
   }
 

@@ -5,6 +5,10 @@ import { preliminaryResearchV1Schema } from "../contracts/preliminary-research-v
 import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
 import { researchReportV2Schema } from "../contracts/research-report-v2.js"
 import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
+import {
+  riskBreakerTransitionV1Schema,
+  shadowRiskDecisionV1Schema,
+} from "../risk/shadow-risk-v1.js"
 
 export const LEDGER_EVENT_VERSION = "1.0.0" as const
 export const MAX_LEDGER_EVENT_PAYLOAD_BYTES = 64 * 1024
@@ -21,6 +25,8 @@ export const LEDGER_EVENT_TYPES = [
   "TRADE_INTENT_DERIVATION_REJECTED",
   "RESEARCH_CYCLE_COMPLETED",
   "RESEARCH_CYCLE_INTERRUPTED",
+  "RISK_SHADOW_DECISION_RECORDED",
+  "RISK_BREAKER_LATCHED",
 ] as const
 
 const identifier = z
@@ -152,6 +158,12 @@ const payloadSchemas = {
       ]),
     })
     .strict(),
+  RISK_SHADOW_DECISION_RECORDED: z
+    .object({
+      decision: shadowRiskDecisionV1Schema,
+    })
+    .strict(),
+  RISK_BREAKER_LATCHED: riskBreakerTransitionV1Schema,
 } as const
 
 type EventType = keyof typeof payloadSchemas

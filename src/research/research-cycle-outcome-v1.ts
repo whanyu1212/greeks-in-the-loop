@@ -14,6 +14,7 @@ import type {
 import type {
   OptionQuoteConfirmationFailureCode,
 } from "../market-data/alpaca-option-quotes.js"
+import type { ShadowRiskResultV1 } from "../risk/shadow-risk-v1.js"
 
 export const RESEARCH_CYCLE_OUTCOME_VERSION = "1.0.0" as const
 
@@ -66,13 +67,25 @@ export type ResearchCycleEvidenceSnapshotReferenceV1 = Readonly<{
   temporalClass?: "LIVE" | "DELAYED" | "PRIOR_CLOSE"
 }>
 
-export type ResearchCycleTerminalRecordV1 = Readonly<{
-  outcome: ResearchCycleOutcomeV1
+type ResearchCycleTerminalRecordMetadataV1 = Readonly<{
   evidenceSnapshots: readonly ResearchCycleEvidenceSnapshotReferenceV1[]
   validatedDecision?: ResearchDecisionV1
   preliminaryResearch?: PreliminaryResearchV1
   researchReport?: ResearchReportV2
 }>
+
+export type ResearchCycleTerminalRecordV1 =
+  ResearchCycleTerminalRecordMetadataV1 &
+    (
+      | Readonly<{
+          outcome: Extract<ResearchCycleOutcomeV1, { status: "INTENT_DERIVED" }>
+          shadowRisk: ShadowRiskResultV1
+        }>
+      | Readonly<{
+          outcome: Exclude<ResearchCycleOutcomeV1, { status: "INTENT_DERIVED" }>
+          shadowRisk?: never
+        }>
+    )
 
 export type ResearchCycleOutcomeSink = Readonly<{
   record(

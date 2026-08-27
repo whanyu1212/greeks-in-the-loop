@@ -24,6 +24,8 @@ import {
   newYorkLocalTime,
   type ResearchEligibilityV1,
 } from "../scheduling/research-eligibility.js"
+import type { ShadowRiskEvaluator } from "../risk/shadow-risk-service.js"
+import type { ShadowRiskResultV1 } from "../risk/shadow-risk-v1.js"
 import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
   type ResearchCycleOutcomeSink,
@@ -58,6 +60,7 @@ export type ProcessResearchCycleOptions = Readonly<{
   cycleStartedAt: string
   signal: AbortSignal
   quoteProvider: OptionQuoteProvider
+  shadowRiskEvaluator: ShadowRiskEvaluator
   outcomeSink: ResearchCycleOutcomeSink
   getEligibility: () => ResearchEligibilityV1
   now?: () => Date
@@ -72,6 +75,7 @@ export type ProcessedResearchCycle = Readonly<{
   outcome: ResearchCycleOutcomeV1
   report: string
   researchReport?: ResearchReportV2
+  shadowRisk?: ShadowRiskResultV1
 }>
 
 const schemaIssues = (
@@ -199,6 +203,7 @@ type TerminalRecordMetadata = Readonly<{
   validatedDecision?: ResearchDecisionV1
   preliminaryResearch?: ResearchCycleTerminalRecordV1["preliminaryResearch"]
   researchReport?: ResearchReportV2
+  shadowRisk?: ShadowRiskResultV1
 }>
 
 /**
@@ -217,8 +222,7 @@ const recordOutcome = async (
 ): Promise<ProcessedResearchCycle> => {
   signal.throwIfAborted()
   const boundedOutcome = boundTerminalOutcome(outcome)
-  const record: ResearchCycleTerminalRecordV1 = {
-    outcome: boundedOutcome,
+  const commonRecord = {
     evidenceSnapshots: metadata.evidenceSnapshots ?? [],
     ...(metadata.validatedDecision === undefined
       ? {}
@@ -230,13 +234,36 @@ const recordOutcome = async (
       ? {}
       : { researchReport: metadata.researchReport }),
   }
+  let record: ResearchCycleTerminalRecordV1
+  if (boundedOutcome.status === "INTENT_DERIVED") {
+    if (metadata.shadowRisk === undefined) {
+      throw new Error("Derived intent outcome requires shadow risk")
+    }
+    record = {
+      ...commonRecord,
+      outcome: boundedOutcome,
+      shadowRisk: metadata.shadowRisk,
+    }
+  } else {
+    if (metadata.shadowRisk !== undefined) {
+      throw new Error("Shadow risk requires a derived intent outcome")
+    }
+    record = { ...commonRecord, outcome: boundedOutcome }
+  }
   await trace.run("ledger.cycle.terminalize", () => sink.record(record, signal))
   return {
     outcome: boundedOutcome,
-    report: `Research cycle outcome: ${boundedOutcome.status}`,
+    report: `Research cycle outcome: ${boundedOutcome.status}${
+      metadata.shadowRisk === undefined
+        ? ""
+        : `\nShadow risk: ${metadata.shadowRisk.decision.outcome}`
+    }`,
     ...(metadata.researchReport === undefined
       ? {}
       : { researchReport: metadata.researchReport }),
+    ...(metadata.shadowRisk === undefined
+      ? {}
+      : { shadowRisk: metadata.shadowRisk }),
   }
 }
 
@@ -255,6 +282,7 @@ export async function processResearchCycle({
   cycleStartedAt,
   signal,
   quoteProvider,
+  shadowRiskEvaluator,
   outcomeSink,
   getEligibility,
   now = () => new Date(),
@@ -628,6 +656,37 @@ export async function processResearchCycle({
     )
   }
 
+  if (
+    proposalEligibility.sessionDate === undefined ||
+    proposalEligibility.tradeIntentWindow === undefined
+  ) {
+    return recordReportOutcome(
+      {
+        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["MARKET_WINDOW_INELIGIBLE"],
+      },
+      {
+        evidenceSnapshots,
+        validatedDecision: proposedDecision,
+      },
+    )
+  }
+
+  const shadowRisk = await trace.run("risk.shadow.evaluate", () =>
+    shadowRiskEvaluator.evaluate({
+      decision: proposedDecision,
+      sourceIntent: derivation.intent,
+      captureEligibility: {
+        ...proposalEligibility,
+        sessionDate: proposalEligibility.sessionDate!,
+        tradeIntentWindow: proposalEligibility.tradeIntentWindow!,
+      },
+      getEvaluationEligibility: getEligibility,
+      signal,
+    }),
+  )
+
   return recordReportOutcome(
     {
       outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
@@ -638,6 +697,7 @@ export async function processResearchCycle({
     {
       evidenceSnapshots,
       validatedDecision: proposedDecision,
+      shadowRisk,
     },
   )
 }

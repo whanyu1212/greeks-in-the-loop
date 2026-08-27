@@ -33,6 +33,7 @@ export const RESEARCH_TRACE_OPERATIONS = [
   "research.decision.validate",
   "market.option_quotes.confirm",
   "research.intent.derive",
+  "risk.shadow.evaluate",
   "ledger.cycle.terminalize",
   "research.artifact.project",
 ] as const
@@ -46,6 +47,7 @@ const OPERATION_KINDS: Readonly<Record<ResearchTraceOperation, OpenInferenceSpan
   "research.decision.validate": OpenInferenceSpanKind.GUARDRAIL,
   "market.option_quotes.confirm": OpenInferenceSpanKind.TOOL,
   "research.intent.derive": OpenInferenceSpanKind.CHAIN,
+  "risk.shadow.evaluate": OpenInferenceSpanKind.GUARDRAIL,
   "ledger.cycle.terminalize": OpenInferenceSpanKind.CHAIN,
   "research.artifact.project": OpenInferenceSpanKind.CHAIN,
 }
