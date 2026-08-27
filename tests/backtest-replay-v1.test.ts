@@ -205,6 +205,8 @@ const signalSnapshot = (
       .toISOString()
       .slice(0, 10)),
   completedDailyBars: closes.map((closeMicros, index) => ({
+    feed: "IEX" as const,
+    adjustment: "all" as const,
     sessionDate: new Date(Date.parse("2026-07-08T00:00:00.000Z") + index * 86_400_000)
       .toISOString()
       .slice(0, 10),
@@ -263,6 +265,17 @@ describe("backtest replay v1", () => {
       completedMinuteBars: [
         { ...signal.completedMinuteBars[0]!, feed: "SIP" },
         ...signal.completedMinuteBars.slice(1),
+      ],
+    } as never)).toThrow(/Invalid input/u)
+  })
+
+  it("requires IEX adjusted provenance for exact signal daily bars", () => {
+    const signal = signalSnapshot()
+    expect(() => evaluateBacktestSignalV1({
+      ...signal,
+      completedDailyBars: [
+        ...signal.completedDailyBars.slice(0, -1),
+        { ...signal.completedDailyBars.at(-1)!, adjustment: "raw" },
       ],
     } as never)).toThrow(/Invalid input/u)
   })
@@ -518,6 +531,23 @@ describe("backtest replay v1", () => {
         monitorCycles: [{ ...monitorCycle, minutesToClose: 299 }],
       }],
     })).toThrow(/incorrect minutes to session close/u)
+  })
+
+  it("rejects cycles claiming open market outside retained session hours", () => {
+    expect(() => runReplay(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [{
+        scenarioId: "after-hours-open",
+        fidelity: "HISTORICAL_BAR_PROXY",
+        retainedIntent: intent,
+        monitorCycles: [{
+          ...monitorCycle,
+          decidedAt: "2026-08-28T21:00:00.000Z",
+          minutesToClose: 0,
+        }],
+      }],
+    })).toThrow(/open cycle outside session hours/u)
   })
 
   it("rejects explicit marks above the spread width", () => {

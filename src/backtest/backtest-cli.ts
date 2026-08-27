@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs"
 
+import { pathsReferToSameFile } from "./file-identity.js"
 import { createBacktestDatasetStore } from "./sqlite-dataset-store.js"
 import { runBacktestReplayV1 } from "./replay-v1.js"
 
@@ -20,6 +21,9 @@ const datasetPath = option("--dataset")
 const scenariosPath = option("--scenarios")
 const outputPath = option("--output")
 if (datasetPath === undefined || scenariosPath === undefined) throw new Error(usage)
+if (outputPath !== undefined && pathsReferToSameFile(datasetPath, outputPath)) {
+  throw new Error("Backtest output must not overwrite the replay dataset")
+}
 
 const store = createBacktestDatasetStore({ path: datasetPath, readonly: true })
 try {

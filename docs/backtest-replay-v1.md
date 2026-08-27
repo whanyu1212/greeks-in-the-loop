@@ -76,8 +76,8 @@ candidate approval evaluation. Exact snapshots must be captured forward; the
 Alpaca historical API cannot recreate them.
 All exact candidates share one application-owned eligibility, account, and
 portfolio approval context; only their contract snapshots may differ.
-Every retained exact signal minute bar declares the strategy-required `IEX`
-feed.
+Every retained exact signal bar declares the strategy-required `IEX` feed, and
+daily bars additionally retain `adjustment=all` provenance.
 
 `HISTORICAL_BAR_PROXY` contains a retained `TradeIntentV1`. When monitor cycles
 are omitted, replay derives them from synchronized long/short option minute bars
@@ -109,6 +109,9 @@ the exit remains unpriced.
 Explicit holding-session indices must match the retained market calendar from
 the intent entry session through each monitor cycle, and minutes to close are
 recomputed from that cycle's retained session close.
+Cycles marked open must fall within the retained session's open and close
+instants. CLI report output is rejected when it aliases the SQLite dataset by
+path, symlink, or hard link.
 
 ## Known limitations
 

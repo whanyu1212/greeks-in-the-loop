@@ -37,6 +37,8 @@ const signalSnapshotSchema = z
       .array(
         z
           .object({
+            feed: z.literal("IEX"),
+            adjustment: z.literal("all"),
             sessionDate: z.iso.date(),
             closeMicros: positiveSafeInteger,
           })
@@ -652,6 +654,16 @@ export function runBacktestReplayV1(
         )
       })) {
         throw new Error(`Scenario ${scenario.scenarioId} has incorrect minutes to session close`)
+      }
+      if (monitorCycles.some(({ decidedAt, marketOpen }) => {
+        if (!marketOpen) return false
+        const session = sessions.find(
+          ({ date }) => date === newYorkDate(new Date(decidedAt)),
+        )!
+        return instant(decidedAt) < instant(session.open) ||
+          instant(decidedAt) > instant(session.close)
+      })) {
+        throw new Error(`Scenario ${scenario.scenarioId} has an open cycle outside session hours`)
       }
     }
     if (monitorCycles.some(({ decidedAt, dte }) =>
