@@ -387,6 +387,49 @@ describe("research run evaluation", () => {
     })
   })
 
+  it("rejects sourced snapshot evidence on a validated no-action run", () => {
+    const run = noActionRun()
+    if (
+      run.researchReport === undefined ||
+      run.validatedDecision?.outcome !== "NO_ACTION" ||
+      run.outcome.status !== "VALIDATED_NO_ACTION"
+    ) {
+      throw new Error("Expected a validated no-action fixture")
+    }
+    const decision = {
+      ...run.validatedDecision,
+      evidence: [
+        {
+          claimId: "no-action-snapshot-fact",
+          kind: "SOURCED_FACT" as const,
+          claim: "private-no-action-fact",
+          snapshotRef: "no-action-snapshot",
+        },
+      ],
+    }
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      evidenceSnapshots: [
+        {
+          snapshotRef: "no-action-snapshot",
+          provider: "ALPACA",
+          source: "retained-no-action-source",
+          retrievedAt: "2026-08-26T12:02:00.000Z",
+          freshUntil: "2026-08-26T12:05:00.000Z",
+          temporalClass: "LIVE",
+        },
+      ],
+      researchReport: { ...run.researchReport, result: decision },
+      validatedDecision: decision,
+      outcome: { ...run.outcome, decision },
+    })
+
+    expect(evaluation.dimensions.grounding).toEqual({
+      status: "FAIL",
+      issueCodes: ["NO_ACTION_SOURCED_EVIDENCE"],
+    })
+  })
+
   it("reports decision references to unknown snapshots", () => {
     const run = derivedIntentRun()
     const evaluation = evaluateResearchRunV1({
@@ -443,6 +486,30 @@ describe("research run evaluation", () => {
     expect(evaluation.dimensions.grounding).toEqual({
       status: "FAIL",
       issueCodes: ["QUOTE_SNAPSHOT_PROVENANCE_INVALID"],
+    })
+  })
+
+  it("rejects duplicate retained snapshot references", () => {
+    const run = derivedIntentRun()
+    const canonicalSnapshot = run.evidenceSnapshots[0]
+    if (canonicalSnapshot === undefined) {
+      throw new Error("Expected retained quote snapshot")
+    }
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      evidenceSnapshots: [
+        {
+          ...canonicalSnapshot,
+          provider: "EXA",
+          source: "conflicting-duplicate",
+        },
+        canonicalSnapshot,
+      ],
+    })
+
+    expect(evaluation.dimensions.grounding).toEqual({
+      status: "FAIL",
+      issueCodes: ["DUPLICATE_SNAPSHOT_REFERENCE"],
     })
   })
 

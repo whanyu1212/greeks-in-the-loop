@@ -43,8 +43,10 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "MARKET_REGIME_STALE_AT_INTENT",
   "INTRADAY_BAR_COUNT_MISMATCH",
   "DUPLICATE_CLAIM_ID",
+  "NO_ACTION_SOURCED_EVIDENCE",
   "UNGROUNDED_INFERENCE",
   "UNKNOWN_SNAPSHOT_REFERENCE",
+  "DUPLICATE_SNAPSHOT_REFERENCE",
   "SNAPSHOT_FROM_FUTURE",
   "STALE_SNAPSHOT",
   "QUOTE_SNAPSHOT_PROVENANCE_INVALID",
@@ -347,6 +349,12 @@ export function evaluateResearchRunV1(
   ) {
     groundingIssues.push("DUPLICATE_CLAIM_ID")
   }
+  if (
+    run.outcome.status === "VALIDATED_NO_ACTION" &&
+    sourcedFacts.length > 0
+  ) {
+    groundingIssues.push("NO_ACTION_SOURCED_EVIDENCE")
+  }
   const groundedInferenceCount = inferences.filter(({ basedOn }) =>
     basedOn.every((claimId) => sourcedFactIds.has(claimId)),
   ).length
@@ -365,6 +373,12 @@ export function evaluateResearchRunV1(
   const knownSnapshots = new Set(
     run.evidenceSnapshots.map(({ snapshotRef }) => snapshotRef),
   )
+  if (
+    run.outcome.status === "INTENT_DERIVED" &&
+    knownSnapshots.size !== run.evidenceSnapshots.length
+  ) {
+    groundingIssues.push("DUPLICATE_SNAPSHOT_REFERENCE")
+  }
   if (snapshotReferences.some((snapshotRef) => !knownSnapshots.has(snapshotRef))) {
     groundingIssues.push("UNKNOWN_SNAPSHOT_REFERENCE")
   }
