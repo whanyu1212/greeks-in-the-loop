@@ -89,7 +89,10 @@ when these assumptions change.
 A mark-independent exit without an observed execution mark is reported as
 `EXIT_UNPRICED` with `pnlCents: null`; it is counted separately and never
 silently valued at zero. A nonpositive bar-derived spread mark is a valid zero
-observation and can trigger the stop-loss rule.
+observation and can trigger the stop-loss rule. If synchronized proxy marks stop,
+the first retained five-minute open-market boundary is emitted as an unpriced
+stale-data exit; closed-market time is not counted. All supplied and derived
+marks are bounded by the vertical spread's contractual width.
 
 ## Known limitations
 

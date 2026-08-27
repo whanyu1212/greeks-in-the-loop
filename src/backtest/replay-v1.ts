@@ -170,10 +170,12 @@ const exactScenarioSchema = z
           message: "Exact candidates must share the signal snapshot instant and session",
         })
       }
-      for (let priorIndex = 0; priorIndex < (eligibility.previousSessionDates?.length ?? 0); priorIndex += 1) {
+      const previousSessionDates = eligibility.previousSessionDates ?? []
+      const retainedPreviousSessions = scenario.signal.completedDailyBars
+        .slice(-previousSessionDates.length)
+      for (let priorIndex = 0; priorIndex < previousSessionDates.length; priorIndex += 1) {
         if (
-          scenario.signal.completedDailyBars.at(-(priorIndex + 1))?.sessionDate ===
-          eligibility.previousSessionDates![priorIndex]
+          retainedPreviousSessions[priorIndex]?.sessionDate === previousSessionDates[priorIndex]
         ) continue
         context.addIssue({
           code: "custom",
@@ -438,7 +440,7 @@ export function deriveHistoricalBarProxyCyclesV1(
     .sort((left, right) => instant(left.decidedAt) - instant(right.decidedAt))
 
   let previousCycle: (typeof cycles)[number] | undefined
-  return cycles.map((cycle) => {
+  const observedCycles = cycles.map((cycle) => {
     const session = sessionForTimestamp(sessions, cycle.decidedAt)!
     const previousSession = previousCycle === undefined
       ? undefined
@@ -455,6 +457,30 @@ export function deriveHistoricalBarProxyCyclesV1(
     previousCycle = cycle
     return { ...cycle, staleMinutes }
   })
+  const lastCycle = observedCycles.at(-1)
+  const lastSessionIndex = lastCycle === undefined
+    ? entrySessionIndex
+    : sessions.findIndex(({ date }) =>
+        date === sessionForTimestamp(sessions, lastCycle.decidedAt)?.date)
+  for (let sessionIndex = lastSessionIndex; sessionIndex < sessions.length; sessionIndex += 1) {
+    const session = sessions[sessionIndex]!
+    const unavailableSince = sessionIndex === lastSessionIndex
+      ? lastCycle?.decidedAt ?? intent.evaluatedAt
+      : session.open
+    const staleAt = instant(unavailableSince) + 5 * 60_000
+    if (staleAt > instant(session.close)) continue
+    return [...observedCycles, {
+      decidedAt: new Date(staleAt).toISOString(),
+      marketOpen: true,
+      lateFill: false,
+      dte: daysBetween(session.date, intent.expiration),
+      minutesToClose: Math.floor((instant(session.close) - staleAt) / 60_000),
+      staleMinutes: 5,
+      markHalfCentsPerShare: undefined,
+      holdingSessionIndex: sessionIndex - entrySessionIndex + 1,
+    }]
+  }
+  return observedCycles
 }
 
 type SelectedIntent = Readonly<{
@@ -527,6 +553,11 @@ export function runBacktestReplayV1(
     }
     if (monitorCycles.some(({ decidedAt }) => instant(decidedAt) < instant(selected.intent!.evaluatedAt))) {
       throw new Error(`Scenario ${scenario.scenarioId} has a monitor cycle before intent evaluation`)
+    }
+    if (monitorCycles.some(({ markHalfCentsPerShare }) =>
+      markHalfCentsPerShare !== undefined &&
+      markHalfCentsPerShare > selected.intent!.widthCentsPerShare * 2)) {
+      throw new Error(`Scenario ${scenario.scenarioId} has a mark above the spread width`)
     }
     const triggered = monitorCycles.find((cycle) => exitReason(selected.intent!, cycle))
     const finalCycle = triggered ?? monitorCycles.at(-1)!

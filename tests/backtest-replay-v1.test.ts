@@ -60,7 +60,7 @@ const riskInput = {
         slotStartedAt: "2026-08-27T14:30:00.000Z",
         deadline: "2026-08-27T14:35:00.000Z",
       },
-      previousSessionDates: ["2026-08-26", "2026-08-25"],
+      previousSessionDates: ["2026-08-25", "2026-08-26"],
     },
     account: {
       observedAt: "2026-08-27T14:29:00.000Z",
@@ -342,6 +342,24 @@ describe("backtest replay v1", () => {
     })).toThrow(/monitor cycle before intent evaluation/u)
   })
 
+  it("rejects explicit marks above the spread width", () => {
+    expect(() => runBacktestReplayV1(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [
+        {
+          scenarioId: "impossible-mark",
+          fidelity: "HISTORICAL_BAR_PROXY",
+          retainedIntent: intent,
+          monitorCycles: [{
+            ...monitorCycle,
+            markHalfCentsPerShare: intent.widthCentsPerShare * 2 + 1,
+          }],
+        },
+      ],
+    })).toThrow(/mark above the spread width/u)
+  })
+
   it("compares offset timestamps by instant", () => {
     const report = runBacktestReplayV1(manifest, {
       replayVersion: "1.0.0",
@@ -486,7 +504,7 @@ describe("backtest replay v1", () => {
     ]
     const cycles = deriveHistoricalBarProxyCyclesV1(records, intent)
 
-    expect(cycles.map(({ staleMinutes }) => staleMinutes)).toEqual([1, 10])
+    expect(cycles.slice(0, 2).map(({ staleMinutes }) => staleMinutes)).toEqual([1, 10])
     expect(deriveHistoricalBarProxyCyclesV1(records.slice(0, 1).concat(records.slice(3)), intent)[0])
       .toMatchObject({ staleMinutes: 11 })
 
@@ -506,6 +524,64 @@ describe("backtest replay v1", () => {
     expect(report.results[0]).toMatchObject({
       exitReason: "STALE_DATA",
       exitDecidedAt: "2026-08-27T14:41:00.000Z",
+    })
+  })
+
+  it("preserves a terminal stale interval as an unpriced proxy exit", () => {
+    const timestamp = intent.evaluatedAt
+    const optionBar = (contractSymbol: string, lowMicros: number, highMicros: number) => ({
+      recordType: "OPTION_BAR" as const,
+      contractSymbol,
+      timeframe: "1MINUTE" as const,
+      timestamp,
+      openMicros: lowMicros,
+      highMicros,
+      lowMicros,
+      closeMicros: lowMicros,
+      volume: 10,
+      vwapMicros: lowMicros,
+      tradeCount: 1,
+    })
+    const records = [
+      {
+        recordType: "MARKET_SESSION" as const,
+        date: "2026-08-27",
+        open: "2026-08-27T13:30:00.000Z",
+        close: "2026-08-27T20:00:00.000Z",
+      },
+      optionBar(intent.longContractSymbol, 3_000_000, 3_000_000),
+      optionBar(intent.shortContractSymbol, 1_000_000, 1_000_000),
+    ]
+    const cycles = deriveHistoricalBarProxyCyclesV1(records, intent)
+
+    expect(cycles.at(-1)).toEqual({
+      decidedAt: "2026-08-27T14:36:00.000Z",
+      marketOpen: true,
+      lateFill: false,
+      dte: 15,
+      minutesToClose: 324,
+      staleMinutes: 5,
+      markHalfCentsPerShare: undefined,
+      holdingSessionIndex: 1,
+    })
+    const report = runBacktestReplayV1(
+      manifest,
+      {
+        replayVersion: "1.0.0",
+        execution,
+        scenarios: [{
+          scenarioId: "terminal-stale",
+          fidelity: "HISTORICAL_BAR_PROXY",
+          retainedIntent: intent,
+        }],
+      },
+      records,
+    )
+    expect(report.results[0]).toMatchObject({
+      outcome: "EXIT_UNPRICED",
+      exitReason: "STALE_DATA",
+      exitDecidedAt: "2026-08-27T14:36:00.000Z",
+      pnlCents: null,
     })
   })
 
@@ -568,7 +644,6 @@ describe("backtest replay v1", () => {
       { ...intent, evaluatedAt: `${sessionDates[20]}T14:30:00.000Z` },
     )
 
-    expect(cycles).toHaveLength(1)
     expect(cycles[0]).toMatchObject({
       completedDailyCloseMicros: 100_000_019,
       sma20Micros: 100_000_009.5,
