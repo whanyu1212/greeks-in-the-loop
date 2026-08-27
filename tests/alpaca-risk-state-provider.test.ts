@@ -58,6 +58,11 @@ const snapshots = {
   },
 }
 
+const marketClock = {
+  timestamp: evaluatedAt.toISOString(),
+  is_open: true,
+}
+
 const openingOrder = (overrides: Record<string, unknown> = {}) => ({
   id: "order-1",
   asset_class: "us_option",
@@ -106,6 +111,8 @@ const router = (overrides: Readonly<{
   openOrders?: (call: number, url: URL) => unknown
   history?: unknown | ((call: number, url: URL) => unknown)
   snapshots?: unknown
+  clock?: unknown
+  clockStatus?: number
 }> = {}) => {
   let positionsCall = 0
   let openOrdersCall = 0
@@ -141,6 +148,9 @@ const router = (overrides: Readonly<{
       expect(url.searchParams.get("symbols")).toBe(`${longSymbol},${shortSymbol}`)
       expect(url.searchParams.get("feed")).toBe("indicative")
       return response(overrides.snapshots ?? snapshots)
+    }
+    if (url.pathname === "/v2/clock") {
+      return response(overrides.clock ?? marketClock, overrides.clockStatus ?? 200)
     }
     return response({}, 404)
   })
@@ -206,7 +216,7 @@ describe("Alpaca risk-state provider", () => {
       },
       reconciliationReasonCodes: [],
     })
-    expect(fetchImplementation).toHaveBeenCalledTimes(10)
+    expect(fetchImplementation).toHaveBeenCalledTimes(11)
     for (const [resource, init] of fetchImplementation.mock.calls) {
       expect(String(resource)).not.toContain("test-key")
       expect(String(resource)).not.toContain("test-secret")
@@ -215,6 +225,56 @@ describe("Alpaca risk-state provider", () => {
         "APCA-API-SECRET-KEY": "test-secret",
       })
     }
+  })
+
+  it("verifies a fresh open Alpaca clock after all other broker reads", async () => {
+    const fetchImplementation = router()
+    const result = await provider(fetchImplementation).capture(input)
+    expect(result.success).toBe(true)
+    expect(new URL(String(fetchImplementation.mock.calls.at(-1)?.[0])).pathname)
+      .toBe("/v2/clock")
+  })
+
+  it("fails closed when Alpaca reports the market closed", async () => {
+    await expectFailure(
+      router({ clock: { ...marketClock, is_open: false } }),
+      "MARKET_CLOSED",
+    )
+  })
+
+  it("fails closed on malformed, stale, future, or cross-session clocks", async () => {
+    await expectFailure(
+      router({ clock: { is_open: true } }),
+      "MARKET_CLOCK_RESPONSE_INVALID",
+    )
+    await expectFailure(
+      router({
+        clock: { ...marketClock, timestamp: "2026-08-27T14:29:29.999Z" },
+      }),
+      "MARKET_CLOCK_RESPONSE_INVALID",
+    )
+    await expectFailure(
+      router({
+        clock: {
+          ...marketClock,
+          timestamp: "2026-08-27T14:30:30.000000001Z",
+        },
+      }),
+      "MARKET_CLOCK_RESPONSE_INVALID",
+    )
+    await expectFailure(
+      router({
+        clock: { ...marketClock, timestamp: "2026-08-26T19:59:59.999Z" },
+      }),
+      "MARKET_CLOCK_RESPONSE_INVALID",
+    )
+  })
+
+  it("returns a bounded failure when the Alpaca clock request fails", async () => {
+    await expectFailure(
+      router({ clockStatus: 503 }),
+      "MARKET_CLOCK_REQUEST_FAILED",
+    )
   })
 
   it("sets reconciliation inconsistent when broker state changes during capture", async () => {

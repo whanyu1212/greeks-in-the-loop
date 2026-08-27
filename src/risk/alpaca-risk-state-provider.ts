@@ -161,6 +161,15 @@ const rawSnapshotsResponseSchema = z
   })
   .passthrough()
 
+const rawClockSchema = z
+  .object({
+    timestamp: z.string(),
+    is_open: z.boolean(),
+  })
+  .passthrough()
+
+const MARKET_CLOCK_MAX_AGE_NANOSECONDS = 60_000_000_000n
+
 export const RISK_STATE_CAPTURE_FAILURE_CODES = [
   "CAPTURE_INPUT_INVALID",
   "CAPTURE_TIME_INVALID",
@@ -174,6 +183,9 @@ export const RISK_STATE_CAPTURE_FAILURE_CODES = [
   "ORDER_HISTORY_REQUEST_FAILED",
   "ORDER_HISTORY_RESPONSE_INVALID",
   "ORDER_HISTORY_INCOMPLETE",
+  "MARKET_CLOCK_REQUEST_FAILED",
+  "MARKET_CLOCK_RESPONSE_INVALID",
+  "MARKET_CLOSED",
   "CONTRACT_REQUEST_FAILED",
   "CONTRACT_RESPONSE_INVALID",
   "OPTION_SNAPSHOT_REQUEST_FAILED",
@@ -610,6 +622,14 @@ export function createAlpacaRiskStateProvider(
       "ACCOUNT_RESPONSE_INVALID",
     )
 
+  const getClock = (signal: AbortSignal) =>
+    getJson(
+      new URL("/v2/clock", tradingBaseUrl),
+      signal,
+      "MARKET_CLOCK_REQUEST_FAILED",
+      "MARKET_CLOCK_RESPONSE_INVALID",
+    )
+
   const getContract = (symbol: string, signal: AbortSignal) =>
     getJson(
       new URL(`/v2/options/contracts/${encodeURIComponent(symbol)}`, tradingBaseUrl),
@@ -705,6 +725,7 @@ export function createAlpacaRiskStateProvider(
           historyAfter,
           evaluatedAt,
         )
+        const rawClock = await getClock(input.signal)
         const captureCompletedAt = now()
         if (
           !Number.isFinite(captureCompletedAt.getTime()) ||
@@ -712,6 +733,26 @@ export function createAlpacaRiskStateProvider(
         ) {
           return { success: false, reasons: ["CAPTURE_TIME_INVALID"] }
         }
+
+        const clock = rawClockSchema.safeParse(rawClock)
+        if (!clock.success) {
+          throw new CaptureFailure("MARKET_CLOCK_RESPONSE_INVALID")
+        }
+        const clockTimestampNanoseconds = parseRfc3339Nanoseconds(
+          clock.data.timestamp,
+        )
+        const captureCompletedAtNanoseconds =
+          BigInt(captureCompletedAt.getTime()) * 1_000_000n
+        if (
+          clockTimestampNanoseconds === undefined ||
+          clockTimestampNanoseconds > captureCompletedAtNanoseconds ||
+          captureCompletedAtNanoseconds - clockTimestampNanoseconds >
+            MARKET_CLOCK_MAX_AGE_NANOSECONDS ||
+          newYorkDate(clock.data.timestamp) !== parsedInput.data.sessionDate
+        ) {
+          throw new CaptureFailure("MARKET_CLOCK_RESPONSE_INVALID")
+        }
+        if (!clock.data.is_open) throw new CaptureFailure("MARKET_CLOSED")
 
         const accountRaw = rawAccountSchema.safeParse(rawAccount)
         if (!accountRaw.success) throw new CaptureFailure("ACCOUNT_RESPONSE_INVALID")
@@ -747,8 +788,6 @@ export function createAlpacaRiskStateProvider(
           shortContractRaw.data.symbol !== parsedInput.data.shortContractSymbol
         ) throw new CaptureFailure("CONTRACT_RESPONSE_INVALID")
         const evaluatedAtNanoseconds = BigInt(evaluatedAtDate.getTime()) * 1_000_000n
-        const captureCompletedAtNanoseconds =
-          BigInt(captureCompletedAt.getTime()) * 1_000_000n
         const longQuote = normalizeAlpacaOptionQuote(
           parsedInput.data.longContractSymbol,
           longSnapshot.data.latestQuote,

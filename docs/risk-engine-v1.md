@@ -42,7 +42,8 @@ reusing the same normalized gate design.
 `createAlpacaRiskStateProvider` is the read-only live-state adapter for PR1. It
 exposes only `capture(input)` and performs GET-only Alpaca reads for account,
 positions, open nested orders, same-day nested order history, exact option
-contracts, and exact option snapshots from the indicative feed.
+contracts, exact option snapshots from the indicative feed, and a final market
+clock observation.
 
 The provider preserves conservative observation times for account, contract,
 quote, and reconciliation state. It double-reads positions and open orders
@@ -50,6 +51,9 @@ around the account, contract, snapshot, and history reads, and validates quote
 freshness against the completed capture timeline. If broker observations or
 same-day history change during capture, reconciliation remains typed but is
 marked inconsistent with `BROKER_STATE_CHANGED`.
+After all other broker reads, it verifies that Alpaca still reports the market
+open and that the clock timestamp is fresh, non-future, and on the requested New
+York session date. A closed or invalid clock fails capture before risk approval.
 
 Reconciliation recognizes only a flat account, exactly one supported SPY debit
 spread position, or exactly one supported open multileg day limit order. Unknown
@@ -78,6 +82,7 @@ thresholds.
 | Gate | V1 rule |
 | --- | --- |
 | Entry window | Application eligibility is true and evaluation precedes the retained deadline |
+| Market open | The final Alpaca clock reports open with a non-future timestamp no more than 60 seconds old on the requested New York session date |
 | Market freshness | Quotes and contract observations are not future-dated and are at most 60 seconds old; comparisons retain RFC 3339 nanosecond precision |
 | Snapshot identity | Contract snapshot slot must equal the application trade window slot; the slot and observation time identify one immutable market snapshot |
 | Snapshot order | Intent evaluation must equal the contract snapshot observation time and lie inside that slot; both quote timestamps must be no later than that observation time |
