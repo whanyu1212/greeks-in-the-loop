@@ -258,6 +258,9 @@ const sessionForTimestamp = (
   value: string,
 ) => sessions.find(({ open, close }) => value >= open && value <= close)
 
+const minuteBarCompletedAt = (timestamp: string) =>
+  new Date(Date.parse(timestamp) + 60_000).toISOString()
+
 /** Derives conservative proxy marks from synchronized option minute bars. */
 export function deriveHistoricalBarProxyCyclesV1(
   records: readonly BacktestDatasetRecordV1[],
@@ -300,7 +303,8 @@ export function deriveHistoricalBarProxyCyclesV1(
     )
     .flatMap((longBar) => {
       const shortBar = shortByTimestamp.get(longBar.timestamp)
-      const session = sessionForTimestamp(sessions, longBar.timestamp)
+      const decidedAt = minuteBarCompletedAt(longBar.timestamp)
+      const session = sessionForTimestamp(sessions, decidedAt)
       if (shortBar === undefined || session === undefined) return []
       const sessionIndex = sessions.indexOf(session)
       if (sessionIndex < entrySessionIndex) return []
@@ -312,20 +316,23 @@ export function deriveHistoricalBarProxyCyclesV1(
           return bars?.length === 1 ? bars : []
         })
       const spreadMicros = longBar.lowMicros - shortBar.highMicros
-      const markHalfCentsPerShare = Math.max(0, Math.floor(spreadMicros / 5_000))
+      const markHalfCentsPerShare = Math.min(
+        intent.widthCentsPerShare * 2,
+        Math.max(0, Math.floor(spreadMicros / 5_000)),
+      )
       const completedDailyCloseMicros = trendBars.at(-1)?.closeMicros
       const sma20Micros =
         trendBars.length === 20
           ? mean(trendBars.map(({ closeMicros }) => closeMicros))
           : undefined
       return [{
-        decidedAt: longBar.timestamp,
+        decidedAt,
         marketOpen: true,
         lateFill: false,
         dte: daysBetween(session.date, intent.expiration),
         minutesToClose: Math.max(
           0,
-          Math.floor((Date.parse(session.close) - Date.parse(longBar.timestamp)) / 60_000),
+          Math.floor((Date.parse(session.close) - Date.parse(decidedAt)) / 60_000),
         ),
         staleMinutes: 0,
         markHalfCentsPerShare,
@@ -424,6 +431,9 @@ export function runBacktestReplayV1(
         : scenario.monitorCycles!
     if (monitorCycles.length === 0) {
       throw new Error(`Scenario ${scenario.scenarioId} has no synchronized replay marks`)
+    }
+    if (monitorCycles.some(({ decidedAt }) => decidedAt < selected.intent!.evaluatedAt)) {
+      throw new Error(`Scenario ${scenario.scenarioId} has a monitor cycle before intent evaluation`)
     }
     const triggered = monitorCycles.find((cycle) => exitReason(selected.intent!, cycle))
     const finalCycle = triggered ?? monitorCycles.at(-1)!
