@@ -68,6 +68,9 @@ describe("parseAgentOptions", () => {
         ".state/live.sqlite",
       ),
     ).toThrow("cannot use the configured production ledger")
+    expect(() =>
+      parseAgentOptions(["--ledger", DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH]),
+    ).toThrow("reserved anytime dry-run ledger")
     expect(() => parseAgentOptions(["--ledger"])).toThrow(
       "--ledger requires a value",
     )

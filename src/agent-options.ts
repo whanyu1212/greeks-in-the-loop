@@ -127,6 +127,14 @@ export function parseAgentOptions(
       "--research-anytime cannot use the configured production ledger",
     )
   }
+  if (
+    !researchAnytime &&
+    ledgerTargetsMatch(ledgerPath, DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH)
+  ) {
+    throw new Error(
+      "Standard agent runs cannot use the reserved anytime dry-run ledger",
+    )
+  }
 
   return { once, researchAnytime, ledgerPath }
 }
