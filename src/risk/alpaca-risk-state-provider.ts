@@ -357,6 +357,9 @@ const normalizeOrder = (
   return parsed.success ? parsed.data : undefined
 }
 
+const rawOrderTimestamp = (order: z.infer<typeof rawOrderSchema>) =>
+  order.submitted_at ?? order.created_at ?? undefined
+
 const normalizeAccount = (
   raw: z.infer<typeof rawAccountSchema>,
   observedAt: string,
@@ -530,7 +533,7 @@ export function createAlpacaRiskStateProvider(
     const responseFailure = kind === "OPEN"
       ? "OPEN_ORDERS_RESPONSE_INVALID"
       : "ORDER_HISTORY_RESPONSE_INVALID"
-    const retained: NormalizedBrokerOrderV1[] = []
+    const retained = new Map<string, NormalizedBrokerOrderV1>()
     let afterTimestamp = historyAfter
     for (let page = 0; page < MAX_ORDER_PAGES; page += 1) {
       const url = new URL("/v2/orders", tradingBaseUrl)
@@ -547,16 +550,42 @@ export function createAlpacaRiskStateProvider(
       if (normalized.some((order) => order === undefined)) {
         throw new CaptureFailure(responseFailure)
       }
-      retained.push(...normalized as NormalizedBrokerOrderV1[])
-      if (parsed.data.length < ORDER_PAGE_SIZE) return retained
-      const nextTimestamp = parsed.data.at(-1)?.submitted_at ??
-        parsed.data.at(-1)?.created_at ?? undefined
-      const nextTimestampNanoseconds = nextTimestamp === undefined
+      for (const order of normalized as NormalizedBrokerOrderV1[]) {
+        const previous = retained.get(order.id)
+        if (previous !== undefined && JSON.stringify(previous) !== JSON.stringify(order)) {
+          throw new CaptureFailure(responseFailure)
+        }
+        retained.set(order.id, order)
+      }
+      if (parsed.data.length < ORDER_PAGE_SIZE) return [...retained.values()]
+      const boundaryTimestamp = parsed.data.at(-1) === undefined
         ? undefined
-        : parseRfc3339Nanoseconds(nextTimestamp)
+        : rawOrderTimestamp(parsed.data.at(-1)!)
+      const boundaryNanoseconds = boundaryTimestamp === undefined
+        ? undefined
+        : parseRfc3339Nanoseconds(boundaryTimestamp)
       const afterTimestampNanoseconds = afterTimestamp === undefined
         ? undefined
         : parseRfc3339Nanoseconds(afterTimestamp)
+      let nextTimestamp: string | undefined
+      if (boundaryNanoseconds !== undefined) {
+        for (let index = parsed.data.length - 2; index >= 0; index -= 1) {
+          const candidate = rawOrderTimestamp(parsed.data[index]!)
+          const candidateNanoseconds = candidate === undefined
+            ? undefined
+            : parseRfc3339Nanoseconds(candidate)
+          if (
+            candidateNanoseconds !== undefined &&
+            candidateNanoseconds < boundaryNanoseconds
+          ) {
+            nextTimestamp = candidate
+            break
+          }
+        }
+      }
+      const nextTimestampNanoseconds = nextTimestamp === undefined
+        ? undefined
+        : parseRfc3339Nanoseconds(nextTimestamp)
       if (
         nextTimestampNanoseconds === undefined ||
         (afterTimestampNanoseconds !== undefined &&

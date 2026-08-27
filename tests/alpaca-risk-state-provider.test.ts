@@ -352,7 +352,7 @@ describe("Alpaca risk-state provider", () => {
       time_in_force: "day",
       qty: "1",
     }))
-    const lastTimestamp = firstPage.at(-1)?.submitted_at
+    const overlapTimestamp = firstPage.at(-2)?.submitted_at
     const historyUrls: URL[] = []
     const result = await provider(router({
       history: (call: number, url: URL) => {
@@ -362,11 +362,61 @@ describe("Alpaca risk-state provider", () => {
     })).capture(input)
     expect(result.success).toBe(true)
     expect(historyUrls).toHaveLength(2)
-    expect(historyUrls[1]?.searchParams.get("after")).toBe(lastTimestamp)
+    expect(historyUrls[1]?.searchParams.get("after")).toBe(overlapTimestamp)
     expect(historyUrls[1]?.searchParams.get("until")).toBe(
       evaluatedAt.toISOString(),
     )
     expect(historyUrls[1]?.searchParams.has("after_order_id")).toBe(false)
+  })
+
+  it("overlaps and deduplicates tied order-pagination boundaries", async () => {
+    const firstPage = Array.from({ length: 499 }, (_, index) => ({
+      id: `earlier-equity-order-${index}`,
+      asset_class: "us_equity",
+      submitted_at: new Date(
+        Date.parse("2026-08-27T13:00:00.000Z") + index,
+      ).toISOString(),
+      status: "filled",
+      order_class: "simple",
+      type: "market",
+      time_in_force: "day",
+      qty: "1",
+    }))
+    const boundaryOrder = {
+      ...firstPage.at(-1)!,
+      id: "boundary-order",
+      submitted_at: "2026-08-27T13:00:01.000123456Z",
+    }
+    firstPage.push(boundaryOrder)
+    const secondTiedOrder = { ...boundaryOrder, id: "second-tied-order" }
+    const historyUrls: URL[] = []
+    const result = await provider(router({
+      history: (call: number, url: URL) => {
+        historyUrls.push(new URL(url))
+        return call === 1 ? firstPage : [boundaryOrder, secondTiedOrder]
+      },
+    })).capture(input)
+    expect(result.success).toBe(true)
+    expect(historyUrls[1]?.searchParams.get("after")).toBe(
+      firstPage.at(-2)?.submitted_at,
+    )
+  })
+
+  it("fails closed when a full tied page has no safe pagination cursor", async () => {
+    const tiedPage = Array.from({ length: 500 }, (_, index) => ({
+      id: `tied-equity-order-${index}`,
+      asset_class: "us_equity",
+      submitted_at: "2026-08-27T13:00:00.000123456Z",
+      status: "filled",
+      order_class: "simple",
+      type: "market",
+      time_in_force: "day",
+      qty: "1",
+    }))
+    await expectFailure(
+      router({ history: tiedPage }),
+      "ORDER_HISTORY_INCOMPLETE",
+    )
   })
 
   it("captures terminal orders submitted during the capture interval", async () => {
