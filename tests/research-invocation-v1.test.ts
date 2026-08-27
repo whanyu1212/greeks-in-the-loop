@@ -107,4 +107,44 @@ describe("ResearchInvocationV1", () => {
 
     expect(result.success).toBe(false)
   })
+
+  it.each([
+    ["https://provider.example/path", "model", "providerId"],
+    ["provider@example.com", "model", "providerId"],
+    ["provider\nmetadata", "model", "providerId"],
+    ["provider", "https://model.example/path", "modelId"],
+  ] as const)(
+    "replaces unsafe durable provider and model labels",
+    (providerId, modelId, replacedField) => {
+      const invocation = createResearchInvocationV1(
+        {
+          agentName: "research",
+          cycleMode: "STANDARD",
+          promptVersion: "1.3.0",
+          skillName: "spy-debit-spread-research",
+          skillVersion: "1.1.0",
+          strategyVersion: "1.1.0",
+          decisionContractVersion: "1.0.0",
+          reportVersion: "2.0.0",
+        },
+        {
+          providerId,
+          modelId,
+          responseError: false,
+          toolCallCount: 0,
+          toolErrorCount: 0,
+          toolIncompleteCount: 0,
+          toolCalls: [],
+          omittedToolCallCount: 0,
+        },
+      )
+
+      expect(invocation[replacedField]).toBe("unknown")
+      expect(JSON.stringify(invocation)).not.toContain("example")
+      expect(researchInvocationV1Schema.safeParse({
+        ...invocation,
+        [replacedField]: replacedField === "providerId" ? providerId : modelId,
+      }).success).toBe(false)
+    },
+  )
 })

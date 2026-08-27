@@ -8,6 +8,11 @@ export const MAX_RESEARCH_INVOCATION_TOOL_CALLS = 32
 
 const boundedText = z.string().trim().min(1).max(128)
 const safeCount = z.number().int().nonnegative().safe()
+const labelIsSafe = (value: string) =>
+  /^[A-Za-z0-9._:/-]+$/u.test(value) &&
+  !value.includes("://") &&
+  !/[?#@]/u.test(value)
+const safeLabel = boundedText.refine(labelIsSafe)
 
 export const researchInvocationV1Schema = z
   .object({
@@ -24,8 +29,8 @@ export const researchInvocationV1Schema = z
     strategyVersion: boundedText,
     decisionContractVersion: boundedText,
     reportVersion: boundedText,
-    providerId: boundedText,
-    modelId: boundedText,
+    providerId: safeLabel,
+    modelId: safeLabel,
     responseError: z.boolean(),
     tokens: z
       .object({
@@ -95,6 +100,10 @@ export type ResearchInvocationV1 = Readonly<
 >
 
 const bounded = (value: string) => value.trim().slice(0, 128) || "unknown"
+const durableLabel = (value: string) => {
+  const normalized = bounded(value)
+  return labelIsSafe(normalized) ? normalized : "unknown"
+}
 const toolDuration = (startedAt?: number, endedAt?: number) => {
   if (startedAt === undefined || endedAt === undefined) return undefined
   const durationMs = endedAt - startedAt
@@ -118,8 +127,8 @@ export function createResearchInvocationV1(
     strategyVersion: bounded(versions.strategyVersion),
     decisionContractVersion: bounded(versions.decisionContractVersion),
     reportVersion: bounded(versions.reportVersion),
-    providerId: bounded(invocation.providerId),
-    modelId: bounded(invocation.modelId),
+    providerId: durableLabel(invocation.providerId),
+    modelId: durableLabel(invocation.modelId),
     responseError: invocation.responseError,
     tokens: {
       ...(invocation.inputTokenCount === undefined
