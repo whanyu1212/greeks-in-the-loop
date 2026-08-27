@@ -1,6 +1,9 @@
 import { z } from "zod"
 
-import type { OpenCodeInvocationSummary } from "../observability/opencode-telemetry-summary.js"
+import {
+  configuredToolName,
+  type OpenCodeInvocationSummary,
+} from "../observability/opencode-telemetry-summary.js"
 import type { ResearchTraceVersions } from "../observability/research-telemetry.js"
 
 export const RESEARCH_INVOCATION_VERSION = "1.0.0" as const
@@ -13,6 +16,9 @@ const labelIsSafe = (value: string) =>
   !value.includes("://") &&
   !/[?#@]/u.test(value)
 const safeLabel = boundedText.refine(labelIsSafe)
+const safeToolName = boundedText.refine(
+  (value) => configuredToolName(value) === value,
+)
 
 export const researchInvocationV1Schema = z
   .object({
@@ -51,7 +57,7 @@ export const researchInvocationV1Schema = z
           .array(
             z
               .object({
-                name: boundedText,
+                name: safeToolName,
                 outcome: z.enum(["completed", "error", "incomplete"]),
                 durationMs: safeCount.optional(),
               })
@@ -157,7 +163,7 @@ export function createResearchInvocationV1(
         .map((tool) => {
           const durationMs = toolDuration(tool.startedAt, tool.endedAt)
           return {
-            name: bounded(tool.name),
+            name: configuredToolName(bounded(tool.name)),
             outcome: tool.outcome,
             ...(durationMs === undefined ? {} : { durationMs }),
           }

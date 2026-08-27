@@ -147,4 +147,46 @@ describe("ResearchInvocationV1", () => {
       }).success).toBe(false)
     },
   )
+
+  it.each([
+    "https://tools.example/read",
+    "tool@example.com",
+    "read\nmetadata",
+    "unconfigured_tool",
+  ])("replaces unapproved durable tool names", (name) => {
+    const invocation = createResearchInvocationV1(
+      {
+        agentName: "research",
+        cycleMode: "STANDARD",
+        promptVersion: "1.3.0",
+        skillName: "spy-debit-spread-research",
+        skillVersion: "1.1.0",
+        strategyVersion: "1.1.0",
+        decisionContractVersion: "1.0.0",
+        reportVersion: "2.0.0",
+      },
+      {
+        providerId: "provider",
+        modelId: "model",
+        responseError: false,
+        toolCallCount: 1,
+        toolErrorCount: 0,
+        toolIncompleteCount: 0,
+        toolCalls: [{ name, outcome: "completed" }],
+        omittedToolCallCount: 0,
+      },
+    )
+
+    expect(invocation.tools.calls[0]?.name).toBe("other")
+    expect(JSON.stringify(invocation)).not.toContain(name)
+    expect(
+      researchInvocationV1Schema.safeParse({
+        ...invocation,
+        tools: {
+          ...invocation.tools,
+          calls: [{ name, outcome: "completed" }],
+        },
+      }).success,
+    ).toBe(false)
+  })
 })
