@@ -589,6 +589,75 @@ describe("research run evaluation", () => {
     )
   })
 
+  it.each(["NON_POSITIVE_NET_DEBIT", "MARKET_WINDOW_INELIGIBLE"] as const)(
+    "reapplies proposal freshness checks to post-quote %s rejections",
+    (reason) => {
+      const run = derivedIntentRun()
+      if (run.researchReport === undefined) {
+        throw new Error("Expected retained research report")
+      }
+      const evaluation = evaluateResearchRunV1({
+        ...run,
+        researchReport: {
+          ...run.researchReport,
+          analysis: {
+            ...run.researchReport.analysis,
+            accountChecks: {
+              ...run.researchReport.analysis.accountChecks,
+              observedAt: "2026-08-26T13:58:00.000Z",
+            },
+          },
+        },
+        ...(reason === "MARKET_WINDOW_INELIGIBLE"
+          ? { validatedDecision: undefined }
+          : {}),
+        outcome: {
+          outcomeVersion: "1.0.0",
+          status: "INTENT_DERIVATION_REJECTED",
+          reasons: [reason],
+        },
+      } as ResearchRunV1)
+
+      expect(evaluation.dimensions.temporalIntegrity.issueCodes).toContain(
+        "ACCOUNT_CHECKS_STALE_AT_INTENT",
+      )
+    },
+  )
+
+  it("validates the snapshot shape retained by decision rejections", () => {
+    const run = derivedIntentRun()
+    const { validatedDecision: _validatedDecision, ...base } = run
+    const rejectedOutcome = {
+      outcomeVersion: "1.0.0" as const,
+      status: "DECISION_REJECTED" as const,
+      issues: [{ code: "CONTEXT_INVALID", path: ["analysis"] }],
+    }
+    const unrelatedSnapshot = evaluateResearchRunV1({
+      ...base,
+      evidenceSnapshots: base.evidenceSnapshots.map((snapshot) => ({
+        ...snapshot,
+        provider: "FMP" as const,
+        source: "unrelated-context",
+      })),
+      outcome: rejectedOutcome,
+    })
+    const duplicateSnapshots = evaluateResearchRunV1({
+      ...base,
+      evidenceSnapshots: [
+        ...base.evidenceSnapshots,
+        ...base.evidenceSnapshots,
+      ],
+      outcome: rejectedOutcome,
+    })
+
+    expect(unrelatedSnapshot.dimensions.grounding.issueCodes).toContain(
+      "QUOTE_SNAPSHOT_PROVENANCE_INVALID",
+    )
+    expect(duplicateSnapshots.dimensions.grounding.issueCodes).toContain(
+      "UNEXPECTED_SNAPSHOT_REFERENCE",
+    )
+  })
+
   it("returns contract failure instead of throwing for malformed retained results", () => {
     const runs = [
       {

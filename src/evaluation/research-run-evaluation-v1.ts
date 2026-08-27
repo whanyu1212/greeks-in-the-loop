@@ -383,11 +383,26 @@ export function evaluateResearchRunV1(
       temporalIssues.push("INTENT_EVALUATION_OUTSIDE_CYCLE")
     }
   }
-  if (
-    run.outcome.status === "INTENT_DERIVED" &&
-    parsedReport?.success === true
-  ) {
-    const intentEvaluatedAt = Date.parse(run.outcome.intent.evaluatedAt)
+  const postQuoteRejectionEvaluatedAt =
+    run.outcome.status === "INTENT_DERIVATION_REJECTED" &&
+    run.evidenceSnapshots.length === 1 &&
+    run.evidenceSnapshots[0] !== undefined &&
+    isCanonicalProposalQuoteSnapshot(run.evidenceSnapshots[0]) &&
+    run.outcome.reasons.length > 0 &&
+    (run.outcome.reasons.every((reason) =>
+      INTENT_DERIVATION_REJECTION_REASONS.has(reason),
+    ) ||
+      run.outcome.reasons.every(
+        (reason) => reason === "MARKET_WINDOW_INELIGIBLE",
+      ))
+      ? run.evidenceSnapshots[0].retrievedAt
+      : undefined
+  const proposalEvaluatedAt =
+    run.outcome.status === "INTENT_DERIVED"
+      ? run.outcome.intent.evaluatedAt
+      : postQuoteRejectionEvaluatedAt
+  if (proposalEvaluatedAt !== undefined && parsedReport?.success === true) {
+    const evaluatedAt = Date.parse(proposalEvaluatedAt)
     const reportAsOf = Date.parse(parsedReport.data.analysis.asOf)
     const accountObservedAt = Date.parse(
       parsedReport.data.analysis.accountChecks.observedAt,
@@ -395,14 +410,14 @@ export function evaluateResearchRunV1(
     const marketObservedAt = Date.parse(
       parsedReport.data.analysis.marketRegime.observedAt,
     )
-    if (reportAsOf > intentEvaluatedAt) {
+    if (reportAsOf > evaluatedAt) {
       temporalIssues.push("REPORT_AS_OF_AFTER_INTENT")
     }
-    const accountAge = intentEvaluatedAt - accountObservedAt
+    const accountAge = evaluatedAt - accountObservedAt
     if (accountAge < 0 || accountAge > 5 * 60 * 1_000) {
       temporalIssues.push("ACCOUNT_CHECKS_STALE_AT_INTENT")
     }
-    const marketAge = intentEvaluatedAt - marketObservedAt
+    const marketAge = evaluatedAt - marketObservedAt
     if (marketAge < 0 || marketAge > 60_000) {
       temporalIssues.push("MARKET_REGIME_STALE_AT_INTENT")
     }
@@ -517,6 +532,18 @@ export function evaluateResearchRunV1(
     )
   ) {
     groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
+  }
+  if (run.outcome.status === "DECISION_REJECTED") {
+    if (run.evidenceSnapshots.length > 1) {
+      groundingIssues.push("UNEXPECTED_SNAPSHOT_REFERENCE")
+    }
+    if (
+      run.evidenceSnapshots.some(
+        (snapshot) => !isCanonicalProposalQuoteSnapshot(snapshot),
+      )
+    ) {
+      groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
+    }
   }
   if (run.outcome.status === "INTENT_DERIVED") {
     const intentEvaluatedAt = Date.parse(run.outcome.intent.evaluatedAt)
@@ -651,7 +678,11 @@ export function evaluateResearchRunV1(
       candidateIssues.push("CANDIDATE_DTE_MISMATCH")
     }
   }
-  if (run.outcome.status === "INTENT_DERIVED" && diagnostics !== undefined) {
+  if (
+    (run.outcome.status === "INTENT_DERIVED" ||
+      postQuoteRejectionEvaluatedAt !== undefined) &&
+    diagnostics !== undefined
+  ) {
     const sessionDate = run.initialEligibility?.sessionDate
     const previousSessionDates = run.initialEligibility?.previousSessionDates
     const priorSessionHistoryIsValid =
