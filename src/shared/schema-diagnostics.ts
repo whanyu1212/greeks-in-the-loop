@@ -31,14 +31,20 @@ export const schemaViolationCategory = (
   issue: ZodIssue,
   input?: unknown,
 ): SchemaViolationCategory => {
+  const issueValue = issue.path.reduce<unknown>((value, part) => {
+    if (typeof value !== "object" || value === null) return value
+    return Reflect.get(value, part)
+  }, input)
+  if (
+    issueValue === undefined &&
+    ["invalid_type", "invalid_value", "invalid_union"].includes(issue.code)
+  ) {
+    return "REQUIRED_FIELD_MISSING"
+  }
+
   switch (issue.code) {
     case "invalid_type":
-      return issue.path.reduce<unknown>((value, part) => {
-        if (typeof value !== "object" || value === null) return value
-        return Reflect.get(value, part)
-      }, input) === undefined
-        ? "REQUIRED_FIELD_MISSING"
-        : "TYPE_MISMATCH"
+      return "TYPE_MISMATCH"
     case "invalid_value":
     case "invalid_union":
       return "VALUE_NOT_ALLOWED"

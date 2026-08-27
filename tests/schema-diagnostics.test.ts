@@ -15,6 +15,8 @@ const firstIssue = (schema: z.ZodType, input: unknown) => {
 describe("safe schema diagnostics", () => {
   it.each([
     [z.object({ value: z.string() }), {}, "REQUIRED_FIELD_MISSING"],
+    [z.object({ value: z.enum(["A", "B"]) }), {}, "REQUIRED_FIELD_MISSING"],
+    [z.object({ value: z.literal("A") }), {}, "REQUIRED_FIELD_MISSING"],
     [z.string(), 1, "TYPE_MISMATCH"],
     [z.enum(["A", "B"]), "C", "VALUE_NOT_ALLOWED"],
     [z.email(), "not-an-email", "FORMAT_INVALID"],
