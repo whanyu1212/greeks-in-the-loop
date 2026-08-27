@@ -109,6 +109,7 @@ const makeInput = (intent = makeIntent()) => ({
       competitionBreakerActive: false,
     },
     contracts: {
+      snapshotRef: intent.quoteSnapshotRef,
       observedAt: "2026-08-27T14:29:45.000Z",
       legs: [
         {
@@ -213,6 +214,13 @@ describe("evaluateTradeIntentRiskV1", () => {
       input.context.contracts.observedAt = "2026-08-27T14:28:59.999Z"
     }, "MARKET_DATA_STALE")
     expectRejection((input) => {
+      input.context.contracts.snapshotRef =
+        "another-snapshot" as typeof input.context.contracts.snapshotRef
+    }, "SNAPSHOT_INTEGRITY_INVALID")
+    expectRejection((input) => {
+      input.context.contracts.observedAt = "2026-08-27T14:29:29.999Z"
+    }, "SNAPSHOT_INTEGRITY_INVALID")
+    expectRejection((input) => {
       input.context.account.observedAt = "2026-08-27T14:24:59.999Z"
     }, "ACCOUNT_STATE_STALE")
     expectRejection((input) => {
@@ -280,6 +288,27 @@ describe("evaluateTradeIntentRiskV1", () => {
     expectRejection((input) => {
       input.context.contracts.legs[0]!.openInterestDate = "2026-08-24"
     }, "LIQUIDITY_INELIGIBLE")
+
+    const oldestFirstLookback = makeInput()
+    oldestFirstLookback.context.eligibility.previousSessionDates = [
+      "2026-08-20",
+      "2026-08-21",
+      "2026-08-25",
+      "2026-08-26",
+    ]
+    oldestFirstLookback.context.contracts.legs[0]!.openInterestDate =
+      "2026-08-26"
+    oldestFirstLookback.context.contracts.legs[1]!.openInterestDate =
+      "2026-08-26"
+    expect(evaluateTradeIntentRiskV1(oldestFirstLookback).outcome).toBe(
+      "APPROVED",
+    )
+
+    oldestFirstLookback.context.contracts.legs[0]!.openInterestDate =
+      "2026-08-20"
+    expect(rejectionReasons(oldestFirstLookback)).toContain(
+      "LIQUIDITY_INELIGIBLE",
+    )
 
     expect(
       rejectionReasons(makeInput(makeIntent({ longAskCents: 321 }))),

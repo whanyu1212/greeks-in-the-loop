@@ -10,6 +10,7 @@ export const RISK_REJECTION_CODES = [
   "RISK_INPUT_INVALID",
   "MARKET_WINDOW_INELIGIBLE",
   "MARKET_DATA_STALE",
+  "SNAPSHOT_INTEGRITY_INVALID",
   "ACCOUNT_STATE_STALE",
   "RECONCILIATION_STATE_STALE",
   "CONTRACT_IDENTITY_MISMATCH",
@@ -104,6 +105,7 @@ const reconciledPortfolioV1Schema = z
 
 const contractSnapshotV1Schema = z
   .object({
+    snapshotRef: z.string().min(1).max(128),
     observedAt: timestamp,
     legs: z.array(riskContractLegV1Schema).length(2),
   })
@@ -243,6 +245,15 @@ export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
   ) {
     reject("MARKET_DATA_STALE")
   }
+  if (
+    contracts.snapshotRef !== intent.quoteSnapshotRef ||
+    Date.parse(intent.longQuote.providerTimestamp) >
+      Date.parse(contracts.observedAt) ||
+    Date.parse(intent.shortQuote.providerTimestamp) >
+      Date.parse(contracts.observedAt)
+  ) {
+    reject("SNAPSHOT_INTEGRITY_INVALID")
+  }
 
   if (
     ageIsInvalid(
@@ -295,7 +306,7 @@ export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
 
     const permittedOpenInterestDates = new Set([
       eligibility.sessionDate,
-      ...(eligibility.previousSessionDates?.slice(0, 2) ?? []),
+      ...(eligibility.previousSessionDates?.slice(-2) ?? []),
     ])
     if (
       contracts.legs.some(

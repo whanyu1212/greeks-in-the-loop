@@ -22,8 +22,9 @@ construct, submit, replace, or cancel an order.
 - application-verified account status, multileg approval, buying power, and
   equity values;
 - reconciled position, pending-entry, same-day-entry, and breaker state; and
-- application-verified contract identity, status, Greeks, volume, and open
-  interest for the exact long and short legs.
+- one application-verified contract snapshot reference, observation time, and
+  contract identity, status, Greeks, volume, and open interest for the exact
+  long and short legs.
 
 The context requires the literal provenance `APPLICATION_VERIFIED`. Agent
 reports, model output, web evidence, and previously retained research context
@@ -45,7 +46,8 @@ thresholds.
 | Gate | V1 rule |
 | --- | --- |
 | Entry window | Application eligibility is true and evaluation precedes the retained deadline |
-| Market freshness | Quotes and contract observations are not future-dated and are at most 60 seconds old |
+| Market freshness | Quotes and contract observations are not future-dated and are at most 60 seconds old; both quote timestamps must be no later than the bound contract snapshot observation time |
+| Snapshot binding | The contract snapshot reference must equal the intent quote snapshot reference |
 | State freshness | Account and reconciliation observations are not future-dated and are at most five minutes old |
 | Contract identity | One exact matching long leg and short leg |
 | Contract status | Active, tradable, American-style, multiplier 100 |
