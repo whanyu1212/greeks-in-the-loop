@@ -78,6 +78,7 @@ All exact candidates share one application-owned eligibility, account, and
 portfolio approval context; only their contract snapshots may differ.
 Every retained exact signal bar declares the strategy-required `IEX` feed, and
 daily bars additionally retain `adjustment=all` provenance.
+All 50 exact daily dates must match the retained market calendar.
 
 `HISTORICAL_BAR_PROXY` contains a retained `TradeIntentV1`. When monitor cycles
 are omitted, replay derives them from synchronized long/short option minute bars
@@ -113,6 +114,8 @@ Cycles marked open must fall within the retained session's open and close
 instants. CLI report output is rejected when it aliases the SQLite dataset by
 path, symlink, or hard link, and the same protection applies to the scenario
 input JSON.
+Explicit trend fields are accepted only when they match the prior 20 retained
+daily bars, and late-fill protection remains latched once observed.
 
 ## Known limitations
 

@@ -150,19 +150,37 @@ const proxyManifest = {
   },
 } as const
 
-const replayCalendar = [
-  {
+const precedingSessionDates = (() => {
+  const dates: string[] = []
+  let timestamp = Date.parse("2026-08-27T00:00:00.000Z")
+  while (dates.length < 50) {
+    timestamp -= 86_400_000
+    const day = new Date(timestamp).getUTCDay()
+    if (day !== 0 && day !== 6) dates.push(new Date(timestamp).toISOString().slice(0, 10))
+  }
+  return dates.reverse()
+})()
+
+const replaySessionDates = [...precedingSessionDates, "2026-08-27", "2026-08-28"]
+const replayCalendar: readonly BacktestDatasetRecordV1[] = [
+  ...replaySessionDates.map((date) => ({
     recordType: "MARKET_SESSION" as const,
-    date: "2026-08-27",
-    open: "2026-08-27T13:30:00.000Z",
-    close: "2026-08-27T20:00:00.000Z",
-  },
-  {
-    recordType: "MARKET_SESSION" as const,
-    date: "2026-08-28",
-    open: "2026-08-28T13:30:00.000Z",
-    close: "2026-08-28T20:00:00.000Z",
-  },
+    date,
+    open: `${date}T13:30:00.000Z`,
+    close: `${date}T20:00:00.000Z`,
+  })),
+  ...replaySessionDates.slice(0, -1).map((date) => ({
+    recordType: "UNDERLYING_BAR" as const,
+    symbol: "SPY" as const,
+    timeframe: "1DAY" as const,
+    timestamp: `${date}T04:00:00.000Z`,
+    openMicros: date === "2026-08-27" ? 60_000_000 : date === "2026-08-26" ? 59_000_000 : 58_000_000,
+    highMicros: date === "2026-08-27" ? 60_000_000 : date === "2026-08-26" ? 59_000_000 : 58_000_000,
+    lowMicros: date === "2026-08-27" ? 60_000_000 : date === "2026-08-26" ? 59_000_000 : 58_000_000,
+    closeMicros: date === "2026-08-27" ? 60_000_000 : date === "2026-08-26" ? 59_000_000 : 58_000_000,
+    volume: 10,
+    vwapMicros: date === "2026-08-27" ? 60_000_000 : date === "2026-08-26" ? 59_000_000 : 58_000_000,
+  })),
 ]
 
 const runReplay = (
@@ -180,7 +198,7 @@ const monitorCycle = {
   staleMinutes: 0,
   markHalfCentsPerShare: 700,
   completedDailyCloseMicros: 60_000_000,
-  sma20Micros: 59_000_000,
+  sma20Micros: 58_150_000,
   holdingSessionIndex: 2,
 } as const
 
@@ -200,16 +218,11 @@ const signalSnapshot = (
 ) => ({
   sessionDate: "2026-08-27",
   observedAt: intent.evaluatedAt,
-  precedingSessionDates: closes.map((_, index) =>
-    new Date(Date.parse("2026-07-08T00:00:00.000Z") + index * 86_400_000)
-      .toISOString()
-      .slice(0, 10)),
+  precedingSessionDates,
   completedDailyBars: closes.map((closeMicros, index) => ({
     feed: "IEX" as const,
     adjustment: "all" as const,
-    sessionDate: new Date(Date.parse("2026-07-08T00:00:00.000Z") + index * 86_400_000)
-      .toISOString()
-      .slice(0, 10),
+    sessionDate: precedingSessionDates[index]!,
     closeMicros,
   })),
   completedMinuteBars: Array.from({ length: 60 }, (_, index) => ({
@@ -278,6 +291,28 @@ describe("backtest replay v1", () => {
         { ...signal.completedDailyBars.at(-1)!, adjustment: "raw" },
       ],
     } as never)).toThrow(/Invalid input/u)
+  })
+
+  it("matches all exact daily dates to the retained market calendar", () => {
+    const signal = signalSnapshot()
+    expect(() => runReplay(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [{
+        scenarioId: "invalid-exact-calendar",
+        fidelity: "EXACT_SNAPSHOT",
+        signal: {
+          ...signal,
+          precedingSessionDates: ["2026-01-01", ...signal.precedingSessionDates.slice(1)],
+          completedDailyBars: [
+            { ...signal.completedDailyBars[0]!, sessionDate: "2026-01-01" },
+            ...signal.completedDailyBars.slice(1),
+          ],
+        },
+        candidates: [riskInput],
+        monitorCycles: [monitorCycle],
+      }],
+    })).toThrow(/exact daily bars do not match the replay calendar/u)
   })
 
   it("rejects stale or future exact underlying quotes", () => {
@@ -476,6 +511,28 @@ describe("backtest replay v1", () => {
     })).toThrow(/Monitor cycle timestamps must be strictly increasing/u)
   })
 
+  it("keeps late-fill protection latched across monitor cycles", () => {
+    expect(() => runReplay(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [{
+        scenarioId: "unlatched-late-fill",
+        fidelity: "HISTORICAL_BAR_PROXY",
+        retainedIntent: intent,
+        monitorCycles: [
+          {
+            ...monitorCycle,
+            decidedAt: "2026-08-28T12:00:00.000Z",
+            marketOpen: false,
+            lateFill: true,
+            minutesToClose: 480,
+          },
+          monitorCycle,
+        ],
+      }],
+    })).toThrow(/Late-fill protection must remain latched/u)
+  })
+
   it("rejects monitor cycles that predate intent evaluation", () => {
     expect(() => runReplay(manifest, {
       replayVersion: "1.0.0",
@@ -550,6 +607,22 @@ describe("backtest replay v1", () => {
     })).toThrow(/open cycle outside session hours/u)
   })
 
+  it("validates explicit trend evidence against retained daily bars", () => {
+    expect(() => runReplay(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [{
+        scenarioId: "invalid-trend-evidence",
+        fidelity: "HISTORICAL_BAR_PROXY",
+        retainedIntent: intent,
+        monitorCycles: [{
+          ...monitorCycle,
+          sma20Micros: monitorCycle.sma20Micros + 1,
+        }],
+      }],
+    })).toThrow(/invalid trend evidence/u)
+  })
+
   it("rejects explicit marks above the spread width", () => {
     expect(() => runReplay(manifest, {
       replayVersion: "1.0.0",
@@ -585,6 +658,8 @@ describe("backtest replay v1", () => {
               minutesToClose: 329,
               markHalfCentsPerShare: 400,
               holdingSessionIndex: 1,
+              completedDailyCloseMicros: 59_000_000,
+              sma20Micros: 58_050_000,
             },
             {
               ...monitorCycle,
@@ -592,6 +667,8 @@ describe("backtest replay v1", () => {
               dte: 15,
               minutesToClose: 328,
               holdingSessionIndex: 1,
+              completedDailyCloseMicros: 59_000_000,
+              sma20Micros: 58_050_000,
             },
           ],
         },

@@ -156,6 +156,17 @@ const monitorCyclesSchema = z
   .min(1)
   .max(10_000)
   .superRefine((cycles, context) => {
+    let lateFillLatched = false
+    for (let index = 0; index < cycles.length; index += 1) {
+      if (lateFillLatched && !cycles[index]!.lateFill) {
+        context.addIssue({
+          code: "custom",
+          path: [index, "lateFill"],
+          message: "Late-fill protection must remain latched across monitor cycles",
+        })
+      }
+      lateFillLatched ||= cycles[index]!.lateFill
+    }
     for (let index = 1; index < cycles.length; index += 1) {
       if (instant(cycles[index]!.decidedAt) > instant(cycles[index - 1]!.decidedAt)) continue
       context.addIssue({
@@ -581,7 +592,33 @@ export function runBacktestReplayV1(
   const manifest = backtestDatasetManifestV1Schema.parse(manifestInput)
   if (!manifest.complete) throw new Error("Backtest dataset must be complete")
   const replay = backtestReplayInputV1Schema.parse(replayInput)
+  const sessions = records
+    .filter((record): record is MarketSessionRecordV1 => record.recordType === "MARKET_SESSION")
+    .sort((left, right) => instant(left.open) - instant(right.open))
+  const dailyBarsBySessionDate = new Map<string, UnderlyingBarRecordV1[]>()
+  for (const record of records) {
+    if (record.recordType !== "UNDERLYING_BAR" || record.timeframe !== "1DAY") continue
+    const date = newYorkDate(new Date(record.timestamp))
+    const retained = dailyBarsBySessionDate.get(date) ?? []
+    retained.push(record)
+    dailyBarsBySessionDate.set(date, retained)
+  }
   const scenarioResults = replay.scenarios.map((scenario) => {
+    if (scenario.fidelity === "EXACT_SNAPSHOT") {
+      const signalSessionIndex = sessions.findIndex(
+        ({ date }) => date === scenario.signal.sessionDate,
+      )
+      const expectedDates = sessions
+        .slice(0, signalSessionIndex)
+        .slice(-50)
+        .map(({ date }) => date)
+      if (
+        signalSessionIndex < 0 ||
+        canonicalJson(expectedDates) !== canonicalJson(scenario.signal.precedingSessionDates)
+      ) {
+        throw new Error(`Scenario ${scenario.scenarioId} exact daily bars do not match the replay calendar`)
+      }
+    }
     const selected = selectIntent(scenario)
     if (selected.intent === undefined) {
       return {
@@ -615,7 +652,7 @@ export function runBacktestReplayV1(
         throw new Error(`Scenario ${scenario.scenarioId} entry session is outside the dataset interval`)
       }
     }
-    const monitorCycles =
+    const monitorCycles: readonly z.infer<typeof monitorCycleSchema>[] =
       scenario.fidelity === "HISTORICAL_BAR_PROXY" && scenario.monitorCycles === undefined
         ? deriveHistoricalBarProxyCyclesV1(records, selected.intent)
         : scenario.monitorCycles!
@@ -626,9 +663,6 @@ export function runBacktestReplayV1(
       throw new Error(`Scenario ${scenario.scenarioId} has a monitor cycle before intent evaluation`)
     }
     if (scenario.monitorCycles !== undefined) {
-      const sessions = records
-        .filter((record): record is MarketSessionRecordV1 => record.recordType === "MARKET_SESSION")
-        .sort((left, right) => instant(left.open) - instant(right.open))
       const entrySessionIndex = sessions.findIndex(({ open, close }) =>
         instant(selected.intent!.evaluatedAt) >= instant(open) &&
         instant(selected.intent!.evaluatedAt) <= instant(close))
@@ -664,6 +698,27 @@ export function runBacktestReplayV1(
           instant(decidedAt) > instant(session.close)
       })) {
         throw new Error(`Scenario ${scenario.scenarioId} has an open cycle outside session hours`)
+      }
+      if (monitorCycles.some((cycle) => {
+        const hasClose = cycle.completedDailyCloseMicros !== undefined
+        const hasSma = cycle.sma20Micros !== undefined
+        if (!hasClose && !hasSma) return false
+        if (!hasClose || !hasSma) return true
+        const cycleSessionIndex = sessions.findIndex(
+          ({ date }) => date === newYorkDate(new Date(cycle.decidedAt)),
+        )
+        const trendBars = sessions
+          .slice(0, cycleSessionIndex)
+          .slice(-20)
+          .flatMap(({ date }) => {
+            const bars = dailyBarsBySessionDate.get(date)
+            return bars?.length === 1 ? bars : []
+          })
+        return trendBars.length !== 20 ||
+          cycle.completedDailyCloseMicros !== trendBars.at(-1)!.closeMicros ||
+          cycle.sma20Micros !== mean(trendBars.map(({ closeMicros }) => closeMicros))
+      })) {
+        throw new Error(`Scenario ${scenario.scenarioId} has invalid trend evidence`)
       }
     }
     if (monitorCycles.some(({ decidedAt, dte }) =>
