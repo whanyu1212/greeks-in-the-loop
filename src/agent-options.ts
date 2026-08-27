@@ -1,5 +1,10 @@
-import { statSync } from "node:fs"
-import { resolve } from "node:path"
+import {
+  lstatSync,
+  readlinkSync,
+  realpathSync,
+  statSync,
+} from "node:fs"
+import { basename, dirname, isAbsolute, resolve } from "node:path"
 
 export const DEFAULT_RESEARCH_LEDGER_PATH =
   ".state/research-ledger.sqlite" as const
@@ -12,18 +17,63 @@ export type AgentOptions = Readonly<{
   ledgerPath: string
 }>
 
-const ledgerTargetsMatch = (firstPath: string, secondPath: string) => {
-  if (resolve(firstPath) === resolve(secondPath)) return true
+const isMissingPathError = (error: unknown) => {
+  const code = (error as NodeJS.ErrnoException).code
+  return code === "ENOENT" || code === "ENOTDIR"
+}
+
+const canonicalLedgerTargetPath = (
+  ledgerPath: string,
+  seenPaths = new Set<string>(),
+): string => {
+  const absolutePath = resolve(ledgerPath)
+  if (seenPaths.has(absolutePath)) return absolutePath
+  seenPaths.add(absolutePath)
 
   try {
-    const first = statSync(firstPath)
-    const second = statSync(secondPath)
-    return first.dev === second.dev && first.ino === second.ino
+    return realpathSync.native(absolutePath)
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code === "ENOENT" || code === "ENOTDIR") return false
+    if (!isMissingPathError(error)) throw error
+  }
+
+  try {
+    if (lstatSync(absolutePath).isSymbolicLink()) {
+      const linkTarget = readlinkSync(absolutePath)
+      return canonicalLedgerTargetPath(
+        isAbsolute(linkTarget)
+          ? linkTarget
+          : resolve(dirname(absolutePath), linkTarget),
+        seenPaths,
+      )
+    }
+  } catch (error) {
+    if (!isMissingPathError(error)) throw error
+  }
+
+  return resolve(
+    canonicalLedgerTargetPath(dirname(absolutePath), seenPaths),
+    basename(absolutePath),
+  )
+}
+
+const ledgerFileIdentity = (ledgerPath: string) => {
+  try {
+    const stats = statSync(ledgerPath)
+    return `${stats.dev}:${stats.ino}`
+  } catch (error) {
+    if (isMissingPathError(error)) return undefined
     throw error
   }
+}
+
+const ledgerTargetsMatch = (firstPath: string, secondPath: string) => {
+  const firstCanonicalPath = canonicalLedgerTargetPath(firstPath)
+  const secondCanonicalPath = canonicalLedgerTargetPath(secondPath)
+  if (firstCanonicalPath === secondCanonicalPath) return true
+
+  const firstIdentity = ledgerFileIdentity(firstPath)
+  const secondIdentity = ledgerFileIdentity(secondPath)
+  return firstIdentity !== undefined && firstIdentity === secondIdentity
 }
 
 /** Parses the worker CLI and checks existing ledger targets for aliasing. */

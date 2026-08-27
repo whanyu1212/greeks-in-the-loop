@@ -1,4 +1,11 @@
-import { linkSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -92,4 +99,46 @@ describe("parseAgentOptions", () => {
       }
     },
   )
+
+  it("rejects a missing ledger behind a symlinked parent directory", () => {
+    const directory = mkdtempSync(join(tmpdir(), "agent-options-test-"))
+    try {
+      const realDirectory = join(directory, "real")
+      const aliasDirectory = join(directory, "alias")
+      mkdirSync(realDirectory)
+      symlinkSync(realDirectory, aliasDirectory, "dir")
+
+      expect(() =>
+        parseAgentOptions(
+          [
+            "--once",
+            "--research-anytime",
+            "--ledger",
+            join(aliasDirectory, "ledger.sqlite"),
+          ],
+          join(realDirectory, "ledger.sqlite"),
+        ),
+      ).toThrow("cannot use the configured production ledger")
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it("rejects a dangling symbolic-link alias of the production ledger", () => {
+    const directory = mkdtempSync(join(tmpdir(), "agent-options-test-"))
+    try {
+      const productionLedger = join(directory, "production.sqlite")
+      const aliasLedger = join(directory, "dry-run.sqlite")
+      symlinkSync(productionLedger, aliasLedger)
+
+      expect(() =>
+        parseAgentOptions(
+          ["--once", "--research-anytime", "--ledger", aliasLedger],
+          productionLedger,
+        ),
+      ).toThrow("cannot use the configured production ledger")
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
 })
