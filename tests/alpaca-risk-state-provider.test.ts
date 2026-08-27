@@ -419,6 +419,14 @@ describe("Alpaca risk-state provider", () => {
     )
   })
 
+  it("rejects duplicate order IDs within one broker response page", async () => {
+    const duplicate = openingOrder({ id: "duplicate-order" })
+    await expectFailure(
+      router({ history: [duplicate, duplicate] }),
+      "ORDER_HISTORY_RESPONSE_INVALID",
+    )
+  })
+
   it("captures terminal orders submitted during the capture interval", async () => {
     const requestStartedAt = new Date("2026-08-27T14:30:30.000Z")
     const captureFinishedAt = new Date("2026-08-27T14:30:31.000Z")

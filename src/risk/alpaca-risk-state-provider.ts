@@ -550,7 +550,11 @@ export function createAlpacaRiskStateProvider(
       if (normalized.some((order) => order === undefined)) {
         throw new CaptureFailure(responseFailure)
       }
-      for (const order of normalized as NormalizedBrokerOrderV1[]) {
+      const pageOrders = normalized as NormalizedBrokerOrderV1[]
+      if (new Set(pageOrders.map(({ id }) => id)).size !== pageOrders.length) {
+        throw new CaptureFailure(responseFailure)
+      }
+      for (const order of pageOrders) {
         const previous = retained.get(order.id)
         if (previous !== undefined && JSON.stringify(previous) !== JSON.stringify(order)) {
           throw new CaptureFailure(responseFailure)
