@@ -9,6 +9,7 @@ import {
   riskEvaluationInputV1Schema,
   type RiskEvaluationV1,
 } from "../risk/risk-evaluation-v1.js"
+import { newYorkDate } from "../scheduling/research-eligibility.js"
 import { canonicalJsonSha256 } from "../shared/canonical-json.js"
 import {
   backtestDatasetManifestV1Schema,
@@ -57,7 +58,7 @@ const monitorCycleSchema = z
     dte: z.number().int().min(0).max(365),
     minutesToClose: z.number().int().min(0).max(1_440),
     staleMinutes: z.number().int().min(0).max(1_440),
-    markHalfCentsPerShare: positiveSafeInteger.optional(),
+    markHalfCentsPerShare: nonnegativeSafeInteger.optional(),
     completedDailyCloseMicros: positiveSafeInteger.optional(),
     sma20Micros: positiveSafeInteger.optional(),
     holdingSessionIndex: z.number().int().min(1).max(365),
@@ -257,6 +258,13 @@ export function deriveHistoricalBarProxyCyclesV1(
         record.recordType === "UNDERLYING_BAR" && record.timeframe === "1DAY",
     )
     .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+  const dailyBarsBySessionDate = new Map<string, UnderlyingBarRecordV1[]>()
+  for (const bar of dailyBars) {
+    const sessionDate = newYorkDate(new Date(bar.timestamp))
+    const retained = dailyBarsBySessionDate.get(sessionDate) ?? []
+    retained.push(bar)
+    dailyBarsBySessionDate.set(sessionDate, retained)
+  }
   const minuteBars = records.filter(
     (record): record is OptionBarRecordV1 =>
       record.recordType === "OPTION_BAR" && record.timeframe === "1MINUTE",
@@ -282,12 +290,15 @@ export function deriveHistoricalBarProxyCyclesV1(
       if (shortBar === undefined || session === undefined) return []
       const sessionIndex = sessions.indexOf(session)
       if (sessionIndex < entrySessionIndex) return []
-      const trendBars = dailyBars
-        .filter(({ timestamp: value }) => value < session.open)
+      const trendBars = sessions
+        .slice(0, sessionIndex)
         .slice(-20)
+        .flatMap(({ date }) => {
+          const bars = dailyBarsBySessionDate.get(date)
+          return bars?.length === 1 ? bars : []
+        })
       const spreadMicros = longBar.lowMicros - shortBar.highMicros
-      const markHalfCentsPerShare = Math.floor(spreadMicros / 5_000)
-      if (markHalfCentsPerShare <= 0) return []
+      const markHalfCentsPerShare = Math.max(0, Math.floor(spreadMicros / 5_000))
       const completedDailyCloseMicros = trendBars.at(-1)?.closeMicros
       const sma20Micros =
         trendBars.length === 20
@@ -384,11 +395,25 @@ export function runBacktestReplayV1(
     const triggered = monitorCycles.find((cycle) => exitReason(selected.intent!, cycle))
     const finalCycle = triggered ?? monitorCycles.at(-1)!
     const reason = triggered === undefined ? "END_OF_REPLAY" : exitReason(selected.intent, triggered)!
-    const rawExitMark = finalCycle.markHalfCentsPerShare ?? 0
     const entryMark = selected.intent.entryLimitCentsPerShare * 2
+    if (finalCycle.markHalfCentsPerShare === undefined) {
+      return {
+        scenarioId: scenario.scenarioId,
+        fidelity: scenario.fidelity,
+        signalDirection: selected.signalDirection,
+        riskStatus: selected.riskStatus,
+        riskEvaluations: selected.riskEvaluations,
+        outcome: "EXIT_UNPRICED" as const,
+        intent: selected.intent,
+        exitReason: reason,
+        exitDecidedAt: finalCycle.decidedAt,
+        entryFillHalfCentsPerShare: entryMark,
+        pnlCents: null,
+      }
+    }
     const exitMark = Math.max(
       0,
-      rawExitMark - replay.execution.exitSlippageHalfCentsPerShare,
+      finalCycle.markHalfCentsPerShare - replay.execution.exitSlippageHalfCentsPerShare,
     )
     const pnlCents =
       (exitMark - entryMark) * 50 -
@@ -409,13 +434,17 @@ export function runBacktestReplayV1(
       pnlCents,
     }
   })
+  const entered = scenarioResults.filter((result) => result.outcome !== "NO_ENTRY")
   const closed = scenarioResults.filter((result) => result.outcome === "CLOSED")
-  const totalPnlCents = scenarioResults.reduce((total, result) => total + result.pnlCents, 0)
+  const totalPnlCents = scenarioResults.reduce(
+    (total, result) => total + (result.pnlCents ?? 0),
+    0,
+  )
   let equityCents = INITIAL_EQUITY_CENTS
   let peakEquityCents = equityCents
   let maxDrawdownCents = 0
   for (const result of scenarioResults) {
-    equityCents += result.pnlCents
+    equityCents += result.pnlCents ?? 0
     peakEquityCents = Math.max(peakEquityCents, equityCents)
     maxDrawdownCents = Math.max(maxDrawdownCents, peakEquityCents - equityCents)
   }
@@ -434,7 +463,11 @@ export function runBacktestReplayV1(
     datasetId: manifest.definition.datasetId,
     datasetChecksum: manifest.checksum,
     scenarioCount: scenarioResults.length,
-    tradeCount: closed.length,
+    tradeCount: entered.length,
+    pricedTradeCount: closed.length,
+    unpricedExitCount: scenarioResults.filter(
+      ({ outcome }) => outcome === "EXIT_UNPRICED",
+    ).length,
     exactScenarioCount: scenarioResults.filter(({ fidelity }) => fidelity === "EXACT_SNAPSHOT").length,
     proxyScenarioCount: scenarioResults.filter(({ fidelity }) => fidelity === "HISTORICAL_BAR_PROXY").length,
     initialEquityCents: INITIAL_EQUITY_CENTS,

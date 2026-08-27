@@ -36,7 +36,7 @@ export const backtestDatasetDefinitionV1Schema = z
           ),
         "Dataset option symbols must be unique and sorted",
       ),
-    createdAt: timestamp,
+    requestStartedAt: timestamp,
   })
   .strict()
   .refine(({ fromDate, toDate }) => fromDate <= toDate, {

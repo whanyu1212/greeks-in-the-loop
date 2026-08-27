@@ -99,7 +99,7 @@ const definition: BacktestDatasetDefinitionV1 = {
   toDate: options.toDate,
   optionHistoricalFeed: "ALPACA_ACCOUNT_DEFAULT",
   optionSymbols: options.optionSymbols,
-  createdAt: new Date().toISOString(),
+  requestStartedAt: new Date().toISOString(),
 }
 const store = createBacktestDatasetStore({
   path: options.datasetPath,

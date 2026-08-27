@@ -93,9 +93,12 @@ export async function ingestAlpacaBacktestDataset({
   const definition: BacktestDatasetDefinitionV1 = store.definition
   const { fromDate, toDate, optionSymbols } = definition
   const historicalEnd = alpacaHistoricalEndTimestamp(toDate)
-  const today = now().toISOString().slice(0, 10)
-  if (toDate >= today) {
-    throw new Error("Backtest acquisition requires fully completed historical dates")
+  const finalizationDelayMs =
+    Date.parse(definition.requestStartedAt) - Date.parse(historicalEnd)
+  if (finalizationDelayMs < 15 * 60_000) {
+    throw new Error(
+      "Backtest acquisition requires the historical end to precede request start by 15 minutes",
+    )
   }
   const signalHistoryFrom = addDays(fromDate, -SIGNAL_WARMUP_CALENDAR_DAYS)
   const expirationFrom = addDays(fromDate, 14)

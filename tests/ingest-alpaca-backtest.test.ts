@@ -31,7 +31,7 @@ describe("Alpaca backtest ingestion", () => {
           "SPY240621C00530000",
           "SPY240621C00535000",
         ],
-        createdAt: "2024-06-05T10:00:00.000Z",
+        requestStartedAt: "2024-06-05T10:00:00.000Z",
       },
     })
     const dailyTokens: (string | undefined)[] = []
@@ -95,7 +95,7 @@ describe("Alpaca backtest ingestion", () => {
         toDate: "2024-06-05",
         optionHistoricalFeed: "ALPACA_ACCOUNT_DEFAULT",
         optionSymbols: [],
-        createdAt: "2024-06-05T10:00:00.000Z",
+        requestStartedAt: "2024-06-05T00:10:00.000Z",
       },
     })
     const unused = vi.fn().mockResolvedValue([])
@@ -110,7 +110,7 @@ describe("Alpaca backtest ingestion", () => {
         signal: new AbortController().signal,
         now: () => new Date("2024-06-05T10:00:00.000Z"),
       }),
-    ).rejects.toThrow("fully completed historical dates")
+    ).rejects.toThrow("precede request start by 15 minutes")
     expect(unused).not.toHaveBeenCalled()
     store.close()
   })

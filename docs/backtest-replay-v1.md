@@ -17,7 +17,8 @@ pnpm backtest:data -- \
 The command reads `ALPACA_API_KEY` and `ALPACA_SECRET_KEY`, downloads directly
 from Alpaca, and writes `.state/backtests/<dataset-id>.sqlite`. The final date
 must be earlier than the acquisition date so partial sessions cannot enter a
-dataset. Calendar and SPY daily bars include a fixed 90-calendar-day warm-up for
+dataset. The immutable `requestStartedAt` must be at least 15 minutes after the
+exact historical request end. Calendar and SPY daily bars include a fixed 90-calendar-day warm-up for
 SMA50. The requested interval is used for minute bars and option data.
 
 Each normalized request is an immutable partition. Page tokens and normalized
@@ -80,6 +81,11 @@ conservative cost so a limit fill is never reported above its limit. Exit fill
 is the selected mark less configured slippage. Four per-contract commissions are charged for
 the two-leg entry and two-leg exit. `BACKTEST_EXECUTION_MODEL_VERSION` changes
 when these assumptions change.
+
+A mark-independent exit without an observed execution mark is reported as
+`EXIT_UNPRICED` with `pnlCents: null`; it is counted separately and never
+silently valued at zero. A nonpositive bar-derived spread mark is a valid zero
+observation and can trigger the stop-loss rule.
 
 ## Known limitations
 

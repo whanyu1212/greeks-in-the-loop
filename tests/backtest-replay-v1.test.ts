@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  deriveHistoricalBarProxyCyclesV1,
   evaluateBacktestSignalV1,
   runBacktestReplayV1,
 } from "../src/backtest/replay-v1.js"
@@ -132,7 +133,7 @@ const manifest = {
     toDate: "2026-08-28",
     optionHistoricalFeed: "ALPACA_ACCOUNT_DEFAULT",
     optionSymbols: [],
-    createdAt: "2026-08-27T10:00:00.000Z",
+    requestStartedAt: "2026-08-27T10:00:00.000Z",
   },
   partitions: [],
   complete: true,
@@ -251,7 +252,7 @@ describe("backtest replay v1", () => {
       timestamp: "2026-08-27T15:00:00.000Z",
       openMicros: 5_000_000,
       highMicros: 5_100_000,
-      lowMicros: 5_000_000,
+      lowMicros: 1_000_000,
       closeMicros: 5_050_000,
       volume: 10,
       vwapMicros: 5_025_000,
@@ -298,8 +299,113 @@ describe("backtest replay v1", () => {
     expect(report.results[0]).toMatchObject({
       fidelity: "HISTORICAL_BAR_PROXY",
       riskStatus: "NOT_EVALUABLE",
-      exitReason: "PROFIT_TARGET",
-      exitFillHalfCentsPerShare: 698,
+      exitReason: "STOP_LOSS",
+      exitFillHalfCentsPerShare: 0,
+    })
+  })
+
+  it("uses only preceding-session daily bars for proxy trend snapshots", () => {
+    const sessionDates = Array.from({ length: 21 }, (_, index) =>
+      new Date(Date.parse("2026-08-07T00:00:00.000Z") + index * 86_400_000)
+        .toISOString()
+        .slice(0, 10),
+    )
+    const sessions = sessionDates.map((date) => ({
+      recordType: "MARKET_SESSION" as const,
+      date,
+      open: `${date}T13:30:00.000Z`,
+      close: `${date}T20:00:00.000Z`,
+    }))
+    const dailyBars = sessionDates.map((date, index) => ({
+      recordType: "UNDERLYING_BAR" as const,
+      symbol: "SPY" as const,
+      timeframe: "1DAY" as const,
+      timestamp: `${date}T04:00:00.000Z`,
+      openMicros: 100_000_000,
+      highMicros: 100_000_000,
+      lowMicros: 100_000_000,
+      closeMicros: index === 20 ? 1 : 100_000_000 + index,
+      volume: 10,
+      vwapMicros: 100_000_000,
+    }))
+    const timestamp = `${sessionDates[20]}T15:00:00.000Z`
+    const cycles = deriveHistoricalBarProxyCyclesV1(
+      [
+        ...sessions,
+        ...dailyBars,
+        {
+          recordType: "OPTION_BAR",
+          contractSymbol: intent.longContractSymbol,
+          timeframe: "1MINUTE",
+          timestamp,
+          openMicros: 5_000_000,
+          highMicros: 5_000_000,
+          lowMicros: 5_000_000,
+          closeMicros: 5_000_000,
+          volume: 10,
+          vwapMicros: 5_000_000,
+          tradeCount: 1,
+        },
+        {
+          recordType: "OPTION_BAR",
+          contractSymbol: intent.shortContractSymbol,
+          timeframe: "1MINUTE",
+          timestamp,
+          openMicros: 1_000_000,
+          highMicros: 1_000_000,
+          lowMicros: 1_000_000,
+          closeMicros: 1_000_000,
+          volume: 10,
+          vwapMicros: 1_000_000,
+          tradeCount: 1,
+        },
+      ],
+      { ...intent, evaluatedAt: `${sessionDates[20]}T14:30:00.000Z` },
+    )
+
+    expect(cycles).toHaveLength(1)
+    expect(cycles[0]).toMatchObject({
+      completedDailyCloseMicros: 100_000_019,
+      sma20Micros: 100_000_009.5,
+    })
+  })
+
+  it("reports mark-independent exits without a fabricated P&L", () => {
+    const report = runBacktestReplayV1(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [
+        {
+          scenarioId: "unpriced-exit",
+          fidelity: "HISTORICAL_BAR_PROXY",
+          retainedIntent: intent,
+          monitorCycles: [
+            {
+              decidedAt: "2026-08-28T15:00:00.000Z",
+              marketOpen: true,
+              lateFill: true,
+              dte: 14,
+              minutesToClose: 300,
+              staleMinutes: 0,
+              holdingSessionIndex: 2,
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(report).toMatchObject({
+      tradeCount: 1,
+      pricedTradeCount: 0,
+      unpricedExitCount: 1,
+      totalPnlCents: 0,
+      results: [
+        {
+          outcome: "EXIT_UNPRICED",
+          exitReason: "LATE_FILL",
+          pnlCents: null,
+        },
+      ],
     })
   })
 })

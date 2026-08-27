@@ -21,7 +21,7 @@ const definition: BacktestDatasetDefinitionV1 = {
   toDate: "2024-02-02",
   optionHistoricalFeed: "ALPACA_ACCOUNT_DEFAULT",
   optionSymbols: [],
-  createdAt: "2026-08-27T10:00:00.000Z",
+  requestStartedAt: "2026-08-27T10:00:00.000Z",
 }
 
 const createPath = () => {
