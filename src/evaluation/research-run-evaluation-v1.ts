@@ -17,7 +17,10 @@ import {
   ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS,
   ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE,
 } from "../market-data/alpaca-option-quotes.js"
-import { PROPOSAL_QUOTE_SNAPSHOT_REF } from "../research/research-cycle.js"
+import {
+  PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
+  PROPOSAL_QUOTE_SNAPSHOT_REF,
+} from "../research/research-cycle.js"
 import {
   newYorkDate,
   newYorkLocalTime,
@@ -274,6 +277,15 @@ export function evaluateResearchRunV1(
     run.outcome.reasons.every((reason) =>
       QUOTE_CONFIRMATION_REJECTION_REASONS.has(reason),
     )
+  const proposalPreflightValidation =
+    run.outcome.status === "DECISION_REJECTED" &&
+    run.evidenceSnapshots.length === 0 &&
+    reportResult?.outcome === "PROPOSE_TRADE"
+      ? validateResearchDecisionV1(
+          reportResult,
+          PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
+        )
+      : undefined
   const canonicalRetainedQuoteSnapshot =
     run.evidenceSnapshots.length === 1 &&
     run.evidenceSnapshots[0] !== undefined &&
@@ -409,6 +421,11 @@ export function evaluateResearchRunV1(
           !isDeepStrictEqual(
             run.outcome.issues,
             noActionValidation.issues,
+          )) ||
+        (proposalPreflightValidation?.success === false &&
+          !isDeepStrictEqual(
+            run.outcome.issues,
+            proposalPreflightValidation.issues,
           )) ||
         (run.evidenceSnapshots.length > 0 &&
           (parsedReport?.success !== true ||

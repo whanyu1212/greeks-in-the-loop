@@ -41,7 +41,7 @@ const MAX_PROPOSAL_ACCOUNT_CHECK_AGE_MS = 5 * 60_000
 // This context validates proposal evidence topology and restricts every sourced
 // fact to the application-owned quote alias before any provider request. Real
 // quote timestamps replace it for the authoritative post-fetch validation.
-const PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT = {
+export const PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT = {
   evaluatedAt: "2000-01-01T00:00:00.000Z",
   snapshots: {
     [PROPOSAL_QUOTE_SNAPSHOT_REF]: {
