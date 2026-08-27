@@ -88,7 +88,8 @@ conservative cost so a limit fill is never reported above its limit. Exit fill
 is the selected open-market mark less configured slippage. Explicit monitor DTE
 must equal the calendar-day distance from its New York date to contract
 expiration, and implicit proxy runs require both retained legs in the dataset
-manifest. Four per-contract commissions are charged for
+manifest and an entry session inside its acquired date interval. Four
+per-contract commissions are charged for
 the two-leg entry and two-leg exit. `BACKTEST_EXECUTION_MODEL_VERSION` changes
 when these assumptions change.
 

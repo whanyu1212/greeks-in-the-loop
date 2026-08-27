@@ -555,6 +555,38 @@ describe("backtest replay v1", () => {
     )).toThrow(/option symbols absent from the dataset/u)
   })
 
+  it("rejects implicit proxy entry sessions outside the acquired interval", () => {
+    expect(() => runBacktestReplayV1(
+      proxyManifest,
+      {
+        replayVersion: "1.0.0",
+        execution,
+        scenarios: [{
+          scenarioId: "warmup-entry",
+          fidelity: "HISTORICAL_BAR_PROXY",
+          retainedIntent: {
+            ...intent,
+            evaluatedAt: "2026-08-26T14:30:00.000Z",
+            longQuote: {
+              ...intent.longQuote,
+              providerTimestamp: "2026-08-26T14:29:30.000Z",
+            },
+            shortQuote: {
+              ...intent.shortQuote,
+              providerTimestamp: "2026-08-26T14:29:30.000Z",
+            },
+          },
+        }],
+      },
+      [{
+        recordType: "MARKET_SESSION",
+        date: "2026-08-26",
+        open: "2026-08-26T13:30:00.000Z",
+        close: "2026-08-26T20:00:00.000Z",
+      }],
+    )).toThrow(/entry session is outside the dataset interval/u)
+  })
+
   it("clamps derived proxy marks to the spread width", () => {
     const timestamp = intent.evaluatedAt
     const bar = (contractSymbol: string, lowMicros: number, highMicros: number) => ({

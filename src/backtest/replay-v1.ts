@@ -573,13 +573,26 @@ export function runBacktestReplayV1(
         pnlCents: 0,
       }
     }
-    if (
-      scenario.fidelity === "HISTORICAL_BAR_PROXY" &&
-      scenario.monitorCycles === undefined &&
-      (!manifest.definition.optionSymbols.includes(selected.intent.longContractSymbol) ||
-        !manifest.definition.optionSymbols.includes(selected.intent.shortContractSymbol))
-    ) {
-      throw new Error(`Scenario ${scenario.scenarioId} references option symbols absent from the dataset`)
+    if (scenario.fidelity === "HISTORICAL_BAR_PROXY" && scenario.monitorCycles === undefined) {
+      if (
+        !manifest.definition.optionSymbols.includes(selected.intent.longContractSymbol) ||
+        !manifest.definition.optionSymbols.includes(selected.intent.shortContractSymbol)
+      ) {
+        throw new Error(`Scenario ${scenario.scenarioId} references option symbols absent from the dataset`)
+      }
+      const entrySession = records.find(
+        (record): record is MarketSessionRecordV1 =>
+          record.recordType === "MARKET_SESSION" &&
+          instant(selected.intent!.evaluatedAt) >= instant(record.open) &&
+          instant(selected.intent!.evaluatedAt) <= instant(record.close),
+      )
+      if (
+        entrySession === undefined ||
+        entrySession.date < manifest.definition.fromDate ||
+        entrySession.date > manifest.definition.toDate
+      ) {
+        throw new Error(`Scenario ${scenario.scenarioId} entry session is outside the dataset interval`)
+      }
     }
     const monitorCycles =
       scenario.fidelity === "HISTORICAL_BAR_PROXY" && scenario.monitorCycles === undefined
