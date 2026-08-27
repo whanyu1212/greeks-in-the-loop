@@ -95,7 +95,7 @@ const rawOrderLegSchema = z
 const rawOrderSchema = z
   .object({
     id: z.string(),
-    asset_class: z.string().optional().default("unknown"),
+    asset_class: z.string().min(1),
     submitted_at: z.string().nullish(),
     created_at: z.string().nullish(),
     status: z.string(),
@@ -691,11 +691,6 @@ export function createAlpacaRiskStateProvider(
           getPositions(input.signal),
           getOrders(input.signal, "OPEN"),
         ])
-        const finalSubmittedOrders = await getOrders(
-          input.signal,
-          "HISTORY",
-          historyAfter,
-        )
         const evaluatedAtDate = now()
         if (
           !Number.isFinite(evaluatedAtDate.getTime()) ||
@@ -704,6 +699,12 @@ export function createAlpacaRiskStateProvider(
           return { success: false, reasons: ["CAPTURE_TIME_INVALID"] }
         }
         const evaluatedAt = evaluatedAtDate.toISOString()
+        const finalSubmittedOrders = await getOrders(
+          input.signal,
+          "HISTORY",
+          historyAfter,
+          evaluatedAt,
+        )
 
         const accountRaw = rawAccountSchema.safeParse(rawAccount)
         if (!accountRaw.success) throw new CaptureFailure("ACCOUNT_RESPONSE_INVALID")

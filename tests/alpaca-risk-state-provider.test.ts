@@ -393,6 +393,9 @@ describe("Alpaca risk-state provider", () => {
     expect(historyUrls[1]?.searchParams.get("after")).toBe(overlapTimestamp)
     expect(historyUrls[3]?.searchParams.get("after")).toBe(overlapTimestamp)
     expect(historyUrls[1]?.searchParams.has("until")).toBe(false)
+    expect(historyUrls[3]?.searchParams.get("until")).toBe(
+      evaluatedAt.toISOString(),
+    )
     expect(historyUrls[1]?.searchParams.has("after_order_id")).toBe(false)
   })
 
@@ -457,6 +460,15 @@ describe("Alpaca risk-state provider", () => {
     )
   })
 
+  it("rejects history orders without an asset class", async () => {
+    const missingAssetClass = openingOrder()
+    delete (missingAssetClass as Record<string, unknown>).asset_class
+    await expectFailure(
+      router({ history: [missingAssetClass] }),
+      "ORDER_HISTORY_RESPONSE_INVALID",
+    )
+  })
+
   it("captures terminal orders submitted during the capture interval", async () => {
     const requestStartedAt = new Date("2026-08-27T14:30:30.000Z")
     const captureFinishedAt = new Date("2026-08-27T14:30:31.000Z")
@@ -483,6 +495,9 @@ describe("Alpaca risk-state provider", () => {
       "BROKER_STATE_CHANGED",
     ])
     expect(historyUrls[0]?.searchParams.has("until")).toBe(false)
+    expect(historyUrls[1]?.searchParams.get("until")).toBe(
+      captureFinishedAt.toISOString(),
+    )
     const historyCallIndex = fetchImplementation.mock.calls.findIndex(([resource]) => {
       const url = new URL(String(resource))
       return url.pathname === "/v2/orders" &&
