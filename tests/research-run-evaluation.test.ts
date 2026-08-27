@@ -1515,6 +1515,92 @@ describe("research run evaluation", () => {
     expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
   })
 
+  it("allows anytime preliminary rejection after New York date rollover", () => {
+    const run = preliminaryRun()
+    if (run.researchReport === undefined) {
+      throw new Error("Expected a preliminary report fixture")
+    }
+    const { preliminaryResearch: _preliminaryResearch, ...base } = run
+    const evaluation = evaluateResearchRunV1({
+      ...base,
+      cycle: {
+        ...base.cycle,
+        startedAt: "2026-08-27T03:58:00.000Z",
+        completedAt: "2026-08-27T04:01:00.000Z",
+      },
+      initialEligibility: {
+        ...base.initialEligibility!,
+        evaluatedAt: "2026-08-27T03:57:59.000Z",
+        researchMode: "DRY_RUN_ANYTIME",
+        reason: "DRY_RUN_RESEARCH_ONLY",
+      },
+      researchReport: {
+        ...run.researchReport,
+        analysis: {
+          ...run.researchReport.analysis,
+          asOf: "2026-08-27T03:59:30.000Z",
+          externalContext: run.researchReport.analysis.externalContext.map(
+            (source) => ({
+              ...source,
+              retrievedAt: "2026-08-27T03:59:00.000Z",
+            }),
+          ),
+        },
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{ code: "CONTEXT_INVALID", path: ["targetSessionDate"] }],
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
+  })
+
+  it("rejects anytime preliminary rejection before New York date rollover", () => {
+    const run = preliminaryRun()
+    if (run.researchReport === undefined) {
+      throw new Error("Expected a preliminary report fixture")
+    }
+    const { preliminaryResearch: _preliminaryResearch, ...base } = run
+    const evaluation = evaluateResearchRunV1({
+      ...base,
+      cycle: {
+        ...base.cycle,
+        startedAt: "2026-08-26T20:01:00.000Z",
+        completedAt: "2026-08-26T20:05:00.000Z",
+      },
+      initialEligibility: {
+        ...base.initialEligibility!,
+        evaluatedAt: "2026-08-26T20:00:59.000Z",
+        researchMode: "DRY_RUN_ANYTIME",
+        reason: "DRY_RUN_RESEARCH_ONLY",
+      },
+      researchReport: {
+        ...run.researchReport,
+        analysis: {
+          ...run.researchReport.analysis,
+          asOf: "2026-08-26T20:04:00.000Z",
+          externalContext: run.researchReport.analysis.externalContext.map(
+            (source) => ({
+              ...source,
+              retrievedAt: "2026-08-26T20:02:00.000Z",
+            }),
+          ),
+        },
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{ code: "CONTEXT_INVALID", path: ["targetSessionDate"] }],
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+  })
+
   it("rejects a preliminary observation no later than report processing", () => {
     const run = preliminaryRun()
     if (

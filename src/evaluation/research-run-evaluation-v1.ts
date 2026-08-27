@@ -672,6 +672,13 @@ export function evaluateResearchRunV1(
       const parsedRejectedReport =
         parsedReport?.success === true ? parsedReport.data : undefined
       const parsedRejectedResult = parsedRejectedReport?.result
+      const rejectedPreliminaryTargetSessionDate =
+        parsedRejectedResult?.outcome === "PRELIMINARY_RESEARCH"
+          ? parsedRejectedResult.targetSessionDate
+          : undefined
+      const preliminaryTargetSessionDateRejectionIssues = [
+        { code: "CONTEXT_INVALID" as const, path: ["targetSessionDate"] },
+      ]
       const preliminaryCouldBeRetained =
         !retainedCommonReportRejectionMatches &&
         parsedRejectedReport !== undefined &&
@@ -801,23 +808,29 @@ export function evaluateResearchRunV1(
           rejectedIssues.length <= MAX_TERMINAL_REJECTION_DETAILS &&
           rejectedIssues.every(({ code }) => code === "SCHEMA_INVALID"))
       const plausibleLaterPreliminaryEligibilityRejection =
-        parsedRejectedResult?.outcome === "PRELIMINARY_RESEARCH" &&
-        !isAnytimeDryRun &&
+        rejectedPreliminaryTargetSessionDate !== undefined &&
         expectedPreliminaryDecisionRejectionIssues === undefined &&
+        rejectionIssuesMatch(preliminaryTargetSessionDateRejectionIssues) &&
         (() => {
+          const completedAt = Date.parse(run.cycle.completedAt)
+          if (isAnytimeDryRun) {
+            return (
+              Number.isFinite(completedAt) &&
+              run.cycle.sessionDate === rejectedPreliminaryTargetSessionDate &&
+              newYorkDate(new Date(completedAt)) >
+                rejectedPreliminaryTargetSessionDate
+            )
+          }
+
           const sessionClose = Date.parse(
             run.initialEligibility?.sessionClose ?? "",
           )
-          const completedAt = Date.parse(run.cycle.completedAt)
           return (
             !Number.isFinite(sessionClose) ||
             !Number.isFinite(completedAt) ||
             completedAt >= sessionClose
           )
-        })() &&
-        rejectionIssuesMatch([
-          { code: "CONTEXT_INVALID", path: ["targetSessionDate"] },
-        ])
+        })()
       const plausibleLaterProposalRejectionIssues = (() => {
         if (
           proposalPreflightValidation?.success !== true ||
