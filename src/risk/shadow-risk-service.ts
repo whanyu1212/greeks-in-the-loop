@@ -4,6 +4,7 @@ import {
   type TradeIntentV1,
 } from "../contracts/trade-intent-v1.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
+import { LedgerPersistenceError } from "../event-ledger/research-lifecycle-recorder.js"
 import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
 import type { RiskStateProvider } from "./alpaca-risk-state-provider.js"
 import {
@@ -63,12 +64,19 @@ export function createLedgerDurableRiskControlStateLoader(
       let competitionBreakerActive = false
       let afterSequence = 0
       while (true) {
-        const page = await store.list({
-          afterSequence,
-          direction: "ASC",
-          eventTypes: ["RISK_BREAKER_LATCHED"],
-          limit: 1_000,
-        })
+        let page: Awaited<ReturnType<LedgerStore["list"]>>
+        try {
+          page = await store.list({
+            afterSequence,
+            direction: "ASC",
+            eventTypes: ["RISK_BREAKER_LATCHED"],
+            limit: 1_000,
+          })
+        } catch (error) {
+          if (signal.aborted) throw signal.reason ?? error
+          if (error instanceof LedgerPersistenceError) throw error
+          throw new LedgerPersistenceError("durable risk-control query", error)
+        }
         for (const event of page) {
           if (event.eventType !== "RISK_BREAKER_LATCHED") continue
           if (

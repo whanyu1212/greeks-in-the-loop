@@ -4,8 +4,11 @@ import type { ProposedTradeDecisionV1 } from "../src/contracts/research-decision
 import { deriveTradeIntentV1 } from "../src/contracts/trade-intent-v1.js"
 import type { RiskStateProvider } from "../src/risk/alpaca-risk-state-provider.js"
 import type { StoredLedgerEventV1 } from "../src/event-ledger/ledger-event-v1.js"
+import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
+import { LedgerPersistenceError } from "../src/event-ledger/research-lifecycle-recorder.js"
 import { buildRiskReportV1 } from "../src/risk/risk-report-v1.js"
 import {
+  createLedgerDurableRiskControlStateLoader,
   createShadowRiskEvaluator,
   SHADOW_RISK_QUOTE_SNAPSHOT_REF,
 } from "../src/risk/shadow-risk-service.js"
@@ -171,6 +174,23 @@ const evaluate = (provider: RiskStateProvider) =>
   })
 
 describe("shadow risk evaluator", () => {
+  it("treats durable-control ledger read failures as fatal persistence errors", async () => {
+    const cause = new Error("ledger unavailable")
+    const store = {
+      list: vi.fn(async () => { throw cause }),
+    } as unknown as LedgerStore
+
+    const failure = await createLedgerDurableRiskControlStateLoader(store)
+      .load(sessionDate, signal)
+      .catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(LedgerPersistenceError)
+    expect(failure).toMatchObject({
+      message: "Ledger durable risk-control query failed",
+      cause,
+    })
+  })
+
   it("refreshes quotes and approves an eligible intent without broker mutation", async () => {
     const capture = vi.fn<RiskStateProvider["capture"]>(async () => ({
       success: true,
