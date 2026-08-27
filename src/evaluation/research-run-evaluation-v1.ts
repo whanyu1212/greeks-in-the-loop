@@ -225,11 +225,17 @@ const retainedTradeWindowContextIsValid = (
     )
   }
   const slotDate = new Date(slotStartedAt)
-  const tradeIntentWindowDurationMs =
+  const tradeIntentTiming =
     strategyVersion === LEGACY_STRATEGY_VERSION
-      ? 5 * 60 * 1_000
+      ? {
+          startGraceMs: 2 * 60 * 1_000,
+          windowDurationMs: 5 * 60 * 1_000,
+        }
       : strategyVersion === STRATEGY_VERSION
-        ? TRADE_INTENT_WINDOW_DURATION_MS
+        ? {
+            startGraceMs: TRADE_INTENT_START_GRACE_MS,
+            windowDurationMs: TRADE_INTENT_WINDOW_DURATION_MS,
+          }
         : undefined
   const slotIsQuarterHour =
     Number.isFinite(slotStartedAt) &&
@@ -265,11 +271,11 @@ const retainedTradeWindowContextIsValid = (
     Number.isFinite(deadline) &&
     slotIsQuarterHour &&
     slotMatchesSession &&
-    tradeIntentWindowDurationMs !== undefined &&
+    tradeIntentTiming !== undefined &&
     deadline ===
-      Math.min(slotStartedAt + tradeIntentWindowDurationMs, entryCutoff) &&
+      Math.min(slotStartedAt + tradeIntentTiming.windowDurationMs, entryCutoff) &&
     eligibilityEvaluatedAt >= slotStartedAt &&
-    eligibilityEvaluatedAt - slotStartedAt < TRADE_INTENT_START_GRACE_MS &&
+    eligibilityEvaluatedAt - slotStartedAt < tradeIntentTiming.startGraceMs &&
     eligibilityEvaluatedAt <= cycleStartedAt &&
     cycleStartedAt < deadline
   )
