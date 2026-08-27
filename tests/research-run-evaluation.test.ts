@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest"
 
 import type { PreliminaryResearchV1 } from "../src/contracts/preliminary-research-v1.js"
-import type { ProposedTradeDecisionV1 } from "../src/contracts/research-decision-v1.js"
+import {
+  validateResearchDecisionV1,
+  type ProposedTradeDecisionV1,
+} from "../src/contracts/research-decision-v1.js"
 import type { ResearchReportV2 } from "../src/contracts/research-report-v2.js"
 import { deriveTradeIntentV1 } from "../src/contracts/trade-intent-v1.js"
 import {
@@ -9,7 +12,10 @@ import {
   researchRunEvaluationV1Schema,
 } from "../src/evaluation/research-run-evaluation-v1.js"
 import type { ResearchRunV1 } from "../src/research/research-artifact.js"
-import { PROPOSAL_QUOTE_SNAPSHOT_REF } from "../src/research/research-cycle.js"
+import {
+  PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
+  PROPOSAL_QUOTE_SNAPSHOT_REF,
+} from "../src/research/research-cycle.js"
 
 const preliminaryResearch = (): PreliminaryResearchV1 => ({
   contractVersion: "1.0.0",
@@ -642,6 +648,112 @@ describe("research run evaluation", () => {
 
     expect(malformed.dimensions.contractCompliance.status).toBe("PASS")
     expect(arbitrary.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+  })
+
+  it("replays common report gates before no-action validation", () => {
+    const run = noActionRun()
+    if (run.researchReport === undefined) {
+      throw new Error("Expected a no-action report fixture")
+    }
+    const { validatedDecision: _validatedDecision, ...base } = run
+    const evaluation = evaluateResearchRunV1({
+      ...base,
+      researchReport: {
+        ...run.researchReport,
+        analysis: {
+          ...run.researchReport.analysis,
+          asOf: "2026-08-26T12:06:00.000Z",
+        },
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{ code: "CONTEXT_INVALID", path: ["analysis", "asOf"] }],
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance).toEqual({
+      status: "PASS",
+      issueCodes: [],
+    })
+  })
+
+  it("matches the runtime bound for replayed rejection issues", () => {
+    const run = derivedIntentRun()
+    if (
+      run.researchReport === undefined ||
+      run.researchReport.result.outcome !== "PROPOSE_TRADE"
+    ) {
+      throw new Error("Expected a proposal report fixture")
+    }
+    const decision: ProposedTradeDecisionV1 = {
+      ...run.researchReport.result,
+      evidence: [
+        {
+          claimId: "missing-snapshot",
+          kind: "SOURCED_FACT",
+          claim: "Fact with unavailable snapshot",
+          snapshotRef: "missing-snapshot",
+        },
+        ...Array.from({ length: 2 }, (_, claimIndex) => ({
+          claimId: `inference-${claimIndex}`,
+          kind: "INFERENCE" as const,
+          claim: `Inference ${claimIndex}`,
+          basedOn: Array.from(
+            { length: 32 },
+            (_, referenceIndex) => `missing-${claimIndex}-${referenceIndex}`,
+          ),
+        })),
+      ],
+    }
+    const validation = validateResearchDecisionV1(
+      decision,
+      PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
+    )
+    if (validation.success || validation.issues.length <= 64) {
+      throw new Error("Expected more than 64 preflight issues")
+    }
+    const {
+      validatedDecision: _validatedDecision,
+      evidenceSnapshots: _evidenceSnapshots,
+      ...base
+    } = run
+    const evaluation = evaluateResearchRunV1({
+      ...base,
+      evidenceSnapshots: [],
+      researchReport: { ...run.researchReport, result: decision },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: validation.issues.slice(0, 64),
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance).toEqual({
+      status: "PASS",
+      issueCodes: [],
+    })
+  })
+
+  it("rejects post-quote market-window failure before the retained deadline", () => {
+    const run = derivedIntentRun()
+    const { validatedDecision: _validatedDecision, ...base } = run
+    const evaluation = evaluateResearchRunV1({
+      ...base,
+      cycle: {
+        ...base.cycle,
+        completedAt: "2026-08-26T14:04:30.000Z",
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["MARKET_WINDOW_INELIGIBLE"],
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
     )
   })

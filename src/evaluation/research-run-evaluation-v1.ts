@@ -18,6 +18,7 @@ import {
   ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE,
 } from "../market-data/alpaca-option-quotes.js"
 import {
+  MAX_TERMINAL_REJECTION_DETAILS,
   proposalAccountChecksAreFresh,
   PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
   proposalHistoryIssuePath,
@@ -267,6 +268,36 @@ export function evaluateResearchRunV1(
   const validReport =
     parsedReport?.success === true ? parsedReport.data : undefined
   const reportResult = validReport?.result
+  const expectedCommonReportRejectionIssues = (() => {
+    if (validReport === undefined) return undefined
+    const cycleStart = Date.parse(run.cycle.startedAt)
+    const cycleEnd = Date.parse(run.cycle.completedAt)
+    const reportAsOf = Date.parse(validReport.analysis.asOf)
+    if (
+      !Number.isFinite(cycleStart) ||
+      !Number.isFinite(cycleEnd) ||
+      cycleStart > cycleEnd ||
+      reportAsOf > cycleEnd
+    ) {
+      return [
+        { code: "CONTEXT_INVALID" as const, path: ["analysis", "asOf"] },
+      ]
+    }
+    const exaSources = validReport.analysis.externalContext.filter(
+      ({ provider }) => provider === "EXA",
+    )
+    return exaSources.length > 0 &&
+      !exaSources.some(({ retrievedAt }) =>
+        timestampWithin(retrievedAt, cycleStart, cycleEnd),
+      )
+      ? [
+          {
+            code: "CONTEXT_INVALID" as const,
+            path: ["analysis", "externalContext"],
+          },
+        ]
+      : undefined
+  })()
   const retainedProposalEvaluationLowerBound = (() => {
     if (validReport === undefined || run.initialEligibility === undefined) {
       return undefined
@@ -294,6 +325,7 @@ export function evaluateResearchRunV1(
     )
   const proposalPreflightValidation =
     run.outcome.status === "DECISION_REJECTED" &&
+    expectedCommonReportRejectionIssues === undefined &&
     run.evidenceSnapshots.length === 0 &&
     reportResult?.outcome === "PROPOSE_TRADE"
       ? validateResearchDecisionV1(
@@ -445,10 +477,21 @@ export function evaluateResearchRunV1(
       break
     case "DECISION_REJECTED":
       const rejectedIssues = run.outcome.issues
+      const rejectionIssuesMatch = (
+        expected: readonly Readonly<{
+          code: string
+          path: readonly (string | number)[]
+        }>[],
+      ) =>
+        isDeepStrictEqual(
+          rejectedIssues,
+          expected.slice(0, MAX_TERMINAL_REJECTION_DETAILS),
+        )
       const parsedRejectedReport =
         parsedReport?.success === true ? parsedReport.data : undefined
       const parsedRejectedResult = parsedRejectedReport?.result
       const preliminaryCouldBeRetained =
+        expectedCommonReportRejectionIssues === undefined &&
         parsedRejectedReport !== undefined &&
         parsedRejectedResult?.outcome === "PRELIMINARY_RESEARCH" &&
         run.initialEligibility?.researchEligible === true &&
@@ -472,6 +515,7 @@ export function evaluateResearchRunV1(
             )
           : -1
       const expectedPreliminaryDecisionRejectionIssues =
+        expectedCommonReportRejectionIssues !== undefined ||
         parsedRejectedResult?.outcome !== "PRELIMINARY_RESEARCH"
           ? undefined
           : preliminaryFutureObservationIndex >= 0
@@ -494,6 +538,7 @@ export function evaluateResearchRunV1(
                 ]
               : undefined
       const noActionValidation =
+        expectedCommonReportRejectionIssues === undefined &&
         parsedRejectedResult?.outcome === "NO_ACTION"
           ? validateResearchDecisionV1(parsedRejectedResult, {
               evaluatedAt: run.cycle.completedAt,
@@ -510,11 +555,12 @@ export function evaluateResearchRunV1(
           { code: "RESPONSE_TOO_LARGE", path: [] },
         ]) ||
         (rejectedIssues.length > 0 &&
+          rejectedIssues.length <= MAX_TERMINAL_REJECTION_DETAILS &&
           rejectedIssues.every(({ code }) => code === "SCHEMA_INVALID"))
       const plausibleLaterPreliminaryEligibilityRejection =
         parsedRejectedResult?.outcome === "PRELIMINARY_RESEARCH" &&
         expectedPreliminaryDecisionRejectionIssues === undefined &&
-        isDeepStrictEqual(rejectedIssues, [
+        rejectionIssuesMatch([
           { code: "CONTEXT_INVALID", path: ["targetSessionDate"] },
         ])
       const proposalRejectionIssuesMatch =
@@ -524,14 +570,11 @@ export function evaluateResearchRunV1(
               ["analysis", "marketRegime", "observedAt"],
               ["analysis", "accountChecks", "observedAt"],
             ].some((path) =>
-              isDeepStrictEqual(rejectedIssues, [
+              rejectionIssuesMatch([
                 { code: "CONTEXT_INVALID", path },
               ]),
             )
-          : isDeepStrictEqual(
-              rejectedIssues,
-              expectedPreQuoteDecisionRejectionIssues,
-            ))
+          : rejectionIssuesMatch(expectedPreQuoteDecisionRejectionIssues))
       if (
         run.preliminaryResearch !== undefined ||
         run.validatedDecision !== undefined ||
@@ -540,32 +583,22 @@ export function evaluateResearchRunV1(
             !plausibleLaterPreliminaryEligibilityRejection) ||
             noActionCouldBeRetained)) ||
         !reportFreeRejectionIssuesMatch ||
+        (expectedCommonReportRejectionIssues !== undefined &&
+          !rejectionIssuesMatch(expectedCommonReportRejectionIssues)) ||
         (expectedPreliminaryDecisionRejectionIssues !== undefined &&
-          !isDeepStrictEqual(
-            run.outcome.issues,
-            expectedPreliminaryDecisionRejectionIssues,
-          )) ||
+          !rejectionIssuesMatch(expectedPreliminaryDecisionRejectionIssues)) ||
         (run.evidenceSnapshots.length === 0 &&
           noActionValidation?.success === false &&
-          !isDeepStrictEqual(
-            run.outcome.issues,
-            noActionValidation.issues,
-          )) ||
+          !rejectionIssuesMatch(noActionValidation.issues)) ||
         (proposalPreflightValidation?.success === false &&
-          !isDeepStrictEqual(
-            run.outcome.issues,
-            proposalPreflightValidation.issues,
-          )) ||
+          !rejectionIssuesMatch(proposalPreflightValidation.issues)) ||
         !proposalRejectionIssuesMatch ||
         (run.evidenceSnapshots.length > 0 &&
           (parsedReport?.success !== true ||
             parsedReport.data.result.outcome !== "PROPOSE_TRADE")) ||
         (canonicalRetainedQuoteSnapshot !== undefined &&
           (expectedSnapshotDecisionRejectionIssues === undefined ||
-            !isDeepStrictEqual(
-              run.outcome.issues,
-              expectedSnapshotDecisionRejectionIssues,
-            )))
+            !rejectionIssuesMatch(expectedSnapshotDecisionRejectionIssues)))
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
       }
@@ -587,6 +620,16 @@ export function evaluateResearchRunV1(
       const hasValidatedProposal =
         parsedValidatedDecision?.success === true &&
         parsedValidatedDecision.data.outcome === "PROPOSE_TRADE"
+      const retainedWindowDeadline = Date.parse(
+        run.initialEligibility?.tradeIntentWindow?.deadline ?? "",
+      )
+      const cycleCompletedAt = Date.parse(run.cycle.completedAt)
+      const postQuoteMarketWindowRejectionPlausible =
+        hasCanonicalQuoteSnapshot &&
+        (run.initialEligibility?.tradeIntentEligible !== true ||
+          !Number.isFinite(retainedWindowDeadline) ||
+          !Number.isFinite(cycleCompletedAt) ||
+          cycleCompletedAt >= retainedWindowDeadline)
       const rejectionRecordsMatch =
         (quoteConfirmationRejection &&
           run.validatedDecision === undefined &&
@@ -596,7 +639,8 @@ export function evaluateResearchRunV1(
           hasCanonicalQuoteSnapshot) ||
         (marketWindowRejected &&
           run.validatedDecision === undefined &&
-          (run.evidenceSnapshots.length === 0 || hasCanonicalQuoteSnapshot))
+          (run.evidenceSnapshots.length === 0 ||
+            postQuoteMarketWindowRejectionPlausible))
       if (
         (parsedReport?.success === true &&
           parsedReport.data.result.outcome !== "PROPOSE_TRADE") ||
