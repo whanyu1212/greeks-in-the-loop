@@ -586,11 +586,22 @@ describe("research run evaluation", () => {
         reasons: ["NON_POSITIVE_NET_DEBIT"],
       },
     })
+    const multipleDerivationFailures = evaluateResearchRunV1({
+      ...run,
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["NON_POSITIVE_NET_DEBIT", "ARITHMETIC_OVERFLOW"],
+      },
+    })
 
     expect(quoteFailure.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
     )
     expect(derivationFailure.dimensions.contractCompliance.status).toBe("PASS")
+    expect(
+      multipleDerivationFailures.dimensions.contractCompliance.issueCodes,
+    ).toContain("OUTCOME_RECORD_MISMATCH")
   })
 
   it("rejects non-Alpaca quote provenance on post-quote rejections", () => {

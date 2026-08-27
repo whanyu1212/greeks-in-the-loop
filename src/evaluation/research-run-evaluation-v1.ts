@@ -554,12 +554,12 @@ export function evaluateResearchRunV1(
     case "INTENT_DERIVATION_REJECTED":
       const reasons = run.outcome.reasons
       const derivationRejected =
-        reasons.length > 0 &&
+        reasons.length === 1 &&
         reasons.every((reason) =>
           INTENT_DERIVATION_REJECTION_REASONS.has(reason),
         )
       const marketWindowRejected =
-        reasons.length > 0 &&
+        reasons.length === 1 &&
         reasons.every((reason) => reason === "MARKET_WINDOW_INELIGIBLE")
       const hasCanonicalQuoteSnapshot =
         run.evidenceSnapshots.length === 1 &&
