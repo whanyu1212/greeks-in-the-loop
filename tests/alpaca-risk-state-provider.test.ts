@@ -206,7 +206,7 @@ describe("Alpaca risk-state provider", () => {
       },
       reconciliationReasonCodes: [],
     })
-    expect(fetchImplementation).toHaveBeenCalledTimes(9)
+    expect(fetchImplementation).toHaveBeenCalledTimes(10)
     for (const [resource, init] of fetchImplementation.mock.calls) {
       expect(String(resource)).not.toContain("test-key")
       expect(String(resource)).not.toContain("test-secret")
@@ -282,15 +282,24 @@ describe("Alpaca risk-state provider", () => {
     ])
   })
 
-  it("counts only same-day submitted entries observed by capture start", async () => {
-    const result = await provider(router({
-      history: [
-        openingOrder({ id: "previous-day", submitted_at: "2026-08-26T18:00:00.000Z" }),
-        openingOrder({ id: "observed" }),
-        openingOrder({ id: "after-capture", submitted_at: "2026-08-27T14:30:31.000Z" }),
-      ],
-    })).capture(input)
-    expect(result.success && result.snapshot.portfolio.entriesSubmittedToday).toBe(1)
+  it("counts same-day submitted entries through capture completion", async () => {
+    const now = vi.fn()
+      .mockReturnValueOnce(new Date("2026-08-27T14:30:30.000Z"))
+      .mockReturnValue(new Date("2026-08-27T14:30:32.000Z"))
+    const result = await provider(
+      router({
+        history: [
+          openingOrder({ id: "previous-day", submitted_at: "2026-08-26T18:00:00.000Z" }),
+          openingOrder({ id: "observed" }),
+          openingOrder({ id: "during-capture", submitted_at: "2026-08-27T14:30:31.000Z" }),
+        ],
+      }),
+      now,
+    ).capture(input)
+    expect(result.success && result.snapshot.portfolio.entriesSubmittedToday).toBe(2)
+    expect(result.success && result.snapshot.reconciliationReasonCodes).toEqual([
+      "BROKER_STATE_CHANGED",
+    ])
   })
 
   it("does not count recognized closing-only option orders as same-day entries", async () => {
@@ -376,12 +385,13 @@ describe("Alpaca risk-state provider", () => {
     const result = await provider(router({
       history: (call: number, url: URL) => {
         historyUrls.push(new URL(url))
-        return call === 1 ? firstPage : []
+        return call % 2 === 1 ? firstPage : []
       },
     })).capture(input)
     expect(result.success).toBe(true)
-    expect(historyUrls).toHaveLength(2)
+    expect(historyUrls).toHaveLength(4)
     expect(historyUrls[1]?.searchParams.get("after")).toBe(overlapTimestamp)
+    expect(historyUrls[3]?.searchParams.get("after")).toBe(overlapTimestamp)
     expect(historyUrls[1]?.searchParams.has("until")).toBe(false)
     expect(historyUrls[1]?.searchParams.has("after_order_id")).toBe(false)
   })
@@ -410,11 +420,14 @@ describe("Alpaca risk-state provider", () => {
     const result = await provider(router({
       history: (call: number, url: URL) => {
         historyUrls.push(new URL(url))
-        return call === 1 ? firstPage : [boundaryOrder, secondTiedOrder]
+        return call % 2 === 1 ? firstPage : [boundaryOrder, secondTiedOrder]
       },
     })).capture(input)
     expect(result.success).toBe(true)
     expect(historyUrls[1]?.searchParams.get("after")).toBe(
+      firstPage.at(-2)?.submitted_at,
+    )
+    expect(historyUrls[3]?.searchParams.get("after")).toBe(
       firstPage.at(-2)?.submitted_at,
     )
   })
@@ -483,6 +496,40 @@ describe("Alpaca risk-state provider", () => {
       },
     )
     expect(finalOpenOrdersCallIndex).toBeGreaterThan(historyCallIndex)
+  })
+
+  it("captures terminal orders appearing after the first history read", async () => {
+    const duringFinalObservations = openingOrder({
+      status: "rejected",
+      submitted_at: "2026-08-27T14:30:30.500123456Z",
+    })
+    const now = vi.fn()
+      .mockReturnValueOnce(new Date("2026-08-27T14:30:30.000Z"))
+      .mockReturnValue(new Date("2026-08-27T14:30:31.000Z"))
+    const result = await provider(
+      router({
+        history: (call: number) => call === 1 ? [] : [duringFinalObservations],
+      }),
+      now,
+    ).capture(input)
+    expect(result.success && result.snapshot.portfolio).toMatchObject({
+      consistent: false,
+      entriesSubmittedToday: 1,
+    })
+    expect(result.success && result.snapshot.reconciliationReasonCodes).toEqual([
+      "BROKER_STATE_CHANGED",
+    ])
+  })
+
+  it("rejects future-dated records returned by order history", async () => {
+    await expectFailure(
+      router({
+        history: [openingOrder({
+          submitted_at: "2026-08-27T14:30:30.000000001Z",
+        })],
+      }),
+      "ORDER_HISTORY_RESPONSE_INVALID",
+    )
   })
 
   it("rejects capture when the evaluation clock moves backward", async () => {

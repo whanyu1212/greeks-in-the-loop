@@ -682,7 +682,7 @@ export function createAlpacaRiskStateProvider(
         ) {
           return { success: false, reasons: ["CAPTURE_TIME_INVALID"] }
         }
-        const submittedOrders = await getOrders(
+        const initialSubmittedOrders = await getOrders(
           input.signal,
           "HISTORY",
           historyAfter,
@@ -691,6 +691,11 @@ export function createAlpacaRiskStateProvider(
           getPositions(input.signal),
           getOrders(input.signal, "OPEN"),
         ])
+        const finalSubmittedOrders = await getOrders(
+          input.signal,
+          "HISTORY",
+          historyAfter,
+        )
         const evaluatedAtDate = now()
         if (
           !Number.isFinite(evaluatedAtDate.getTime()) ||
@@ -779,16 +784,34 @@ export function createAlpacaRiskStateProvider(
 
         const requestStartedAtNanoseconds =
           BigInt(requestStartedAt.getTime()) * 1_000_000n
+        const stableOrders = (orders: readonly NormalizedBrokerOrderV1[]) =>
+          JSON.stringify([...orders].sort((left, right) =>
+            left.id.localeCompare(right.id),
+          ))
+        const orderHistoryChangedDuringCapture =
+          stableOrders(initialSubmittedOrders) !== stableOrders(finalSubmittedOrders)
+        const submittedOrderById = new Map(
+          initialSubmittedOrders.map((order) => [order.id, order]),
+        )
+        for (const order of finalSubmittedOrders) submittedOrderById.set(order.id, order)
+        const submittedOrders = [...submittedOrderById.values()]
+        if (submittedOrders.some(({ submittedAt }) =>
+          parseRfc3339Nanoseconds(submittedAt)! > evaluatedAtNanoseconds
+        )) {
+          throw new CaptureFailure("ORDER_HISTORY_RESPONSE_INVALID")
+        }
         const currentDateOrders = submittedOrders.filter(({ submittedAt }) => {
           const submittedAtNanoseconds = parseRfc3339Nanoseconds(submittedAt)
           return submittedAtNanoseconds !== undefined &&
             newYorkDate(submittedAt) === parsedInput.data.sessionDate &&
             submittedAtNanoseconds <= evaluatedAtNanoseconds
         })
-        const brokerStateChangedDuringCapture = currentDateOrders.some(
-          ({ submittedAt }) =>
-            parseRfc3339Nanoseconds(submittedAt)! > requestStartedAtNanoseconds,
-        )
+        const brokerStateChangedDuringCapture =
+          orderHistoryChangedDuringCapture ||
+          currentDateOrders.some(
+            ({ submittedAt }) =>
+              parseRfc3339Nanoseconds(submittedAt)! > requestStartedAtNanoseconds,
+          )
         const reconciliation = reconcileBrokerPortfolioV1({
           observedAt: evaluatedAt,
           sessionDate: parsedInput.data.sessionDate,
