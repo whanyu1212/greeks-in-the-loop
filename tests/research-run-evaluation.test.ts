@@ -361,6 +361,40 @@ describe("research run evaluation", () => {
     }
   })
 
+  it("validates the preliminary target against retained session context", () => {
+    const run = preliminaryRun()
+    if (run.outcome.status !== "PRELIMINARY_RESEARCH_RETAINED") {
+      throw new Error("Expected a preliminary-research fixture")
+    }
+    const research = {
+      ...run.preliminaryResearch!,
+      targetSessionDate: "2026-08-27",
+    }
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      preliminaryResearch: research,
+      researchReport: { ...run.researchReport!, result: research },
+      outcome: { ...run.outcome, research },
+    })
+
+    expect(evaluation.dimensions.temporalIntegrity).toEqual({
+      status: "FAIL",
+      issueCodes: ["PRELIMINARY_TARGET_SESSION_MISMATCH"],
+    })
+  })
+
+  it("does not mark legacy preliminary runs without session context safe", () => {
+    const run = preliminaryRun()
+    const { initialEligibility: _initialEligibility, ...legacyRun } = run
+
+    const evaluation = evaluateResearchRunV1(legacyRun)
+
+    expect(evaluation.dimensions.temporalIntegrity).toEqual({
+      status: "FAIL",
+      issueCodes: ["PRELIMINARY_SESSION_CONTEXT_MISSING"],
+    })
+  })
+
   it("evaluates valid no-action and derived-intent outcomes", () => {
     const noAction = evaluateResearchRunV1(noActionRun())
     const derived = evaluateResearchRunV1(derivedIntentRun())

@@ -42,6 +42,8 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "ACCOUNT_CHECKS_STALE_AT_INTENT",
   "MARKET_REGIME_STALE_AT_INTENT",
   "INTRADAY_BAR_COUNT_MISMATCH",
+  "PRELIMINARY_SESSION_CONTEXT_MISSING",
+  "PRELIMINARY_TARGET_SESSION_MISMATCH",
   "DUPLICATE_CLAIM_ID",
   "NO_ACTION_SOURCED_EVIDENCE",
   "UNGROUNDED_INFERENCE",
@@ -332,6 +334,17 @@ export function evaluateResearchRunV1(
         expectedIntradayBars
     ) {
       temporalIssues.push("INTRADAY_BAR_COUNT_MISMATCH")
+    }
+  }
+  if (run.outcome.status === "PRELIMINARY_RESEARCH_RETAINED") {
+    const eligibilitySessionDate = run.initialEligibility?.sessionDate
+    if (eligibilitySessionDate === undefined) {
+      temporalIssues.push("PRELIMINARY_SESSION_CONTEXT_MISSING")
+    } else if (
+      run.outcome.research.targetSessionDate !== eligibilitySessionDate ||
+      run.outcome.research.targetSessionDate !== run.cycle.sessionDate
+    ) {
+      temporalIssues.push("PRELIMINARY_TARGET_SESSION_MISMATCH")
     }
   }
 
