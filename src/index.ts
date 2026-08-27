@@ -385,13 +385,16 @@ try {
           abortController.abort(error)
           throw error
         }
-        console.log(`OpenCode session ${sessionId} started at ${runtime.url}`)
         const cycleNumber = cycle.cycleNumber
         const stageReporter = createTerminalStageReporter({
           cycleId: cycle.cycleId,
           cycleNumber,
           startedAt: cycle.startedAt,
           format: terminalLogFormat,
+        })
+        stageReporter.report("runtime.session", "COMPLETED", {
+          sessionId,
+          url: runtime.url,
         })
         stageReporter.report("eligibility", "COMPLETED", {
           sessionDate,
@@ -572,8 +575,10 @@ try {
           if (!abortController.signal.aborted) await deleteSession()
         }
       }),
-      onResult: (result, attempt) =>
-        console.log(`[cycle ${cycleNumbers.get(attempt) ?? attempt}]\n${result}`),
+      onResult: (result, attempt) => {
+        if (terminalLogFormat === "json") return
+        console.log(`[cycle ${cycleNumbers.get(attempt) ?? attempt}]\n${result}`)
+      },
       onError: (error, attempt) =>
         console.error(
           `[cycle ${cycleNumbers.get(attempt) ?? attempt}] failed`,

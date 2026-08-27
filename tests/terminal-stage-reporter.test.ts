@@ -59,6 +59,32 @@ describe("terminal stage reporter", () => {
     expect(line).not.toContain("cycle-1")
   })
 
+  it("encodes runtime session metadata as one JSON line", () => {
+    const write = vi.fn()
+    const reporter = createTerminalStageReporter({
+      cycleId: "cycle-1",
+      cycleNumber: 3,
+      startedAt: "2026-08-27T14:00:00.000Z",
+      now: () => new Date("2026-08-27T14:00:00.100Z"),
+      write,
+      format: "json",
+    })
+
+    reporter.report("runtime.session", "COMPLETED", {
+      sessionId: "session-1",
+      url: "http://127.0.0.1:4096",
+    })
+
+    const line = write.mock.calls[0]![0] as string
+    expect(line).not.toContain("\n")
+    expect(JSON.parse(line)).toMatchObject({
+      stage: "runtime.session",
+      status: "COMPLETED",
+      sessionId: "session-1",
+      url: "http://127.0.0.1:4096",
+    })
+  })
+
   it("selects format from an explicit value or TTY detection", () => {
     expect(resolveTerminalLogFormat(undefined, true)).toBe("pretty")
     expect(resolveTerminalLogFormat(undefined, false)).toBe("json")

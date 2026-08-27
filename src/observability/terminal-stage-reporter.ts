@@ -47,6 +47,7 @@ const elapsed = (milliseconds: number) => {
 
 const stageLabel = (stage: string) =>
   ({
+    "runtime.session": "Runtime session",
     eligibility: "Eligibility",
     "research.agent": "Research agent",
     "research.report": "Research report",
@@ -83,6 +84,8 @@ const prettySummary = (
   const reasons = reasonSummary(details)
   if (reasons !== undefined) return reasons
   switch (stage) {
+    case "runtime.session":
+      return `${String(detail(details, "sessionId"))} | ${String(detail(details, "url"))}`
     case "eligibility":
       return [
         detail(details, "tradeIntentEligible") === true
