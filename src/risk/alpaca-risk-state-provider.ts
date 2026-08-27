@@ -705,6 +705,13 @@ export function createAlpacaRiskStateProvider(
           historyAfter,
           evaluatedAt,
         )
+        const captureCompletedAt = now()
+        if (
+          !Number.isFinite(captureCompletedAt.getTime()) ||
+          captureCompletedAt.getTime() < evaluatedAtDate.getTime()
+        ) {
+          return { success: false, reasons: ["CAPTURE_TIME_INVALID"] }
+        }
 
         const accountRaw = rawAccountSchema.safeParse(rawAccount)
         if (!accountRaw.success) throw new CaptureFailure("ACCOUNT_RESPONSE_INVALID")
@@ -740,15 +747,17 @@ export function createAlpacaRiskStateProvider(
           shortContractRaw.data.symbol !== parsedInput.data.shortContractSymbol
         ) throw new CaptureFailure("CONTRACT_RESPONSE_INVALID")
         const evaluatedAtNanoseconds = BigInt(evaluatedAtDate.getTime()) * 1_000_000n
+        const captureCompletedAtNanoseconds =
+          BigInt(captureCompletedAt.getTime()) * 1_000_000n
         const longQuote = normalizeAlpacaOptionQuote(
           parsedInput.data.longContractSymbol,
           longSnapshot.data.latestQuote,
-          evaluatedAtNanoseconds,
+          captureCompletedAtNanoseconds,
         )
         const shortQuote = normalizeAlpacaOptionQuote(
           parsedInput.data.shortContractSymbol,
           shortSnapshot.data.latestQuote,
-          evaluatedAtNanoseconds,
+          captureCompletedAtNanoseconds,
         )
         for (const quote of [longQuote, shortQuote]) {
           if (!quote.success) {

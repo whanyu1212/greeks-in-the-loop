@@ -613,6 +613,19 @@ describe("Alpaca risk-state provider", () => {
     await expectFailure(router({ snapshots: stale }), "OPTION_QUOTE_STALE")
   })
 
+  it("revalidates quote freshness after final history collection", async () => {
+    const now = vi.fn()
+      .mockReturnValueOnce(new Date("2026-08-27T14:30:30.000Z"))
+      .mockReturnValueOnce(new Date("2026-08-27T14:30:30.000Z"))
+      .mockReturnValueOnce(new Date("2026-08-27T14:30:30.000Z"))
+      .mockReturnValue(new Date("2026-08-27T14:31:01.000Z"))
+    const result = await provider(router(), now).capture(input)
+    expect(result).toEqual({
+      success: false,
+      reasons: ["OPTION_QUOTE_STALE"],
+    })
+  })
+
   it("validates input before any network request", async () => {
     const fetchImplementation = router()
     const result = await provider(fetchImplementation).capture({
