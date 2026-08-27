@@ -1,5 +1,7 @@
 import { z } from "zod"
 
+import { canonicalJsonSha256 } from "../shared/canonical-json.js"
+
 export const BACKTEST_DATASET_VERSION = "1.0.0" as const
 export const BACKTEST_NORMALIZATION_VERSION = "1.0.0" as const
 
@@ -24,6 +26,16 @@ export const backtestDatasetDefinitionV1Schema = z
     fromDate: date,
     toDate: date,
     optionHistoricalFeed: z.literal("ALPACA_ACCOUNT_DEFAULT"),
+    optionSymbols: z
+      .array(optionSymbol)
+      .max(10_000)
+      .refine(
+        (symbols) =>
+          symbols.every(
+            (symbol, index) => index === 0 || symbols[index - 1]! < symbol,
+          ),
+        "Dataset option symbols must be unique and sorted",
+      ),
     createdAt: timestamp,
   })
   .strict()
@@ -35,6 +47,37 @@ export const backtestDatasetDefinitionV1Schema = z
 export type BacktestDatasetDefinitionV1 = Readonly<
   z.infer<typeof backtestDatasetDefinitionV1Schema>
 >
+
+export const backtestOptionSymbolChunks = (
+  symbols: readonly string[],
+): readonly (readonly string[])[] => {
+  const chunks: string[][] = []
+  for (let index = 0; index < symbols.length; index += 100) {
+    chunks.push(symbols.slice(index, index + 100))
+  }
+  return chunks
+}
+
+export const backtestOptionChunkId = (symbols: readonly string[]) =>
+  canonicalJsonSha256(symbols).slice(0, 16)
+
+export const expectedBacktestPartitionKeys = (
+  definition: BacktestDatasetDefinitionV1,
+) => [
+  "calendar",
+  "spy-daily",
+  "spy-minute",
+  "contracts-active",
+  "contracts-inactive",
+  ...backtestOptionSymbolChunks(definition.optionSymbols).flatMap((symbols) => {
+    const chunkId = backtestOptionChunkId(symbols)
+    return [
+      `option-bars-1day-${chunkId}`,
+      `option-bars-1minute-${chunkId}`,
+      `option-trades-${chunkId}`,
+    ]
+  }),
+]
 
 export const BACKTEST_PARTITION_KINDS = [
   "MARKET_CALENDAR",

@@ -1,9 +1,16 @@
-import { canonicalJsonSha256 } from "../shared/canonical-json.js"
-import type { AlpacaHistoricalClient, HistoricalDataPage } from "../market-data/alpaca-historical-client.js"
+import {
+  alpacaHistoricalEndTimestamp,
+  type AlpacaHistoricalClient,
+  type HistoricalDataPage,
+} from "../market-data/alpaca-historical-client.js"
 import type {
   BacktestDatasetDefinitionV1,
   BacktestPartitionKind,
   BacktestPartitionRequestV1,
+} from "./dataset-v1.js"
+import {
+  backtestOptionChunkId,
+  backtestOptionSymbolChunks,
 } from "./dataset-v1.js"
 import type { BacktestDatasetStore } from "./sqlite-dataset-store.js"
 
@@ -13,14 +20,6 @@ const addDays = (date: string, days: number) =>
   new Date(Date.parse(`${date}T00:00:00.000Z`) + days * 86_400_000)
     .toISOString()
     .slice(0, 10)
-
-const chunks = <T>(values: readonly T[], size: number): readonly (readonly T[])[] => {
-  const result: T[][] = []
-  for (let index = 0; index < values.length; index += size) {
-    result.push(values.slice(index, index + size))
-  }
-  return result
-}
 
 type PageLoader = (pageToken?: string) => Promise<HistoricalDataPage>
 
@@ -80,7 +79,6 @@ const ingestPartition = async (
 export type IngestAlpacaBacktestDatasetOptions = Readonly<{
   store: BacktestDatasetStore
   client: AlpacaHistoricalClient
-  optionSymbols?: readonly string[]
   signal: AbortSignal
   now?: () => Date
 }>
@@ -89,12 +87,12 @@ export type IngestAlpacaBacktestDatasetOptions = Readonly<{
 export async function ingestAlpacaBacktestDataset({
   store,
   client,
-  optionSymbols = [],
   signal,
   now = () => new Date(),
 }: IngestAlpacaBacktestDatasetOptions) {
   const definition: BacktestDatasetDefinitionV1 = store.definition
-  const { fromDate, toDate } = definition
+  const { fromDate, toDate, optionSymbols } = definition
+  const historicalEnd = alpacaHistoricalEndTimestamp(toDate)
   const today = now().toISOString().slice(0, 10)
   if (toDate >= today) {
     throw new Error("Backtest acquisition requires fully completed historical dates")
@@ -135,7 +133,7 @@ export async function ingestAlpacaBacktestDataset({
           symbols: "SPY",
           timeframe: timeframe === "1DAY" ? "1Day" : "1Min",
           start: barsFromDate,
-          end: toDate,
+          end: historicalEnd,
           feed: "iex",
           adjustment: "all",
         },
@@ -177,9 +175,8 @@ export async function ingestAlpacaBacktestDataset({
     })
   }
 
-  const symbols = [...new Set(optionSymbols)].sort()
-  for (const symbolChunk of chunks(symbols, 100)) {
-    const chunkId = canonicalJsonSha256(symbolChunk).slice(0, 16)
+  for (const symbolChunk of backtestOptionSymbolChunks(optionSymbols)) {
+    const chunkId = backtestOptionChunkId(symbolChunk)
     for (const timeframe of ["1DAY", "1MINUTE"] as const) {
       await ingestPartition(store, {
         partitionKey: `option-bars-${timeframe.toLowerCase()}-${chunkId}`,
@@ -190,7 +187,7 @@ export async function ingestAlpacaBacktestDataset({
             symbols: [...symbolChunk],
             timeframe: timeframe === "1DAY" ? "1Day" : "1Min",
             start: fromDate,
-            end: toDate,
+            end: historicalEnd,
           },
         },
         now,
@@ -213,7 +210,7 @@ export async function ingestAlpacaBacktestDataset({
         parameters: {
           symbols: [...symbolChunk],
           start: fromDate,
-          end: toDate,
+          end: historicalEnd,
         },
       },
       now,

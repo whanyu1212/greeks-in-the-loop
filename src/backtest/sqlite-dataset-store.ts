@@ -15,6 +15,7 @@ import {
   backtestDatasetRecordV1Schema,
   backtestPartitionRequestV1Schema,
   backtestRecordKey,
+  expectedBacktestPartitionKeys,
   type BacktestDatasetDefinitionV1,
   type BacktestDatasetManifestV1,
   type BacktestDatasetPartitionV1,
@@ -170,6 +171,9 @@ export function createBacktestDatasetStore({
       (getMetadata.get("definition") as { value: string }).value,
     ) as unknown,
   )
+  const expectedPartitionKeys = new Set(
+    expectedBacktestPartitionKeys(storedDefinition),
+  )
   if (
     definition !== undefined &&
     canonicalJson(backtestDatasetDefinitionV1Schema.parse(definition)) !==
@@ -203,6 +207,9 @@ export function createBacktestDatasetStore({
     beginPartition(input) {
       assertOpen()
       assertWritable()
+      if (!expectedPartitionKeys.has(input.partitionKey)) {
+        throw new Error("Backtest partition is not declared by the dataset")
+      }
       const request = backtestPartitionRequestV1Schema.parse(input.request)
       assertPersistenceSafe(request, knownCredentialValues)
       const existing = readPartition(input.partitionKey)
@@ -349,8 +356,11 @@ export function createBacktestDatasetStore({
         definition: storedDefinition,
         partitions,
         complete:
-          partitions.length > 0 &&
-          partitions.every(({ status }) => status === "COMPLETE"),
+          expectedPartitionKeys.size === partitions.length &&
+          partitions.every(
+            ({ partitionKey, status }) =>
+              expectedPartitionKeys.has(partitionKey) && status === "COMPLETE",
+          ),
         limitations: [...LIMITATIONS],
       }
       return {

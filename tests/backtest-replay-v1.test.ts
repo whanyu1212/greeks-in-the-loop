@@ -131,6 +131,7 @@ const manifest = {
     fromDate: "2026-08-27",
     toDate: "2026-08-28",
     optionHistoricalFeed: "ALPACA_ACCOUNT_DEFAULT",
+    optionSymbols: [],
     createdAt: "2026-08-27T10:00:00.000Z",
   },
   partitions: [],

@@ -27,6 +27,10 @@ describe("Alpaca backtest ingestion", () => {
         fromDate: "2024-06-03",
         toDate: "2024-06-04",
         optionHistoricalFeed: "ALPACA_ACCOUNT_DEFAULT",
+        optionSymbols: [
+          "SPY240621C00530000",
+          "SPY240621C00535000",
+        ],
         createdAt: "2024-06-05T10:00:00.000Z",
       },
     })
@@ -57,15 +61,23 @@ describe("Alpaca backtest ingestion", () => {
 
     const first = await ingestAlpacaBacktestDataset(input)
     expect(first.complete).toBe(true)
-    expect(first.partitions).toHaveLength(5)
+    expect(first.partitions).toHaveLength(8)
+    expect(
+      first.partitions.find(({ partitionKey }) => partitionKey === "spy-minute")
+        ?.request.parameters.end,
+    ).toBe("2024-06-04T23:59:59.999Z")
     expect(dailyTokens).toEqual([undefined, "daily-page-2"])
     expect(client.getCalendar).toHaveBeenCalledWith(
       expect.objectContaining({ fromDate: "2024-03-05" }),
     )
+    expect(client.getOptionBarsPage).toHaveBeenCalledTimes(2)
+    expect(client.getOptionTradesPage).toHaveBeenCalledTimes(1)
 
     await ingestAlpacaBacktestDataset(input)
     expect(dailyTokens).toEqual([undefined, "daily-page-2"])
     expect(client.getCalendar).toHaveBeenCalledTimes(1)
+    expect(client.getOptionBarsPage).toHaveBeenCalledTimes(2)
+    expect(client.getOptionTradesPage).toHaveBeenCalledTimes(1)
     store.close()
   })
 
@@ -82,6 +94,7 @@ describe("Alpaca backtest ingestion", () => {
         fromDate: "2024-06-05",
         toDate: "2024-06-05",
         optionHistoricalFeed: "ALPACA_ACCOUNT_DEFAULT",
+        optionSymbols: [],
         createdAt: "2024-06-05T10:00:00.000Z",
       },
     })

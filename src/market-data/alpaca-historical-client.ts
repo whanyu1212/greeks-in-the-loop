@@ -203,6 +203,9 @@ const pageToken = (value: string | null | undefined) =>
     ? undefined
     : value
 
+export const alpacaHistoricalEndTimestamp = (date: string) =>
+  `${z.iso.date().parse(date)}T23:59:59.999Z`
+
 const historicalPage = (
   records: readonly BacktestDatasetRecordV1[],
   token: string | null | undefined,
@@ -316,7 +319,7 @@ export function createAlpacaHistoricalClient(
     const toDate = z.iso.date().parse(input.toDate)
     if (fromDate > toDate) throw new Error("Alpaca historical date range is invalid")
     url.searchParams.set("start", fromDate)
-    url.searchParams.set("end", toDate)
+    url.searchParams.set("end", alpacaHistoricalEndTimestamp(toDate))
     url.searchParams.set("sort", "asc")
     url.searchParams.set("limit", "10000")
     if (input.pageToken !== undefined) {

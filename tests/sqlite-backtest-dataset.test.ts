@@ -20,6 +20,7 @@ const definition: BacktestDatasetDefinitionV1 = {
   fromDate: "2024-02-01",
   toDate: "2024-02-02",
   optionHistoricalFeed: "ALPACA_ACCOUNT_DEFAULT",
+  optionSymbols: [],
   createdAt: "2026-08-27T10:00:00.000Z",
 }
 
@@ -79,7 +80,7 @@ describe("SQLite backtest dataset", () => {
     )
     expect(completed.status).toBe("COMPLETE")
     expect(completed.checksum).toMatch(/^[a-f0-9]{64}$/u)
-    expect(resumed.manifest()).toMatchObject({ complete: true })
+    expect(resumed.manifest()).toMatchObject({ complete: false })
     expect(resumed.listRecords()).toHaveLength(2)
     expect(() =>
       resumed.appendPage({
@@ -94,28 +95,28 @@ describe("SQLite backtest dataset", () => {
   it("rejects changed requests, page tokens, and retained record conflicts", () => {
     const store = createBacktestDatasetStore({ path: createPath(), definition })
     store.beginPartition({
-      partitionKey: "daily",
+      partitionKey: "spy-daily",
       kind: "UNDERLYING_DAILY_BARS",
       request: { endpoint: "/bars", parameters: { timeframe: "1Day" } },
       updatedAt: "2026-08-27T10:00:00.000Z",
     })
     expect(() =>
       store.beginPartition({
-        partitionKey: "daily",
+        partitionKey: "spy-daily",
         kind: "UNDERLYING_DAILY_BARS",
         request: { endpoint: "/bars", parameters: { timeframe: "1Min" } },
         updatedAt: "2026-08-27T10:00:00.000Z",
       }),
     ).toThrow("definition changed")
     store.appendPage({
-      partitionKey: "daily",
+      partitionKey: "spy-daily",
       records: [],
       nextPageToken: "next",
       updatedAt: "2026-08-27T10:00:00.000Z",
     })
     expect(() =>
       store.appendPage({
-        partitionKey: "daily",
+        partitionKey: "spy-daily",
         expectedPageToken: "wrong",
         records: [],
         updatedAt: "2026-08-27T10:00:00.000Z",

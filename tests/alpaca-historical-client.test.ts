@@ -118,6 +118,7 @@ describe("Alpaca historical client", () => {
     expect(url.pathname).toBe("/v2/stocks/bars")
     expect(url.searchParams.get("feed")).toBe("iex")
     expect(url.searchParams.get("adjustment")).toBe("all")
+    expect(url.searchParams.get("end")).toBe("2024-02-02T23:59:59.999Z")
     expect(url.toString()).not.toContain("key")
     expect(requestInit).toMatchObject({
       method: "GET",

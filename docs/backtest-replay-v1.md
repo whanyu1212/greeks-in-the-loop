@@ -23,8 +23,10 @@ SMA50. The requested interval is used for minute bars and option data.
 Each normalized request is an immutable partition. Page tokens and normalized
 records are committed atomically, so rerunning the same command resumes an
 interrupted download and skips completed partitions. A changed request must use
-a new dataset ID. The manifest and every completed partition have deterministic
-SHA-256 checksums.
+a new dataset ID. The requested option-symbol set is part of the immutable
+dataset definition, and the manifest is complete only when every declared base
+and option partition is sealed. The manifest and every completed partition have
+deterministic SHA-256 checksums.
 
 Option bars and trades are acquired only for explicit, repeated `--option`
 symbols. This prevents an unbounded chain download and avoids pretending that

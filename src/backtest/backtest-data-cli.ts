@@ -72,13 +72,14 @@ const parseOptions = (args: readonly string[]) => {
     throw new Error("--from and --to are required")
   }
   if (fromDate > toDate) throw new Error("--to cannot precede --from")
+  const normalizedOptionSymbols = [...new Set(optionSymbols)].sort()
   const resolvedId = datasetId ?? `SPY-${fromDate}-${toDate}`
   return {
     fromDate,
     toDate,
     datasetId: resolvedId,
     datasetPath: datasetPath ?? `.state/backtests/${resolvedId}.sqlite`,
-    optionSymbols,
+    optionSymbols: normalizedOptionSymbols,
   }
 }
 
@@ -97,6 +98,7 @@ const definition: BacktestDatasetDefinitionV1 = {
   fromDate: options.fromDate,
   toDate: options.toDate,
   optionHistoricalFeed: "ALPACA_ACCOUNT_DEFAULT",
+  optionSymbols: options.optionSymbols,
   createdAt: new Date().toISOString(),
 }
 const store = createBacktestDatasetStore({
@@ -108,7 +110,9 @@ if (
   store.definition.datasetId !== options.datasetId ||
   store.definition.fromDate !== options.fromDate ||
   store.definition.toDate !== options.toDate ||
-  store.definition.optionHistoricalFeed !== "ALPACA_ACCOUNT_DEFAULT"
+  store.definition.optionHistoricalFeed !== "ALPACA_ACCOUNT_DEFAULT" ||
+  JSON.stringify(store.definition.optionSymbols) !==
+    JSON.stringify(options.optionSymbols)
 ) {
   store.close()
   throw new Error("CLI options do not match the existing backtest dataset")
@@ -128,7 +132,6 @@ try {
   const manifest = await ingestAlpacaBacktestDataset({
     store,
     client,
-    optionSymbols: options.optionSymbols,
     signal: controller.signal,
   })
   console.log(JSON.stringify(manifest, null, 2))
