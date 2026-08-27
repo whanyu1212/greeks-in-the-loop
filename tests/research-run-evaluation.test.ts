@@ -9,6 +9,7 @@ import {
   researchRunEvaluationV1Schema,
 } from "../src/evaluation/research-run-evaluation-v1.js"
 import type { ResearchRunV1 } from "../src/research/research-artifact.js"
+import { PROPOSAL_QUOTE_SNAPSHOT_REF } from "../src/research/research-cycle.js"
 
 const preliminaryResearch = (): PreliminaryResearchV1 => ({
   contractVersion: "1.0.0",
@@ -169,12 +170,12 @@ const derivedIntentRun = (): ResearchRunV1 => {
         claimId: "quote-fact",
         kind: "SOURCED_FACT",
         claim: "private-proposal-fact",
-        snapshotRef: "quote-snapshot",
+        snapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
       },
     ],
   }
   const derived = deriveTradeIntentV1(decision, {
-    quoteSnapshotRef: "quote-snapshot",
+    quoteSnapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
     evaluatedAt: "2026-08-26T14:04:00.000Z",
     longQuote: {
       contractSymbol: "SPY260918C00600000",
@@ -214,9 +215,9 @@ const derivedIntentRun = (): ResearchRunV1 => {
     },
     evidenceSnapshots: [
       {
-        snapshotRef: "quote-snapshot",
+        snapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
         provider: "ALPACA",
-        source: "option-quotes",
+        source: "options-snapshots-indicative",
         retrievedAt: "2026-08-26T14:03:59.000Z",
         freshUntil: "2026-08-26T14:04:59.000Z",
         temporalClass: "LIVE",
@@ -327,7 +328,27 @@ describe("research run evaluation", () => {
 
     expect(evaluation.dimensions.grounding).toEqual({
       status: "FAIL",
-      issueCodes: ["UNKNOWN_SNAPSHOT_REFERENCE"],
+      issueCodes: [
+        "QUOTE_SNAPSHOT_PROVENANCE_INVALID",
+        "UNKNOWN_SNAPSHOT_REFERENCE",
+      ],
+    })
+  })
+
+  it("rejects quote snapshot metadata with unrelated provenance", () => {
+    const run = derivedIntentRun()
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      evidenceSnapshots: run.evidenceSnapshots.map((snapshot) => ({
+        ...snapshot,
+        provider: "EXA" as const,
+        source: "web-search",
+      })),
+    })
+
+    expect(evaluation.dimensions.grounding).toEqual({
+      status: "FAIL",
+      issueCodes: ["QUOTE_SNAPSHOT_PROVENANCE_INVALID"],
     })
   })
 

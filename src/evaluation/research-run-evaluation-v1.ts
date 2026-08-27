@@ -10,6 +10,8 @@ import {
   RESEARCH_RUN_VERSION,
   type ResearchRunV1,
 } from "../research/research-artifact.js"
+import { ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE } from "../market-data/alpaca-option-quotes.js"
+import { PROPOSAL_QUOTE_SNAPSHOT_REF } from "../research/research-cycle.js"
 import {
   newYorkDate,
   newYorkLocalTime,
@@ -32,6 +34,7 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "UNKNOWN_SNAPSHOT_REFERENCE",
   "SNAPSHOT_FROM_FUTURE",
   "STALE_SNAPSHOT",
+  "QUOTE_SNAPSHOT_PROVENANCE_INVALID",
   "CANDIDATE_IDENTITY_MISMATCH",
   "INELIGIBLE_CYCLE_DERIVED_INTENT",
   "INTENT_ELIGIBILITY_CONTEXT_INVALID",
@@ -300,12 +303,28 @@ export function evaluateResearchRunV1(
     for (const snapshotReference of snapshotReferences) {
       const snapshot = snapshotsByReference.get(snapshotReference)
       if (snapshot === undefined) continue
+      if (
+        snapshotReference !== PROPOSAL_QUOTE_SNAPSHOT_REF ||
+        snapshot.provider !== "ALPACA" ||
+        snapshot.source !== ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE ||
+        snapshot.temporalClass !== "LIVE"
+      ) {
+        groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
+      }
       if (Date.parse(snapshot.retrievedAt) > intentEvaluatedAt) {
         groundingIssues.push("SNAPSHOT_FROM_FUTURE")
       }
       if (Date.parse(snapshot.freshUntil) < intentEvaluatedAt) {
         groundingIssues.push("STALE_SNAPSHOT")
       }
+    }
+    if (
+      snapshotReferences.some(
+        (snapshotReference) =>
+          snapshotReference !== PROPOSAL_QUOTE_SNAPSHOT_REF,
+      )
+    ) {
+      groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
     }
   }
 
