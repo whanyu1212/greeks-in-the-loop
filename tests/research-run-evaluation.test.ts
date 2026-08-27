@@ -175,34 +175,39 @@ const derivedIntentRun = (): ResearchRunV1 => {
   }
   const derived = deriveTradeIntentV1(decision, {
     quoteSnapshotRef: "quote-snapshot",
-    evaluatedAt: "2026-08-26T12:04:00.000Z",
+    evaluatedAt: "2026-08-26T14:04:00.000Z",
     longQuote: {
       contractSymbol: "SPY260918C00600000",
       feed: "INDICATIVE",
       bidCentsPerShare: 100,
       askCentsPerShare: 110,
-      providerTimestamp: "2026-08-26T12:03:59.000Z",
+      providerTimestamp: "2026-08-26T14:03:59.000Z",
     },
     shortQuote: {
       contractSymbol: "SPY260918C00610000",
       feed: "INDICATIVE",
       bidCentsPerShare: 50,
       askCentsPerShare: 60,
-      providerTimestamp: "2026-08-26T12:03:59.000Z",
+      providerTimestamp: "2026-08-26T14:03:59.000Z",
     },
   })
   if (!derived.success) throw new Error("Expected valid derived-intent fixture")
 
   return {
     ...base,
+    cycle: {
+      ...base.cycle,
+      startedAt: "2026-08-26T14:00:00.000Z",
+      completedAt: "2026-08-26T14:05:00.000Z",
+    },
     initialEligibility: {
-      evaluatedAt: "2026-08-26T12:00:30.000Z",
+      evaluatedAt: "2026-08-26T14:00:30.000Z",
       sessionDate: "2026-08-26",
       researchEligible: true,
       tradeIntentEligible: true,
       tradeIntentWindow: {
-        slotStartedAt: "2026-08-26T12:00:00.000Z",
-        deadline: "2026-08-26T12:05:00.000Z",
+        slotStartedAt: "2026-08-26T14:00:00.000Z",
+        deadline: "2026-08-26T14:05:00.000Z",
       },
     },
     evidenceSnapshots: [
@@ -210,8 +215,8 @@ const derivedIntentRun = (): ResearchRunV1 => {
         snapshotRef: "quote-snapshot",
         provider: "ALPACA",
         source: "option-quotes",
-        retrievedAt: "2026-08-26T12:03:59.000Z",
-        freshUntil: "2026-08-26T12:04:59.000Z",
+        retrievedAt: "2026-08-26T14:03:59.000Z",
+        freshUntil: "2026-08-26T14:04:59.000Z",
         temporalClass: "LIVE",
       },
     ],
@@ -485,14 +490,14 @@ describe("research run evaluation", () => {
     }
     const intent = {
       ...run.outcome.intent,
-      evaluatedAt: "2026-08-26T12:05:00.000Z",
+      evaluatedAt: "2026-08-26T14:05:00.000Z",
       longQuote: {
         ...run.outcome.intent.longQuote,
-        providerTimestamp: "2026-08-26T12:04:59.000Z",
+        providerTimestamp: "2026-08-26T14:04:59.000Z",
       },
       shortQuote: {
         ...run.outcome.intent.shortQuote,
-        providerTimestamp: "2026-08-26T12:04:59.000Z",
+        providerTimestamp: "2026-08-26T14:04:59.000Z",
       },
     }
 
@@ -530,7 +535,7 @@ describe("research run evaluation", () => {
       ...run,
       initialEligibility: {
         ...run.initialEligibility,
-        evaluatedAt: "2026-08-26T11:59:59.000Z",
+        evaluatedAt: "2026-08-26T13:59:59.000Z",
       },
     })
 
@@ -552,11 +557,62 @@ describe("research run evaluation", () => {
         ...run.initialEligibility,
         tradeIntentWindow: {
           ...run.initialEligibility.tradeIntentWindow,
-          deadline: "2026-08-26T12:06:00.000Z",
+          deadline: "2026-08-26T14:06:00.000Z",
         },
       },
     })
 
+    expect(evaluation.dimensions.failClosedBehavior).toEqual({
+      status: "FAIL",
+      issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_INVALID"],
+    })
+  })
+
+  it("rejects a retained trade slot outside runtime entry hours", () => {
+    const run = derivedIntentRun()
+    if (
+      run.initialEligibility?.tradeIntentWindow === undefined ||
+      run.outcome.status !== "INTENT_DERIVED"
+    ) {
+      throw new Error("Expected a derived-intent fixture")
+    }
+    const intent = {
+      ...run.outcome.intent,
+      evaluatedAt: "2026-08-26T19:04:00.000Z",
+      longQuote: {
+        ...run.outcome.intent.longQuote,
+        providerTimestamp: "2026-08-26T19:03:59.000Z",
+      },
+      shortQuote: {
+        ...run.outcome.intent.shortQuote,
+        providerTimestamp: "2026-08-26T19:03:59.000Z",
+      },
+    }
+
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      cycle: {
+        ...run.cycle,
+        startedAt: "2026-08-26T19:00:00.000Z",
+        completedAt: "2026-08-26T19:05:00.000Z",
+      },
+      initialEligibility: {
+        ...run.initialEligibility,
+        evaluatedAt: "2026-08-26T19:00:30.000Z",
+        tradeIntentWindow: {
+          slotStartedAt: "2026-08-26T19:00:00.000Z",
+          deadline: "2026-08-26T19:05:00.000Z",
+        },
+      },
+      evidenceSnapshots: run.evidenceSnapshots.map((snapshot) => ({
+        ...snapshot,
+        retrievedAt: "2026-08-26T19:03:59.000Z",
+        freshUntil: "2026-08-26T19:04:59.000Z",
+      })),
+      outcome: { ...run.outcome, intent },
+    })
+
+    expect(evaluation.dimensions.temporalIntegrity.status).toBe("PASS")
     expect(evaluation.dimensions.failClosedBehavior).toEqual({
       status: "FAIL",
       issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_INVALID"],

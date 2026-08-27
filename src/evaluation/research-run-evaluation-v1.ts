@@ -10,7 +10,10 @@ import {
   RESEARCH_RUN_VERSION,
   type ResearchRunV1,
 } from "../research/research-artifact.js"
-import { newYorkDate } from "../scheduling/research-eligibility.js"
+import {
+  newYorkDate,
+  newYorkLocalTime,
+} from "../scheduling/research-eligibility.js"
 
 export const RESEARCH_RUN_EVALUATION_VERSION = "1.0.0" as const
 
@@ -366,7 +369,9 @@ export function evaluateResearchRunV1(
       const slotMatchesSession =
         sessionDate !== undefined &&
         Number.isFinite(slotStartedAt) &&
-        newYorkDate(slotDate) === sessionDate
+        newYorkDate(slotDate) === sessionDate &&
+        slotStartedAt >= newYorkLocalTime(sessionDate, "10:00").getTime() &&
+        slotStartedAt < newYorkLocalTime(sessionDate, "15:00").getTime()
       const eligibilityContextValid =
         Number.isFinite(eligibilityEvaluatedAt) &&
         Number.isFinite(slotStartedAt) &&
