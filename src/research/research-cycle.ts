@@ -100,7 +100,7 @@ const observationIsFresh = (
   )
 }
 
-const proposalMarketRegimeIsFresh = (
+export const proposalMarketRegimeIsFresh = (
   report: ResearchReportV2,
   evaluatedAt: string,
 ) =>
@@ -110,7 +110,7 @@ const proposalMarketRegimeIsFresh = (
     MAX_PROPOSAL_MARKET_REGIME_AGE_MS,
   )
 
-const proposalAccountChecksAreFresh = (
+export const proposalAccountChecksAreFresh = (
   report: ResearchReportV2,
   evaluatedAt: string,
 ) =>
@@ -120,7 +120,7 @@ const proposalAccountChecksAreFresh = (
     MAX_PROPOSAL_ACCOUNT_CHECK_AGE_MS,
   )
 
-const proposalHistoryIssuePath = (
+export const proposalHistoryIssuePath = (
   report: ResearchReportV2,
   eligibility: ResearchEligibilityV1,
 ): readonly (string | number)[] | undefined => {

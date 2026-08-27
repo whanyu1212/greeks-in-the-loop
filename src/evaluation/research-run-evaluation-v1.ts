@@ -18,7 +18,10 @@ import {
   ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE,
 } from "../market-data/alpaca-option-quotes.js"
 import {
+  proposalAccountChecksAreFresh,
   PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
+  proposalHistoryIssuePath,
+  proposalMarketRegimeIsFresh,
   PROPOSAL_QUOTE_SNAPSHOT_REF,
 } from "../research/research-cycle.js"
 import {
@@ -264,6 +267,18 @@ export function evaluateResearchRunV1(
   const validReport =
     parsedReport?.success === true ? parsedReport.data : undefined
   const reportResult = validReport?.result
+  const retainedProposalEvaluationLowerBound = (() => {
+    if (validReport === undefined || run.initialEligibility === undefined) {
+      return undefined
+    }
+    const eligibilityEvaluatedAt = Date.parse(
+      run.initialEligibility.evaluatedAt,
+    )
+    const reportAsOf = Date.parse(validReport.analysis.asOf)
+    return Number.isFinite(eligibilityEvaluatedAt) && Number.isFinite(reportAsOf)
+      ? new Date(Math.max(eligibilityEvaluatedAt, reportAsOf)).toISOString()
+      : undefined
+  })()
   const retainedResult = run.preliminaryResearch ?? run.validatedDecision
   const validRetainedResult =
     parsedPreliminaryResearch?.success === true
@@ -286,6 +301,49 @@ export function evaluateResearchRunV1(
           PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
         )
       : undefined
+  const expectedPreQuoteDecisionRejectionIssues = (() => {
+    if (
+      proposalPreflightValidation?.success !== true ||
+      validReport === undefined ||
+      run.initialEligibility === undefined ||
+      retainedProposalEvaluationLowerBound === undefined
+    ) {
+      return undefined
+    }
+    if (
+      !proposalMarketRegimeIsFresh(
+        validReport,
+        retainedProposalEvaluationLowerBound,
+      )
+    ) {
+      return [
+        {
+          code: "CONTEXT_INVALID" as const,
+          path: ["analysis", "marketRegime", "observedAt"],
+        },
+      ]
+    }
+    if (
+      !proposalAccountChecksAreFresh(
+        validReport,
+        retainedProposalEvaluationLowerBound,
+      )
+    ) {
+      return [
+        {
+          code: "CONTEXT_INVALID" as const,
+          path: ["analysis", "accountChecks", "observedAt"],
+        },
+      ]
+    }
+    const historyIssuePath = proposalHistoryIssuePath(
+      validReport,
+      run.initialEligibility,
+    )
+    return historyIssuePath === undefined
+      ? undefined
+      : [{ code: "CONTEXT_INVALID" as const, path: historyIssuePath }]
+  })()
   const canonicalRetainedQuoteSnapshot =
     run.evidenceSnapshots.length === 1 &&
     run.evidenceSnapshots[0] !== undefined &&
@@ -427,6 +485,11 @@ export function evaluateResearchRunV1(
             run.outcome.issues,
             proposalPreflightValidation.issues,
           )) ||
+        (expectedPreQuoteDecisionRejectionIssues !== undefined &&
+          !isDeepStrictEqual(
+            run.outcome.issues,
+            expectedPreQuoteDecisionRejectionIssues,
+          )) ||
         (run.evidenceSnapshots.length > 0 &&
           (parsedReport?.success !== true ||
             parsedReport.data.result.outcome !== "PROPOSE_TRADE")) ||
@@ -530,19 +593,8 @@ export function evaluateResearchRunV1(
       ? run.evidenceSnapshots[0].retrievedAt
       : undefined
   const quoteConfirmationEvaluationLowerBound = (() => {
-    if (
-      !quoteConfirmationRejection ||
-      parsedReport?.success !== true ||
-      run.initialEligibility === undefined
-    ) {
-      return undefined
-    }
-    const eligibilityEvaluatedAt = Date.parse(
-      run.initialEligibility.evaluatedAt,
-    )
-    const reportAsOf = Date.parse(parsedReport.data.analysis.asOf)
-    return Number.isFinite(eligibilityEvaluatedAt) && Number.isFinite(reportAsOf)
-      ? new Date(Math.max(eligibilityEvaluatedAt, reportAsOf)).toISOString()
+    return quoteConfirmationRejection
+      ? retainedProposalEvaluationLowerBound
       : undefined
   })()
   const decisionRejectionEvaluatedAt =

@@ -929,6 +929,60 @@ describe("research run evaluation", () => {
     )
   })
 
+  it("requires exact provable pre-quote issues for proposal rejections", () => {
+    const run = derivedIntentRun()
+    if (run.researchReport === undefined) {
+      throw new Error("Expected a proposal report fixture")
+    }
+    const {
+      validatedDecision: _validatedDecision,
+      evidenceSnapshots: _evidenceSnapshots,
+      ...base
+    } = run
+    const rejectedRun = {
+      ...base,
+      evidenceSnapshots: [],
+      researchReport: {
+        ...run.researchReport,
+        analysis: {
+          ...run.researchReport.analysis,
+          accountChecks: {
+            ...run.researchReport.analysis.accountChecks,
+            observedAt: "2026-08-26T13:58:00.000Z",
+          },
+        },
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [
+          {
+            code: "CONTEXT_INVALID",
+            path: ["analysis", "accountChecks", "observedAt"],
+          },
+        ],
+      },
+    } as ResearchRunV1
+    const evaluation = evaluateResearchRunV1(rejectedRun)
+    const misattributed = evaluateResearchRunV1({
+      ...rejectedRun,
+      outcome: {
+        ...rejectedRun.outcome,
+        issues: [
+          {
+            code: "CONTEXT_INVALID",
+            path: ["analysis", "marketRegime", "observedAt"],
+          },
+        ],
+      },
+    } as ResearchRunV1)
+
+    expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
+    expect(misattributed.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+  })
+
   it("returns contract failure instead of throwing for malformed retained results", () => {
     const runs = [
       {
