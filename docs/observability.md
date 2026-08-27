@@ -109,5 +109,7 @@ research record; trace identifiers are not written into the ledger in this
 phase.
 
 Detailed OpenCode event adaptation and token/tool metadata belong to the next
-tracing increment. Evaluation datasets, scorers, and prompt/skill comparisons
-remain a separate evaluation increment.
+tracing increment. Deterministic offline run evaluation is documented in
+[Offline research evaluation](research-evaluation.md); LLM judging, evaluation
+datasets, AX publication, and prompt/skill comparisons remain separate
+increments.

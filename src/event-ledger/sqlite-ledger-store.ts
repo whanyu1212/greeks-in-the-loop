@@ -136,6 +136,7 @@ export type CreateSqliteLedgerStoreOptions = Readonly<{
   knownCredentialValues: readonly string[]
   now?: () => Date
   timeoutMs?: number
+  readonly?: boolean
 }>
 
 /**
@@ -149,6 +150,7 @@ export function createSqliteLedgerStore({
   knownCredentialValues,
   now = () => new Date(),
   timeoutMs = 5_000,
+  readonly = false,
 }: CreateSqliteLedgerStoreOptions): LedgerStore {
   if (
     !Array.isArray(knownCredentialValues) ||
@@ -163,16 +165,26 @@ export function createSqliteLedgerStore({
     throw new Error("Known credential values are invalid")
   }
   const protectedCredentialValues = [...knownCredentialValues]
-  const database = new Database(path, { timeout: timeoutMs })
+  const database = new Database(path, {
+    timeout: timeoutMs,
+    readonly,
+    fileMustExist: readonly,
+  })
   database.pragma("foreign_keys = ON")
-  database.pragma("journal_mode = WAL")
-  database.pragma("synchronous = FULL")
+  if (!readonly) {
+    database.pragma("journal_mode = WAL")
+    database.pragma("synchronous = FULL")
+  }
   database.pragma(`busy_timeout = ${timeoutMs}`)
 
   let closed = false
 
   const assertOpen = () => {
     if (closed || !database.open) throw new Error("Ledger store is closed")
+  }
+
+  const assertWritable = () => {
+    if (readonly) throw new Error("Ledger store is read-only")
   }
 
   const appendValidated = (
@@ -204,6 +216,7 @@ export function createSqliteLedgerStore({
   ) => {
     signal?.throwIfAborted()
     assertOpen()
+    assertWritable()
     if (events.length === 0) return []
     if (events.length > 1_000) {
       throw new Error("Ledger append batch cannot exceed 1000 events")
@@ -238,6 +251,7 @@ export function createSqliteLedgerStore({
     async migrate(signal) {
       signal?.throwIfAborted()
       assertOpen()
+      assertWritable()
       applyLedgerMigrations(database, undefined, () => now().toISOString())
     },
 

@@ -120,6 +120,22 @@ The JSON artifact is a deterministic `ResearchRunV1` view intended for humans an
 
 The project intentionally does **not** retain raw model responses, hidden reasoning, full OpenCode transcripts, raw Alpaca/FMP/Exa responses, credentials, or secret-bearing URLs. The bounded report is the retained analysis record, and all its observations remain labeled `AGENT_REPORTED`; only application-confirmed quotes and deterministic intent calculations cross that trust boundary.
 
+## Offline evaluation
+
+Evaluate the latest completed run, or select one by cycle ID:
+
+```bash
+pnpm research:evaluate
+pnpm research:evaluate -- --cycle <cycle-id>
+pnpm research:evaluate -- --ledger .state/manual-dry-run.sqlite --cycle <cycle-id>
+```
+
+The command reads SQLite without changing it and prints a deterministic,
+content-free `ResearchRunEvaluationV1` JSON result. Failed dimensions are
+reported as data and do not make the command fail; a missing, interrupted, or
+invalid run does. See [Offline research evaluation](docs/research-evaluation.md)
+for the dimensions, privacy boundary, and current limitations.
+
 ## Observability
 
 Optional manual OpenTelemetry/OpenInference tracing shows coarse research-cycle
