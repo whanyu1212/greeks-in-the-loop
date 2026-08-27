@@ -60,7 +60,7 @@ const contractSymbol = z
   .max(32)
   .regex(/^[A-Z0-9]{1,6}\d{6}[CP]\d{8}$/u)
 
-const riskContractLegV1Schema = z
+export const riskContractLegV1Schema = z
   .object({
     role: z.enum(["LONG", "SHORT"]),
     contractSymbol,
@@ -80,7 +80,7 @@ const riskContractLegV1Schema = z
   })
   .strict()
 
-const applicationVerifiedAccountV1Schema = z
+export const applicationVerifiedAccountV1Schema = z
   .object({
     observedAt: timestamp,
     status: z.enum(["ACTIVE", "INACTIVE", "UNKNOWN"]),
@@ -92,7 +92,7 @@ const applicationVerifiedAccountV1Schema = z
   })
   .strict()
 
-const reconciledPortfolioV1Schema = z
+export const reconciledPortfolioV1Schema = z
   .object({
     observedAt: timestamp,
     consistent: z.boolean(),
@@ -104,7 +104,7 @@ const reconciledPortfolioV1Schema = z
   })
   .strict()
 
-const contractSnapshotV1Schema = z
+export const contractSnapshotV1Schema = z
   .object({
     slotStartedAt: timestamp,
     observedAt: timestamp,
@@ -122,6 +122,19 @@ const contractSnapshotV1Schema = z
       }
     }
   })
+
+export type RiskContractLegV1 = Readonly<
+  z.infer<typeof riskContractLegV1Schema>
+>
+export type ApplicationVerifiedAccountV1 = Readonly<
+  z.infer<typeof applicationVerifiedAccountV1Schema>
+>
+export type ReconciledPortfolioV1 = Readonly<
+  z.infer<typeof reconciledPortfolioV1Schema>
+>
+export type ContractSnapshotV1 = Readonly<
+  z.infer<typeof contractSnapshotV1Schema>
+>
 
 export const riskEvaluationInputV1Schema = z
   .object({
