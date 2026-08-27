@@ -4,7 +4,7 @@ import { preliminaryResearchV1Schema } from "../src/contracts/preliminary-resear
 
 const preliminary = {
   contractVersion: "1.0.0",
-  strategyVersion: "1.0.0",
+  strategyVersion: "1.1.0",
   outcome: "PRELIMINARY_RESEARCH",
   targetSessionDate: "2026-08-26",
   direction: "BULLISH",
@@ -32,6 +32,15 @@ const preliminary = {
 describe("PreliminaryResearchV1", () => {
   it("accepts bounded research with explicit temporal labels", () => {
     expect(preliminaryResearchV1Schema.parse(preliminary)).toEqual(preliminary)
+  })
+
+  it("keeps legacy strategy research readable", () => {
+    expect(
+      preliminaryResearchV1Schema.safeParse({
+        ...preliminary,
+        strategyVersion: "1.0.0",
+      }).success,
+    ).toBe(true)
   })
 
   it("requires every sourced observation to identify its temporal class", () => {

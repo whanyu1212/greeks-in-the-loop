@@ -113,7 +113,7 @@ describe("research cycle artifact", () => {
   it("projects the complete run from the committed ledger timeline", () => {
     const decision = {
       contractVersion: "1.0.0" as const,
-      strategyVersion: "1.0.0" as const,
+      strategyVersion: "1.1.0" as const,
       outcome: "NO_ACTION" as const,
       reasonCodes: ["SIGNAL_NOT_ACTIONABLE" as const],
       evidence: [],
@@ -207,7 +207,7 @@ describe("research cycle artifact", () => {
       status: "PRELIMINARY_RESEARCH_RETAINED",
       research: {
         contractVersion: "1.0.0",
-        strategyVersion: "1.0.0",
+        strategyVersion: "1.1.0",
         outcome: "PRELIMINARY_RESEARCH",
         targetSessionDate: "2026-08-26",
         direction: "UNDETERMINED",
@@ -306,7 +306,7 @@ describe("research cycle artifact", () => {
       status: "VALIDATED_NO_ACTION",
       decision: {
         contractVersion: "1.0.0",
-        strategyVersion: "1.0.0",
+        strategyVersion: "1.1.0",
         outcome: "NO_ACTION",
         reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
         evidence: [],

@@ -72,7 +72,7 @@ Example:
 ```json
 {
   "contractVersion": "1.0.0",
-  "strategyVersion": "1.0.0",
+  "strategyVersion": "1.1.0",
   "outcome": "NO_ACTION",
   "reasonCodes": ["SIGNAL_NOT_ACTIONABLE"]
 }
@@ -113,7 +113,7 @@ Example:
 ```json
 {
   "contractVersion": "1.0.0",
-  "strategyVersion": "1.0.0",
+  "strategyVersion": "1.1.0",
   "outcome": "PROPOSE_TRADE",
   "direction": "BULLISH",
   "thesis": "Daily and intraday direction agree.",

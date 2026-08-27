@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Version | 1.0.0 |
+| Version | 1.1.0 |
 | Status | Frozen for implementation |
 | Effective date | 2026-08-25 |
 | Account | Alpaca paper account with $100,000 initial equity |
@@ -38,9 +38,10 @@ open spread, one pending entry, and one new entry per trading day.
 - All market windows use `America/New_York`, including daylight-saving changes.
 - Trading sessions come from the Alpaca market calendar.
 - Decision slots occur at minute `00`, `15`, `30`, and `45` of each hour. A
-  cycle may start from its slot through 119 seconds after it. Missed slots are
+  cycle may start during the first five minutes of its slot. Missed slots are
   skipped rather than replayed, cycles may not overlap, and approval must
-  complete before five minutes have elapsed from the slot.
+  complete before ten minutes have elapsed from the slot. The remaining five
+  minutes prevent overlap with the next decision slot.
 - New entries are evaluated only on a regular trading day while the Alpaca
   clock reports the market open and
   `10:00 <= slot < min(15:00, session_close - 60 minutes)`.
@@ -57,7 +58,7 @@ are stored with the decision but are not part of the immutable market snapshot.
 After snapshot analysis, the strategy makes a final Alpaca clock request and
 captures `approval_evaluated_at` after that response. Approval is the atomic,
 in-memory evaluation performed at that timestamp; it makes no further provider
-request. It requires `approval_evaluated_at < slot + 5 minutes` and
+request. It requires `approval_evaluated_at < slot + 10 minutes` and
 `approval_evaluated_at < min(15:00, session_close - 60 minutes)`, plus a returned
 clock that still reports the market open. Every sub-day freshness limit,
 including quote and latest-bar age, is measured again against
@@ -208,7 +209,7 @@ deadlines, and every sub-day freshness limit against that timestamp. After those
 checks, it captures `submitted_at` immediately before invoking the order API and
 repeats the no-I/O deadline and freshness comparisons against `submitted_at`.
 The API invocation follows in the same synchronous call path. Both timestamps
-must be before `slot + 5 minutes` and
+must be before `slot + 10 minutes` and
 `min(15:00, session_close - 60 minutes)`. A failed check abandons the entry. If
 satisfying a failed freshness check requires new market data, that market data
 forms a new snapshot and triggers the complete reevaluation above.
@@ -250,7 +251,7 @@ order with `time_in_force=day`. Market orders, legging, and paying above the
 approved limit are forbidden.
 
 The order's `entry_order_deadline` is
-`min(slot + 5 minutes, 15:00, session_close - 60 minutes)`. Before submission,
+`min(slot + 10 minutes, 15:00, session_close - 60 minutes)`. Before submission,
 persist the intent, deadline, unique `client_order_id`, and phase `PREPARED`.
 Arm the local deadline timer, durably transition to `SUBMITTING`, then immediately
 invoke the POST with that same ID in its payload and a five-second timeout.

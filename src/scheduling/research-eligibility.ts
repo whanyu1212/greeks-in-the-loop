@@ -2,8 +2,13 @@ import { z } from "zod"
 
 export const DEFAULT_PREMARKET_RESEARCH_START_ET = "08:00" as const
 export const DRY_RUN_ANYTIME_RESEARCH_MODE = "DRY_RUN_ANYTIME" as const
+export const DRY_RUN_ANYTIME_SHADOW_MODE = "DRY_RUN_SHADOW_ANYTIME" as const
+export const TRADE_INTENT_START_GRACE_MS = 5 * 60 * 1_000
+export const TRADE_INTENT_WINDOW_DURATION_MS = 10 * 60 * 1_000
 
-export type ResearchMode = typeof DRY_RUN_ANYTIME_RESEARCH_MODE
+export type ResearchMode =
+  | typeof DRY_RUN_ANYTIME_RESEARCH_MODE
+  | typeof DRY_RUN_ANYTIME_SHADOW_MODE
 
 export type MarketSessionV1 = Readonly<{
   date: string
@@ -36,7 +41,9 @@ export const researchEligibilityV1Schema = z
     tradeIntentEligible: z.boolean(),
     tradeIntentWindow: tradeIntentWindowV1Schema.optional(),
     previousSessionDates: z.array(z.iso.date()).max(16).optional(),
-    researchMode: z.literal(DRY_RUN_ANYTIME_RESEARCH_MODE).optional(),
+    researchMode: z
+      .enum([DRY_RUN_ANYTIME_RESEARCH_MODE, DRY_RUN_ANYTIME_SHADOW_MODE])
+      .optional(),
     reason: z
       .enum([
         "NO_MARKET_SESSION",
@@ -48,19 +55,40 @@ export const researchEligibilityV1Schema = z
   })
   .strict()
   .superRefine((eligibility, context) => {
-    const isAnytimeDryRun =
+    const isResearchOnlyDryRun =
       eligibility.researchMode === DRY_RUN_ANYTIME_RESEARCH_MODE
-    const dryRunShapeIsValid = eligibility.researchEligible
+    const isShadowDryRun =
+      eligibility.researchMode === DRY_RUN_ANYTIME_SHADOW_MODE
+    const unavailableShapeIsValid =
+      eligibility.researchEligible === false &&
+      eligibility.tradeIntentEligible === false &&
+      eligibility.tradeIntentWindow === undefined &&
+      eligibility.reason === "NO_MARKET_SESSION"
+    const researchOnlyShapeIsValid = eligibility.researchEligible
       ? eligibility.tradeIntentEligible === false &&
         eligibility.tradeIntentWindow === undefined &&
         eligibility.reason === "DRY_RUN_RESEARCH_ONLY"
-      : eligibility.tradeIntentEligible === false &&
-        eligibility.tradeIntentWindow === undefined &&
-        eligibility.reason === "NO_MARKET_SESSION"
+      : unavailableShapeIsValid
+    const windowStart = Date.parse(
+      eligibility.tradeIntentWindow?.slotStartedAt ?? "",
+    )
+    const windowDeadline = Date.parse(
+      eligibility.tradeIntentWindow?.deadline ?? "",
+    )
+    const shadowShapeIsValid = eligibility.researchEligible
+      ? eligibility.tradeIntentEligible === true &&
+        eligibility.tradeIntentWindow !== undefined &&
+        eligibility.reason === undefined &&
+        Number.isFinite(windowStart) &&
+        Number.isFinite(windowDeadline) &&
+        windowDeadline > windowStart
+      : unavailableShapeIsValid
 
     if (
-      (isAnytimeDryRun && !dryRunShapeIsValid) ||
-      (!isAnytimeDryRun && eligibility.reason === "DRY_RUN_RESEARCH_ONLY")
+      (isResearchOnlyDryRun && !researchOnlyShapeIsValid) ||
+      (isShadowDryRun && !shadowShapeIsValid) ||
+      (!isResearchOnlyDryRun &&
+        eligibility.reason === "DRY_RUN_RESEARCH_ONLY")
     ) {
       context.addIssue({
         code: "custom",
@@ -205,6 +233,40 @@ export function evaluateResearchEligibility({
     }
   }
 
+  if (researchMode === DRY_RUN_ANYTIME_SHADOW_MODE) {
+    if (tradeIntentWindow === null) {
+      throw new Error("Shadow anytime trade-intent window is missing")
+    }
+    const activeWindow = tradeIntentWindow ?? {
+      slotStartedAt: evaluatedAt.toISOString(),
+      deadline: new Date(
+        evaluatedMilliseconds + 24 * 60 * 60 * 1_000,
+      ).toISOString(),
+    }
+    const slotStartedAt = Date.parse(activeWindow.slotStartedAt)
+    const deadline = Date.parse(activeWindow.deadline)
+    if (
+      !Number.isFinite(slotStartedAt) ||
+      !Number.isFinite(deadline) ||
+      deadline <= slotStartedAt
+    ) {
+      throw new Error("Shadow anytime trade-intent window is invalid")
+    }
+    return {
+      evaluatedAt: evaluatedAt.toISOString(),
+      sessionDate: session.date,
+      sessionOpen: new Date(open).toISOString(),
+      sessionClose: new Date(close).toISOString(),
+      researchEligible: true,
+      tradeIntentEligible: true,
+      tradeIntentWindow: activeWindow,
+      ...(session.previousSessionDates === undefined
+        ? {}
+        : { previousSessionDates: [...session.previousSessionDates] }),
+      researchMode,
+    }
+  }
+
   const researchEligible =
     evaluatedMilliseconds >= premarketStart && evaluatedMilliseconds < close
   if (!researchEligible) {
@@ -230,14 +292,17 @@ export function evaluateResearchEligibility({
     if (
       evaluatedMilliseconds >= open &&
       slotAge >= 0 &&
-      slotAge <= 119_999 &&
+      slotAge < TRADE_INTENT_START_GRACE_MS &&
       slot.getTime() >= entryStart &&
       slot.getTime() < entryCutoff
     ) {
       activeWindow = {
         slotStartedAt: slot.toISOString(),
         deadline: new Date(
-          Math.min(slot.getTime() + 5 * 60 * 1_000, entryCutoff),
+          Math.min(
+            slot.getTime() + TRADE_INTENT_WINDOW_DURATION_MS,
+            entryCutoff,
+          ),
         ).toISOString(),
       }
     }
@@ -249,7 +314,11 @@ export function evaluateResearchEligibility({
       !Number.isFinite(deadline) ||
       slotStartedAt < entryStart ||
       slotStartedAt >= entryCutoff ||
-      deadline !== Math.min(slotStartedAt + 5 * 60 * 1_000, entryCutoff)
+      deadline !==
+        Math.min(
+          slotStartedAt + TRADE_INTENT_WINDOW_DURATION_MS,
+          entryCutoff,
+        )
     ) {
       throw new Error("Trade-intent window is invalid")
     }

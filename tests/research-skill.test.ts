@@ -27,7 +27,7 @@ describe("SPY debit-spread research skill", () => {
     expect(skill).toContain("cannot expand application eligibility")
     expect(skill).toContain("rechecks the slot and deadline immediately before and after exact-leg quote confirmation")
     expect(skill).toContain("Never return `PROPOSE_TRADE` in that state")
-    expect(sourcePolicy).toContain("elapsed start greater than 119 seconds")
+    expect(sourcePolicy).toContain("start outside its first five minutes")
   })
 
   it("defines staged research with mandatory temporal labels and refresh", () => {

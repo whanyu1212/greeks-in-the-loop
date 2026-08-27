@@ -19,7 +19,7 @@ import {
 
 const preliminaryResearch = (): PreliminaryResearchV1 => ({
   contractVersion: "1.0.0",
-  strategyVersion: "1.0.0",
+  strategyVersion: "1.1.0",
   outcome: "PRELIMINARY_RESEARCH",
   targetSessionDate: "2026-08-26",
   direction: "UNDETERMINED",
@@ -130,7 +130,7 @@ const noActionRun = (): ResearchRunV1 => {
   } = sourceRun
   const decision = {
     contractVersion: "1.0.0" as const,
-    strategyVersion: "1.0.0" as const,
+    strategyVersion: "1.1.0" as const,
     outcome: "NO_ACTION" as const,
     reasonCodes: ["SIGNAL_NOT_ACTIONABLE" as const],
     evidence: [],
@@ -158,7 +158,7 @@ const derivedIntentRun = (): ResearchRunV1 => {
   } = preliminaryRun()
   const decision: ProposedTradeDecisionV1 = {
     contractVersion: "1.0.0",
-    strategyVersion: "1.0.0",
+    strategyVersion: "1.1.0",
     outcome: "PROPOSE_TRADE",
     direction: "BULLISH",
     thesis: "private-proposal-marker",
@@ -298,7 +298,7 @@ const derivedIntentRun = (): ResearchRunV1 => {
       tradeIntentEligible: true,
       tradeIntentWindow: {
         slotStartedAt: "2026-08-26T14:00:00.000Z",
-        deadline: "2026-08-26T14:05:00.000Z",
+        deadline: "2026-08-26T14:10:00.000Z",
       },
     },
     evidenceSnapshots: [
@@ -2414,28 +2414,28 @@ describe("research run evaluation", () => {
     }
     const intent = {
       ...run.outcome.intent,
-      evaluatedAt: "2026-08-26T14:05:00.000Z",
+      evaluatedAt: "2026-08-26T14:10:00.000Z",
       longQuote: {
         ...run.outcome.intent.longQuote,
-        providerTimestamp: "2026-08-26T14:04:59.000Z",
+        providerTimestamp: "2026-08-26T14:09:59.000Z",
       },
       shortQuote: {
         ...run.outcome.intent.shortQuote,
-        providerTimestamp: "2026-08-26T14:04:59.000Z",
+        providerTimestamp: "2026-08-26T14:09:59.000Z",
       },
     }
     const researchReport = {
       ...run.researchReport!,
       analysis: {
         ...run.researchReport!.analysis,
-        asOf: "2026-08-26T14:04:30.000Z",
+        asOf: "2026-08-26T14:09:30.000Z",
         marketRegime: {
           ...run.researchReport!.analysis.marketRegime,
-          observedAt: "2026-08-26T14:04:30.000Z",
+          observedAt: "2026-08-26T14:09:30.000Z",
         },
         candidateEvaluation: {
           ...run.researchReport!.analysis.candidateEvaluation!,
-          observedAt: "2026-08-26T14:04:30.000Z",
+          observedAt: "2026-08-26T14:09:30.000Z",
         },
       },
     }

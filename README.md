@@ -54,6 +54,20 @@ writes a dedicated `.state/research-anytime.sqlite` ledger plus the normal JSON
 export. Substantive research requires Exa; FMP context is optional. No `.env`
 change is required.
 
+Run the complete research, intent-derivation, and shadow-risk chain without the
+production quarter-hour window:
+
+```bash
+AGENT_CYCLE_TIMEOUT_MS=300000 pnpm agent:shadow-anytime
+```
+
+This mode remains non-executing, requires Alpaca to identify the current New
+York date as a trading session, and retains the normal freshness and
+deterministic risk gates. It records `DRY_RUN_SHADOW_ANYTIME` provenance in the
+dedicated `.state/shadow-anytime.sqlite` ledger and cannot use the configured
+production ledger. The agent may still return `NO_ACTION` or preliminary
+research when the strategy does not support a proposal.
+
 To use another isolated ledger, pass it explicitly. The command rejects the
 configured production ledger:
 
@@ -68,13 +82,22 @@ pnpm build
 node dist/index.js --once
 ```
 
+Interactive terminals show colored, aligned pipeline rows for eligibility,
+agent and tool summary, report and decision validation, quote confirmation,
+intent economics, risk-state capture and evaluation, ledger commit, and
+artifact output. Redirected output automatically uses JSONL. Set
+`AGENT_LOG_FORMAT=pretty` or `AGENT_LOG_FORMAT=json` to override detection.
+Logs intentionally exclude model prose, tool inputs and responses, account
+balances, positions, credentials, and raw provider payloads.
+
 Useful environment controls are documented in [`.env.example`](.env.example):
 
 | Setting | Purpose |
 | --- | --- |
 | `RESEARCH_LEDGER_PATH` | Selects the exclusively owned SQLite ledger. |
 | `AGENT_PREMARKET_START_ET` | Sets the earliest research time on an Alpaca trading date, in `America/New_York`. |
-| `AGENT_CYCLE_TIMEOUT_MS` | Limits one model/research cycle. Live research may need more than the 120-second default. |
+| `AGENT_CYCLE_TIMEOUT_MS` | Limits one model/research cycle (five minutes by default). |
+| `AGENT_LOG_FORMAT` | Selects `pretty` or `json` pipeline logs; defaults from TTY detection. |
 | `AGENT_INTERVAL_MS` | Controls continuous-run spacing. |
 | `AGENT_MAX_CYCLES` | Stops a continuous run after a bounded number of attempts. |
 | `AGENT_TASK` | Adds an operator objective to the structured research prompt. |

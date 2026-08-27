@@ -3,8 +3,8 @@ name: spy-debit-spread-research
 description: Research one SPY directional debit-spread decision using authoritative Alpaca facts, optional FMP context, mandatory Exa context, explicit freshness checks, and a fail-closed ResearchReportV2 output.
 compatibility: opencode
 metadata:
-  skill-version: "1.0.0"
-  strategy-version: "1.0.0"
+  skill-version: "1.1.0"
+  strategy-version: "1.1.0"
   contract-version: "1.0.0"
 ---
 

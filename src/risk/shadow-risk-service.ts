@@ -6,6 +6,10 @@ import {
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import { LedgerPersistenceError } from "../event-ledger/research-lifecycle-recorder.js"
 import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
+import {
+  NOOP_TERMINAL_STAGE_REPORTER,
+  type TerminalStageReporter,
+} from "../observability/terminal-stage-reporter.js"
 import type { RiskStateProvider } from "./alpaca-risk-state-provider.js"
 import {
   evaluateTradeIntentRiskV1,
@@ -41,6 +45,7 @@ export type ShadowRiskEvaluator = Readonly<{
     }>
     getEvaluationEligibility: () => ResearchEligibilityV1
     signal: AbortSignal
+    stageReporter?: TerminalStageReporter
   }>): Promise<ShadowRiskResultV1>
 }>
 
@@ -164,11 +169,19 @@ export function createShadowRiskEvaluator(options: Readonly<{
   return {
     async evaluate(input) {
       input.signal.throwIfAborted()
+      const stageReporter =
+        input.stageReporter ?? NOOP_TERMINAL_STAGE_REPORTER
       const { sessionDate, tradeIntentWindow } = input.captureEligibility
       const durableControl = await options.durableControl.load(
         sessionDate,
         input.signal,
       )
+      stageReporter.report("risk.durable_state", "COMPLETED", {
+        tradingDate: durableControl.tradingDate,
+        dailyBreakerActive: durableControl.dailyBreakerActive,
+        competitionBreakerActive: durableControl.competitionBreakerActive,
+        entriesSubmittedToday: durableControl.entriesSubmittedToday,
+      })
       const capture = await options.provider.capture({
         sessionDate,
         slotStartedAt: tradeIntentWindow.slotStartedAt,
@@ -179,6 +192,9 @@ export function createShadowRiskEvaluator(options: Readonly<{
       })
       input.signal.throwIfAborted()
       if (!capture.success) {
+        stageReporter.report("risk.state_capture", "REJECTED", {
+          reasonCodes: capture.reasons,
+        })
         return {
           decision: shadowRiskDecisionV1Schema.parse({
             decisionVersion: SHADOW_RISK_DECISION_VERSION,
@@ -194,6 +210,14 @@ export function createShadowRiskEvaluator(options: Readonly<{
         }
       }
 
+      stageReporter.report("risk.state_capture", "COMPLETED", {
+        evaluatedAt: capture.snapshot.evaluatedAt,
+        accountObservedAt: capture.snapshot.account.observedAt,
+        portfolioObservedAt: capture.snapshot.portfolio.observedAt,
+        contractsObservedAt: capture.snapshot.contracts.observedAt,
+        reconciliationReasonCodes: capture.snapshot.reconciliationReasonCodes,
+      })
+
       const stateProvenance = provenanceFor(capture)
       const breakerTransitions = breakerTransitionsFor(
         durableControl,
@@ -207,6 +231,9 @@ export function createShadowRiskEvaluator(options: Readonly<{
       })
       input.signal.throwIfAborted()
       if (!refreshed.success) {
+        stageReporter.report("risk.intent_refresh", "REJECTED", {
+          reasonCodes: refreshed.reasons,
+        })
         return {
           decision: shadowRiskDecisionV1Schema.parse({
             decisionVersion: SHADOW_RISK_DECISION_VERSION,
@@ -222,6 +249,12 @@ export function createShadowRiskEvaluator(options: Readonly<{
           breakerTransitions,
         }
       }
+
+      stageReporter.report("risk.intent_refresh", "COMPLETED", {
+        evaluatedAt: refreshed.intent.evaluatedAt,
+        entryLimitCentsPerShare: refreshed.intent.entryLimitCentsPerShare,
+        maxLossCentsPerContract: refreshed.intent.maxLossCentsPerContract,
+      })
 
       const evaluation = evaluateRisk({
         intent: refreshed.intent,

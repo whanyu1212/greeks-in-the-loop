@@ -40,7 +40,7 @@ const sourcedFact = {
 
 const bullishProposal = {
   contractVersion: "1.0.0",
-  strategyVersion: "1.0.0",
+  strategyVersion: "1.1.0",
   outcome: "PROPOSE_TRADE",
   direction: "BULLISH",
   thesis: "Daily and intraday direction agree.",
@@ -97,7 +97,7 @@ describe("ResearchDecision v1 NO_ACTION contract", () => {
     const result = validateResearchDecisionV1(
       {
         contractVersion: "1.0.0",
-        strategyVersion: "1.0.0",
+        strategyVersion: "1.1.0",
         outcome: "NO_ACTION",
         reasonCodes: [reasonCode],
       },
@@ -108,7 +108,7 @@ describe("ResearchDecision v1 NO_ACTION contract", () => {
       success: true,
       data: {
         contractVersion: "1.0.0",
-        strategyVersion: "1.0.0",
+        strategyVersion: "1.1.0",
         outcome: "NO_ACTION",
         reasonCodes: [reasonCode],
         evidence: [],
@@ -120,7 +120,7 @@ describe("ResearchDecision v1 NO_ACTION contract", () => {
     const result = validateResearchDecisionV1(
       {
         contractVersion: "1.0.0",
-        strategyVersion: "1.0.0",
+        strategyVersion: "1.1.0",
         outcome: "NO_ACTION",
         reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
         commentary: { arbitrary: "content" },
@@ -137,7 +137,7 @@ describe("ResearchDecision v1 NO_ACTION contract", () => {
     expectFailureCode(
       {
         contractVersion: "1.0.0",
-        strategyVersion: "1.0.0",
+        strategyVersion: "1.1.0",
         outcome: "NO_ACTION",
         reasonCodes: [],
       },
@@ -149,7 +149,7 @@ describe("ResearchDecision v1 NO_ACTION contract", () => {
     expectFailureCode(
       {
         contractVersion: "1.0.0",
-        strategyVersion: "1.0.0",
+        strategyVersion: "1.1.0",
         outcome: "NO_ACTION",
         reasonCodes: Array(NO_ACTION_REASON_CODES.length + 1).fill(
           "SIGNAL_NOT_ACTIONABLE",
@@ -163,7 +163,7 @@ describe("ResearchDecision v1 NO_ACTION contract", () => {
     const result = validateResearchDecisionV1(
       {
         contractVersion: "1.0.0",
-        strategyVersion: "1.0.0",
+        strategyVersion: "1.1.0",
         outcome: "NO_ACTION",
         reasonCodes: ["NO_ELIGIBLE_SPREAD"],
       },

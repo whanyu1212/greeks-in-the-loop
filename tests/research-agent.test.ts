@@ -12,9 +12,9 @@ import { projectResearchContextV1 } from "../src/research/research-context-v1.js
 describe("research agent request construction", () => {
   it("uses the fixed checked-in agent identity", () => {
     expect(RESEARCH_AGENT_NAME).toBe("research")
-    expect(RESEARCH_PROMPT_VERSION).toBe("1.1.0")
+    expect(RESEARCH_PROMPT_VERSION).toBe("1.3.0")
     expect(RESEARCH_SKILL_NAME).toBe("spy-debit-spread-research")
-    expect(RESEARCH_SKILL_VERSION).toBe("1.0.0")
+    expect(RESEARCH_SKILL_VERSION).toBe("1.1.0")
   })
 
   it("builds a bounded cycle request with an optional operator objective", () => {
@@ -98,5 +98,30 @@ describe("research agent request construction", () => {
     expect(prompt).toContain("research-only anytime dry run")
     expect(prompt).toContain("Never return PROPOSE_TRADE")
     expect(prompt).toContain('"researchMode":"DRY_RUN_ANYTIME"')
+  })
+
+  it("allows proposals only for non-executing shadow anytime evaluation", () => {
+    const prompt = buildResearchCyclePrompt(
+      1,
+      new Date("2026-08-25T23:00:00.000Z"),
+      undefined,
+      undefined,
+      {
+        evaluatedAt: "2026-08-25T23:00:00.000Z",
+        sessionDate: "2026-08-25",
+        researchEligible: true,
+        tradeIntentEligible: true,
+        tradeIntentWindow: {
+          slotStartedAt: "2026-08-25T23:00:00.000Z",
+          deadline: "2026-08-26T23:00:00.000Z",
+        },
+        researchMode: "DRY_RUN_SHADOW_ANYTIME",
+      },
+    )
+
+    expect(prompt).toContain("non-executing shadow anytime dry run")
+    expect(prompt).toContain("A fresh PROPOSE_TRADE may be returned")
+    expect(prompt).toContain('"researchMode":"DRY_RUN_SHADOW_ANYTIME"')
+    expect(prompt).not.toContain("Never return PROPOSE_TRADE")
   })
 })

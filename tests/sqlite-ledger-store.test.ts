@@ -175,7 +175,7 @@ describe("createSqliteLedgerStore", () => {
       payload: {
         decision: {
           contractVersion: "1.0.0",
-          strategyVersion: "1.0.0",
+          strategyVersion: "1.1.0",
           outcome: "NO_ACTION",
           reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
           evidence: [

@@ -16,7 +16,7 @@ This policy defines how the dedicated research agent selects sources, labels obs
 | Fact type | Authoritative source | Optional support | Conflict behavior |
 | --- | --- | --- | --- |
 | Paper account, configuration, orders, positions | Alpaca Trading API | None | Account must be active and approved for the complete multileg spread; missing, ambiguous, or inconsistent state blocks a proposal |
-| Market clock, calendar, scheduled slot, and deadlines | Alpaca, cycle-start timestamp, and read-only `trusted_time` | None | Derive the preceding quarter-hour slot; elapsed start greater than 119 seconds, closed market, or missed five-minute/entry deadline blocks a proposal |
+| Market clock, calendar, scheduled slot, and deadlines | Alpaca, cycle-start timestamp, and read-only `trusted_time` | None | Derive the preceding quarter-hour slot; a start outside its first five minutes, closed market, or missed ten-minute/entry deadline blocks a proposal |
 | SPY bars and quote | Alpaca IEX | FMP context only | Alpaca controls the strategy signal |
 | Option contracts, chain, quotes, Greeks | Alpaca Basic indicative feed | None | Chain and snapshot/quote inputs must explicitly request and retain the indicative feed label; missing, default/unspecified, OPRA, or conflicting fields reject the candidate |
 | Fundamentals and macro datasets | FMP | Exa corroboration | FMP is optional; material unresolved conflict produces `NO_ACTION` |

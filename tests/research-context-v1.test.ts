@@ -69,7 +69,7 @@ const validatedProposal = (): LedgerEventV1 => ({
   payload: {
     decision: {
       contractVersion: "1.0.0",
-      strategyVersion: "1.0.0",
+      strategyVersion: "1.1.0",
       outcome: "PROPOSE_TRADE",
       direction: "BULLISH",
       thesis: "PROSE_THESIS_MUST_NOT_SURVIVE",
@@ -125,7 +125,7 @@ const preliminaryRecorded = (): LedgerEventV1 => ({
   payload: {
     research: {
       contractVersion: "1.0.0",
-      strategyVersion: "1.0.0",
+      strategyVersion: "1.1.0",
       outcome: "PRELIMINARY_RESEARCH",
       targetSessionDate: "2026-08-26",
       direction: "UNDETERMINED",
@@ -247,7 +247,7 @@ describe("ResearchContextV1", () => {
           payload: {
             decision: {
               contractVersion: "1.0.0",
-              strategyVersion: "1.0.0",
+              strategyVersion: "1.1.0",
               outcome: "NO_ACTION",
               reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
               evidence: [],

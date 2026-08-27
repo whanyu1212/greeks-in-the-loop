@@ -30,6 +30,10 @@ import { createAlpacaOptionQuoteProvider } from "./market-data/alpaca-option-quo
 import { createAlpacaCalendarClient } from "./market-data/alpaca-calendar-client.js"
 import { summarizeOpenCodeInvocation } from "./observability/opencode-telemetry-summary.js"
 import { startResearchTelemetry } from "./observability/research-telemetry.js"
+import {
+  createTerminalStageReporter,
+  resolveTerminalLogFormat,
+} from "./observability/terminal-stage-reporter.js"
 import { startOpencode } from "./opencode-runtime.js"
 import {
   buildResearchCyclePrompt,
@@ -55,6 +59,7 @@ import {
 import {
   DEFAULT_PREMARKET_RESEARCH_START_ET,
   DRY_RUN_ANYTIME_RESEARCH_MODE,
+  DRY_RUN_ANYTIME_SHADOW_MODE,
   evaluateResearchEligibility,
   newYorkDate,
 } from "./scheduling/research-eligibility.js"
@@ -170,14 +175,22 @@ const agentOptions = parseAgentOptions(
   process.argv.slice(2),
   readSetting("RESEARCH_LEDGER_PATH"),
 )
-const { once, researchAnytime, ledgerPath } = agentOptions
+const { once, researchAnytime, shadowAnytime, ledgerPath } = agentOptions
+const researchMode = researchAnytime
+  ? DRY_RUN_ANYTIME_RESEARCH_MODE
+  : shadowAnytime
+    ? DRY_RUN_ANYTIME_SHADOW_MODE
+    : undefined
 const intervalMs = readPositiveInteger("AGENT_INTERVAL_MS", 5 * 60 * 1000)
-const cycleTimeoutMs = readPositiveInteger("AGENT_CYCLE_TIMEOUT_MS", 2 * 60 * 1000)
+const cycleTimeoutMs = readPositiveInteger("AGENT_CYCLE_TIMEOUT_MS", 5 * 60 * 1000)
 const cycleAbortTimeoutMs = readPositiveInteger("AGENT_CYCLE_ABORT_TIMEOUT_MS", 5_000)
 const maxCycles = once
   ? 1
   : readPositiveInteger("AGENT_MAX_CYCLES", Number.MAX_SAFE_INTEGER)
 const port = readPositiveInteger("OPENCODE_SERVER_PORT", 4096)
+const terminalLogFormat = resolveTerminalLogFormat(
+  readSetting("AGENT_LOG_FORMAT"),
+)
 const serverTimeout = readPositiveInteger("OPENCODE_SERVER_TIMEOUT_MS", 60_000)
 const task = readSetting("AGENT_TASK")?.trim()
 const alpacaApiKey = readRequiredSetting("ALPACA_API_KEY")
@@ -222,7 +235,7 @@ evaluateResearchEligibility({
 })
 const traceVersions = {
   agentName: RESEARCH_AGENT_NAME,
-  cycleMode: researchAnytime ? DRY_RUN_ANYTIME_RESEARCH_MODE : "STANDARD",
+  cycleMode: researchMode ?? "STANDARD",
   promptVersion: RESEARCH_PROMPT_VERSION,
   skillName: RESEARCH_SKILL_NAME,
   skillVersion: RESEARCH_SKILL_VERSION,
@@ -287,9 +300,7 @@ try {
                 evaluatedAt: eligibilityEvaluatedAt,
                 ...(session === undefined ? {} : { session }),
                 premarketStartEt,
-                ...(researchAnytime
-                  ? { researchMode: DRY_RUN_ANYTIME_RESEARCH_MODE }
-                  : {}),
+                ...(researchMode === undefined ? {} : { researchMode }),
               }),
             }
           },
@@ -300,9 +311,7 @@ try {
             ...(session === undefined ? {} : { session }),
             premarketStartEt,
             tradeIntentWindow: initialEligibility.tradeIntentWindow ?? null,
-            ...(researchAnytime
-              ? { researchMode: DRY_RUN_ANYTIME_RESEARCH_MODE }
-              : {}),
+            ...(researchMode === undefined ? {} : { researchMode }),
           })
         if (!initialEligibility.researchEligible) {
           const reason = initialEligibility.reason ?? "RESEARCH_WINDOW_INELIGIBLE"
@@ -378,6 +387,28 @@ try {
         }
         console.log(`OpenCode session ${sessionId} started at ${runtime.url}`)
         const cycleNumber = cycle.cycleNumber
+        const stageReporter = createTerminalStageReporter({
+          cycleId: cycle.cycleId,
+          cycleNumber,
+          startedAt: cycle.startedAt,
+          format: terminalLogFormat,
+        })
+        stageReporter.report("eligibility", "COMPLETED", {
+          sessionDate,
+          researchEligible: initialEligibility.researchEligible,
+          tradeIntentEligible: initialEligibility.tradeIntentEligible,
+          mode: initialEligibility.researchMode ?? "STANDARD",
+          reason: initialEligibility.reason ?? null,
+          slotStartedAt:
+            initialEligibility.tradeIntentWindow?.slotStartedAt ?? null,
+          deadline: initialEligibility.tradeIntentWindow?.deadline ?? null,
+        })
+        stageReporter.report("research.agent", "STARTED", {
+          agent: RESEARCH_AGENT_NAME,
+          promptVersion: RESEARCH_PROMPT_VERSION,
+          skillVersion: RESEARCH_SKILL_VERSION,
+          strategyVersion: STRATEGY_VERSION,
+        })
         cycleTrace.identify({
           cycleId: cycle.cycleId,
           cycleNumber,
@@ -436,12 +467,24 @@ try {
                       response.error,
                     )
                   }
-                  cycleTrace.recordOpenCodeResult(
-                    summarizeOpenCodeInvocation(
-                      response.data.info,
-                      response.data.parts,
-                    ),
+                  const invocation = summarizeOpenCodeInvocation(
+                    response.data.info,
+                    response.data.parts,
                   )
+                  cycleTrace.recordOpenCodeResult(invocation)
+                  stageReporter.report("research.agent", "COMPLETED", {
+                    providerId: invocation.providerId,
+                    modelId: invocation.modelId,
+                    inputTokenCount: invocation.inputTokenCount ?? null,
+                    outputTokenCount: invocation.outputTokenCount ?? null,
+                    reasoningTokenCount:
+                      invocation.reasoningTokenCount ?? null,
+                    toolCallCount: invocation.toolCallCount,
+                    toolErrorCount: invocation.toolErrorCount,
+                    toolCalls: invocation.toolCalls.map(
+                      ({ name, outcome }) => `${name}:${outcome}`,
+                    ),
+                  })
                   return response
                 },
               )
@@ -461,6 +504,7 @@ try {
                 outcomeSink: cycle.outcomeSink,
                 getEligibility,
                 trace: cycleTrace,
+                stageReporter,
               })
             },
             onTimeout: async () => {
@@ -488,8 +532,14 @@ try {
                 return writeResearchRunArtifact({ run })
               },
             )
+            stageReporter.report("artifact.write", "COMPLETED", {
+              path: artifactPath,
+            })
             return `${processed.report}\nResearch artifact: ${artifactPath}`
           } catch {
+            stageReporter.report("artifact.write", "REJECTED", {
+              reason: "WRITE_FAILED",
+            })
             console.error(
               `[cycle ${cycleNumber}] validated outcome recorded, but research artifact could not be written`,
             )

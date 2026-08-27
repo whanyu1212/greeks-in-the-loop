@@ -4,7 +4,7 @@ Issue #20 separates the time in which research is useful from the narrower time 
 
 ## Eligibility
 
-Application code queries the read-only Alpaca market calendar for the current `America/New_York` date. Research is eligible from the configured `AGENT_PREMARKET_START_ET` through the session close. Trade-intent eligibility additionally requires the existing quarter-hour slot, 119-second start tolerance, five-minute deadline, regular-session open, and strategy cutoff `min(15:00, session_close - 60 minutes)`.
+Application code queries the read-only Alpaca market calendar for the current `America/New_York` date. Research is eligible from the configured `AGENT_PREMARKET_START_ET` through the session close. Trade-intent eligibility additionally requires the existing quarter-hour slot, five-minute start tolerance, ten-minute deadline, regular-session open, and strategy cutoff `min(15:00, session_close - 60 minutes)`.
 
 A missing trading session represents a weekend or holiday and fails closed. Calendar request and validation failures fail the cycle. The interval scheduler, retries, and deployment behavior remain owned by issue #9.
 

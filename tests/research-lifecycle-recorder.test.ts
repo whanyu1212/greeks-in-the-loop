@@ -21,7 +21,7 @@ const signal = new AbortController().signal
 
 const noActionDecision: NoActionDecisionV1 = {
   contractVersion: "1.0.0",
-  strategyVersion: "1.0.0",
+  strategyVersion: "1.1.0",
   outcome: "NO_ACTION",
   reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
   evidence: [],
@@ -69,7 +69,7 @@ const researchReport: ResearchReportV2 = {
 
 const preliminaryResearch: PreliminaryResearchV1 = {
   contractVersion: "1.0.0",
-  strategyVersion: "1.0.0",
+  strategyVersion: "1.1.0",
   outcome: "PRELIMINARY_RESEARCH",
   targetSessionDate: "2026-08-26",
   direction: "UNDETERMINED",
@@ -90,7 +90,7 @@ const preliminaryResearch: PreliminaryResearchV1 = {
 
 const proposedDecision: ProposedTradeDecisionV1 = {
   contractVersion: "1.0.0",
-  strategyVersion: "1.0.0",
+  strategyVersion: "1.1.0",
   outcome: "PROPOSE_TRADE",
   direction: "BULLISH",
   thesis: "Daily and intraday direction agree.",
@@ -121,7 +121,7 @@ const proposedDecision: ProposedTradeDecisionV1 = {
 const intent: TradeIntentV1 = {
   contractVersion: "1.0.0",
   decisionContractVersion: "1.0.0",
-  strategyVersion: "1.0.0",
+  strategyVersion: "1.1.0",
   direction: "BULLISH",
   structure: "BULL_CALL_SPREAD",
   expiration: "2026-09-18",

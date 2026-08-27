@@ -9,7 +9,7 @@ import type { ProposedTradeDecisionV1 } from "../src/contracts/research-decision
 
 const bullishDecision: ProposedTradeDecisionV1 = {
   contractVersion: "1.0.0",
-  strategyVersion: "1.0.0",
+  strategyVersion: "1.1.0",
   outcome: "PROPOSE_TRADE",
   direction: "BULLISH",
   thesis: "Daily and intraday direction agree.",
@@ -57,6 +57,26 @@ const context = {
 } as const
 
 describe("deriveTradeIntentV1", () => {
+  it("reads legacy intents but does not derive new legacy intents", () => {
+    const derived = deriveTradeIntentV1(bullishDecision, context)
+    if (!derived.success) throw new Error("Expected current intent derivation")
+    expect(
+      tradeIntentV1Schema.safeParse({
+        ...derived.intent,
+        strategyVersion: "1.0.0",
+      }).success,
+    ).toBe(true)
+    expect(
+      deriveTradeIntentV1(
+        { ...bullishDecision, strategyVersion: "1.0.0" },
+        context,
+      ),
+    ).toEqual({
+      success: false,
+      reasons: ["DERIVATION_INPUT_INVALID"],
+    })
+  })
+
   it("derives exact economics and half-cent exit marks", () => {
     const result = deriveTradeIntentV1(bullishDecision, context)
 
@@ -65,7 +85,7 @@ describe("deriveTradeIntentV1", () => {
       intent: expect.objectContaining({
         contractVersion: "1.0.0",
         decisionContractVersion: "1.0.0",
-        strategyVersion: "1.0.0",
+        strategyVersion: "1.1.0",
         entryLimitCentsPerShare: 101,
         widthCentsPerShare: 500,
         maxLossCentsPerContract: 10_100,

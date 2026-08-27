@@ -89,7 +89,7 @@ const versions = {
   promptVersion: "1.0.0",
   skillName: "spy-debit-spread-research",
   skillVersion: "1.0.0",
-  strategyVersion: "1.0.0",
+  strategyVersion: "1.1.0",
   decisionContractVersion: "1.0.0",
   reportVersion: "2.0.0",
 }

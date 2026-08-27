@@ -71,7 +71,7 @@ Application code derives:
 type TradeIntentV1 = {
   contractVersion: "1.0.0"
   decisionContractVersion: "1.0.0"
-  strategyVersion: "1.0.0"
+  strategyVersion: "1.1.0"
 
   direction: "BULLISH" | "BEARISH"
   structure: "BULL_CALL_SPREAD" | "BEAR_PUT_SPREAD"
