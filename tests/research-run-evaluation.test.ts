@@ -445,6 +445,27 @@ describe("research run evaluation", () => {
     })
   })
 
+  it("requires intent-derivation rejections to retain their report", () => {
+    const {
+      researchReport: _researchReport,
+      preliminaryResearch: _preliminaryResearch,
+      ...base
+    } = preliminaryRun()
+    const evaluation = evaluateResearchRunV1({
+      ...base,
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["MARKET_WINDOW_INELIGIBLE"],
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance).toEqual({
+      status: "FAIL",
+      issueCodes: ["RESEARCH_REPORT_MISSING"],
+    })
+  })
+
   it("rejects sourced snapshot evidence on a validated no-action run", () => {
     const run = noActionRun()
     if (
@@ -568,6 +589,29 @@ describe("research run evaluation", () => {
     expect(evaluation.dimensions.grounding).toEqual({
       status: "FAIL",
       issueCodes: ["DUPLICATE_SNAPSHOT_REFERENCE"],
+    })
+  })
+
+  it("rejects extra retained snapshots on a derived-intent run", () => {
+    const run = derivedIntentRun()
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      evidenceSnapshots: [
+        ...run.evidenceSnapshots,
+        {
+          snapshotRef: "unreferenced-extra-snapshot",
+          provider: "EXA",
+          source: "web-search",
+          retrievedAt: "2026-08-26T14:02:00.000Z",
+          freshUntil: "2026-08-26T14:05:00.000Z",
+          temporalClass: "LIVE",
+        },
+      ],
+    })
+
+    expect(evaluation.dimensions.grounding).toEqual({
+      status: "FAIL",
+      issueCodes: ["UNEXPECTED_SNAPSHOT_REFERENCE"],
     })
   })
 

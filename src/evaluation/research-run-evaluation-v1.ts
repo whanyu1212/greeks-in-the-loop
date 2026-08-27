@@ -49,6 +49,7 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "UNGROUNDED_INFERENCE",
   "UNKNOWN_SNAPSHOT_REFERENCE",
   "DUPLICATE_SNAPSHOT_REFERENCE",
+  "UNEXPECTED_SNAPSHOT_REFERENCE",
   "SNAPSHOT_FROM_FUTURE",
   "STALE_SNAPSHOT",
   "QUOTE_SNAPSHOT_PROVENANCE_INVALID",
@@ -185,6 +186,7 @@ export function evaluateResearchRunV1(
     [
       "PRELIMINARY_RESEARCH_RETAINED",
       "VALIDATED_NO_ACTION",
+      "INTENT_DERIVATION_REJECTED",
       "INTENT_DERIVED",
     ].includes(run.outcome.status)
   ) {
@@ -391,6 +393,16 @@ export function evaluateResearchRunV1(
     knownSnapshots.size !== run.evidenceSnapshots.length
   ) {
     groundingIssues.push("DUPLICATE_SNAPSHOT_REFERENCE")
+  }
+  if (
+    run.outcome.status === "INTENT_DERIVED" &&
+    ((knownSnapshots.size === run.evidenceSnapshots.length &&
+      run.evidenceSnapshots.length > 1) ||
+      run.evidenceSnapshots.some(
+        ({ snapshotRef }) => snapshotRef !== PROPOSAL_QUOTE_SNAPSHOT_REF,
+      ))
+  ) {
+    groundingIssues.push("UNEXPECTED_SNAPSHOT_REFERENCE")
   }
   if (snapshotReferences.some((snapshotRef) => !knownSnapshots.has(snapshotRef))) {
     groundingIssues.push("UNKNOWN_SNAPSHOT_REFERENCE")
