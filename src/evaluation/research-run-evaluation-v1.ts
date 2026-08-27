@@ -489,9 +489,7 @@ export function evaluateResearchRunV1(
       shortContractSymbol: run.outcome.intent.shortContractSymbol,
     })
   }
-  const candidateApplicable =
-    candidateIdentities.length > 0 ||
-    run.researchReport?.analysis.candidateEvaluation !== undefined
+  const candidateApplicable = candidateIdentities.length > 0
   if (new Set(candidateIdentities.map(candidateKey)).size > 1) {
     candidateIssues.push("CANDIDATE_IDENTITY_MISMATCH")
   }
@@ -507,8 +505,6 @@ export function evaluateResearchRunV1(
     ) {
       candidateIssues.push("CANDIDATE_IDENTITY_MISMATCH")
     }
-  } else if (diagnostics !== undefined) {
-    candidateIssues.push("CANDIDATE_IDENTITY_MISMATCH")
   }
   if (
     diagnostics !== undefined &&

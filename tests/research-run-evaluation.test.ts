@@ -410,6 +410,30 @@ describe("research run evaluation", () => {
     })
   })
 
+  it("treats diagnostics without a canonical candidate as not applicable", () => {
+    const run = noActionRun()
+    const proposal = derivedIntentRun()
+    const diagnostics = proposal.researchReport?.analysis.candidateEvaluation
+    if (run.researchReport === undefined || diagnostics === undefined) {
+      throw new Error("Expected retained research reports")
+    }
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      researchReport: {
+        ...run.researchReport,
+        analysis: {
+          ...run.researchReport.analysis,
+          candidateEvaluation: diagnostics,
+        },
+      },
+    })
+
+    expect(evaluation.dimensions.candidateIdentity).toEqual({
+      status: "NOT_APPLICABLE",
+      issueCodes: [],
+    })
+  })
+
   it("requires successful outcomes to retain their research report", () => {
     const { researchReport: _researchReport, ...run } = derivedIntentRun()
 
