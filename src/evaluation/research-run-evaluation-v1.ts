@@ -377,6 +377,7 @@ export function evaluateResearchRunV1(
     : undefined
   if (
     (run.runVersion === RESEARCH_RUN_VERSION && invocation === undefined) ||
+    (run.runVersion === RESEARCH_RUN_VERSION && run.initialEligibility === undefined) ||
     (run.runVersion !== RESEARCH_RUN_VERSION && run.researchInvocation !== undefined) ||
     (parsedInvocation?.success === false) ||
     (invocation !== undefined &&
@@ -388,6 +389,17 @@ export function evaluateResearchRunV1(
         invocation.strategyVersion !== STRATEGY_VERSION ||
         invocation.decisionContractVersion !== RESEARCH_DECISION_CONTRACT_VERSION ||
         invocation.reportVersion !== RESEARCH_REPORT_VERSION))
+  ) {
+    contractIssues.push("RUN_METADATA_INVALID")
+  }
+  if (
+    run.runVersion === RESEARCH_RUN_VERSION &&
+    run.outcome.status === "DECISION_REJECTED" &&
+    run.outcome.issues.some(
+      (issue) =>
+        issue.code === "SCHEMA_INVALID" &&
+        issue.schemaCategory === undefined,
+    )
   ) {
     contractIssues.push("RUN_METADATA_INVALID")
   }

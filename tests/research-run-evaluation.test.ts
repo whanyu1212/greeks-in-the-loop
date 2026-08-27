@@ -375,6 +375,13 @@ describe("research run evaluation", () => {
         strategyVersion: "0.0.0",
       },
     })
+    const { initialEligibility: _initialEligibility, ...withoutEligibility } =
+      noActionRun()
+    const missingEligibility = evaluateResearchRunV1({
+      ...withoutEligibility,
+      runVersion: "1.2.0",
+      researchInvocation: currentInvocation,
+    })
 
     expect(healthy.dimensions.contractCompliance.issueCodes).not.toContain(
       "RUN_METADATA_INVALID",
@@ -383,6 +390,47 @@ describe("research run evaluation", () => {
       "RUN_METADATA_INVALID",
     )
     expect(mismatched.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
+    )
+    expect(missingEligibility.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
+    )
+  })
+
+  it("requires safe schema categories on current rejected runs", () => {
+    const {
+      researchReport: _researchReport,
+      preliminaryResearch: _preliminaryResearch,
+      ...base
+    } = preliminaryRun()
+    const rejected = {
+      ...base,
+      runVersion: "1.2.0" as const,
+      researchInvocation: currentInvocation,
+      outcome: {
+        outcomeVersion: "1.0.0" as const,
+        status: "DECISION_REJECTED" as const,
+        issues: [{ code: "SCHEMA_INVALID", path: ["result"] }],
+      },
+    }
+
+    const missingCategory = evaluateResearchRunV1(rejected)
+    const categorized = evaluateResearchRunV1({
+      ...rejected,
+      outcome: {
+        ...rejected.outcome,
+        issues: [{
+          code: "SCHEMA_INVALID",
+          schemaCategory: "TYPE_MISMATCH",
+          path: ["result"],
+        }],
+      },
+    })
+
+    expect(missingCategory.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
+    )
+    expect(categorized.dimensions.contractCompliance.issueCodes).not.toContain(
       "RUN_METADATA_INVALID",
     )
   })
