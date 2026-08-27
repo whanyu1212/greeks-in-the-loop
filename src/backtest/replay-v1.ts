@@ -47,6 +47,7 @@ const signalSnapshotSchema = z
       .array(
         z
           .object({
+            feed: z.literal("IEX"),
             startedAt: timestamp,
             vwapMicros: positiveSafeInteger,
             volume: positiveSafeInteger,
@@ -440,7 +441,8 @@ export function deriveHistoricalBarProxyCyclesV1(
   const cycles = minuteBars
     .filter(
       ({ contractSymbol, timestamp: value }) =>
-        contractSymbol === intent.longContractSymbol && instant(value) >= instant(intent.evaluatedAt),
+        contractSymbol === intent.longContractSymbol &&
+        instant(minuteBarCompletedAt(value)) >= instant(intent.evaluatedAt),
     )
     .flatMap((longBar) => {
       const shortBar = shortByTimestamp.get(instant(longBar.timestamp))
@@ -639,6 +641,17 @@ export function runBacktestReplayV1(
           holdingSessionIndex !== cycleSessionIndex - entrySessionIndex + 1
       })) {
         throw new Error(`Scenario ${scenario.scenarioId} has an incorrect holding session index`)
+      }
+      if (monitorCycles.some(({ decidedAt, minutesToClose }) => {
+        const session = sessions.find(
+          ({ date }) => date === newYorkDate(new Date(decidedAt)),
+        )
+        return session === undefined || minutesToClose !== Math.max(
+          0,
+          Math.floor((instant(session.close) - instant(decidedAt)) / 60_000),
+        )
+      })) {
+        throw new Error(`Scenario ${scenario.scenarioId} has incorrect minutes to session close`)
       }
     }
     if (monitorCycles.some(({ decidedAt, dte }) =>

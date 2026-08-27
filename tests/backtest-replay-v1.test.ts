@@ -211,6 +211,7 @@ const signalSnapshot = (
     closeMicros,
   })),
   completedMinuteBars: Array.from({ length: 60 }, (_, index) => ({
+    feed: "IEX" as const,
     startedAt: new Date(Date.parse("2026-08-27T13:30:00.000Z") + index * 60_000)
       .toISOString(),
     vwapMicros: minuteVwapMicros,
@@ -253,6 +254,17 @@ describe("backtest replay v1", () => {
         signal.completedDailyBars.at(-2)!,
       ],
     })).toThrow(/one-to-one to 50 unique preceding sessions/u)
+  })
+
+  it("requires IEX provenance for exact signal minute bars", () => {
+    const signal = signalSnapshot()
+    expect(() => evaluateBacktestSignalV1({
+      ...signal,
+      completedMinuteBars: [
+        { ...signal.completedMinuteBars[0]!, feed: "SIP" },
+        ...signal.completedMinuteBars.slice(1),
+      ],
+    } as never)).toThrow(/Invalid input/u)
   })
 
   it("rejects stale or future exact underlying quotes", () => {
@@ -394,6 +406,7 @@ describe("backtest replay v1", () => {
               ...monitorCycle,
               decidedAt: "2026-08-28T12:00:00.000Z",
               marketOpen: false,
+              minutesToClose: 480,
               markHalfCentsPerShare: 0,
             },
             monitorCycle,
@@ -494,6 +507,19 @@ describe("backtest replay v1", () => {
     })).toThrow(/incorrect holding session index/u)
   })
 
+  it("rejects explicit minutes to close that disagree with the replay calendar", () => {
+    expect(() => runReplay(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [{
+        scenarioId: "incorrect-minutes-to-close",
+        fidelity: "HISTORICAL_BAR_PROXY",
+        retainedIntent: intent,
+        monitorCycles: [{ ...monitorCycle, minutesToClose: 299 }],
+      }],
+    })).toThrow(/incorrect minutes to session close/u)
+  })
+
   it("rejects explicit marks above the spread width", () => {
     expect(() => runReplay(manifest, {
       replayVersion: "1.0.0",
@@ -526,6 +552,7 @@ describe("backtest replay v1", () => {
               ...monitorCycle,
               decidedAt: "2026-08-27T14:31:00.000Z",
               dte: 15,
+              minutesToClose: 329,
               markHalfCentsPerShare: 400,
               holdingSessionIndex: 1,
             },
@@ -533,6 +560,7 @@ describe("backtest replay v1", () => {
               ...monitorCycle,
               decidedAt: "2026-08-27T10:32:00.000-04:00",
               dte: 15,
+              minutesToClose: 328,
               holdingSessionIndex: 1,
             },
           ],
@@ -547,7 +575,7 @@ describe("backtest replay v1", () => {
   })
 
   it("derives proxy marks from synchronized bars in the selected dataset", () => {
-    const offsetIntent = { ...intent, evaluatedAt: "2026-08-27T10:30:00.000-04:00" }
+    const offsetIntent = { ...intent, evaluatedAt: "2026-08-27T10:30:30.000-04:00" }
     const bar = {
       timeframe: "1MINUTE",
       timestamp: intent.evaluatedAt,

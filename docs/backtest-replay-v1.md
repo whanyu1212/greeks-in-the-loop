@@ -76,6 +76,8 @@ candidate approval evaluation. Exact snapshots must be captured forward; the
 Alpaca historical API cannot recreate them.
 All exact candidates share one application-owned eligibility, account, and
 portfolio approval context; only their contract snapshots may differ.
+Every retained exact signal minute bar declares the strategy-required `IEX`
+feed.
 
 `HISTORICAL_BAR_PROXY` contains a retained `TradeIntentV1`. When monitor cycles
 are omitted, replay derives them from synchronized long/short option minute bars
@@ -105,7 +107,8 @@ marks are bounded by the vertical spread's contractual width.
 An end-of-replay valuation uses the last open-market cycle; when none exists,
 the exit remains unpriced.
 Explicit holding-session indices must match the retained market calendar from
-the intent entry session through each monitor cycle.
+the intent entry session through each monitor cycle, and minutes to close are
+recomputed from that cycle's retained session close.
 
 ## Known limitations
 
