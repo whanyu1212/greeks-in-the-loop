@@ -189,6 +189,15 @@ const exactScenarioSchema = z
           message: "Exact candidates must share the signal snapshot instant and session",
         })
       }
+      const approvalQuoteAge = instant(eligibility.evaluatedAt) -
+        instant(scenario.signal.underlyingQuote.providerTimestamp)
+      if (approvalQuoteAge < 0 || approvalQuoteAge > 60_000) {
+        context.addIssue({
+          code: "custom",
+          path: ["candidates", index, "context", "eligibility", "evaluatedAt"],
+          message: "Exact underlying IEX quote must remain fresh at candidate approval",
+        })
+      }
       const previousSessionDates = eligibility.previousSessionDates ?? []
       const retainedPreviousSessions = scenario.signal.completedDailyBars
         .slice(-previousSessionDates.length)

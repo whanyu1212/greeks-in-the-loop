@@ -243,6 +243,31 @@ describe("backtest replay v1", () => {
     })).toThrow(/current-session and fresh/u)
   })
 
+  it("rechecks exact underlying quote freshness at candidate approval", () => {
+    expect(() => runBacktestReplayV1(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [
+        {
+          scenarioId: "stale-at-approval",
+          fidelity: "EXACT_SNAPSHOT",
+          signal: signalSnapshot(),
+          candidates: [{
+            ...riskInput,
+            context: {
+              ...riskInput.context,
+              eligibility: {
+                ...riskInput.context.eligibility,
+                evaluatedAt: "2026-08-27T14:30:31.000Z",
+              },
+            },
+          }],
+          monitorCycles: [monitorCycle],
+        },
+      ],
+    })).toThrow(/remain fresh at candidate approval/u)
+  })
+
   it("runs exact snapshots through production risk and a deterministic profit exit", () => {
     const report = runBacktestReplayV1(manifest, {
       replayVersion: "1.0.0",

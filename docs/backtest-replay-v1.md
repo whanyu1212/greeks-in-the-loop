@@ -71,7 +71,8 @@ instant. Replay recalculates the strict SMA/VWAP signal, runs the production
 lexicographic candidate ranking. Snapshot validation rejects missing, duplicate,
 out-of-order, cross-session, or candidate-misaligned signal evidence before a
 result can claim exact fidelity. The underlying quote must be no later than the
-observation instant and no more than 60 seconds old. Exact snapshots must be captured forward; the
+observation instant and no more than 60 seconds old both then and at every
+candidate approval evaluation. Exact snapshots must be captured forward; the
 Alpaca historical API cannot recreate them.
 
 `HISTORICAL_BAR_PROXY` contains a retained `TradeIntentV1`. When monitor cycles
