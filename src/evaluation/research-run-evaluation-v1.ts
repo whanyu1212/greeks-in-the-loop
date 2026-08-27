@@ -4,29 +4,21 @@ import { z } from "zod"
 
 import { preliminaryResearchV1Schema } from "../contracts/preliminary-research-v1.js"
 import {
-  RESEARCH_DECISION_CONTRACT_VERSION,
   LEGACY_STRATEGY_VERSION,
   STRATEGY_VERSION,
   researchDecisionV1Schema,
   validateResearchDecisionV1,
 } from "../contracts/research-decision-v1.js"
-import {
-  RESEARCH_REPORT_VERSION,
-  researchReportV2Schema,
-} from "../contracts/research-report-v2.js"
+import { researchReportV2Schema } from "../contracts/research-report-v2.js"
 import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
 import {
-  RESEARCH_AGENT_NAME,
-  RESEARCH_PROMPT_VERSION,
-  RESEARCH_SKILL_NAME,
-  RESEARCH_SKILL_VERSION,
-} from "../research/research-agent.js"
-import {
-  RESEARCH_RUN_VERSION,
   SUPPORTED_RESEARCH_RUN_VERSIONS,
   type ResearchRunV1,
 } from "../research/research-artifact.js"
-import { researchInvocationV1Schema } from "../research/research-invocation-v1.js"
+import {
+  RESEARCH_INVOCATION_PROVENANCE_BY_VERSION,
+  researchInvocationV1Schema,
+} from "../research/research-invocation-v1.js"
 import {
   ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS,
   ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE,
@@ -53,6 +45,15 @@ import {
 } from "../shared/value-normalization.js"
 
 export const RESEARCH_RUN_EVALUATION_VERSION = "1.0.0" as const
+
+const INVOCATION_VERSION_BY_RUN_VERSION = {
+  "1.0.0": undefined,
+  "1.1.0": undefined,
+  "1.2.0": "1.0.0",
+} as const satisfies Record<
+  (typeof SUPPORTED_RESEARCH_RUN_VERSIONS)[number],
+  keyof typeof RESEARCH_INVOCATION_PROVENANCE_BY_VERSION | undefined
+>
 
 export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "RUN_VERSION_INVALID",
@@ -375,25 +376,33 @@ export function evaluateResearchRunV1(
   const invocation = parsedInvocation?.success === true
     ? parsedInvocation.data
     : undefined
+  const expectedInvocationVersion =
+    INVOCATION_VERSION_BY_RUN_VERSION[run.runVersion]
+  const expectedInvocationProvenance = invocation === undefined
+    ? undefined
+    : RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[invocation.invocationVersion]
   if (
-    (run.runVersion === RESEARCH_RUN_VERSION && invocation === undefined) ||
-    (run.runVersion === RESEARCH_RUN_VERSION && run.initialEligibility === undefined) ||
-    (run.runVersion !== RESEARCH_RUN_VERSION && run.researchInvocation !== undefined) ||
+    (expectedInvocationVersion !== undefined && invocation === undefined) ||
+    (expectedInvocationVersion !== undefined && run.initialEligibility === undefined) ||
+    (expectedInvocationVersion === undefined && run.researchInvocation !== undefined) ||
     (parsedInvocation?.success === false) ||
     (invocation !== undefined &&
-      (invocation.agentName !== RESEARCH_AGENT_NAME ||
+      (invocation.invocationVersion !== expectedInvocationVersion ||
+        expectedInvocationProvenance === undefined ||
+        invocation.agentName !== expectedInvocationProvenance.agentName ||
         invocation.cycleMode !== expectedCycleMode ||
-        invocation.promptVersion !== RESEARCH_PROMPT_VERSION ||
-        invocation.skillName !== RESEARCH_SKILL_NAME ||
-        invocation.skillVersion !== RESEARCH_SKILL_VERSION ||
-        invocation.strategyVersion !== STRATEGY_VERSION ||
-        invocation.decisionContractVersion !== RESEARCH_DECISION_CONTRACT_VERSION ||
-        invocation.reportVersion !== RESEARCH_REPORT_VERSION))
+        invocation.promptVersion !== expectedInvocationProvenance.promptVersion ||
+        invocation.skillName !== expectedInvocationProvenance.skillName ||
+        invocation.skillVersion !== expectedInvocationProvenance.skillVersion ||
+        invocation.strategyVersion !== expectedInvocationProvenance.strategyVersion ||
+        invocation.decisionContractVersion !==
+          expectedInvocationProvenance.decisionContractVersion ||
+        invocation.reportVersion !== expectedInvocationProvenance.reportVersion))
   ) {
     contractIssues.push("RUN_METADATA_INVALID")
   }
   if (
-    run.runVersion === RESEARCH_RUN_VERSION &&
+    expectedInvocationVersion !== undefined &&
     run.outcome.status === "DECISION_REJECTED" &&
     run.outcome.issues.some(
       (issue) =>

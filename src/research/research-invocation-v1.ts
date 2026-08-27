@@ -7,6 +7,31 @@ import {
 import type { ResearchTraceVersions } from "../observability/research-telemetry.js"
 
 export const RESEARCH_INVOCATION_VERSION = "1.0.0" as const
+export const SUPPORTED_RESEARCH_INVOCATION_VERSIONS = [
+  RESEARCH_INVOCATION_VERSION,
+] as const
+export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = {
+  "1.0.0": {
+    agentName: "research",
+    promptVersion: "1.3.0",
+    skillName: "spy-debit-spread-research",
+    skillVersion: "1.1.0",
+    strategyVersion: "1.1.0",
+    decisionContractVersion: "1.0.0",
+    reportVersion: "2.0.0",
+  },
+} as const satisfies Record<
+  (typeof SUPPORTED_RESEARCH_INVOCATION_VERSIONS)[number],
+  Readonly<{
+    agentName: string
+    promptVersion: string
+    skillName: string
+    skillVersion: string
+    strategyVersion: string
+    decisionContractVersion: string
+    reportVersion: string
+  }>
+>
 export const MAX_RESEARCH_INVOCATION_TOOL_CALLS = 32
 
 const boundedText = z.string().trim().min(1).max(128)
@@ -22,7 +47,7 @@ const safeToolName = boundedText.refine(
 
 export const researchInvocationV1Schema = z
   .object({
-    invocationVersion: z.literal(RESEARCH_INVOCATION_VERSION),
+    invocationVersion: z.enum(SUPPORTED_RESEARCH_INVOCATION_VERSIONS),
     agentName: safeLabel,
     cycleMode: z.enum([
       "STANDARD",

@@ -357,6 +357,25 @@ describe("research run evaluation", () => {
     )
   })
 
+  it("uses versioned invocation requirements for historical runs", () => {
+    const historical = evaluateResearchRunV1({
+      ...noActionRun(),
+      runVersion: "1.1.0",
+    })
+    const historicalWithCurrentInvocation = evaluateResearchRunV1({
+      ...noActionRun(),
+      runVersion: "1.1.0",
+      researchInvocation: currentInvocation,
+    })
+
+    expect(historical.dimensions.contractCompliance.issueCodes).not.toContain(
+      "RUN_METADATA_INVALID",
+    )
+    expect(
+      historicalWithCurrentInvocation.dimensions.contractCompliance.issueCodes,
+    ).toContain("RUN_METADATA_INVALID")
+  })
+
   it("requires matching invocation metadata for current runs", () => {
     const healthy = evaluateResearchRunV1({
       ...noActionRun(),
