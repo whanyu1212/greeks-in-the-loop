@@ -509,6 +509,37 @@ describe("research run evaluation", () => {
     )
   })
 
+  it("rejects opposite retained record types on successful outcomes", () => {
+    const preliminary = preliminaryRun()
+    const noAction = noActionRun()
+    const derived = derivedIntentRun()
+    const extraPreliminary = preliminary.preliminaryResearch
+    const extraDecision = noAction.validatedDecision
+    if (extraPreliminary === undefined || extraDecision === undefined) {
+      throw new Error("Expected retained result fixtures")
+    }
+    const evaluations = [
+      evaluateResearchRunV1({
+        ...preliminary,
+        validatedDecision: extraDecision,
+      }),
+      evaluateResearchRunV1({
+        ...noAction,
+        preliminaryResearch: extraPreliminary,
+      }),
+      evaluateResearchRunV1({
+        ...derived,
+        preliminaryResearch: extraPreliminary,
+      }),
+    ]
+
+    for (const evaluation of evaluations) {
+      expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+        "OUTCOME_RECORD_MISMATCH",
+      )
+    }
+  })
+
   it("matches intent-rejection reasons to retained quote and proposal records", () => {
     const run = derivedIntentRun()
     const quoteFailure = evaluateResearchRunV1({
@@ -532,6 +563,30 @@ describe("research run evaluation", () => {
       "OUTCOME_RECORD_MISMATCH",
     )
     expect(derivationFailure.dimensions.contractCompliance.status).toBe("PASS")
+  })
+
+  it("rejects non-Alpaca quote provenance on post-quote rejections", () => {
+    const run = derivedIntentRun()
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      evidenceSnapshots: run.evidenceSnapshots.map((snapshot) => ({
+        ...snapshot,
+        provider: "EXA" as const,
+        source: "unrelated-context",
+      })),
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["NON_POSITIVE_NET_DEBIT"],
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+    expect(evaluation.dimensions.grounding.issueCodes).toContain(
+      "QUOTE_SNAPSHOT_PROVENANCE_INVALID",
+    )
   })
 
   it("returns contract failure instead of throwing for malformed retained results", () => {
@@ -957,11 +1012,27 @@ describe("research run evaluation", () => {
         decision,
       },
     })
+    const rejectedEvaluation = evaluateResearchRunV1({
+      ...run,
+      researchReport: {
+        ...run.researchReport,
+        result: decision,
+      },
+      validatedDecision: decision,
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["NON_POSITIVE_NET_DEBIT"],
+      },
+    })
 
     expect(evaluation.dimensions.grounding).toEqual({
       status: "FAIL",
       issueCodes: ["DUPLICATE_CLAIM_ID"],
     })
+    expect(rejectedEvaluation.dimensions.grounding.issueCodes).toContain(
+      "DUPLICATE_CLAIM_ID",
+    )
   })
 
   it("detects candidate identity drift between retained records", () => {

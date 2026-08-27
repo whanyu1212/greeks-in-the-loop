@@ -174,6 +174,14 @@ const INTENT_DERIVATION_REJECTION_REASONS = new Set([
   "ARITHMETIC_OVERFLOW",
 ])
 
+const isCanonicalProposalQuoteSnapshot = (
+  snapshot: ResearchRunV1["evidenceSnapshots"][number],
+) =>
+  snapshot.snapshotRef === PROPOSAL_QUOTE_SNAPSHOT_REF &&
+  snapshot.provider === "ALPACA" &&
+  snapshot.source === ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE &&
+  snapshot.temporalClass === "LIVE"
+
 /**
  * Evaluates one already-projected research run without I/O or wall-clock input.
  *
@@ -254,7 +262,8 @@ export function evaluateResearchRunV1(
       }
       if (
         run.preliminaryResearch === undefined ||
-        !isDeepStrictEqual(run.outcome.research, run.preliminaryResearch)
+        !isDeepStrictEqual(run.outcome.research, run.preliminaryResearch) ||
+        run.validatedDecision !== undefined
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
       }
@@ -265,7 +274,8 @@ export function evaluateResearchRunV1(
       }
       if (
         run.validatedDecision === undefined ||
-        !isDeepStrictEqual(run.outcome.decision, run.validatedDecision)
+        !isDeepStrictEqual(run.outcome.decision, run.validatedDecision) ||
+        run.preliminaryResearch !== undefined
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
       }
@@ -279,7 +289,8 @@ export function evaluateResearchRunV1(
       }
       if (
         run.validatedDecision === undefined ||
-        !isDeepStrictEqual(run.outcome.decision, run.validatedDecision)
+        !isDeepStrictEqual(run.outcome.decision, run.validatedDecision) ||
+        run.preliminaryResearch !== undefined
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
       }
@@ -309,7 +320,8 @@ export function evaluateResearchRunV1(
         reasons.every((reason) => reason === "MARKET_WINDOW_INELIGIBLE")
       const hasCanonicalQuoteSnapshot =
         run.evidenceSnapshots.length === 1 &&
-        run.evidenceSnapshots[0]?.snapshotRef === PROPOSAL_QUOTE_SNAPSHOT_REF
+        run.evidenceSnapshots[0] !== undefined &&
+        isCanonicalProposalQuoteSnapshot(run.evidenceSnapshots[0])
       const hasValidatedProposal =
         parsedValidatedDecision?.success === true &&
         parsedValidatedDecision.data.outcome === "PROPOSE_TRADE"
@@ -440,7 +452,9 @@ export function evaluateResearchRunV1(
   )
   const sourcedFactIds = new Set(sourcedFacts.map(({ claimId }) => claimId))
   if (
-    run.outcome.status === "INTENT_DERIVED" &&
+    ["INTENT_DERIVED", "INTENT_DERIVATION_REJECTED"].includes(
+      run.outcome.status,
+    ) &&
     new Set(evidence.map(({ claimId }) => claimId)).size !== evidence.length
   ) {
     groundingIssues.push("DUPLICATE_CLAIM_ID")
@@ -496,6 +510,14 @@ export function evaluateResearchRunV1(
   if (snapshotReferences.some((snapshotRef) => !knownSnapshots.has(snapshotRef))) {
     groundingIssues.push("UNKNOWN_SNAPSHOT_REFERENCE")
   }
+  if (
+    run.outcome.status === "INTENT_DERIVATION_REJECTED" &&
+    run.evidenceSnapshots.some(
+      (snapshot) => !isCanonicalProposalQuoteSnapshot(snapshot),
+    )
+  ) {
+    groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
+  }
   if (run.outcome.status === "INTENT_DERIVED") {
     const intentEvaluatedAt = Date.parse(run.outcome.intent.evaluatedAt)
     const parsedIntent = tradeIntentV1Schema.safeParse(run.outcome.intent)
@@ -525,10 +547,7 @@ export function evaluateResearchRunV1(
       const snapshot = snapshotsByReference.get(snapshotReference)
       if (snapshot === undefined) continue
       if (
-        snapshotReference !== PROPOSAL_QUOTE_SNAPSHOT_REF ||
-        snapshot.provider !== "ALPACA" ||
-        snapshot.source !== ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE ||
-        snapshot.temporalClass !== "LIVE"
+        !isCanonicalProposalQuoteSnapshot(snapshot)
       ) {
         groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
       }
