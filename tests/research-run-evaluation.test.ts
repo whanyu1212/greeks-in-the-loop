@@ -662,6 +662,19 @@ describe("research run evaluation", () => {
         reasons: ["STRIKE_PRECISION_UNSUPPORTED"],
       },
     })
+    const unreachableDerivationReasons = [
+      "DERIVATION_INPUT_INVALID",
+      "QUOTE_SYMBOL_MISMATCH",
+    ].map((reason) =>
+      evaluateResearchRunV1({
+        ...run,
+        outcome: {
+          outcomeVersion: "1.0.0",
+          status: "INTENT_DERIVATION_REJECTED",
+          reasons: [reason],
+        },
+      }),
+    )
 
     expect(quoteFailure.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
@@ -678,6 +691,7 @@ describe("research run evaluation", () => {
       ineligibleDerivationFailure,
       invalidWindowDerivationFailure,
       unsupportedPrecision,
+      ...unreachableDerivationReasons,
     ]) {
       expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
         "OUTCOME_RECORD_MISMATCH",

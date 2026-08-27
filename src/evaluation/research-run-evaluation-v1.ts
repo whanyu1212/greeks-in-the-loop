@@ -261,8 +261,6 @@ const QUOTE_CONFIRMATION_REJECTION_REASONS = new Set([
 ])
 
 const INTENT_DERIVATION_REJECTION_REASONS = new Set([
-  "DERIVATION_INPUT_INVALID",
-  "QUOTE_SYMBOL_MISMATCH",
   "STRIKE_PRECISION_UNSUPPORTED",
   "NON_POSITIVE_NET_DEBIT",
   "ENTRY_LIMIT_NOT_BELOW_WIDTH",
@@ -448,8 +446,29 @@ export function evaluateResearchRunV1(
       run.initialEligibility.evaluatedAt,
     )
     const reportAsOf = Date.parse(validReport.analysis.asOf)
+    const cycleStart = Date.parse(run.cycle.startedAt)
+    const cycleEnd = Date.parse(run.cycle.completedAt)
+    const earliestInCycleExaRetrieval = Math.min(
+      ...validReport.analysis.externalContext
+        .filter(({ provider }) => provider === "EXA")
+        .map(({ retrievedAt }) => Date.parse(retrievedAt))
+        .filter(
+          (retrievedAt) =>
+            Number.isFinite(retrievedAt) &&
+            retrievedAt >= cycleStart &&
+            retrievedAt <= cycleEnd,
+        ),
+    )
     return Number.isFinite(eligibilityEvaluatedAt) && Number.isFinite(reportAsOf)
-      ? new Date(Math.max(eligibilityEvaluatedAt, reportAsOf)).toISOString()
+      ? new Date(
+          Math.max(
+            eligibilityEvaluatedAt,
+            reportAsOf,
+            Number.isFinite(earliestInCycleExaRetrieval)
+              ? earliestInCycleExaRetrieval
+              : Number.NEGATIVE_INFINITY,
+          ),
+        ).toISOString()
       : undefined
   })()
   const hasRetainedEligibleTradeWindow =
