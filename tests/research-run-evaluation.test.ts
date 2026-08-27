@@ -673,11 +673,29 @@ describe("research run evaluation", () => {
         issues: [{ code: "CONTEXT_INVALID", path: ["analysis", "asOf"] }],
       },
     })
+    const unobservableProcessingBoundary = evaluateResearchRunV1({
+      ...base,
+      researchReport: {
+        ...run.researchReport,
+        analysis: {
+          ...run.researchReport.analysis,
+          asOf: "2026-08-26T12:04:30.000Z",
+        },
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{ code: "CONTEXT_INVALID", path: ["analysis", "asOf"] }],
+      },
+    })
 
     expect(evaluation.dimensions.contractCompliance).toEqual({
       status: "PASS",
       issueCodes: [],
     })
+    expect(
+      unobservableProcessingBoundary.dimensions.contractCompliance.status,
+    ).toBe("PASS")
   })
 
   it("matches the runtime bound for replayed rejection issues", () => {
@@ -1052,7 +1070,6 @@ describe("research run evaluation", () => {
         issues: [{ code: "UNKNOWN_SNAPSHOT", path: ["evidence"] }],
       },
     } as ResearchRunV1)
-
     expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
     expect(misattributed.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
@@ -1103,9 +1120,16 @@ describe("research run evaluation", () => {
         issues: [{ code: "DUPLICATE_CLAIM_ID", path: ["evidence"] }],
       },
     } as ResearchRunV1)
+    const snapshotBearing = evaluateResearchRunV1({
+      ...rejectedRun,
+      evidenceSnapshots: run.evidenceSnapshots,
+    })
 
     expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
     expect(misattributed.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+    expect(snapshotBearing.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
     )
   })

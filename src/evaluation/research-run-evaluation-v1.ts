@@ -320,6 +320,64 @@ export function evaluateResearchRunV1(
         ]
       : undefined
   })()
+  const plausibleCommonReportRejectionIssues = (() => {
+    if (
+      validReport === undefined ||
+      expectedCommonReportRejectionIssues !== undefined
+    ) {
+      return []
+    }
+    const cycleStart = Date.parse(run.cycle.startedAt)
+    const cycleEnd = Date.parse(run.cycle.completedAt)
+    const reportAsOf = Date.parse(validReport.analysis.asOf)
+    if (
+      !Number.isFinite(cycleStart) ||
+      !Number.isFinite(cycleEnd) ||
+      !Number.isFinite(reportAsOf)
+    ) {
+      return []
+    }
+    const plausible: Array<
+      ReadonlyArray<
+        Readonly<{ code: string; path: readonly (string | number)[] }>
+      >
+    > = []
+    if (reportAsOf > cycleStart && reportAsOf <= cycleEnd) {
+      plausible.push([
+        { code: "CONTEXT_INVALID", path: ["analysis", "asOf"] },
+      ])
+    }
+    const exaSources = validReport.analysis.externalContext.filter(
+      ({ provider }) => provider === "EXA",
+    )
+    if (
+      exaSources.length > 0 &&
+      !exaSources.some(
+        ({ retrievedAt }) =>
+          Date.parse(retrievedAt) >= cycleStart &&
+          Date.parse(retrievedAt) <= Math.max(cycleStart, reportAsOf),
+      )
+    ) {
+      plausible.push([
+        { code: "CONTEXT_INVALID", path: ["analysis", "externalContext"] },
+      ])
+    }
+    return plausible
+  })()
+  const rejectedOutcomeIssues =
+    run.outcome.status === "DECISION_REJECTED"
+      ? run.outcome.issues
+      : undefined
+  const retainedCommonReportRejectionMatches =
+    rejectedOutcomeIssues !== undefined &&
+    (expectedCommonReportRejectionIssues !== undefined
+      ? isDeepStrictEqual(
+          rejectedOutcomeIssues,
+          expectedCommonReportRejectionIssues,
+        )
+      : plausibleCommonReportRejectionIssues.some((issues) =>
+          isDeepStrictEqual(rejectedOutcomeIssues, issues),
+        ))
   const retainedProposalEvaluationLowerBound = (() => {
     if (validReport === undefined || run.initialEligibility === undefined) {
       return undefined
@@ -347,8 +405,7 @@ export function evaluateResearchRunV1(
     )
   const proposalPreflightValidation =
     run.outcome.status === "DECISION_REJECTED" &&
-    expectedCommonReportRejectionIssues === undefined &&
-    run.evidenceSnapshots.length === 0 &&
+    !retainedCommonReportRejectionMatches &&
     reportResult?.outcome === "PROPOSE_TRADE"
       ? validateResearchDecisionV1(
           reportResult,
@@ -513,7 +570,7 @@ export function evaluateResearchRunV1(
         parsedReport?.success === true ? parsedReport.data : undefined
       const parsedRejectedResult = parsedRejectedReport?.result
       const preliminaryCouldBeRetained =
-        expectedCommonReportRejectionIssues === undefined &&
+        !retainedCommonReportRejectionMatches &&
         parsedRejectedReport !== undefined &&
         parsedRejectedResult?.outcome === "PRELIMINARY_RESEARCH" &&
         run.initialEligibility?.researchEligible === true &&
@@ -537,7 +594,7 @@ export function evaluateResearchRunV1(
             )
           : -1
       const expectedPreliminaryDecisionRejectionIssues =
-        expectedCommonReportRejectionIssues !== undefined ||
+        retainedCommonReportRejectionMatches ||
         parsedRejectedResult?.outcome !== "PRELIMINARY_RESEARCH"
           ? undefined
           : preliminaryFutureObservationIndex >= 0
@@ -560,7 +617,7 @@ export function evaluateResearchRunV1(
                 ]
               : undefined
       const noActionValidation =
-        expectedCommonReportRejectionIssues === undefined &&
+        !retainedCommonReportRejectionMatches &&
         parsedRejectedResult?.outcome === "NO_ACTION"
           ? validateResearchDecisionV1(parsedRejectedResult, {
               evaluatedAt: run.cycle.completedAt,
@@ -618,13 +675,16 @@ export function evaluateResearchRunV1(
         !reportFreeRejectionIssuesMatch ||
         (expectedCommonReportRejectionIssues !== undefined &&
           !rejectionIssuesMatch(expectedCommonReportRejectionIssues)) ||
+        (retainedCommonReportRejectionMatches &&
+          run.evidenceSnapshots.length > 0) ||
         (expectedPreliminaryDecisionRejectionIssues !== undefined &&
           !rejectionIssuesMatch(expectedPreliminaryDecisionRejectionIssues)) ||
         (run.evidenceSnapshots.length === 0 &&
           noActionValidation?.success === false &&
           !rejectionIssuesMatch(noActionValidation.issues)) ||
         (proposalPreflightValidation?.success === false &&
-          !rejectionIssuesMatch(proposalPreflightValidation.issues)) ||
+          (run.evidenceSnapshots.length > 0 ||
+            !rejectionIssuesMatch(proposalPreflightValidation.issues))) ||
         !proposalRejectionIssuesMatch ||
         (run.evidenceSnapshots.length > 0 &&
           (parsedReport?.success !== true ||
