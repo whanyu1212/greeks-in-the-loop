@@ -654,6 +654,18 @@ describe("research run evaluation", () => {
         reasons: ["NON_POSITIVE_NET_DEBIT"],
       },
     })
+    const lateCycleDerivationFailure = evaluateResearchRunV1({
+      ...run,
+      cycle: {
+        ...run.cycle,
+        startedAt: run.initialEligibility!.tradeIntentWindow!.deadline,
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["NON_POSITIVE_NET_DEBIT"],
+      },
+    })
     const unsupportedPrecision = evaluateResearchRunV1({
       ...run,
       outcome: {
@@ -690,6 +702,7 @@ describe("research run evaluation", () => {
       ineligibleQuoteFailure,
       ineligibleDerivationFailure,
       invalidWindowDerivationFailure,
+      lateCycleDerivationFailure,
       unsupportedPrecision,
       ...unreachableDerivationReasons,
     ]) {
@@ -1461,7 +1474,7 @@ describe("research run evaluation", () => {
     expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
   })
 
-  it("allows a preliminary observation from the unretained eligibility gap", () => {
+  it("rejects a preliminary observation no later than report processing", () => {
     const run = preliminaryRun()
     if (
       run.preliminaryResearch === undefined ||
@@ -1497,7 +1510,9 @@ describe("research run evaluation", () => {
       },
     })
 
-    expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
+    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
   })
 
   it("rejects preliminary eligibility failure before retained session close", () => {

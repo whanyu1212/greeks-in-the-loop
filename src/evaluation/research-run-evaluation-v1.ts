@@ -236,7 +236,8 @@ const retainedTradeWindowContextIsValid = (
     deadline === Math.min(slotStartedAt + 5 * 60 * 1_000, entryCutoff) &&
     eligibilityEvaluatedAt >= slotStartedAt &&
     eligibilityEvaluatedAt - slotStartedAt <= 119_999 &&
-    eligibilityEvaluatedAt <= cycleStartedAt
+    eligibilityEvaluatedAt <= cycleStartedAt &&
+    cycleStartedAt < deadline
   )
 }
 
@@ -705,22 +706,39 @@ export function evaluateResearchRunV1(
         if (
           retainedCommonReportRejectionMatches ||
           preliminaryFutureObservationIndex >= 0 ||
+          parsedRejectedReport === undefined ||
           parsedRejectedResult?.outcome !== "PRELIMINARY_RESEARCH"
         ) {
           return []
         }
-        const eligibilityLowerBound = Math.max(
-          Date.parse(run.cycle.startedAt),
-          Date.parse(run.initialEligibility?.evaluatedAt ?? ""),
-        )
+        const cycleStartedAt = Date.parse(run.cycle.startedAt)
         const completedAt = Date.parse(run.cycle.completedAt)
+        const earliestInCycleExaRetrieval = Math.min(
+          ...parsedRejectedReport.analysis.externalContext
+            .filter(({ provider }) => provider === "EXA")
+            .map(({ retrievedAt }) => Date.parse(retrievedAt))
+            .filter(
+              (retrievedAt) =>
+                Number.isFinite(retrievedAt) &&
+                retrievedAt >= cycleStartedAt &&
+                retrievedAt <= completedAt,
+            ),
+        )
+        const processingLowerBound = Math.max(
+          cycleStartedAt,
+          Date.parse(run.initialEligibility?.evaluatedAt ?? ""),
+          Date.parse(parsedRejectedReport.analysis.asOf),
+          Number.isFinite(earliestInCycleExaRetrieval)
+            ? earliestInCycleExaRetrieval
+            : Number.NEGATIVE_INFINITY,
+        )
         if (
-          !Number.isFinite(eligibilityLowerBound) ||
+          !Number.isFinite(processingLowerBound) ||
           !Number.isFinite(completedAt)
         ) {
           return []
         }
-        let priorObservation = eligibilityLowerBound
+        let priorObservation = processingLowerBound
         return parsedRejectedResult.evidence.flatMap((claim, index) => {
           if (claim.kind !== "SOURCED_FACT") return []
           const observedAt = Date.parse(claim.observedAt)
