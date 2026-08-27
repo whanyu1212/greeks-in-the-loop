@@ -300,6 +300,19 @@ describe("Alpaca risk-state provider", () => {
     expect(result.success && result.snapshot.portfolio.entriesSubmittedToday).toBe(0)
   })
 
+  it("does not count simple single-leg option closes as entries", async () => {
+    const result = await provider(router({
+      history: [openingOrder({
+        id: "simple-close",
+        status: "filled",
+        order_class: "simple",
+        position_intent: "sell_to_close",
+        legs: null,
+      })],
+    })).capture(input)
+    expect(result.success && result.snapshot.portfolio.entriesSubmittedToday).toBe(0)
+  })
+
   it("accepts valid notional orders without treating them as option entries", async () => {
     const notionalOrder = {
       id: "notional-order",
@@ -413,6 +426,15 @@ describe("Alpaca risk-state provider", () => {
     delete missingGreeks.snapshots[longSymbol].greeks
     await expectFailure(
       router({ snapshots: missingGreeks }),
+      "OPTION_METRICS_UNAVAILABLE",
+    )
+  })
+
+  it("rejects blank provider numerics instead of coercing them to zero", async () => {
+    const blankGamma = structuredClone(snapshots) as Record<string, any>
+    blankGamma.snapshots[longSymbol].greeks.gamma = " "
+    await expectFailure(
+      router({ snapshots: blankGamma }),
       "OPTION_METRICS_UNAVAILABLE",
     )
   })

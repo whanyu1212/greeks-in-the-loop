@@ -76,6 +76,7 @@ export const normalizedBrokerOrderV1Schema = z
     timeInForce: z.string().min(1).max(64),
     quantity: positiveProviderNumber.optional(),
     notional: positiveProviderNumber.optional(),
+    positionIntent: z.enum(BROKER_POSITION_INTENTS).optional(),
     legs: z.array(normalizedBrokerOrderLegV1Schema).max(4),
   })
   .strict()
@@ -267,10 +268,11 @@ const CLOSING_POSITION_INTENTS = new Set([
 
 const isRecognizedClosingOnlyOrder = (order: NormalizedBrokerOrderV1) =>
   order.assetClass === "us_option" &&
-  order.legs.length > 0 &&
-  order.legs.every(({ positionIntent }) =>
-    CLOSING_POSITION_INTENTS.has(positionIntent),
-  )
+  (order.legs.length > 0
+    ? order.legs.every(({ positionIntent }) =>
+      CLOSING_POSITION_INTENTS.has(positionIntent),
+    )
+    : CLOSING_POSITION_INTENTS.has(order.positionIntent ?? "UNKNOWN"))
 
 const OPEN_ORDER_STATUSES = new Set([
   "new",

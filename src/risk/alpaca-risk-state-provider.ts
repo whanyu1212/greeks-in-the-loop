@@ -104,6 +104,7 @@ const rawOrderSchema = z
     time_in_force: z.string().nullish(),
     qty: decimal.nullish(),
     notional: decimal.nullish(),
+    position_intent: z.string().nullish(),
     legs: z.array(rawOrderLegSchema).max(4).nullish(),
   })
   .passthrough()
@@ -241,8 +242,15 @@ const normalizeBaseUrl = (
   }
 }
 
+const DECIMAL_NUMBER_PATTERN =
+  /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/u
+
 const finiteNumber = (value: unknown) => {
-  const parsed = typeof value === "number" ? value : Number(value)
+  const parsed = typeof value === "number"
+    ? value
+    : typeof value === "string" && DECIMAL_NUMBER_PATTERN.test(value)
+      ? Number(value)
+      : Number.NaN
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
@@ -343,6 +351,7 @@ const normalizeOrder = (
     timeInForce: (raw.time_in_force ?? "unknown").toLowerCase(),
     quantity,
     notional,
+    positionIntent: positionIntent(raw.position_intent),
     legs,
   })
   return parsed.success ? parsed.data : undefined
