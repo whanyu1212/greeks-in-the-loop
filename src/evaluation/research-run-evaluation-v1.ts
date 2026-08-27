@@ -701,17 +701,65 @@ export function evaluateResearchRunV1(
         rejectionIssuesMatch([
           { code: "CONTEXT_INVALID", path: ["targetSessionDate"] },
         ])
+      const plausibleLaterProposalRejectionIssues = (() => {
+        if (
+          proposalPreflightValidation?.success !== true ||
+          !hasRetainedEligibleTradeWindow ||
+          validReport === undefined
+        ) {
+          return []
+        }
+        const completedAt = Date.parse(run.cycle.completedAt)
+        const deadline = Date.parse(
+          run.initialEligibility?.tradeIntentWindow?.deadline ?? "",
+        )
+        const marketObservedAt = Date.parse(
+          validReport.analysis.marketRegime.observedAt,
+        )
+        const accountObservedAt = Date.parse(
+          validReport.analysis.accountChecks.observedAt,
+        )
+        if (
+          !Number.isFinite(completedAt) ||
+          !Number.isFinite(deadline) ||
+          !Number.isFinite(marketObservedAt) ||
+          !Number.isFinite(accountObservedAt)
+        ) {
+          return []
+        }
+        const latestHiddenEvaluation = Math.min(completedAt, deadline - 1)
+        const plausible: Array<
+          ReadonlyArray<
+            Readonly<{ code: string; path: readonly (string | number)[] }>
+          >
+        > = []
+        if (latestHiddenEvaluation > marketObservedAt + 60_000) {
+          plausible.push([
+            {
+              code: "CONTEXT_INVALID",
+              path: ["analysis", "marketRegime", "observedAt"],
+            },
+          ])
+        }
+        if (
+          Math.min(latestHiddenEvaluation, marketObservedAt + 60_000) >
+          accountObservedAt + 5 * 60_000
+        ) {
+          plausible.push([
+            {
+              code: "CONTEXT_INVALID",
+              path: ["analysis", "accountChecks", "observedAt"],
+            },
+          ])
+        }
+        return plausible
+      })()
       const proposalRejectionIssuesMatch =
         proposalPreflightValidation?.success !== true ||
         (hasRetainedEligibleTradeWindow &&
           (expectedPreQuoteDecisionRejectionIssues === undefined
-            ? [
-                ["analysis", "marketRegime", "observedAt"],
-                ["analysis", "accountChecks", "observedAt"],
-              ].some((path) =>
-                rejectionIssuesMatch([
-                  { code: "CONTEXT_INVALID", path },
-                ]),
+            ? plausibleLaterProposalRejectionIssues.some((issues) =>
+                rejectionIssuesMatch(issues),
               )
             : rejectionIssuesMatch(expectedPreQuoteDecisionRejectionIssues)))
       if (
@@ -1278,6 +1326,7 @@ export function evaluateResearchRunV1(
         slotStartedAt < entryCutoff
       const eligibilityContextValid =
         eligibility.researchEligible &&
+        eligibility.sessionDate === run.cycle.sessionDate &&
         eligibility.reason === undefined &&
         Number.isFinite(eligibilityEvaluatedAt) &&
         Number.isFinite(sessionOpen) &&

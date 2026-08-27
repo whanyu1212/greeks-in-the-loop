@@ -1303,6 +1303,35 @@ describe("research run evaluation", () => {
         ],
       },
     })
+    const prematureMarketStaleness = evaluateResearchRunV1({
+      ...base,
+      cycle: { ...base.cycle, completedAt: "2026-08-26T14:04:00.000Z" },
+      evidenceSnapshots: [],
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [
+          {
+            code: "CONTEXT_INVALID",
+            path: ["analysis", "marketRegime", "observedAt"],
+          },
+        ],
+      },
+    })
+    const unreachableAccountStaleness = evaluateResearchRunV1({
+      ...base,
+      evidenceSnapshots: [],
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [
+          {
+            code: "CONTEXT_INVALID",
+            path: ["analysis", "accountChecks", "observedAt"],
+          },
+        ],
+      },
+    })
 
     expect(arbitraryRejection.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
@@ -1310,6 +1339,14 @@ describe("research run evaluation", () => {
     expect(plausibleLaterStaleness.dimensions.contractCompliance.status).toBe(
       "PASS",
     )
+    for (const evaluation of [
+      prematureMarketStaleness,
+      unreachableAccountStaleness,
+    ]) {
+      expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+        "OUTCOME_RECORD_MISMATCH",
+      )
+    }
   })
 
   it("requires exact issues for rejected preliminary reports", () => {
@@ -2208,6 +2245,18 @@ describe("research run evaluation", () => {
       status: "FAIL",
       issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_MISSING"],
     })
+  })
+
+  it("requires the cycle and eligibility session dates to match", () => {
+    const run = derivedIntentRun()
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      cycle: { ...run.cycle, sessionDate: "2026-08-27" },
+    })
+
+    expect(evaluation.dimensions.failClosedBehavior.issueCodes).toContain(
+      "INTENT_ELIGIBILITY_CONTEXT_INVALID",
+    )
   })
 
   it("rejects eligibility evaluated outside its retained trade window", () => {
