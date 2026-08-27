@@ -481,6 +481,54 @@ describe("research run evaluation", () => {
     })
   })
 
+  it("rejects unreachable result and record combinations for rejected outcomes", () => {
+    const noAction = noActionRun()
+    const { validatedDecision: _validatedDecision, ...withoutDecision } = noAction
+    const intentRejection = evaluateResearchRunV1({
+      ...withoutDecision,
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["MARKET_WINDOW_INELIGIBLE"],
+      },
+    })
+    const decisionRejection = evaluateResearchRunV1({
+      ...noAction,
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{ code: "SCHEMA_INVALID", path: ["outcome"] }],
+      },
+    })
+
+    expect(intentRejection.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+    expect(decisionRejection.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+  })
+
+  it("returns contract failure instead of throwing for malformed retained results", () => {
+    const runs = [
+      {
+        ...preliminaryRun(),
+        preliminaryResearch: null,
+      },
+      {
+        ...noActionRun(),
+        validatedDecision: 7,
+      },
+    ] as unknown as ResearchRunV1[]
+
+    for (const run of runs) {
+      const evaluation = evaluateResearchRunV1(run)
+      expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+        "OUTCOME_CONTRACT_INVALID",
+      )
+    }
+  })
+
   it("rejects sourced snapshot evidence on a validated no-action run", () => {
     const run = noActionRun()
     if (

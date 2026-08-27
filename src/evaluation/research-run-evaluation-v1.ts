@@ -192,16 +192,18 @@ export function evaluateResearchRunV1(
   ) {
     contractIssues.push("RESEARCH_REPORT_MISSING")
   }
-  if (
-    run.preliminaryResearch !== undefined &&
-    !preliminaryResearchV1Schema.safeParse(run.preliminaryResearch).success
-  ) {
+  const parsedPreliminaryResearch =
+    run.preliminaryResearch === undefined
+      ? undefined
+      : preliminaryResearchV1Schema.safeParse(run.preliminaryResearch)
+  if (parsedPreliminaryResearch?.success === false) {
     contractIssues.push("OUTCOME_CONTRACT_INVALID")
   }
-  if (
-    run.validatedDecision !== undefined &&
-    !researchDecisionV1Schema.safeParse(run.validatedDecision).success
-  ) {
+  const parsedValidatedDecision =
+    run.validatedDecision === undefined
+      ? undefined
+      : researchDecisionV1Schema.safeParse(run.validatedDecision)
+  if (parsedValidatedDecision?.success === false) {
     contractIssues.push("OUTCOME_CONTRACT_INVALID")
   }
 
@@ -209,6 +211,12 @@ export function evaluateResearchRunV1(
     ? parsedReport.data.result
     : undefined
   const retainedResult = run.preliminaryResearch ?? run.validatedDecision
+  const validRetainedResult =
+    parsedPreliminaryResearch?.success === true
+      ? parsedPreliminaryResearch.data
+      : parsedValidatedDecision?.success === true
+        ? parsedValidatedDecision.data
+        : undefined
   if (
     reportResult !== undefined &&
     retainedResult !== undefined &&
@@ -257,7 +265,23 @@ export function evaluateResearchRunV1(
       }
       break
     case "DECISION_REJECTED":
+      if (
+        run.preliminaryResearch !== undefined ||
+        run.validatedDecision !== undefined
+      ) {
+        contractIssues.push("OUTCOME_RECORD_MISMATCH")
+      }
+      break
     case "INTENT_DERIVATION_REJECTED":
+      if (
+        (parsedReport?.success === true &&
+          parsedReport.data.result.outcome !== "PROPOSE_TRADE") ||
+        run.preliminaryResearch !== undefined ||
+        (parsedValidatedDecision?.success === true &&
+          parsedValidatedDecision.data.outcome !== "PROPOSE_TRADE")
+      ) {
+        contractIssues.push("OUTCOME_RECORD_MISMATCH")
+      }
       break
   }
 
@@ -351,7 +375,14 @@ export function evaluateResearchRunV1(
     }
   }
 
-  const evidence = reportResult?.evidence ?? retainedResult?.evidence ?? []
+  const retainedEvidence =
+    typeof retainedResult === "object" &&
+    retainedResult !== null &&
+    "evidence" in retainedResult &&
+    Array.isArray(retainedResult.evidence)
+      ? retainedResult.evidence
+      : []
+  const evidence = reportResult?.evidence ?? retainedEvidence
   const sourcedFacts = evidence.flatMap((claim) =>
     claim.kind === "SOURCED_FACT" ? [claim] : [],
   )
@@ -483,8 +514,7 @@ export function evaluateResearchRunV1(
   const addCandidate = (
     result:
       | typeof reportResult
-      | typeof run.preliminaryResearch
-      | typeof run.validatedDecision,
+      | typeof validRetainedResult,
   ) => {
     if (result === undefined || !("candidate" in result) || result.candidate === undefined) {
       return
@@ -499,8 +529,16 @@ export function evaluateResearchRunV1(
     })
   }
   addCandidate(reportResult)
-  addCandidate(run.preliminaryResearch)
-  addCandidate(run.validatedDecision)
+  addCandidate(
+    parsedPreliminaryResearch?.success === true
+      ? parsedPreliminaryResearch.data
+      : undefined,
+  )
+  addCandidate(
+    parsedValidatedDecision?.success === true
+      ? parsedValidatedDecision.data
+      : undefined,
+  )
   if (run.outcome.status === "INTENT_DERIVED") {
     candidateIdentities.push({
       direction: run.outcome.intent.direction,
@@ -651,7 +689,7 @@ export function evaluateResearchRunV1(
     }
   }
 
-  const versionedResult = reportResult ?? retainedResult
+  const versionedResult = reportResult ?? validRetainedResult
   const evaluation = {
     evaluationVersion: RESEARCH_RUN_EVALUATION_VERSION,
     cycleId: run.cycle.cycleId,
