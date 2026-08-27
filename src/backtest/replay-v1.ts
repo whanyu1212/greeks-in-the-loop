@@ -573,6 +573,14 @@ export function runBacktestReplayV1(
         pnlCents: 0,
       }
     }
+    if (
+      scenario.fidelity === "HISTORICAL_BAR_PROXY" &&
+      scenario.monitorCycles === undefined &&
+      (!manifest.definition.optionSymbols.includes(selected.intent.longContractSymbol) ||
+        !manifest.definition.optionSymbols.includes(selected.intent.shortContractSymbol))
+    ) {
+      throw new Error(`Scenario ${scenario.scenarioId} references option symbols absent from the dataset`)
+    }
     const monitorCycles =
       scenario.fidelity === "HISTORICAL_BAR_PROXY" && scenario.monitorCycles === undefined
         ? deriveHistoricalBarProxyCyclesV1(records, selected.intent)
@@ -583,13 +591,19 @@ export function runBacktestReplayV1(
     if (monitorCycles.some(({ decidedAt }) => instant(decidedAt) < instant(selected.intent!.evaluatedAt))) {
       throw new Error(`Scenario ${scenario.scenarioId} has a monitor cycle before intent evaluation`)
     }
+    if (monitorCycles.some(({ decidedAt, dte }) =>
+      dte !== daysBetween(newYorkDate(new Date(decidedAt)), selected.intent!.expiration))) {
+      throw new Error(`Scenario ${scenario.scenarioId} has a monitor cycle with incorrect DTE`)
+    }
     if (monitorCycles.some(({ markHalfCentsPerShare }) =>
       markHalfCentsPerShare !== undefined &&
       markHalfCentsPerShare > selected.intent!.widthCentsPerShare * 2)) {
       throw new Error(`Scenario ${scenario.scenarioId} has a mark above the spread width`)
     }
     const triggered = monitorCycles.find((cycle) => exitReason(selected.intent!, cycle))
-    const finalCycle = triggered ?? monitorCycles.at(-1)!
+    const finalCycle = triggered ??
+      monitorCycles.filter(({ marketOpen }) => marketOpen).at(-1) ??
+      { ...monitorCycles.at(-1)!, markHalfCentsPerShare: undefined }
     const reason = triggered === undefined ? "END_OF_REPLAY" : exitReason(selected.intent, triggered)!
     const entryMark = selected.intent.entryLimitCentsPerShare * 2
     if (finalCycle.markHalfCentsPerShare === undefined) {

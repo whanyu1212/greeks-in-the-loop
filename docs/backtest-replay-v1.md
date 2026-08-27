@@ -85,7 +85,10 @@ approved the spread historically.
 Both modes evaluate the strategy exit priority deterministically. Entry fill is
 the retained entry limit; configured entry slippage is charged as an explicit
 conservative cost so a limit fill is never reported above its limit. Exit fill
-is the selected mark less configured slippage. Four per-contract commissions are charged for
+is the selected open-market mark less configured slippage. Explicit monitor DTE
+must equal the calendar-day distance from its New York date to contract
+expiration, and implicit proxy runs require both retained legs in the dataset
+manifest. Four per-contract commissions are charged for
 the two-leg entry and two-leg exit. `BACKTEST_EXECUTION_MODEL_VERSION` changes
 when these assumptions change.
 
@@ -96,6 +99,8 @@ observation and can trigger the stop-loss rule. If synchronized proxy marks stop
 the first retained five-minute open-market boundary is emitted as an unpriced
 stale-data exit; closed-market time is not counted. All supplied and derived
 marks are bounded by the vertical spread's contractual width.
+An end-of-replay valuation uses the last open-market cycle; when none exists,
+the exit remains unpriced.
 
 ## Known limitations
 

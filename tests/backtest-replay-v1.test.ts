@@ -141,6 +141,14 @@ const manifest = {
   limitations: [],
 } as const
 
+const proxyManifest = {
+  ...manifest,
+  definition: {
+    ...manifest.definition,
+    optionSymbols: [intent.longContractSymbol, intent.shortContractSymbol],
+  },
+} as const
+
 const monitorCycle = {
   decidedAt: "2026-08-28T15:00:00.000Z",
   marketOpen: true,
@@ -308,7 +316,6 @@ describe("backtest replay v1", () => {
             {
               ...monitorCycle,
               lateFill: true,
-              dte: 1,
               staleMinutes: 10,
               markHalfCentsPerShare: 100,
             },
@@ -353,6 +360,30 @@ describe("backtest replay v1", () => {
     })
   })
 
+  it("does not value end of replay from closed-market cycles", () => {
+    const report = runBacktestReplayV1(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [{
+        scenarioId: "closed-market-end",
+        fidelity: "HISTORICAL_BAR_PROXY",
+        retainedIntent: intent,
+        monitorCycles: [{
+          ...monitorCycle,
+          marketOpen: false,
+          markHalfCentsPerShare: 500,
+        }],
+      }],
+    })
+
+    expect(report.results[0]).toMatchObject({
+      outcome: "EXIT_UNPRICED",
+      exitReason: "END_OF_REPLAY",
+      exitDecidedAt: monitorCycle.decidedAt,
+      pnlCents: null,
+    })
+  })
+
   it("rejects monitor cycles that are not strictly chronological", () => {
     expect(() => runBacktestReplayV1(manifest, {
       replayVersion: "1.0.0",
@@ -389,6 +420,19 @@ describe("backtest replay v1", () => {
     })).toThrow(/monitor cycle before intent evaluation/u)
   })
 
+  it("rejects explicit monitor DTE that disagrees with the contract expiration", () => {
+    expect(() => runBacktestReplayV1(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [{
+        scenarioId: "incorrect-dte",
+        fidelity: "HISTORICAL_BAR_PROXY",
+        retainedIntent: intent,
+        monitorCycles: [{ ...monitorCycle, dte: 2 }],
+      }],
+    })).toThrow(/monitor cycle with incorrect DTE/u)
+  })
+
   it("rejects explicit marks above the spread width", () => {
     expect(() => runBacktestReplayV1(manifest, {
       replayVersion: "1.0.0",
@@ -417,8 +461,8 @@ describe("backtest replay v1", () => {
           fidelity: "HISTORICAL_BAR_PROXY",
           retainedIntent: intent,
           monitorCycles: [
-            { ...monitorCycle, decidedAt: "2026-08-27T14:31:00.000Z", markHalfCentsPerShare: 400 },
-            { ...monitorCycle, decidedAt: "2026-08-27T10:32:00.000-04:00" },
+            { ...monitorCycle, decidedAt: "2026-08-27T14:31:00.000Z", dte: 15, markHalfCentsPerShare: 400 },
+            { ...monitorCycle, decidedAt: "2026-08-27T10:32:00.000-04:00", dte: 15 },
           ],
         },
       ],
@@ -444,7 +488,7 @@ describe("backtest replay v1", () => {
       tradeCount: 5,
     } as const
     const report = runBacktestReplayV1(
-      manifest,
+      proxyManifest,
       {
         replayVersion: "1.0.0",
         execution,
@@ -488,6 +532,27 @@ describe("backtest replay v1", () => {
       exitDecidedAt: "2026-08-27T14:31:00.000Z",
       exitFillHalfCentsPerShare: 0,
     })
+  })
+
+  it("requires both retained proxy legs in the selected dataset", () => {
+    expect(() => runBacktestReplayV1(
+      {
+        ...manifest,
+        definition: {
+          ...manifest.definition,
+          optionSymbols: [intent.longContractSymbol],
+        },
+      },
+      {
+        replayVersion: "1.0.0",
+        execution,
+        scenarios: [{
+          scenarioId: "missing-proxy-leg",
+          fidelity: "HISTORICAL_BAR_PROXY",
+          retainedIntent: intent,
+        }],
+      },
+    )).toThrow(/option symbols absent from the dataset/u)
   })
 
   it("clamps derived proxy marks to the spread width", () => {
@@ -556,7 +621,7 @@ describe("backtest replay v1", () => {
       .toMatchObject({ staleMinutes: 11 })
 
     const report = runBacktestReplayV1(
-      manifest,
+      proxyManifest,
       {
         replayVersion: "1.0.0",
         execution,
@@ -612,7 +677,7 @@ describe("backtest replay v1", () => {
       holdingSessionIndex: 1,
     })
     const report = runBacktestReplayV1(
-      manifest,
+      proxyManifest,
       {
         replayVersion: "1.0.0",
         execution,
