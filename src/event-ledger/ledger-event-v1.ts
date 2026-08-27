@@ -5,6 +5,8 @@ import { preliminaryResearchV1Schema } from "../contracts/preliminary-research-v
 import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
 import { researchReportV2Schema } from "../contracts/research-report-v2.js"
 import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
+import { researchInvocationV1Schema } from "../research/research-invocation-v1.js"
+import { SCHEMA_VIOLATION_CATEGORIES } from "../shared/schema-diagnostics.js"
 import {
   riskBreakerTransitionV1Schema,
   shadowRiskDecisionV1Schema,
@@ -119,6 +121,7 @@ const payloadSchemas = {
             .object({
               code: boundedCode,
               path: issuePath,
+              schemaCategory: z.enum(SCHEMA_VIOLATION_CATEGORIES).optional(),
             })
             .strict(),
         )
@@ -145,6 +148,7 @@ const payloadSchemas = {
         "INTENT_DERIVATION_REJECTED",
         "INTENT_DERIVED",
       ]),
+      researchInvocation: researchInvocationV1Schema.optional(),
     })
     .strict(),
   RESEARCH_CYCLE_INTERRUPTED: z

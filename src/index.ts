@@ -34,6 +34,7 @@ import {
   createTerminalStageReporter,
   resolveTerminalLogFormat,
 } from "./observability/terminal-stage-reporter.js"
+import { createResearchInvocationV1 } from "./research/research-invocation-v1.js"
 import { startOpencode } from "./opencode-runtime.js"
 import {
   buildResearchCyclePrompt,
@@ -488,11 +489,11 @@ try {
                       ({ name, outcome }) => `${name}:${outcome}`,
                     ),
                   })
-                  return response
+                  return { response, invocation }
                 },
               )
 
-              const text = response.data.parts
+              const text = response.response.data.parts
                 .filter((part) => part.type === "text")
                 .map((part) => part.text.trim())
                 .filter(Boolean)
@@ -506,6 +507,10 @@ try {
                 shadowRiskEvaluator,
                 outcomeSink: cycle.outcomeSink,
                 getEligibility,
+                researchInvocation: createResearchInvocationV1(
+                  traceVersions,
+                  response.invocation,
+                ),
                 trace: cycleTrace,
                 stageReporter,
               })

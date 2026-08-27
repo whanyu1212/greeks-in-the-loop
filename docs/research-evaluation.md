@@ -24,7 +24,7 @@ only when it cannot load and project a completed run.
 
 | Dimension | Deterministic checks |
 | --- | --- |
-| Contract compliance | Reuses the existing report, decision, preliminary-research, eligibility, and intent schemas; checks that the report, retained record, and terminal outcome agree. An anytime dry run must retain its mode marker, remain trade-ineligible, have no trade window, and use the research-only reason. |
+| Contract compliance | Reuses the existing report, decision, preliminary-research, eligibility, intent, and invocation schemas; checks that the report, retained record, terminal outcome, cycle mode, and retained versions agree. An anytime research-only run must remain trade-ineligible, have no trade window, and use the research-only reason. |
 | Temporal integrity | Checks the cycle time range and ensures report, source-retrieval, snapshot-retrieval, and intent-evaluation timestamps remain inside it where applicable. |
 | Grounding | Checks inference-to-sourced-fact links and decision snapshot references. |
 | Candidate identity | Checks candidate agreement across the report result, retained decision or preliminary result, report diagnostics, and derived intent. |
@@ -48,7 +48,8 @@ citations and URLs, option symbols, provider payloads, credentials, and hidden
 reasoning. Results are not stored because they are deterministic and can be
 recomputed from SQLite; this avoids creating a second source of truth.
 
-Model, prompt, and skill revisions are not yet retained in `ResearchRunV1`, so
-this evaluator does not invent labels for historical runs. LLM-as-judge
-scoring, variant comparison, AX publication, human annotations, and detailed
-OpenCode event adaptation remain separate increments.
+New `ResearchRunV1` records retain bounded model, prompt, skill, strategy, and
+contract provenance. Legacy `1.0.0` and `1.1.0` runs remain evaluable without
+invented metadata; a `1.2.0` run fails contract compliance when this metadata is
+missing or inconsistent. LLM-as-judge scoring, variant comparison, AX
+publication, and human annotations remain separate increments.

@@ -163,13 +163,26 @@ const completionEvents = (
     case "VALIDATED_NO_ACTION":
       break
     case "DECISION_REJECTED":
+      if (
+        outcome.issues.some(
+          (issue) =>
+            issue.code === "SCHEMA_INVALID" &&
+            record.researchInvocation !== undefined &&
+            (!("schemaCategory" in issue) || issue.schemaCategory === undefined),
+        )
+      ) {
+        throw new Error("New schema rejections require a safe diagnostic category")
+      }
       append({
         ...envelope(),
         eventType: "RESEARCH_DECISION_REJECTED",
         payload: {
-          issues: outcome.issues.map(({ code, path }) => ({
-            code,
-            path: [...path],
+          issues: outcome.issues.map((issue) => ({
+            code: issue.code,
+            path: [...issue.path],
+            ...(!("schemaCategory" in issue) || issue.schemaCategory === undefined
+              ? {}
+              : { schemaCategory: issue.schemaCategory }),
           })),
         },
       })
@@ -208,7 +221,12 @@ const completionEvents = (
   append({
     ...envelope(),
     eventType: "RESEARCH_CYCLE_COMPLETED",
-    payload: { status: outcome.status },
+    payload: {
+      status: outcome.status,
+      ...(record.researchInvocation === undefined
+        ? {}
+        : { researchInvocation: record.researchInvocation }),
+    },
   })
 
   return events

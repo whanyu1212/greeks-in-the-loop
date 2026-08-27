@@ -118,14 +118,15 @@ Variables prefixed by `OTEL_`, `ARIZE_`, or `PHOENIX_` are removed from the
 managed OpenCode child environment, where
 `OTEL_SDK_DISABLED=true` is then forced to prevent preloaded or transitive
 instrumentation from tracing agent content. SQLite remains the authoritative
-research record; trace identifiers are not written into the ledger in this
-phase.
+research record; trace identifiers are not written into the ledger.
 
 The worker deliberately uses the finalized `session.prompt` response instead of
 opening the SDK's live SSE event stream. The response exposes the same completed
 assistant and tool records needed for comparison without adding stream retries,
-cross-session routing, or another shutdown path. SQLite remains authoritative;
-these operational measurements are not written into research artifacts.
+cross-session routing, or another shutdown path. A bounded, content-free subset
+is retained as `ResearchInvocationV1` in new completed ledger cycles and JSON
+artifacts. Prompts, responses, tool arguments/results, provider metadata, error
+text, and trace identifiers remain excluded.
 
 Deterministic offline run evaluation is documented in
 [Offline research evaluation](research-evaluation.md). LLM judging, evaluation

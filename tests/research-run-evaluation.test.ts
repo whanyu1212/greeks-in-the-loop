@@ -150,6 +150,29 @@ const noActionRun = (): ResearchRunV1 => {
   }
 }
 
+const currentInvocation = {
+  invocationVersion: "1.0.0" as const,
+  agentName: "research",
+  cycleMode: "STANDARD" as const,
+  promptVersion: "1.3.0",
+  skillName: "spy-debit-spread-research",
+  skillVersion: "1.1.0",
+  strategyVersion: "1.1.0",
+  decisionContractVersion: "1.0.0",
+  reportVersion: "2.0.0",
+  providerId: "test-provider",
+  modelId: "test-model",
+  responseError: false,
+  tokens: {},
+  tools: {
+    totalCount: 0,
+    errorCount: 0,
+    incompleteCount: 0,
+    omittedCount: 0,
+    calls: [],
+  },
+}
+
 const derivedIntentRun = (): ResearchRunV1 => {
   const {
     preliminaryResearch: _preliminaryResearch,
@@ -331,6 +354,36 @@ describe("research run evaluation", () => {
 
     expect(evaluation.dimensions.contractCompliance.issueCodes).not.toContain(
       "RUN_VERSION_INVALID",
+    )
+  })
+
+  it("requires matching invocation metadata for current runs", () => {
+    const healthy = evaluateResearchRunV1({
+      ...noActionRun(),
+      runVersion: "1.2.0",
+      researchInvocation: currentInvocation,
+    })
+    const missing = evaluateResearchRunV1({
+      ...noActionRun(),
+      runVersion: "1.2.0",
+    })
+    const mismatched = evaluateResearchRunV1({
+      ...noActionRun(),
+      runVersion: "1.2.0",
+      researchInvocation: {
+        ...currentInvocation,
+        strategyVersion: "0.0.0",
+      },
+    })
+
+    expect(healthy.dimensions.contractCompliance.issueCodes).not.toContain(
+      "RUN_METADATA_INVALID",
+    )
+    expect(missing.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
+    )
+    expect(mismatched.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
     )
   })
 

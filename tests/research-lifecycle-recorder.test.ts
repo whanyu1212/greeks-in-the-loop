@@ -15,9 +15,33 @@ import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { createResearchLifecycleRecorder } from "../src/event-ledger/research-lifecycle-recorder.js"
 import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
 import type { ResearchCycleTerminalRecordV1 } from "../src/research/research-cycle-outcome-v1.js"
+import type { ResearchInvocationV1 } from "../src/research/research-invocation-v1.js"
 
 const TIMESTAMP = "2026-08-26T10:00:00.000Z"
 const signal = new AbortController().signal
+
+const researchInvocation: ResearchInvocationV1 = {
+  invocationVersion: "1.0.0",
+  agentName: "research",
+  cycleMode: "STANDARD",
+  promptVersion: "1.3.0",
+  skillName: "spy-debit-spread-research",
+  skillVersion: "1.1.0",
+  strategyVersion: "1.1.0",
+  decisionContractVersion: "1.0.0",
+  reportVersion: "2.0.0",
+  providerId: "test-provider",
+  modelId: "test-model",
+  responseError: false,
+  tokens: {},
+  tools: {
+    totalCount: 0,
+    errorCount: 0,
+    incompleteCount: 0,
+    omittedCount: 0,
+    calls: [],
+  },
+}
 
 const noActionDecision: NoActionDecisionV1 = {
   contractVersion: "1.0.0",
@@ -248,6 +272,7 @@ const terminalMappingCases: readonly {
   {
     name: "retained preliminary research",
     record: {
+      researchInvocation,
       outcome: {
         outcomeVersion: "1.0.0",
         status: "PRELIMINARY_RESEARCH_RETAINED",
@@ -264,6 +289,7 @@ const terminalMappingCases: readonly {
   {
     name: "validated no action",
     record: {
+      researchInvocation,
       outcome: {
         outcomeVersion: "1.0.0",
         status: "VALIDATED_NO_ACTION",
@@ -282,10 +308,15 @@ const terminalMappingCases: readonly {
   {
     name: "decision rejection",
     record: {
+      researchInvocation,
       outcome: {
         outcomeVersion: "1.0.0",
         status: "DECISION_REJECTED",
-        issues: [{ code: "SCHEMA_INVALID", path: ["candidate", 0] }],
+        issues: [{
+          code: "SCHEMA_INVALID",
+          schemaCategory: "TYPE_MISMATCH",
+          path: ["candidate", 0],
+        }],
       },
       evidenceSnapshots,
     },
@@ -299,6 +330,7 @@ const terminalMappingCases: readonly {
   {
     name: "intent derivation rejection with a validated decision",
     record: {
+      researchInvocation,
       outcome: {
         outcomeVersion: "1.0.0",
         status: "INTENT_DERIVATION_REJECTED",
@@ -317,6 +349,7 @@ const terminalMappingCases: readonly {
   {
     name: "derived intent without duplicate decision or intent events",
     record: {
+      researchInvocation,
       outcome: {
         outcomeVersion: "1.0.0",
         status: "INTENT_DERIVED",
@@ -431,7 +464,10 @@ describe("createResearchLifecycleRecorder", () => {
       expect(terminalEvents.map(({ eventType }) => eventType)).toEqual(eventTypes)
       expect(terminalEvents.at(-1)).toMatchObject({
         eventType: "RESEARCH_CYCLE_COMPLETED",
-        payload: { status: record.outcome.status },
+        payload: {
+          status: record.outcome.status,
+          researchInvocation,
+        },
       })
       expect(
         terminalEvents.every(

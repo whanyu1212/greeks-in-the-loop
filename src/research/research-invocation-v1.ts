@@ -1,0 +1,126 @@
+import { z } from "zod"
+
+import type { OpenCodeInvocationSummary } from "../observability/opencode-telemetry-summary.js"
+import type { ResearchTraceVersions } from "../observability/research-telemetry.js"
+
+export const RESEARCH_INVOCATION_VERSION = "1.0.0" as const
+export const MAX_RESEARCH_INVOCATION_TOOL_CALLS = 32
+
+const boundedText = z.string().trim().min(1).max(128)
+const safeCount = z.number().int().nonnegative().safe()
+
+export const researchInvocationV1Schema = z
+  .object({
+    invocationVersion: z.literal(RESEARCH_INVOCATION_VERSION),
+    agentName: boundedText,
+    cycleMode: z.enum([
+      "STANDARD",
+      "DRY_RUN_ANYTIME",
+      "DRY_RUN_SHADOW_ANYTIME",
+    ]),
+    promptVersion: boundedText,
+    skillName: boundedText,
+    skillVersion: boundedText,
+    strategyVersion: boundedText,
+    decisionContractVersion: boundedText,
+    reportVersion: boundedText,
+    providerId: boundedText,
+    modelId: boundedText,
+    responseError: z.boolean(),
+    tokens: z
+      .object({
+        input: safeCount.optional(),
+        output: safeCount.optional(),
+        reasoning: safeCount.optional(),
+        cacheRead: safeCount.optional(),
+        cacheWrite: safeCount.optional(),
+      })
+      .strict(),
+    tools: z
+      .object({
+        totalCount: safeCount,
+        errorCount: safeCount,
+        incompleteCount: safeCount,
+        omittedCount: safeCount,
+        calls: z
+          .array(
+            z
+              .object({
+                name: boundedText,
+                outcome: z.enum(["completed", "error", "incomplete"]),
+                durationMs: safeCount.optional(),
+              })
+              .strict(),
+          )
+          .max(MAX_RESEARCH_INVOCATION_TOOL_CALLS),
+      })
+      .strict(),
+  })
+  .strict()
+
+export type ResearchInvocationV1 = Readonly<
+  z.infer<typeof researchInvocationV1Schema>
+>
+
+const bounded = (value: string) => value.trim().slice(0, 128) || "unknown"
+const toolDuration = (startedAt?: number, endedAt?: number) => {
+  if (startedAt === undefined || endedAt === undefined) return undefined
+  const durationMs = endedAt - startedAt
+  return Number.isSafeInteger(durationMs) && durationMs >= 0
+    ? durationMs
+    : undefined
+}
+
+/** Builds the durable, content-free provenance retained with a completed run. */
+export function createResearchInvocationV1(
+  versions: ResearchTraceVersions,
+  invocation: OpenCodeInvocationSummary,
+): ResearchInvocationV1 {
+  return researchInvocationV1Schema.parse({
+    invocationVersion: RESEARCH_INVOCATION_VERSION,
+    agentName: bounded(versions.agentName),
+    cycleMode: versions.cycleMode,
+    promptVersion: bounded(versions.promptVersion),
+    skillName: bounded(versions.skillName),
+    skillVersion: bounded(versions.skillVersion),
+    strategyVersion: bounded(versions.strategyVersion),
+    decisionContractVersion: bounded(versions.decisionContractVersion),
+    reportVersion: bounded(versions.reportVersion),
+    providerId: bounded(invocation.providerId),
+    modelId: bounded(invocation.modelId),
+    responseError: invocation.responseError,
+    tokens: {
+      ...(invocation.inputTokenCount === undefined
+        ? {}
+        : { input: invocation.inputTokenCount }),
+      ...(invocation.outputTokenCount === undefined
+        ? {}
+        : { output: invocation.outputTokenCount }),
+      ...(invocation.reasoningTokenCount === undefined
+        ? {}
+        : { reasoning: invocation.reasoningTokenCount }),
+      ...(invocation.cacheReadTokenCount === undefined
+        ? {}
+        : { cacheRead: invocation.cacheReadTokenCount }),
+      ...(invocation.cacheWriteTokenCount === undefined
+        ? {}
+        : { cacheWrite: invocation.cacheWriteTokenCount }),
+    },
+    tools: {
+      totalCount: invocation.toolCallCount,
+      errorCount: invocation.toolErrorCount,
+      incompleteCount: invocation.toolIncompleteCount,
+      omittedCount: invocation.omittedToolCallCount,
+      calls: invocation.toolCalls
+        .slice(0, MAX_RESEARCH_INVOCATION_TOOL_CALLS)
+        .map((tool) => {
+          const durationMs = toolDuration(tool.startedAt, tool.endedAt)
+          return {
+            name: bounded(tool.name),
+            outcome: tool.outcome,
+            ...(durationMs === undefined ? {} : { durationMs }),
+          }
+        }),
+    },
+  })
+}
