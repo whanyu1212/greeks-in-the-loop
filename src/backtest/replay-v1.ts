@@ -10,7 +10,7 @@ import {
   type RiskEvaluationV1,
 } from "../risk/risk-evaluation-v1.js"
 import { newYorkDate, newYorkLocalTime } from "../scheduling/research-eligibility.js"
-import { canonicalJsonSha256 } from "../shared/canonical-json.js"
+import { canonicalJson, canonicalJsonSha256 } from "../shared/canonical-json.js"
 import {
   backtestDatasetManifestV1Schema,
   type BacktestDatasetRecordV1,
@@ -177,10 +177,27 @@ const exactScenarioSchema = z
   })
   .strict()
   .superRefine((scenario, context) => {
+    const sharedApprovalContext = canonicalJson({
+      eligibility: scenario.candidates[0]!.context.eligibility,
+      account: scenario.candidates[0]!.context.account,
+      portfolio: scenario.candidates[0]!.context.portfolio,
+    })
     for (let index = 0; index < scenario.candidates.length; index += 1) {
-      const eligibility = scenario.candidates[index]!.context.eligibility
+      const candidate = scenario.candidates[index]!
+      const eligibility = candidate.context.eligibility
+      if (canonicalJson({
+        eligibility,
+        account: candidate.context.account,
+        portfolio: candidate.context.portfolio,
+      }) !== sharedApprovalContext) {
+        context.addIssue({
+          code: "custom",
+          path: ["candidates", index, "context"],
+          message: "Exact candidates must share one application approval context",
+        })
+      }
       if (
-        instant(scenario.candidates[index]!.intent.evaluatedAt) !== instant(scenario.signal.observedAt) ||
+        instant(candidate.intent.evaluatedAt) !== instant(scenario.signal.observedAt) ||
         eligibility.sessionDate !== scenario.signal.sessionDate
       ) {
         context.addIssue({
@@ -603,6 +620,26 @@ export function runBacktestReplayV1(
     }
     if (monitorCycles.some(({ decidedAt }) => instant(decidedAt) < instant(selected.intent!.evaluatedAt))) {
       throw new Error(`Scenario ${scenario.scenarioId} has a monitor cycle before intent evaluation`)
+    }
+    if (scenario.monitorCycles !== undefined) {
+      const sessions = records
+        .filter((record): record is MarketSessionRecordV1 => record.recordType === "MARKET_SESSION")
+        .sort((left, right) => instant(left.open) - instant(right.open))
+      const entrySessionIndex = sessions.findIndex(({ open, close }) =>
+        instant(selected.intent!.evaluatedAt) >= instant(open) &&
+        instant(selected.intent!.evaluatedAt) <= instant(close))
+      if (entrySessionIndex < 0) {
+        throw new Error(`Scenario ${scenario.scenarioId} entry session is absent from the replay calendar`)
+      }
+      if (monitorCycles.some(({ decidedAt, holdingSessionIndex }) => {
+        const cycleSessionIndex = sessions.findIndex(
+          ({ date }) => date === newYorkDate(new Date(decidedAt)),
+        )
+        return cycleSessionIndex < entrySessionIndex ||
+          holdingSessionIndex !== cycleSessionIndex - entrySessionIndex + 1
+      })) {
+        throw new Error(`Scenario ${scenario.scenarioId} has an incorrect holding session index`)
+      }
     }
     if (monitorCycles.some(({ decidedAt, dte }) =>
       dte !== daysBetween(newYorkDate(new Date(decidedAt)), selected.intent!.expiration))) {

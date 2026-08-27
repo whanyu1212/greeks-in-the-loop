@@ -74,6 +74,8 @@ result can claim exact fidelity. The underlying quote must be no later than the
 observation instant and no more than 60 seconds old both then and at every
 candidate approval evaluation. Exact snapshots must be captured forward; the
 Alpaca historical API cannot recreate them.
+All exact candidates share one application-owned eligibility, account, and
+portfolio approval context; only their contract snapshots may differ.
 
 `HISTORICAL_BAR_PROXY` contains a retained `TradeIntentV1`. When monitor cycles
 are omitted, replay derives them from synchronized long/short option minute bars
@@ -102,6 +104,8 @@ stale-data exit; closed-market time is not counted. All supplied and derived
 marks are bounded by the vertical spread's contractual width.
 An end-of-replay valuation uses the last open-market cycle; when none exists,
 the exit remains unpriced.
+Explicit holding-session indices must match the retained market calendar from
+the intent entry session through each monitor cycle.
 
 ## Known limitations
 

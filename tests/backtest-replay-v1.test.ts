@@ -5,6 +5,7 @@ import {
   evaluateBacktestSignalV1,
   runBacktestReplayV1,
 } from "../src/backtest/replay-v1.js"
+import type { BacktestDatasetRecordV1 } from "../src/backtest/dataset-v1.js"
 import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 
 const optionSymbol = (strikeCents: number) =>
@@ -149,6 +150,27 @@ const proxyManifest = {
   },
 } as const
 
+const replayCalendar = [
+  {
+    recordType: "MARKET_SESSION" as const,
+    date: "2026-08-27",
+    open: "2026-08-27T13:30:00.000Z",
+    close: "2026-08-27T20:00:00.000Z",
+  },
+  {
+    recordType: "MARKET_SESSION" as const,
+    date: "2026-08-28",
+    open: "2026-08-28T13:30:00.000Z",
+    close: "2026-08-28T20:00:00.000Z",
+  },
+]
+
+const runReplay = (
+  manifestInput: unknown,
+  replayInput: unknown,
+  records: readonly BacktestDatasetRecordV1[] = replayCalendar,
+) => runBacktestReplayV1(manifestInput, replayInput, records)
+
 const monitorCycle = {
   decidedAt: "2026-08-28T15:00:00.000Z",
   marketOpen: true,
@@ -252,7 +274,7 @@ describe("backtest replay v1", () => {
   })
 
   it("rechecks exact underlying quote freshness at candidate approval", () => {
-    expect(() => runBacktestReplayV1(manifest, {
+    expect(() => runReplay(manifest, {
       replayVersion: "1.0.0",
       execution,
       scenarios: [
@@ -276,8 +298,34 @@ describe("backtest replay v1", () => {
     })).toThrow(/remain fresh at candidate approval/u)
   })
 
+  it("requires exact candidates to share one application approval context", () => {
+    expect(() => runReplay(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [{
+        scenarioId: "split-approval-context",
+        fidelity: "EXACT_SNAPSHOT",
+        signal: signalSnapshot(),
+        candidates: [
+          riskInput,
+          {
+            ...riskInput,
+            context: {
+              ...riskInput.context,
+              account: {
+                ...riskInput.context.account,
+                buyingPowerCents: riskInput.context.account.buyingPowerCents - 1,
+              },
+            },
+          },
+        ],
+        monitorCycles: [monitorCycle],
+      }],
+    })).toThrow(/share one application approval context/u)
+  })
+
   it("runs exact snapshots through production risk and a deterministic profit exit", () => {
-    const report = runBacktestReplayV1(manifest, {
+    const report = runReplay(manifest, {
       replayVersion: "1.0.0",
       execution,
       scenarios: [
@@ -304,7 +352,7 @@ describe("backtest replay v1", () => {
   })
 
   it("labels retained-intent runs as proxy and preserves exit priority", () => {
-    const report = runBacktestReplayV1(manifest, {
+    const report = runReplay(manifest, {
       replayVersion: "1.0.0",
       execution,
       scenarios: [
@@ -333,7 +381,7 @@ describe("backtest replay v1", () => {
   })
 
   it("does not latch exits from closed-market cycles", () => {
-    const report = runBacktestReplayV1(manifest, {
+    const report = runReplay(manifest, {
       replayVersion: "1.0.0",
       execution,
       scenarios: [
@@ -361,7 +409,7 @@ describe("backtest replay v1", () => {
   })
 
   it("does not value end of replay from closed-market cycles", () => {
-    const report = runBacktestReplayV1(manifest, {
+    const report = runReplay(manifest, {
       replayVersion: "1.0.0",
       execution,
       scenarios: [{
@@ -385,7 +433,7 @@ describe("backtest replay v1", () => {
   })
 
   it("rejects monitor cycles that are not strictly chronological", () => {
-    expect(() => runBacktestReplayV1(manifest, {
+    expect(() => runReplay(manifest, {
       replayVersion: "1.0.0",
       execution,
       scenarios: [
@@ -403,7 +451,7 @@ describe("backtest replay v1", () => {
   })
 
   it("rejects monitor cycles that predate intent evaluation", () => {
-    expect(() => runBacktestReplayV1(manifest, {
+    expect(() => runReplay(manifest, {
       replayVersion: "1.0.0",
       execution,
       scenarios: [
@@ -421,7 +469,7 @@ describe("backtest replay v1", () => {
   })
 
   it("rejects explicit monitor DTE that disagrees with the contract expiration", () => {
-    expect(() => runBacktestReplayV1(manifest, {
+    expect(() => runReplay(manifest, {
       replayVersion: "1.0.0",
       execution,
       scenarios: [{
@@ -433,8 +481,21 @@ describe("backtest replay v1", () => {
     })).toThrow(/monitor cycle with incorrect DTE/u)
   })
 
+  it("rejects explicit holding age that disagrees with the replay calendar", () => {
+    expect(() => runReplay(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [{
+        scenarioId: "incorrect-holding-age",
+        fidelity: "HISTORICAL_BAR_PROXY",
+        retainedIntent: intent,
+        monitorCycles: [{ ...monitorCycle, holdingSessionIndex: 1 }],
+      }],
+    })).toThrow(/incorrect holding session index/u)
+  })
+
   it("rejects explicit marks above the spread width", () => {
-    expect(() => runBacktestReplayV1(manifest, {
+    expect(() => runReplay(manifest, {
       replayVersion: "1.0.0",
       execution,
       scenarios: [
@@ -452,7 +513,7 @@ describe("backtest replay v1", () => {
   })
 
   it("compares offset timestamps by instant", () => {
-    const report = runBacktestReplayV1(manifest, {
+    const report = runReplay(manifest, {
       replayVersion: "1.0.0",
       execution,
       scenarios: [
@@ -461,8 +522,19 @@ describe("backtest replay v1", () => {
           fidelity: "HISTORICAL_BAR_PROXY",
           retainedIntent: intent,
           monitorCycles: [
-            { ...monitorCycle, decidedAt: "2026-08-27T14:31:00.000Z", dte: 15, markHalfCentsPerShare: 400 },
-            { ...monitorCycle, decidedAt: "2026-08-27T10:32:00.000-04:00", dte: 15 },
+            {
+              ...monitorCycle,
+              decidedAt: "2026-08-27T14:31:00.000Z",
+              dte: 15,
+              markHalfCentsPerShare: 400,
+              holdingSessionIndex: 1,
+            },
+            {
+              ...monitorCycle,
+              decidedAt: "2026-08-27T10:32:00.000-04:00",
+              dte: 15,
+              holdingSessionIndex: 1,
+            },
           ],
         },
       ],
@@ -487,7 +559,7 @@ describe("backtest replay v1", () => {
       vwapMicros: 5_025_000,
       tradeCount: 5,
     } as const
-    const report = runBacktestReplayV1(
+    const report = runReplay(
       proxyManifest,
       {
         replayVersion: "1.0.0",
@@ -535,7 +607,7 @@ describe("backtest replay v1", () => {
   })
 
   it("requires both retained proxy legs in the selected dataset", () => {
-    expect(() => runBacktestReplayV1(
+    expect(() => runReplay(
       {
         ...manifest,
         definition: {
@@ -556,7 +628,7 @@ describe("backtest replay v1", () => {
   })
 
   it("rejects implicit proxy entry sessions outside the acquired interval", () => {
-    expect(() => runBacktestReplayV1(
+    expect(() => runReplay(
       proxyManifest,
       {
         replayVersion: "1.0.0",
@@ -652,7 +724,7 @@ describe("backtest replay v1", () => {
     expect(deriveHistoricalBarProxyCyclesV1(records.slice(0, 1).concat(records.slice(3)), intent)[0])
       .toMatchObject({ staleMinutes: 11 })
 
-    const report = runBacktestReplayV1(
+    const report = runReplay(
       proxyManifest,
       {
         replayVersion: "1.0.0",
@@ -708,7 +780,7 @@ describe("backtest replay v1", () => {
       markHalfCentsPerShare: undefined,
       holdingSessionIndex: 1,
     })
-    const report = runBacktestReplayV1(
+    const report = runReplay(
       proxyManifest,
       {
         replayVersion: "1.0.0",
@@ -795,7 +867,7 @@ describe("backtest replay v1", () => {
   })
 
   it("reports mark-independent exits without a fabricated P&L", () => {
-    const report = runBacktestReplayV1(manifest, {
+    const report = runReplay(manifest, {
       replayVersion: "1.0.0",
       execution,
       scenarios: [
