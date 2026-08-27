@@ -30,6 +30,8 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "INTENT_EVALUATION_OUTSIDE_CYCLE",
   "UNGROUNDED_INFERENCE",
   "UNKNOWN_SNAPSHOT_REFERENCE",
+  "SNAPSHOT_FROM_FUTURE",
+  "STALE_SNAPSHOT",
   "CANDIDATE_IDENTITY_MISMATCH",
   "INELIGIBLE_CYCLE_DERIVED_INTENT",
   "INTENT_ELIGIBILITY_CONTEXT_INVALID",
@@ -290,6 +292,22 @@ export function evaluateResearchRunV1(
   if (snapshotReferences.some((snapshotRef) => !knownSnapshots.has(snapshotRef))) {
     groundingIssues.push("UNKNOWN_SNAPSHOT_REFERENCE")
   }
+  if (run.outcome.status === "INTENT_DERIVED") {
+    const intentEvaluatedAt = Date.parse(run.outcome.intent.evaluatedAt)
+    const snapshotsByReference = new Map(
+      run.evidenceSnapshots.map((snapshot) => [snapshot.snapshotRef, snapshot]),
+    )
+    for (const snapshotReference of snapshotReferences) {
+      const snapshot = snapshotsByReference.get(snapshotReference)
+      if (snapshot === undefined) continue
+      if (Date.parse(snapshot.retrievedAt) > intentEvaluatedAt) {
+        groundingIssues.push("SNAPSHOT_FROM_FUTURE")
+      }
+      if (Date.parse(snapshot.freshUntil) < intentEvaluatedAt) {
+        groundingIssues.push("STALE_SNAPSHOT")
+      }
+    }
+  }
 
   const candidateIdentities: CandidateIdentity[] = []
   const addCandidate = (
@@ -352,7 +370,10 @@ export function evaluateResearchRunV1(
       failClosedIssues.push("INELIGIBLE_CYCLE_DERIVED_INTENT")
     } else if (eligibility.tradeIntentWindow === undefined) {
       failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_MISSING")
-    } else if (eligibility.sessionClose === undefined) {
+    } else if (
+      eligibility.sessionOpen === undefined ||
+      eligibility.sessionClose === undefined
+    ) {
       failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_MISSING")
     } else {
       const eligibilityEvaluatedAt = Date.parse(eligibility.evaluatedAt)
@@ -361,6 +382,7 @@ export function evaluateResearchRunV1(
         eligibility.tradeIntentWindow.slotStartedAt,
       )
       const deadline = Date.parse(eligibility.tradeIntentWindow.deadline)
+      const sessionOpen = Date.parse(eligibility.sessionOpen)
       const sessionClose = Date.parse(eligibility.sessionClose)
       const sessionDate = eligibility.sessionDate
       const slotDate = new Date(slotStartedAt)
@@ -379,8 +401,10 @@ export function evaluateResearchRunV1(
       const slotMatchesSession =
         sessionDate !== undefined &&
         Number.isFinite(slotStartedAt) &&
+        Number.isFinite(sessionOpen) &&
         Number.isFinite(sessionClose) &&
         newYorkDate(slotDate) === sessionDate &&
+        newYorkDate(new Date(sessionOpen)) === sessionDate &&
         newYorkDate(new Date(sessionClose)) === sessionDate &&
         slotStartedAt >= newYorkLocalTime(sessionDate, "10:00").getTime() &&
         slotStartedAt < entryCutoff
@@ -388,6 +412,9 @@ export function evaluateResearchRunV1(
         eligibility.researchEligible &&
         eligibility.reason === undefined &&
         Number.isFinite(eligibilityEvaluatedAt) &&
+        Number.isFinite(sessionOpen) &&
+        sessionOpen < sessionClose &&
+        eligibilityEvaluatedAt >= sessionOpen &&
         Number.isFinite(cycleStart) &&
         Number.isFinite(slotStartedAt) &&
         Number.isFinite(deadline) &&

@@ -203,6 +203,7 @@ const derivedIntentRun = (): ResearchRunV1 => {
     initialEligibility: {
       evaluatedAt: "2026-08-26T14:00:30.000Z",
       sessionDate: "2026-08-26",
+      sessionOpen: "2026-08-26T13:30:00.000Z",
       sessionClose: "2026-08-26T20:00:00.000Z",
       researchEligible: true,
       tradeIntentEligible: true,
@@ -327,6 +328,36 @@ describe("research run evaluation", () => {
     expect(evaluation.dimensions.grounding).toEqual({
       status: "FAIL",
       issueCodes: ["UNKNOWN_SNAPSHOT_REFERENCE"],
+    })
+  })
+
+  it.each([
+    {
+      name: "stale",
+      retrievedAt: "2026-08-26T14:03:59.000Z",
+      freshUntil: "2026-08-26T14:03:59.999Z",
+      issueCode: "STALE_SNAPSHOT" as const,
+    },
+    {
+      name: "from the future",
+      retrievedAt: "2026-08-26T14:04:01.000Z",
+      freshUntil: "2026-08-26T14:04:59.000Z",
+      issueCode: "SNAPSHOT_FROM_FUTURE" as const,
+    },
+  ])("reports a referenced snapshot that is $name", (snapshot) => {
+    const run = derivedIntentRun()
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      evidenceSnapshots: run.evidenceSnapshots.map((retained) => ({
+        ...retained,
+        retrievedAt: snapshot.retrievedAt,
+        freshUntil: snapshot.freshUntil,
+      })),
+    })
+
+    expect(evaluation.dimensions.grounding).toEqual({
+      status: "FAIL",
+      issueCodes: [snapshot.issueCode],
     })
   })
 
@@ -577,6 +608,26 @@ describe("research run evaluation", () => {
       initialEligibility: {
         ...run.initialEligibility,
         sessionClose: "2026-08-26T15:00:00.000Z",
+      },
+    })
+
+    expect(evaluation.dimensions.failClosedBehavior).toEqual({
+      status: "FAIL",
+      issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_INVALID"],
+    })
+  })
+
+  it("requires eligibility evaluation at or after the retained session open", () => {
+    const run = derivedIntentRun()
+    if (run.initialEligibility === undefined) {
+      throw new Error("Expected retained eligibility")
+    }
+
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      initialEligibility: {
+        ...run.initialEligibility,
+        sessionOpen: "2026-08-26T14:00:31.000Z",
       },
     })
 

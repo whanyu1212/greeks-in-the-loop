@@ -27,6 +27,7 @@ export const researchEligibilityV1Schema = z
   .object({
     evaluatedAt: eligibilityTimestamp,
     sessionDate: z.iso.date().optional(),
+    sessionOpen: eligibilityTimestamp.optional(),
     sessionClose: eligibilityTimestamp.optional(),
     researchEligible: z.boolean(),
     tradeIntentEligible: z.boolean(),
@@ -45,6 +46,7 @@ export const researchEligibilityV1Schema = z
 export type ResearchEligibilityV1 = Readonly<{
   evaluatedAt: string
   sessionDate?: string | undefined
+  sessionOpen?: string | undefined
   sessionClose?: string | undefined
   researchEligible: boolean
   tradeIntentEligible: boolean
@@ -161,6 +163,7 @@ export function evaluateResearchEligibility({
     return {
       evaluatedAt: evaluatedAt.toISOString(),
       sessionDate: session.date,
+      sessionOpen: new Date(open).toISOString(),
       sessionClose: new Date(close).toISOString(),
       researchEligible: false,
       tradeIntentEligible: false,
@@ -213,6 +216,7 @@ export function evaluateResearchEligibility({
   return {
     evaluatedAt: evaluatedAt.toISOString(),
     sessionDate: session.date,
+    sessionOpen: new Date(open).toISOString(),
     sessionClose: new Date(close).toISOString(),
     researchEligible: true,
     tradeIntentEligible,
