@@ -752,10 +752,26 @@ describe("research run evaluation", () => {
         reasons: ["MARKET_WINDOW_INELIGIBLE"],
       },
     })
+    const preQuoteEvaluation = evaluateResearchRunV1({
+      ...base,
+      cycle: {
+        ...base.cycle,
+        completedAt: "2026-08-26T14:04:30.000Z",
+      },
+      evidenceSnapshots: [],
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["MARKET_WINDOW_INELIGIBLE"],
+      },
+    })
 
     expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
     )
+    expect(
+      preQuoteEvaluation.dimensions.contractCompliance.issueCodes,
+    ).toContain("OUTCOME_RECORD_MISMATCH")
   })
 
   it("rejects non-Alpaca quote provenance on post-quote rejections", () => {
@@ -1243,7 +1259,33 @@ describe("research run evaluation", () => {
     expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
   })
 
+  it("rejects preliminary eligibility failure before retained session close", () => {
+    const run = preliminaryRun()
+    const { preliminaryResearch: _preliminaryResearch, ...base } = run
+    const evaluation = evaluateResearchRunV1({
+      ...base,
+      initialEligibility: {
+        ...base.initialEligibility!,
+        sessionClose: "2026-08-26T20:00:00.000Z",
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{ code: "CONTEXT_INVALID", path: ["targetSessionDate"] }],
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+  })
+
   it("returns contract failure instead of throwing for malformed retained results", () => {
+    const {
+      researchReport: _researchReport,
+      validatedDecision,
+      ...withoutReport
+    } = noActionRun()
     const runs = [
       {
         ...preliminaryRun(),
@@ -1252,6 +1294,10 @@ describe("research run evaluation", () => {
       {
         ...noActionRun(),
         validatedDecision: 7,
+      },
+      {
+        ...withoutReport,
+        validatedDecision: { ...validatedDecision, evidence: [null] },
       },
     ] as unknown as ResearchRunV1[]
 

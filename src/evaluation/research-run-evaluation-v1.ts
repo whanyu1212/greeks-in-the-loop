@@ -156,6 +156,28 @@ type CandidateIdentity = Readonly<{
   shortContractSymbol: string
 }>
 
+type EvaluableEvidenceClaim =
+  | Readonly<{ kind: "SOURCED_FACT"; claimId: string }>
+  | Readonly<{
+      kind: "INFERENCE"
+      claimId: string
+      basedOn: readonly string[]
+    }>
+
+const isEvaluableEvidenceClaim = (
+  claim: unknown,
+): claim is EvaluableEvidenceClaim => {
+  if (typeof claim !== "object" || claim === null) return false
+  const candidate = claim as Record<string, unknown>
+  if (typeof candidate.claimId !== "string") return false
+  if (candidate.kind === "SOURCED_FACT") return true
+  return (
+    candidate.kind === "INFERENCE" &&
+    Array.isArray(candidate.basedOn) &&
+    candidate.basedOn.every((claimId) => typeof claimId === "string")
+  )
+}
+
 const candidateKey = (candidate: CandidateIdentity) =>
   [
     candidate.direction,
@@ -560,6 +582,17 @@ export function evaluateResearchRunV1(
       const plausibleLaterPreliminaryEligibilityRejection =
         parsedRejectedResult?.outcome === "PRELIMINARY_RESEARCH" &&
         expectedPreliminaryDecisionRejectionIssues === undefined &&
+        (() => {
+          const sessionClose = Date.parse(
+            run.initialEligibility?.sessionClose ?? "",
+          )
+          const completedAt = Date.parse(run.cycle.completedAt)
+          return (
+            !Number.isFinite(sessionClose) ||
+            !Number.isFinite(completedAt) ||
+            completedAt >= sessionClose
+          )
+        })() &&
         rejectionIssuesMatch([
           { code: "CONTEXT_INVALID", path: ["targetSessionDate"] },
         ])
@@ -624,12 +657,13 @@ export function evaluateResearchRunV1(
         run.initialEligibility?.tradeIntentWindow?.deadline ?? "",
       )
       const cycleCompletedAt = Date.parse(run.cycle.completedAt)
+      const retainedTradeWindowCanExpireByCompletion =
+        run.initialEligibility?.tradeIntentEligible !== true ||
+        !Number.isFinite(retainedWindowDeadline) ||
+        !Number.isFinite(cycleCompletedAt) ||
+        cycleCompletedAt >= retainedWindowDeadline
       const postQuoteMarketWindowRejectionPlausible =
-        hasCanonicalQuoteSnapshot &&
-        (run.initialEligibility?.tradeIntentEligible !== true ||
-          !Number.isFinite(retainedWindowDeadline) ||
-          !Number.isFinite(cycleCompletedAt) ||
-          cycleCompletedAt >= retainedWindowDeadline)
+        hasCanonicalQuoteSnapshot && retainedTradeWindowCanExpireByCompletion
       const rejectionRecordsMatch =
         (quoteConfirmationRejection &&
           run.validatedDecision === undefined &&
@@ -639,7 +673,8 @@ export function evaluateResearchRunV1(
           hasCanonicalQuoteSnapshot) ||
         (marketWindowRejected &&
           run.validatedDecision === undefined &&
-          (run.evidenceSnapshots.length === 0 ||
+          ((run.evidenceSnapshots.length === 0 &&
+            retainedTradeWindowCanExpireByCompletion) ||
             postQuoteMarketWindowRejectionPlausible))
       if (
         (parsedReport?.success === true &&
@@ -797,7 +832,7 @@ export function evaluateResearchRunV1(
     retainedResult !== null &&
     "evidence" in retainedResult &&
     Array.isArray(retainedResult.evidence)
-      ? retainedResult.evidence
+      ? retainedResult.evidence.filter(isEvaluableEvidenceClaim)
       : []
   const evidence = reportResult?.evidence ?? retainedEvidence
   const sourcedFacts = evidence.flatMap((claim) =>
