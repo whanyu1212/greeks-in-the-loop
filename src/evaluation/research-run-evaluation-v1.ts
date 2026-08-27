@@ -620,6 +620,50 @@ export function evaluateResearchRunV1(
                   },
                 ]
               : undefined
+      const plausiblePreliminaryObservationRejectionIssues = (() => {
+        if (
+          retainedCommonReportRejectionMatches ||
+          preliminaryFutureObservationIndex >= 0 ||
+          parsedRejectedResult?.outcome !== "PRELIMINARY_RESEARCH"
+        ) {
+          return []
+        }
+        const eligibilityLowerBound = Math.max(
+          Date.parse(run.cycle.startedAt),
+          Date.parse(run.initialEligibility?.evaluatedAt ?? ""),
+        )
+        const completedAt = Date.parse(run.cycle.completedAt)
+        if (
+          !Number.isFinite(eligibilityLowerBound) ||
+          !Number.isFinite(completedAt)
+        ) {
+          return []
+        }
+        let priorObservation = eligibilityLowerBound
+        return parsedRejectedResult.evidence.flatMap((claim, index) => {
+          if (claim.kind !== "SOURCED_FACT") return []
+          const observedAt = Date.parse(claim.observedAt)
+          const couldBeFirstFutureObservation =
+            Number.isFinite(observedAt) &&
+            observedAt > priorObservation &&
+            observedAt <= completedAt
+          priorObservation = Math.max(priorObservation, observedAt)
+          return couldBeFirstFutureObservation
+            ? [
+                [
+                  {
+                    code: "CONTEXT_INVALID" as const,
+                    path: ["evidence", index, "observedAt"],
+                  },
+                ],
+              ]
+            : []
+        })
+      })()
+      const plausiblePreliminaryObservationRejectionMatches =
+        plausiblePreliminaryObservationRejectionIssues.some((issues) =>
+          rejectionIssuesMatch(issues),
+        )
       const noActionValidation =
         !retainedCommonReportRejectionMatches &&
         parsedRejectedResult?.outcome === "NO_ACTION"
@@ -675,7 +719,8 @@ export function evaluateResearchRunV1(
         run.validatedDecision !== undefined ||
         (run.evidenceSnapshots.length === 0 &&
           ((preliminaryCouldBeRetained &&
-            !plausibleLaterPreliminaryEligibilityRejection) ||
+            !plausibleLaterPreliminaryEligibilityRejection &&
+            !plausiblePreliminaryObservationRejectionMatches) ||
             noActionCouldBeRetained)) ||
         !reportFreeRejectionIssuesMatch ||
         (expectedCommonReportRejectionIssues !== undefined &&
@@ -683,6 +728,7 @@ export function evaluateResearchRunV1(
         (retainedCommonReportRejectionMatches &&
           run.evidenceSnapshots.length > 0) ||
         (expectedPreliminaryDecisionRejectionIssues !== undefined &&
+          !plausiblePreliminaryObservationRejectionMatches &&
           !rejectionIssuesMatch(expectedPreliminaryDecisionRejectionIssues)) ||
         (run.evidenceSnapshots.length === 0 &&
           noActionValidation?.success === false &&

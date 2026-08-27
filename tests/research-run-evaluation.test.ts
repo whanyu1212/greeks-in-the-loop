@@ -1368,6 +1368,45 @@ describe("research run evaluation", () => {
     expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
   })
 
+  it("allows a preliminary observation from the unretained eligibility gap", () => {
+    const run = preliminaryRun()
+    if (
+      run.preliminaryResearch === undefined ||
+      run.researchReport === undefined
+    ) {
+      throw new Error("Expected a preliminary report fixture")
+    }
+    const { preliminaryResearch: _preliminaryResearch, ...base } = run
+    const research: PreliminaryResearchV1 = {
+      ...run.preliminaryResearch,
+      evidence: run.preliminaryResearch.evidence.map((claim) =>
+        claim.kind === "SOURCED_FACT"
+          ? { ...claim, observedAt: "2026-08-26T12:04:30.000Z" }
+          : claim,
+      ),
+    }
+    const evaluation = evaluateResearchRunV1({
+      ...base,
+      researchReport: {
+        ...run.researchReport,
+        result: research,
+        analysis: {
+          ...run.researchReport.analysis,
+          asOf: "2026-08-26T12:04:30.000Z",
+        },
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [
+          { code: "CONTEXT_INVALID", path: ["evidence", 0, "observedAt"] },
+        ],
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
+  })
+
   it("rejects preliminary eligibility failure before retained session close", () => {
     const run = preliminaryRun()
     const { preliminaryResearch: _preliminaryResearch, ...base } = run
