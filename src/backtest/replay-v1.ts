@@ -65,6 +65,21 @@ const monitorCycleSchema = z
   })
   .strict()
 
+const monitorCyclesSchema = z
+  .array(monitorCycleSchema)
+  .min(1)
+  .max(10_000)
+  .superRefine((cycles, context) => {
+    for (let index = 1; index < cycles.length; index += 1) {
+      if (cycles[index]!.decidedAt > cycles[index - 1]!.decidedAt) continue
+      context.addIssue({
+        code: "custom",
+        path: [index, "decidedAt"],
+        message: "Monitor cycle timestamps must be strictly increasing",
+      })
+    }
+  })
+
 const commonScenarioFields = {
   scenarioId: z.string().min(1).max(128),
 } as const
@@ -72,7 +87,7 @@ const commonScenarioFields = {
 const exactScenarioSchema = z
   .object({
     ...commonScenarioFields,
-    monitorCycles: z.array(monitorCycleSchema).min(1).max(10_000),
+    monitorCycles: monitorCyclesSchema,
     fidelity: z.literal("EXACT_SNAPSHOT"),
     signal: signalSnapshotSchema,
     candidates: z.array(riskEvaluationInputV1Schema).min(1).max(10_000),
@@ -82,7 +97,7 @@ const exactScenarioSchema = z
 const proxyScenarioSchema = z
   .object({
     ...commonScenarioFields,
-    monitorCycles: z.array(monitorCycleSchema).min(1).max(10_000).optional(),
+    monitorCycles: monitorCyclesSchema.optional(),
     fidelity: z.literal("HISTORICAL_BAR_PROXY"),
     retainedIntent: tradeIntentV1Schema,
   })
@@ -210,12 +225,12 @@ const exitReason = (
   intent: TradeIntentV1,
   cycle: z.infer<typeof monitorCycleSchema>,
 ): BacktestExitReasonV1 | undefined => {
+  if (!cycle.marketOpen) return undefined
   if (cycle.lateFill) return "LATE_FILL"
   if (
-    cycle.marketOpen &&
     (cycle.dte < 3 || (cycle.dte === 3 && cycle.minutesToClose <= 60))
   ) return "EXPIRATION"
-  if (cycle.marketOpen && cycle.staleMinutes >= 5) return "STALE_DATA"
+  if (cycle.staleMinutes >= 5) return "STALE_DATA"
   if (
     cycle.markHalfCentsPerShare !== undefined &&
     cycle.markHalfCentsPerShare <= intent.stopLossMarkHalfCentsPerShare
@@ -232,7 +247,6 @@ const exitReason = (
       : cycle.completedDailyCloseMicros >= cycle.sma20Micros)
   ) return "TREND_INVALIDATION"
   if (
-    cycle.marketOpen &&
     (cycle.holdingSessionIndex > 5 ||
       (cycle.holdingSessionIndex === 5 && cycle.minutesToClose <= 30))
   ) return "MAX_HOLDING_PERIOD"
@@ -279,7 +293,7 @@ export function deriveHistoricalBarProxyCyclesV1(
   )
   if (matchingEntrySession < 0) return []
   const entrySessionIndex = matchingEntrySession
-  return minuteBars
+  const cycles = minuteBars
     .filter(
       ({ contractSymbol, timestamp: value }) =>
         contractSymbol === intent.longContractSymbol && value >= intent.evaluatedAt,
@@ -322,6 +336,25 @@ export function deriveHistoricalBarProxyCyclesV1(
       }]
     })
     .sort((left, right) => left.decidedAt.localeCompare(right.decidedAt))
+
+  let previousCycle: (typeof cycles)[number] | undefined
+  return cycles.map((cycle) => {
+    const session = sessionForTimestamp(sessions, cycle.decidedAt)!
+    const previousSession = previousCycle === undefined
+      ? undefined
+      : sessionForTimestamp(sessions, previousCycle.decidedAt)
+    const unavailableSince = previousSession?.date === session.date
+      ? previousCycle!.decidedAt
+      : session.date === sessions[entrySessionIndex]!.date
+        ? intent.evaluatedAt
+        : session.open
+    const staleMinutes = Math.max(
+      0,
+      Math.floor((Date.parse(cycle.decidedAt) - Date.parse(unavailableSince)) / 60_000),
+    )
+    previousCycle = cycle
+    return { ...cycle, staleMinutes }
+  })
 }
 
 type SelectedIntent = Readonly<{
