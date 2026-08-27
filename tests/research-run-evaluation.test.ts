@@ -492,39 +492,45 @@ describe("research run evaluation", () => {
   })
 
   it("accepts the canonical rejection of a legacy strategy version", () => {
-    const source = noActionRun()
-    const { validatedDecision: _validatedDecision, ...sourceWithoutDecision } =
-      source
-    const legacyDecision = {
-      ...source.researchReport!.result,
-      strategyVersion: "1.0.0" as const,
+    const rejectedRun = (source: ResearchRunV1, useLegacyVersion = true) => {
+      const {
+        preliminaryResearch: _preliminaryResearch,
+        validatedDecision: _validatedDecision,
+        shadowRisk: _shadowRisk,
+        ...base
+      } = source
+      return {
+        ...base,
+        runVersion: "1.2.0" as const,
+        researchInvocation: currentInvocation,
+        evidenceSnapshots: [],
+        researchReport: {
+          ...source.researchReport!,
+          result: {
+            ...source.researchReport!.result,
+            ...(useLegacyVersion ? { strategyVersion: "1.0.0" as const } : {}),
+          },
+        },
+        outcome: {
+          outcomeVersion: "1.0.0" as const,
+          status: "DECISION_REJECTED" as const,
+          issues: [{
+            code: "SCHEMA_INVALID",
+            schemaCategory: "VALUE_NOT_ALLOWED" as const,
+            path: ["result", "strategyVersion"],
+          }],
+        },
+      }
     }
-    const baseRun = {
-      ...sourceWithoutDecision,
-      runVersion: "1.2.0" as const,
-      researchInvocation: currentInvocation,
-      researchReport: {
-        ...source.researchReport!,
-        result: legacyDecision,
-      },
-    }
-    const canonical = evaluateResearchRunV1({
-      ...baseRun,
-      outcome: {
-        outcomeVersion: "1.0.0",
-        status: "DECISION_REJECTED",
-        issues: [{
-          code: "SCHEMA_INVALID",
-          schemaCategory: "VALUE_NOT_ALLOWED",
-          path: ["result", "strategyVersion"],
-        }],
-      },
-    })
+    const canonical = [preliminaryRun(), noActionRun(), derivedIntentRun()].map(
+      (source) => evaluateResearchRunV1(rejectedRun(source)),
+    )
+    const forged = evaluateResearchRunV1(rejectedRun(noActionRun(), false))
+    const wrongDiagnosticRun = rejectedRun(noActionRun())
     const wrongDiagnostic = evaluateResearchRunV1({
-      ...baseRun,
+      ...wrongDiagnosticRun,
       outcome: {
-        outcomeVersion: "1.0.0",
-        status: "DECISION_REJECTED",
+        ...wrongDiagnosticRun.outcome,
         issues: [{
           code: "SCHEMA_INVALID",
           schemaCategory: "VALUE_NOT_ALLOWED",
@@ -533,13 +539,14 @@ describe("research run evaluation", () => {
       },
     })
 
-    expect(canonical.dimensions.contractCompliance.issueCodes).not.toContain(
-      "RUN_METADATA_INVALID",
-    )
-    expect(canonical.dimensions.contractCompliance.issueCodes).not.toContain(
+    expect(canonical.map(({ dimensions }) => dimensions.contractCompliance)).toEqual([
+      { status: "PASS", issueCodes: [] },
+      { status: "PASS", issueCodes: [] },
+      { status: "PASS", issueCodes: [] },
+    ])
+    expect(forged.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
     )
-    expect(canonical.dimensions.contractCompliance.status).toBe("PASS")
     expect(wrongDiagnostic.dimensions.contractCompliance.issueCodes).toContain(
       "RUN_METADATA_INVALID",
     )

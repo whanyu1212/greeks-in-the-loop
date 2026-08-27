@@ -478,6 +478,10 @@ export function evaluateResearchRunV1(
     parsedReport?.success === true ? parsedReport.data : undefined
   const reportResult = validReport?.result
   const expectedStrategyVersionRejection =
+    invocation !== undefined &&
+    reportResult !== undefined &&
+    invocation.strategyVersion !== reportResult.strategyVersion &&
+    run.evidenceSnapshots.length === 0 &&
     run.outcome.status === "DECISION_REJECTED" &&
     isDeepStrictEqual(run.outcome.issues, [
       {
@@ -1057,33 +1061,34 @@ export function evaluateResearchRunV1(
       if (
         run.preliminaryResearch !== undefined ||
         run.validatedDecision !== undefined ||
-        (run.evidenceSnapshots.length === 0 &&
-          ((preliminaryCouldBeRetained &&
-            !plausibleLaterPreliminaryEligibilityRejection &&
-            !plausiblePreliminaryObservationRejectionMatches) ||
-            (noActionCouldBeRetained && !expectedStrategyVersionRejection))) ||
-        !reportFreeRejectionIssuesMatch ||
-        (expectedCommonReportRejectionIssues !== undefined &&
-          !rejectionIssuesMatch(expectedCommonReportRejectionIssues)) ||
-        (retainedCommonReportRejectionMatches &&
-          run.evidenceSnapshots.length > 0) ||
-        (expectedPreliminaryDecisionRejectionIssues !== undefined &&
-          !plausiblePreliminaryObservationRejectionMatches &&
-          !rejectionIssuesMatch(expectedPreliminaryDecisionRejectionIssues)) ||
-        (run.evidenceSnapshots.length === 0 &&
-          noActionValidation?.success === false &&
-          !rejectionIssuesMatch(noActionValidation.issues)) ||
-        (proposalPreflightValidation?.success === false &&
-          (run.evidenceSnapshots.length > 0 ||
-            !rejectionIssuesMatch(proposalPreflightValidation.issues))) ||
-        !proposalRejectionIssuesMatch ||
-        (run.evidenceSnapshots.length > 0 &&
-          (parsedReport?.success !== true ||
-            parsedReport.data.result.outcome !== "PROPOSE_TRADE")) ||
-        (canonicalRetainedQuoteSnapshot !== undefined &&
-          (!hasRetainedEligibleTradeWindow ||
-            expectedSnapshotDecisionRejectionIssues === undefined ||
-            !rejectionIssuesMatch(expectedSnapshotDecisionRejectionIssues)))
+        (!expectedStrategyVersionRejection &&
+          ((run.evidenceSnapshots.length === 0 &&
+            ((preliminaryCouldBeRetained &&
+              !plausibleLaterPreliminaryEligibilityRejection &&
+              !plausiblePreliminaryObservationRejectionMatches) ||
+              noActionCouldBeRetained)) ||
+            !reportFreeRejectionIssuesMatch ||
+            (expectedCommonReportRejectionIssues !== undefined &&
+              !rejectionIssuesMatch(expectedCommonReportRejectionIssues)) ||
+            (retainedCommonReportRejectionMatches &&
+              run.evidenceSnapshots.length > 0) ||
+            (expectedPreliminaryDecisionRejectionIssues !== undefined &&
+              !plausiblePreliminaryObservationRejectionMatches &&
+              !rejectionIssuesMatch(expectedPreliminaryDecisionRejectionIssues)) ||
+            (run.evidenceSnapshots.length === 0 &&
+              noActionValidation?.success === false &&
+              !rejectionIssuesMatch(noActionValidation.issues)) ||
+            (proposalPreflightValidation?.success === false &&
+              (run.evidenceSnapshots.length > 0 ||
+                !rejectionIssuesMatch(proposalPreflightValidation.issues))) ||
+            !proposalRejectionIssuesMatch ||
+            (run.evidenceSnapshots.length > 0 &&
+              (parsedReport?.success !== true ||
+                parsedReport.data.result.outcome !== "PROPOSE_TRADE")) ||
+            (canonicalRetainedQuoteSnapshot !== undefined &&
+              (!hasRetainedEligibleTradeWindow ||
+                expectedSnapshotDecisionRejectionIssues === undefined ||
+                !rejectionIssuesMatch(expectedSnapshotDecisionRejectionIssues)))))
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
       }
