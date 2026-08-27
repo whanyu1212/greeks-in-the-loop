@@ -639,6 +639,29 @@ describe("research run evaluation", () => {
         reasons: ["NON_POSITIVE_NET_DEBIT"],
       },
     })
+    const invalidWindowDerivationFailure = evaluateResearchRunV1({
+      ...run,
+      initialEligibility: {
+        ...run.initialEligibility!,
+        tradeIntentWindow: {
+          ...run.initialEligibility!.tradeIntentWindow!,
+          deadline: "2026-08-26T14:00:00.000Z",
+        },
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["NON_POSITIVE_NET_DEBIT"],
+      },
+    })
+    const unsupportedPrecision = evaluateResearchRunV1({
+      ...run,
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["STRIKE_PRECISION_UNSUPPORTED"],
+      },
+    })
 
     expect(quoteFailure.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
@@ -653,6 +676,8 @@ describe("research run evaluation", () => {
     for (const evaluation of [
       ineligibleQuoteFailure,
       ineligibleDerivationFailure,
+      invalidWindowDerivationFailure,
+      unsupportedPrecision,
     ]) {
       expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
         "OUTCOME_RECORD_MISMATCH",

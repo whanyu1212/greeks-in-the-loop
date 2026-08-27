@@ -178,6 +178,68 @@ const isEvaluableEvidenceClaim = (
   )
 }
 
+const retainedTradeWindowContextIsValid = (
+  eligibility: NonNullable<ResearchRunV1["initialEligibility"]>,
+  cycle: ResearchRunV1["cycle"],
+) => {
+  const window = eligibility.tradeIntentWindow
+  if (
+    !eligibility.tradeIntentEligible ||
+    window === undefined ||
+    eligibility.sessionOpen === undefined ||
+    eligibility.sessionClose === undefined
+  ) {
+    return false
+  }
+  const eligibilityEvaluatedAt = Date.parse(eligibility.evaluatedAt)
+  const cycleStartedAt = Date.parse(cycle.startedAt)
+  const slotStartedAt = Date.parse(window.slotStartedAt)
+  const deadline = Date.parse(window.deadline)
+  const sessionOpen = Date.parse(eligibility.sessionOpen)
+  const sessionClose = Date.parse(eligibility.sessionClose)
+  const sessionDate = eligibility.sessionDate
+  const slotDate = new Date(slotStartedAt)
+  const slotIsQuarterHour =
+    Number.isFinite(slotStartedAt) &&
+    slotDate.getUTCMinutes() % 15 === 0 &&
+    slotDate.getUTCSeconds() === 0 &&
+    slotDate.getUTCMilliseconds() === 0
+  const entryCutoff =
+    sessionDate === undefined || !Number.isFinite(sessionClose)
+      ? Number.NaN
+      : Math.min(
+          newYorkLocalTime(sessionDate, "15:00").getTime(),
+          sessionClose - 60 * 60 * 1_000,
+        )
+  const slotMatchesSession =
+    sessionDate !== undefined &&
+    Number.isFinite(slotStartedAt) &&
+    Number.isFinite(sessionOpen) &&
+    Number.isFinite(sessionClose) &&
+    newYorkDate(slotDate) === sessionDate &&
+    newYorkDate(new Date(sessionOpen)) === sessionDate &&
+    newYorkDate(new Date(sessionClose)) === sessionDate &&
+    slotStartedAt >= newYorkLocalTime(sessionDate, "10:00").getTime() &&
+    slotStartedAt < entryCutoff
+  return (
+    eligibility.researchEligible &&
+    sessionDate === cycle.sessionDate &&
+    eligibility.reason === undefined &&
+    Number.isFinite(eligibilityEvaluatedAt) &&
+    Number.isFinite(sessionOpen) &&
+    sessionOpen < sessionClose &&
+    eligibilityEvaluatedAt >= sessionOpen &&
+    Number.isFinite(cycleStartedAt) &&
+    Number.isFinite(deadline) &&
+    slotIsQuarterHour &&
+    slotMatchesSession &&
+    deadline === Math.min(slotStartedAt + 5 * 60 * 1_000, entryCutoff) &&
+    eligibilityEvaluatedAt >= slotStartedAt &&
+    eligibilityEvaluatedAt - slotStartedAt <= 119_999 &&
+    eligibilityEvaluatedAt <= cycleStartedAt
+  )
+}
+
 const candidateKey = (candidate: CandidateIdentity) =>
   [
     candidate.direction,
@@ -391,9 +453,8 @@ export function evaluateResearchRunV1(
       : undefined
   })()
   const hasRetainedEligibleTradeWindow =
-    run.initialEligibility?.tradeIntentEligible === true &&
-    run.initialEligibility.tradeIntentWindow !== undefined &&
-    run.initialEligibility.sessionDate === run.cycle.sessionDate
+    run.initialEligibility !== undefined &&
+    retainedTradeWindowContextIsValid(run.initialEligibility, run.cycle)
   const retainedResult = run.preliminaryResearch ?? run.validatedDecision
   const validRetainedResult =
     parsedPreliminaryResearch?.success === true
@@ -828,11 +889,19 @@ export function evaluateResearchRunV1(
       break
     case "INTENT_DERIVATION_REJECTED":
       const reasons = run.outcome.reasons
+      const candidateUsesSubCentStrike =
+        reportResult?.outcome === "PROPOSE_TRADE" &&
+        [
+          reportResult.candidate.longLeg.contractSymbol,
+          reportResult.candidate.shortLeg.contractSymbol,
+        ].some((symbol) => Number(symbol.slice(-8)) % 10 !== 0)
       const derivationRejected =
         reasons.length === 1 &&
         reasons.every((reason) =>
           INTENT_DERIVATION_REJECTION_REASONS.has(reason),
-        )
+        ) &&
+        (reasons[0] !== "STRIKE_PRECISION_UNSUPPORTED" ||
+          candidateUsesSubCentStrike)
       const marketWindowRejected =
         reasons.length === 1 &&
         reasons.every((reason) => reason === "MARKET_WINDOW_INELIGIBLE")
@@ -1328,50 +1397,7 @@ export function evaluateResearchRunV1(
         eligibility.tradeIntentWindow.slotStartedAt,
       )
       const deadline = Date.parse(eligibility.tradeIntentWindow.deadline)
-      const sessionOpen = Date.parse(eligibility.sessionOpen)
-      const sessionClose = Date.parse(eligibility.sessionClose)
-      const sessionDate = eligibility.sessionDate
-      const slotDate = new Date(slotStartedAt)
-      const slotIsQuarterHour =
-        Number.isFinite(slotStartedAt) &&
-        slotDate.getUTCMinutes() % 15 === 0 &&
-        slotDate.getUTCSeconds() === 0 &&
-        slotDate.getUTCMilliseconds() === 0
-      const entryCutoff =
-        sessionDate === undefined || !Number.isFinite(sessionClose)
-          ? Number.NaN
-          : Math.min(
-              newYorkLocalTime(sessionDate, "15:00").getTime(),
-              sessionClose - 60 * 60 * 1_000,
-            )
-      const slotMatchesSession =
-        sessionDate !== undefined &&
-        Number.isFinite(slotStartedAt) &&
-        Number.isFinite(sessionOpen) &&
-        Number.isFinite(sessionClose) &&
-        newYorkDate(slotDate) === sessionDate &&
-        newYorkDate(new Date(sessionOpen)) === sessionDate &&
-        newYorkDate(new Date(sessionClose)) === sessionDate &&
-        slotStartedAt >= newYorkLocalTime(sessionDate, "10:00").getTime() &&
-        slotStartedAt < entryCutoff
-      const eligibilityContextValid =
-        eligibility.researchEligible &&
-        eligibility.sessionDate === run.cycle.sessionDate &&
-        eligibility.reason === undefined &&
-        Number.isFinite(eligibilityEvaluatedAt) &&
-        Number.isFinite(sessionOpen) &&
-        sessionOpen < sessionClose &&
-        eligibilityEvaluatedAt >= sessionOpen &&
-        Number.isFinite(cycleStart) &&
-        Number.isFinite(slotStartedAt) &&
-        Number.isFinite(deadline) &&
-        slotIsQuarterHour &&
-        slotMatchesSession &&
-        deadline === Math.min(slotStartedAt + 5 * 60 * 1_000, entryCutoff) &&
-        eligibilityEvaluatedAt >= slotStartedAt &&
-        eligibilityEvaluatedAt - slotStartedAt <= 119_999 &&
-        eligibilityEvaluatedAt <= cycleStart
-      if (!eligibilityContextValid) {
+      if (!retainedTradeWindowContextIsValid(eligibility, run.cycle)) {
         failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_INVALID")
       }
       if (
