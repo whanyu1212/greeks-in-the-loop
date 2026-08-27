@@ -44,6 +44,7 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "INTRADAY_BAR_COUNT_MISMATCH",
   "PRELIMINARY_SESSION_CONTEXT_MISSING",
   "PRELIMINARY_TARGET_SESSION_MISMATCH",
+  "PRELIMINARY_OBSERVATION_AFTER_CYCLE",
   "DUPLICATE_CLAIM_ID",
   "NO_ACTION_SOURCED_EVIDENCE",
   "UNGROUNDED_INFERENCE",
@@ -298,7 +299,10 @@ export function evaluateResearchRunV1(
     case "DECISION_REJECTED":
       if (
         run.preliminaryResearch !== undefined ||
-        run.validatedDecision !== undefined
+        run.validatedDecision !== undefined ||
+        (run.evidenceSnapshots.length > 0 &&
+          (parsedReport?.success !== true ||
+            parsedReport.data.result.outcome !== "PROPOSE_TRADE"))
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
       }
@@ -448,6 +452,22 @@ export function evaluateResearchRunV1(
       run.outcome.research.targetSessionDate !== run.cycle.sessionDate
     ) {
       temporalIssues.push("PRELIMINARY_TARGET_SESSION_MISMATCH")
+    }
+    const preliminaryResult =
+      reportResult?.outcome === "PRELIMINARY_RESEARCH"
+        ? reportResult
+        : parsedPreliminaryResearch?.success === true
+          ? parsedPreliminaryResearch.data
+          : undefined
+    if (
+      validCycleRange &&
+      preliminaryResult?.evidence.some(
+        (claim) =>
+          claim.kind === "SOURCED_FACT" &&
+          Date.parse(claim.observedAt) > cycleEnd,
+      )
+    ) {
+      temporalIssues.push("PRELIMINARY_OBSERVATION_AFTER_CYCLE")
     }
   }
 

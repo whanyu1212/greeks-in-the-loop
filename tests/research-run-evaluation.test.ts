@@ -395,6 +395,34 @@ describe("research run evaluation", () => {
     })
   })
 
+  it("rejects preliminary evidence observed after cycle completion", () => {
+    const run = preliminaryRun()
+    if (
+      run.preliminaryResearch === undefined ||
+      run.outcome.status !== "PRELIMINARY_RESEARCH_RETAINED"
+    ) {
+      throw new Error("Expected a preliminary-research fixture")
+    }
+    const research: PreliminaryResearchV1 = {
+      ...run.preliminaryResearch,
+      evidence: run.preliminaryResearch.evidence.map((claim) =>
+        claim.kind === "SOURCED_FACT"
+          ? { ...claim, observedAt: "2026-08-26T12:05:01.000Z" }
+          : claim,
+      ),
+    }
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      preliminaryResearch: research,
+      researchReport: { ...run.researchReport!, result: research },
+      outcome: { ...run.outcome, research },
+    })
+
+    expect(evaluation.dimensions.temporalIntegrity.issueCodes).toContain(
+      "PRELIMINARY_OBSERVATION_AFTER_CYCLE",
+    )
+  })
+
   it("evaluates valid no-action and derived-intent outcomes", () => {
     const noAction = evaluateResearchRunV1(noActionRun())
     const derived = evaluateResearchRunV1(derivedIntentRun())
@@ -655,6 +683,37 @@ describe("research run evaluation", () => {
     )
     expect(duplicateSnapshots.dimensions.grounding.issueCodes).toContain(
       "UNEXPECTED_SNAPSHOT_REFERENCE",
+    )
+  })
+
+  it("requires proposal reports for snapshot-bearing decision rejections", () => {
+    const proposalRun = derivedIntentRun()
+    const noAction = noActionRun()
+    if (noAction.researchReport === undefined) {
+      throw new Error("Expected a no-action report fixture")
+    }
+    const { validatedDecision: _validatedDecision, ...proposalBase } = proposalRun
+    const rejectedOutcome = {
+      outcomeVersion: "1.0.0" as const,
+      status: "DECISION_REJECTED" as const,
+      issues: [{ code: "CONTEXT_INVALID", path: ["analysis"] }],
+    }
+    const { researchReport: _researchReport, ...withoutReport } = proposalBase
+    const missingReport = evaluateResearchRunV1({
+      ...withoutReport,
+      outcome: rejectedOutcome,
+    })
+    const noActionReport = evaluateResearchRunV1({
+      ...proposalBase,
+      researchReport: noAction.researchReport,
+      outcome: rejectedOutcome,
+    })
+
+    expect(missingReport.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+    expect(noActionReport.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
     )
   })
 
