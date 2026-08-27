@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
 import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
+import { parseRfc3339Nanoseconds } from "../shared/value-normalization.js"
 
 export const RISK_EVALUATION_VERSION = "1.0.0" as const
 export const RISK_RULE_VERSION = "1.0.0" as const
@@ -32,7 +33,7 @@ export const RISK_REJECTION_CODES = [
 
 export type RiskRejectionCode = (typeof RISK_REJECTION_CODES)[number]
 
-const QUOTE_AND_CONTRACT_MAX_AGE_MS = 60_000
+const QUOTE_AND_CONTRACT_MAX_AGE_NANOSECONDS = 60_000_000_000n
 const ACCOUNT_AND_RECONCILIATION_MAX_AGE_MS = 5 * 60_000
 const MIN_DTE = 14
 const MAX_DTE = 30
@@ -181,6 +182,31 @@ const ageIsInvalid = (observedAt: string, evaluatedAt: number, maxAge: number) =
   return observed > evaluatedAt || evaluatedAt - observed > maxAge
 }
 
+const timestampAfter = (candidate: string, boundary: string) => {
+  const candidateNanoseconds = parseRfc3339Nanoseconds(candidate)
+  const boundaryNanoseconds = parseRfc3339Nanoseconds(boundary)
+  return (
+    candidateNanoseconds === undefined ||
+    boundaryNanoseconds === undefined ||
+    candidateNanoseconds > boundaryNanoseconds
+  )
+}
+
+const timestampAgeIsInvalid = (
+  observedAt: string,
+  evaluatedAt: string,
+  maxAgeNanoseconds: bigint,
+) => {
+  const observedNanoseconds = parseRfc3339Nanoseconds(observedAt)
+  const evaluatedNanoseconds = parseRfc3339Nanoseconds(evaluatedAt)
+  return (
+    observedNanoseconds === undefined ||
+    evaluatedNanoseconds === undefined ||
+    observedNanoseconds > evaluatedNanoseconds ||
+    evaluatedNanoseconds - observedNanoseconds > maxAgeNanoseconds
+  )
+}
+
 const quoteIsTooWide = (bidCents: number, askCents: number) => {
   const width = BigInt(askCents - bidCents)
   return (
@@ -226,31 +252,30 @@ export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
   }
 
   if (
-    Date.parse(intent.evaluatedAt) > evaluatedAt ||
-    ageIsInvalid(
+    timestampAfter(intent.evaluatedAt, eligibility.evaluatedAt) ||
+    timestampAgeIsInvalid(
       intent.longQuote.providerTimestamp,
-      evaluatedAt,
-      QUOTE_AND_CONTRACT_MAX_AGE_MS,
+      eligibility.evaluatedAt,
+      QUOTE_AND_CONTRACT_MAX_AGE_NANOSECONDS,
     ) ||
-    ageIsInvalid(
+    timestampAgeIsInvalid(
       intent.shortQuote.providerTimestamp,
-      evaluatedAt,
-      QUOTE_AND_CONTRACT_MAX_AGE_MS,
+      eligibility.evaluatedAt,
+      QUOTE_AND_CONTRACT_MAX_AGE_NANOSECONDS,
     ) ||
-    ageIsInvalid(
+    timestampAgeIsInvalid(
       contracts.observedAt,
-      evaluatedAt,
-      QUOTE_AND_CONTRACT_MAX_AGE_MS,
+      eligibility.evaluatedAt,
+      QUOTE_AND_CONTRACT_MAX_AGE_NANOSECONDS,
     )
   ) {
     reject("MARKET_DATA_STALE")
   }
   if (
     contracts.snapshotRef !== intent.quoteSnapshotRef ||
-    Date.parse(intent.longQuote.providerTimestamp) >
-      Date.parse(contracts.observedAt) ||
-    Date.parse(intent.shortQuote.providerTimestamp) >
-      Date.parse(contracts.observedAt)
+    timestampAfter(intent.evaluatedAt, contracts.observedAt) ||
+    timestampAfter(intent.longQuote.providerTimestamp, contracts.observedAt) ||
+    timestampAfter(intent.shortQuote.providerTimestamp, contracts.observedAt)
   ) {
     reject("SNAPSHOT_INTEGRITY_INVALID")
   }

@@ -46,7 +46,8 @@ thresholds.
 | Gate | V1 rule |
 | --- | --- |
 | Entry window | Application eligibility is true and evaluation precedes the retained deadline |
-| Market freshness | Quotes and contract observations are not future-dated and are at most 60 seconds old; both quote timestamps must be no later than the bound contract snapshot observation time |
+| Market freshness | Quotes and contract observations are not future-dated and are at most 60 seconds old; comparisons retain RFC 3339 nanosecond precision |
+| Snapshot order | Intent evaluation and both quote timestamps must be no later than the bound contract snapshot observation time |
 | Snapshot binding | The contract snapshot reference must equal the intent quote snapshot reference |
 | State freshness | Account and reconciliation observations are not future-dated and are at most five minutes old |
 | Contract identity | One exact matching long leg and short leg |

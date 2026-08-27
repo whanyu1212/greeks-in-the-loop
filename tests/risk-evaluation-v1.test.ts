@@ -24,6 +24,8 @@ const makeIntent = ({
   longAskCents = 310,
   shortBidCents = 100,
   shortAskCents = 110,
+  evaluatedAt = "2026-08-27T14:30:00.000Z",
+  providerTimestamp = "2026-08-27T14:29:30.000Z",
 }: Readonly<{
   expiration?: string
   longStrikeCents?: number
@@ -32,6 +34,8 @@ const makeIntent = ({
   longAskCents?: number
   shortBidCents?: number
   shortAskCents?: number
+  evaluatedAt?: string
+  providerTimestamp?: string
 }> = {}) => {
   const longContractSymbol = optionSymbol(expiration, "C", longStrikeCents)
   const shortContractSymbol = optionSymbol(expiration, "C", shortStrikeCents)
@@ -49,20 +53,20 @@ const makeIntent = ({
     longContractSymbol,
     shortContractSymbol,
     quoteSnapshotRef: "alpaca-proposal-quotes-v1",
-    evaluatedAt: "2026-08-27T14:30:00.000Z",
+    evaluatedAt,
     longQuote: {
       contractSymbol: longContractSymbol,
       feed: "INDICATIVE",
       bidCentsPerShare: longBidCents,
       askCentsPerShare: longAskCents,
-      providerTimestamp: "2026-08-27T14:29:30.000Z",
+      providerTimestamp,
     },
     shortQuote: {
       contractSymbol: shortContractSymbol,
       feed: "INDICATIVE",
       bidCentsPerShare: shortBidCents,
       askCentsPerShare: shortAskCents,
-      providerTimestamp: "2026-08-27T14:29:30.000Z",
+      providerTimestamp,
     },
     entryLimitCentsPerShare,
     widthCentsPerShare,
@@ -110,7 +114,7 @@ const makeInput = (intent = makeIntent()) => ({
     },
     contracts: {
       snapshotRef: intent.quoteSnapshotRef,
-      observedAt: "2026-08-27T14:29:45.000Z",
+      observedAt: "2026-08-27T14:30:00.000Z",
       legs: [
         {
           role: "LONG",
@@ -226,6 +230,20 @@ describe("evaluateTradeIntentRiskV1", () => {
     expectRejection((input) => {
       input.context.portfolio.observedAt = "2026-08-27T14:30:00.001Z"
     }, "RECONCILIATION_STATE_STALE")
+
+    const subMillisecondQuote = makeInput(
+      makeIntent({
+        evaluatedAt: "2026-08-27T14:30:00.001Z",
+        providerTimestamp: "2026-08-27T14:29:00.001001Z",
+      }),
+    )
+    subMillisecondQuote.context.eligibility.evaluatedAt =
+      "2026-08-27T14:30:00.001Z"
+    subMillisecondQuote.context.contracts.observedAt =
+      "2026-08-27T14:30:00.001Z"
+    expect(evaluateTradeIntentRiskV1(subMillisecondQuote).outcome).toBe(
+      "APPROVED",
+    )
   })
 
   it("checks contract identity and eligibility", () => {
