@@ -63,13 +63,15 @@ curve.
 `EXACT_SNAPSHOT` contains the expected 50-session calendar, one dated completed
 daily bar for each of those sessions, and every uniquely dated completed
 regular-session minute bar through the retained observation instant,
-underlying quote, candidate intents, historical option quotes and Greeks,
+the same-session IEX underlying quote with provider time, candidate intents,
+historical option quotes and Greeks,
 account state, reconciled portfolio, and contract metadata at one decision
 instant. Replay recalculates the strict SMA/VWAP signal, runs the production
 `evaluateTradeIntentRiskV1` rules for every candidate, and applies the frozen
 lexicographic candidate ranking. Snapshot validation rejects missing, duplicate,
 out-of-order, cross-session, or candidate-misaligned signal evidence before a
-result can claim exact fidelity. Exact snapshots must be captured forward; the
+result can claim exact fidelity. The underlying quote must be no later than the
+observation instant and no more than 60 seconds old. Exact snapshots must be captured forward; the
 Alpaca historical API cannot recreate them.
 
 `HISTORICAL_BAR_PROXY` contains a retained `TradeIntentV1`. When monitor cycles

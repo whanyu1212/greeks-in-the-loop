@@ -186,8 +186,12 @@ const signalSnapshot = (
     vwapMicros: minuteVwapMicros,
     volume: 10,
   })),
-  underlyingBidMicros: 55_000_000,
-  underlyingAskMicros: 55_000_000,
+  underlyingQuote: {
+    feed: "IEX" as const,
+    providerTimestamp: "2026-08-27T14:29:30.000Z",
+    bidMicros: 55_000_000,
+    askMicros: 55_000_000,
+  },
 })
 
 describe("backtest replay v1", () => {
@@ -219,6 +223,24 @@ describe("backtest replay v1", () => {
         signal.completedDailyBars.at(-2)!,
       ],
     })).toThrow(/one-to-one to 50 unique preceding sessions/u)
+  })
+
+  it("rejects stale or future exact underlying quotes", () => {
+    const signal = signalSnapshot()
+    expect(() => evaluateBacktestSignalV1({
+      ...signal,
+      underlyingQuote: {
+        ...signal.underlyingQuote,
+        providerTimestamp: "2026-08-27T14:28:59.999Z",
+      },
+    })).toThrow(/current-session and fresh/u)
+    expect(() => evaluateBacktestSignalV1({
+      ...signal,
+      underlyingQuote: {
+        ...signal.underlyingQuote,
+        providerTimestamp: "2026-08-27T14:30:00.001Z",
+      },
+    })).toThrow(/current-session and fresh/u)
   })
 
   it("runs exact snapshots through production risk and a deterministic profit exit", () => {

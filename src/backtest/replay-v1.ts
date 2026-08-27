@@ -55,15 +55,21 @@ const signalSnapshotSchema = z
       )
       .min(1)
       .max(390),
-    underlyingBidMicros: positiveSafeInteger,
-    underlyingAskMicros: positiveSafeInteger,
+    underlyingQuote: z
+      .object({
+        feed: z.literal("IEX"),
+        providerTimestamp: timestamp,
+        bidMicros: positiveSafeInteger,
+        askMicros: positiveSafeInteger,
+      })
+      .strict(),
   })
   .strict()
   .superRefine((snapshot, context) => {
-    if (snapshot.underlyingAskMicros < snapshot.underlyingBidMicros) {
+    if (snapshot.underlyingQuote.askMicros < snapshot.underlyingQuote.bidMicros) {
       context.addIssue({
         code: "custom",
-        path: ["underlyingAskMicros"],
+        path: ["underlyingQuote", "askMicros"],
         message: "Underlying ask cannot be below bid",
       })
     }
@@ -72,6 +78,19 @@ const signalSnapshotSchema = z
         code: "custom",
         path: ["observedAt"],
         message: "Signal observation must belong to its New York session date",
+      })
+    }
+    const quoteAge = instant(snapshot.observedAt) -
+      instant(snapshot.underlyingQuote.providerTimestamp)
+    if (
+      quoteAge < 0 ||
+      quoteAge > 60_000 ||
+      newYorkDate(new Date(snapshot.underlyingQuote.providerTimestamp)) !== snapshot.sessionDate
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["underlyingQuote", "providerTimestamp"],
+        message: "Exact underlying IEX quote must be current-session and fresh",
       })
     }
     const sessionOpen = newYorkLocalTime(snapshot.sessionDate, "09:30").getTime()
@@ -259,14 +278,15 @@ export const evaluateBacktestSignalV1 = (
   )
   const sessionVwapMicros = Number(weightedVwap) / volume
   const spotMidpointMicros =
-    (parsed.underlyingBidMicros + parsed.underlyingAskMicros) / 2
+    (parsed.underlyingQuote.bidMicros + parsed.underlyingQuote.askMicros) / 2
   const close = BigInt(dailyCloseMicros)
   const sum20 = last20.reduce((total, value) => total + BigInt(value), 0n)
   const sum50 = dailyClosesMicros.reduce(
     (total, value) => total + BigInt(value),
     0n,
   )
-  const spotTwice = BigInt(parsed.underlyingBidMicros) + BigInt(parsed.underlyingAskMicros)
+  const spotTwice = BigInt(parsed.underlyingQuote.bidMicros) +
+    BigInt(parsed.underlyingQuote.askMicros)
   const direction =
     close * 20n > sum20 &&
     sum20 * 50n > sum50 * 20n &&
