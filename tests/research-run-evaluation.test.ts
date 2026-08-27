@@ -484,4 +484,16 @@ describe("research run evaluation", () => {
       issueCodes: ["INTENT_OUTSIDE_RETAINED_TRADE_WINDOW"],
     })
   })
+
+  it("does not mark legacy intents without eligibility context as safe", () => {
+    const { initialEligibility: _initialEligibility, ...legacyRun } =
+      derivedIntentRun()
+
+    const evaluation = evaluateResearchRunV1(legacyRun)
+
+    expect(evaluation.dimensions.failClosedBehavior).toEqual({
+      status: "FAIL",
+      issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_MISSING"],
+    })
+  })
 })

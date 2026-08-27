@@ -28,6 +28,7 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "UNKNOWN_SNAPSHOT_REFERENCE",
   "CANDIDATE_IDENTITY_MISMATCH",
   "INELIGIBLE_CYCLE_DERIVED_INTENT",
+  "INTENT_ELIGIBILITY_CONTEXT_MISSING",
   "INTENT_OUTSIDE_RETAINED_TRADE_WINDOW",
   "INTENT_WITHOUT_VALIDATED_PROPOSAL",
 ] as const
@@ -338,6 +339,14 @@ export function evaluateResearchRunV1(
     run.outcome.status === "INTENT_DERIVED"
   ) {
     failClosedIssues.push("INELIGIBLE_CYCLE_DERIVED_INTENT")
+  }
+  if (
+    run.outcome.status === "INTENT_DERIVED" &&
+    (run.initialEligibility === undefined ||
+      (run.initialEligibility.tradeIntentEligible &&
+        run.initialEligibility.tradeIntentWindow === undefined))
+  ) {
+    failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_MISSING")
   }
   if (
     run.outcome.status === "INTENT_DERIVED" &&
