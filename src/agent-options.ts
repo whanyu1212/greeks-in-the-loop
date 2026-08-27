@@ -1,3 +1,4 @@
+import { statSync } from "node:fs"
 import { resolve } from "node:path"
 
 export const DEFAULT_RESEARCH_LEDGER_PATH =
@@ -11,7 +12,21 @@ export type AgentOptions = Readonly<{
   ledgerPath: string
 }>
 
-/** Parses the worker CLI without reading credentials or touching the filesystem. */
+const ledgerTargetsMatch = (firstPath: string, secondPath: string) => {
+  if (resolve(firstPath) === resolve(secondPath)) return true
+
+  try {
+    const first = statSync(firstPath)
+    const second = statSync(secondPath)
+    return first.dev === second.dev && first.ino === second.ino
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === "ENOENT" || code === "ENOTDIR") return false
+    throw error
+  }
+}
+
+/** Parses the worker CLI and checks existing ledger targets for aliasing. */
 export function parseAgentOptions(
   args: readonly string[],
   configuredLedgerPath?: string,
@@ -56,7 +71,7 @@ export function parseAgentOptions(
       : normalLedgerPath)
   if (
     researchAnytime &&
-    resolve(ledgerPath) === resolve(normalLedgerPath)
+    ledgerTargetsMatch(ledgerPath, normalLedgerPath)
   ) {
     throw new Error(
       "--research-anytime cannot use the configured production ledger",

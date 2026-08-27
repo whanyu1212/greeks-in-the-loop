@@ -1,3 +1,7 @@
+import { linkSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
 import { describe, expect, it } from "vitest"
 
 import {
@@ -62,4 +66,30 @@ describe("parseAgentOptions", () => {
     )
     expect(() => parseAgentOptions(["--unknown"])).toThrow("Unknown option")
   })
+
+  it.each(["symbolic", "hard"] as const)(
+    "rejects a %s-link alias of the production ledger",
+    (linkKind) => {
+      const directory = mkdtempSync(join(tmpdir(), "agent-options-test-"))
+      try {
+        const productionLedger = join(directory, "production.sqlite")
+        const aliasLedger = join(directory, "dry-run.sqlite")
+        writeFileSync(productionLedger, "")
+        if (linkKind === "symbolic") {
+          symlinkSync(productionLedger, aliasLedger)
+        } else {
+          linkSync(productionLedger, aliasLedger)
+        }
+
+        expect(() =>
+          parseAgentOptions(
+            ["--once", "--research-anytime", "--ledger", aliasLedger],
+            productionLedger,
+          ),
+        ).toThrow("cannot use the configured production ledger")
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+      }
+    },
+  )
 })
