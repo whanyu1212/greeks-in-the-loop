@@ -1491,6 +1491,7 @@ describe("processResearchCycle", () => {
       {
         outcome,
         evidenceSnapshots: [],
+        researchInvocation,
         validatedDecision: decision,
       },
       new AbortController().signal,

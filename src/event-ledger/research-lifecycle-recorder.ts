@@ -98,6 +98,9 @@ const completionEvents = (
   occurredAt: string,
   idFactory: () => string,
 ): LedgerEventV1[] => {
+  if (record.researchInvocation === undefined) {
+    throw new Error("Completed research cycles require invocation metadata")
+  }
   const events: LedgerEventV1[] = []
   let causationEventId = startEventId
 
@@ -167,7 +170,6 @@ const completionEvents = (
         outcome.issues.some(
           (issue) =>
             issue.code === "SCHEMA_INVALID" &&
-            record.researchInvocation !== undefined &&
             (!("schemaCategory" in issue) || issue.schemaCategory === undefined),
         )
       ) {
@@ -223,9 +225,7 @@ const completionEvents = (
     eventType: "RESEARCH_CYCLE_COMPLETED",
     payload: {
       status: outcome.status,
-      ...(record.researchInvocation === undefined
-        ? {}
-        : { researchInvocation: record.researchInvocation }),
+      researchInvocation: record.researchInvocation,
     },
   })
 

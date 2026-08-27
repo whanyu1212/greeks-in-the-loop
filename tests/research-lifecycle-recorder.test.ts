@@ -482,6 +482,30 @@ describe("createResearchLifecycleRecorder", () => {
     },
   )
 
+  it("rejects missing invocation metadata at the runtime boundary", async () => {
+    const state = setup()
+    const cycle = await startCycle(state)
+    const missingInvocation = {
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "VALIDATED_NO_ACTION",
+        decision: noActionDecision,
+      },
+      evidenceSnapshots: [],
+      validatedDecision: noActionDecision,
+    } as unknown as ResearchCycleTerminalRecordV1
+
+    await expect(
+      cycle.outcomeSink.record(missingInvocation, signal),
+    ).rejects.toMatchObject({
+      message: "Ledger cycle-completion append failed",
+      cause: expect.objectContaining({
+        message: "Completed research cycles require invocation metadata",
+      }),
+    })
+    expect(state.appendBatch).not.toHaveBeenCalled()
+  })
+
   it("preserves evidence order and normalized rejection details", async () => {
     const state = setup()
     const cycle = await startCycle(state)
@@ -491,9 +515,14 @@ describe("createResearchLifecycleRecorder", () => {
         outcome: {
           outcomeVersion: "1.0.0",
           status: "DECISION_REJECTED",
-          issues: [{ code: "SCHEMA_INVALID", path: ["candidate", 0] }],
+          issues: [{
+            code: "SCHEMA_INVALID",
+            schemaCategory: "TYPE_MISMATCH",
+            path: ["candidate", 0],
+          }],
         },
         evidenceSnapshots,
+        researchInvocation,
       },
       signal,
     )
@@ -501,8 +530,14 @@ describe("createResearchLifecycleRecorder", () => {
     expect(state.events.slice(1).map(({ payload }) => payload)).toEqual([
       evidenceSnapshots[0],
       evidenceSnapshots[1],
-      { issues: [{ code: "SCHEMA_INVALID", path: ["candidate", 0] }] },
-      { status: "DECISION_REJECTED" },
+      {
+        issues: [{
+          code: "SCHEMA_INVALID",
+          schemaCategory: "TYPE_MISMATCH",
+          path: ["candidate", 0],
+        }],
+      },
+      { status: "DECISION_REJECTED", researchInvocation },
     ])
   })
 
@@ -541,6 +576,7 @@ describe("createResearchLifecycleRecorder", () => {
         decision: noActionDecision,
       },
       evidenceSnapshots: [],
+      researchInvocation,
       validatedDecision: noActionDecision,
     }
     state.appendBatch.mockRejectedValueOnce(new Error("atomic write failed"))
@@ -584,6 +620,7 @@ describe("createResearchLifecycleRecorder", () => {
           decision: noActionDecision,
         },
         evidenceSnapshots: [],
+        researchInvocation,
         validatedDecision: noActionDecision,
       },
       signal,
@@ -613,6 +650,7 @@ describe("createResearchLifecycleRecorder", () => {
           decision: noActionDecision,
         },
         evidenceSnapshots: [],
+        researchInvocation,
         validatedDecision: noActionDecision,
       },
       signal,
@@ -644,6 +682,7 @@ describe("createResearchLifecycleRecorder", () => {
           decision: noActionDecision,
         },
         evidenceSnapshots: [],
+        researchInvocation,
         validatedDecision: noActionDecision,
       },
       signal,
@@ -712,6 +751,7 @@ describe("createResearchLifecycleRecorder", () => {
           intent,
         },
         evidenceSnapshots: [evidenceSnapshots[0]],
+        researchInvocation,
         validatedDecision: proposedDecision,
         shadowRisk: {
           ...shadowRisk,

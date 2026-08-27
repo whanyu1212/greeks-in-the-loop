@@ -70,7 +70,7 @@ export type ResearchCycleEvidenceSnapshotReferenceV1 = Readonly<{
 
 type ResearchCycleTerminalRecordMetadataV1 = Readonly<{
   evidenceSnapshots: readonly ResearchCycleEvidenceSnapshotReferenceV1[]
-  researchInvocation?: ResearchInvocationV1
+  researchInvocation: ResearchInvocationV1
   validatedDecision?: ResearchDecisionV1
   preliminaryResearch?: PreliminaryResearchV1
   researchReport?: ResearchReportV2
