@@ -347,6 +347,47 @@ describe("research run evaluation", () => {
     })
   })
 
+  it.each([
+    ["preliminary research", preliminaryRun],
+    ["no action", noActionRun],
+  ])("accepts healthy research-only anytime %s", (_name, fixture) => {
+    const run = fixture()
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      initialEligibility: {
+        ...run.initialEligibility!,
+        researchMode: "DRY_RUN_ANYTIME",
+        reason: "DRY_RUN_RESEARCH_ONLY",
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance).toEqual({
+      status: "PASS",
+      issueCodes: [],
+    })
+    expect(evaluation.dimensions.failClosedBehavior).toEqual({
+      status: "PASS",
+      issueCodes: [],
+    })
+  })
+
+  it("flags contradictory anytime dry-run eligibility", () => {
+    const run = preliminaryRun()
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      initialEligibility: {
+        ...run.initialEligibility!,
+        researchMode: "DRY_RUN_ANYTIME",
+        tradeIntentEligible: true,
+        reason: "DRY_RUN_RESEARCH_ONLY",
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+      "DRY_RUN_ELIGIBILITY_CONTEXT_INVALID",
+    )
+  })
+
   it("never copies retained research content into evaluation output", () => {
     const serialized = JSON.stringify(evaluateResearchRunV1(preliminaryRun()))
 
@@ -2250,7 +2291,15 @@ describe("research run evaluation", () => {
       },
     } as unknown as ResearchRunV1["outcome"]
 
-    const evaluation = evaluateResearchRunV1({ ...run, outcome: invalidOutcome })
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      initialEligibility: {
+        ...run.initialEligibility!,
+        researchMode: "DRY_RUN_ANYTIME",
+        reason: "DRY_RUN_RESEARCH_ONLY",
+      },
+      outcome: invalidOutcome,
+    })
 
     expect(evaluation.dimensions.failClosedBehavior).toEqual({
       status: "FAIL",

@@ -85,6 +85,7 @@ const createRecordingTracer = () => {
 
 const versions = {
   agentName: "research",
+  cycleMode: "STANDARD" as const,
   promptVersion: "1.0.0",
   skillName: "spy-debit-spread-research",
   skillVersion: "1.0.0",
@@ -104,6 +105,31 @@ describe("startResearchTelemetry", () => {
     await telemetry.shutdown()
 
     expect(createSdk).not.toHaveBeenCalled()
+  })
+
+  it("marks research-only anytime cycles on the root span", async () => {
+    const { spans, tracer } = createRecordingTracer()
+    const telemetry = startResearchTelemetry(
+      { endpoint: "https://collector.example/otel" },
+      {
+        createSdk: () => ({
+          start: () => undefined,
+          shutdown: async () => undefined,
+        }),
+        getTracer: () => tracer,
+      },
+    )
+
+    await telemetry.runCycle(
+      1,
+      { ...versions, cycleMode: "DRY_RUN_ANYTIME" },
+      async () => undefined,
+    )
+    await telemetry.shutdown()
+
+    expect(spans[0]?.attributes).toMatchObject({
+      [RESEARCH_TRACE_ATTRIBUTE_KEYS.cycleMode]: "DRY_RUN_ANYTIME",
+    })
   })
 
   it("applies trace-specific precedence and caps the exporter timeout", () => {
@@ -236,6 +262,7 @@ describe("startResearchTelemetry", () => {
       [SemanticConventions.LLM_PROVIDER]: "anthropic",
       [SemanticConventions.LLM_MODEL_NAME]: "claude-sonnet-4",
       [RESEARCH_TRACE_ATTRIBUTE_KEYS.attemptNumber]: 3,
+      [RESEARCH_TRACE_ATTRIBUTE_KEYS.cycleMode]: "STANDARD",
       [RESEARCH_TRACE_ATTRIBUTE_KEYS.cycleId]: "cycle-3",
       [RESEARCH_TRACE_ATTRIBUTE_KEYS.promptVersion]: "1.0.0",
       [RESEARCH_TRACE_ATTRIBUTE_KEYS.skillName]:

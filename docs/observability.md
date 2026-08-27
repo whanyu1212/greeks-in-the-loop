@@ -91,7 +91,8 @@ parsing, decision validation, quote confirmation, intent derivation, ledger
 terminalization, and artifact projection when those operations run.
 
 The allowlisted attributes are limited to attempt/cycle/session identifiers,
-agent, prompt, skill, strategy, and contract versions, bounded outcome or skip
+the `STANDARD` or `DRY_RUN_ANYTIME` cycle mode, agent, prompt, skill, strategy,
+and contract versions, bounded outcome or skip
 reason, provider/model identifiers, token counts, and bounded tool metadata.
 Prompt and skill versions are checked-in constants and must be incremented when
 their behavior changes so AX experiments can group comparable runs.

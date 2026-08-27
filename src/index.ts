@@ -14,6 +14,7 @@ import { dirname } from "node:path"
 import { parse as parseEnv } from "dotenv"
 
 import { runAgentLoop } from "./agent-loop.js"
+import { parseAgentOptions } from "./agent-options.js"
 import {
   RESEARCH_DECISION_CONTRACT_VERSION,
   STRATEGY_VERSION,
@@ -48,6 +49,7 @@ import {
 import { processResearchCycle } from "./research/research-cycle.js"
 import {
   DEFAULT_PREMARKET_RESEARCH_START_ET,
+  DRY_RUN_ANYTIME_RESEARCH_MODE,
   evaluateResearchEligibility,
   newYorkDate,
 } from "./scheduling/research-eligibility.js"
@@ -159,7 +161,11 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => abortController.abort(new Error(`Received ${signal}`)))
 }
 
-const once = process.argv.includes("--once")
+const agentOptions = parseAgentOptions(
+  process.argv.slice(2),
+  readSetting("RESEARCH_LEDGER_PATH"),
+)
+const { once, researchAnytime, ledgerPath } = agentOptions
 const intervalMs = readPositiveInteger("AGENT_INTERVAL_MS", 5 * 60 * 1000)
 const cycleTimeoutMs = readPositiveInteger("AGENT_CYCLE_TIMEOUT_MS", 2 * 60 * 1000)
 const cycleAbortTimeoutMs = readPositiveInteger("AGENT_CYCLE_ABORT_TIMEOUT_MS", 5_000)
@@ -199,17 +205,16 @@ evaluateResearchEligibility({
   evaluatedAt: new Date(),
   premarketStartEt,
 })
-const ledgerPath = readSetting("RESEARCH_LEDGER_PATH")?.trim() ||
-  ".state/research-ledger.sqlite"
 const traceVersions = {
   agentName: RESEARCH_AGENT_NAME,
+  cycleMode: researchAnytime ? DRY_RUN_ANYTIME_RESEARCH_MODE : "STANDARD",
   promptVersion: RESEARCH_PROMPT_VERSION,
   skillName: RESEARCH_SKILL_NAME,
   skillVersion: RESEARCH_SKILL_VERSION,
   strategyVersion: STRATEGY_VERSION,
   decisionContractVersion: RESEARCH_DECISION_CONTRACT_VERSION,
   reportVersion: RESEARCH_REPORT_VERSION,
-}
+} as const
 mkdirSync(dirname(ledgerPath), { recursive: true })
 const ledgerStore = createSqliteLedgerStore({
   path: ledgerPath,
@@ -260,9 +265,12 @@ try {
             return {
               session,
               initialEligibility: evaluateResearchEligibility({
-                evaluatedAt: new Date(),
+                evaluatedAt: eligibilityEvaluatedAt,
                 ...(session === undefined ? {} : { session }),
                 premarketStartEt,
+                ...(researchAnytime
+                  ? { researchMode: DRY_RUN_ANYTIME_RESEARCH_MODE }
+                  : {}),
               }),
             }
           },
@@ -273,6 +281,9 @@ try {
             ...(session === undefined ? {} : { session }),
             premarketStartEt,
             tradeIntentWindow: initialEligibility.tradeIntentWindow ?? null,
+            ...(researchAnytime
+              ? { researchMode: DRY_RUN_ANYTIME_RESEARCH_MODE }
+              : {}),
           })
         if (!initialEligibility.researchEligible) {
           const reason = initialEligibility.reason ?? "RESEARCH_WINDOW_INELIGIBLE"

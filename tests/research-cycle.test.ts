@@ -280,14 +280,15 @@ const setup = () => {
 }
 
 describe("processResearchCycle", () => {
-  it("retains pre-market research without confirming quotes or deriving an intent", async () => {
+  it("retains anytime research without confirming quotes or deriving an intent", async () => {
     const dependencies = setup()
     dependencies.getEligibility.mockReturnValue({
       evaluatedAt: "2026-08-25T12:00:00.000Z",
       sessionDate: "2026-08-25",
       researchEligible: true,
       tradeIntentEligible: false,
-      reason: "OUTSIDE_TRADE_INTENT_WINDOW",
+      researchMode: "DRY_RUN_ANYTIME",
+      reason: "DRY_RUN_RESEARCH_ONLY",
     })
 
     const result = await processResearchCycle({
@@ -338,7 +339,8 @@ describe("processResearchCycle", () => {
       sessionDate: "2026-08-25",
       researchEligible: true,
       tradeIntentEligible: false,
-      reason: "OUTSIDE_TRADE_INTENT_WINDOW",
+      researchMode: "DRY_RUN_ANYTIME",
+      reason: "DRY_RUN_RESEARCH_ONLY",
     })
 
     const result = await processResearchCycle({

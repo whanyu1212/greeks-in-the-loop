@@ -1,5 +1,8 @@
 import type { ResearchContextV1 } from "./research-context-v1.js"
-import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
+import {
+  DRY_RUN_ANYTIME_RESEARCH_MODE,
+  type ResearchEligibilityV1,
+} from "../scheduling/research-eligibility.js"
 
 /**
  * Fixed identity and request construction for the unattended research agent.
@@ -11,7 +14,7 @@ import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.j
 /** Checked-in OpenCode primary agent used by every unattended cycle. */
 export const RESEARCH_AGENT_NAME = "research" as const
 /** Increment when the system prompt or cycle-request behavior changes. */
-export const RESEARCH_PROMPT_VERSION = "1.0.0" as const
+export const RESEARCH_PROMPT_VERSION = "1.1.0" as const
 /** Checked-in skill selected by the research agent policy. */
 export const RESEARCH_SKILL_NAME = "spy-debit-spread-research" as const
 /** Increment when the selected skill's research behavior changes. */
@@ -43,11 +46,16 @@ export function buildResearchCyclePrompt(
     eligibility
       ? [
           "Application-authoritative research and trade-intent eligibility follows. Do not override it with model reasoning or provider prose.",
+          eligibility.researchMode === DRY_RUN_ANYTIME_RESEARCH_MODE
+            ? "This is a research-only anytime dry run. Never return PROPOSE_TRADE; return PRELIMINARY_RESEARCH or NO_ACTION."
+            : undefined,
           JSON.stringify(eligibility),
           eligibility.tradeIntentEligible
             ? "A fresh PROPOSE_TRADE may be returned if every strategy requirement passes."
             : "Do not return PROPOSE_TRADE. Return PRELIMINARY_RESEARCH for useful findings that require refresh, or NO_ACTION when no useful finding exists.",
-        ].join("\n")
+        ]
+          .filter((line) => line !== undefined)
+          .join("\n")
       : undefined,
     operatorObjective ? `Current operator objective: ${operatorObjective}` : undefined,
     durableContext
