@@ -1,0 +1,456 @@
+import { z } from "zod"
+
+import {
+  tradeIntentV1Schema,
+  type TradeIntentV1,
+} from "../contracts/trade-intent-v1.js"
+import {
+  evaluateTradeIntentRiskV1,
+  riskEvaluationInputV1Schema,
+  type RiskEvaluationV1,
+} from "../risk/risk-evaluation-v1.js"
+import { canonicalJsonSha256 } from "../shared/canonical-json.js"
+import {
+  backtestDatasetManifestV1Schema,
+  type BacktestDatasetRecordV1,
+  type MarketSessionRecordV1,
+  type OptionBarRecordV1,
+  type UnderlyingBarRecordV1,
+} from "./dataset-v1.js"
+
+export const BACKTEST_REPLAY_VERSION = "1.0.0" as const
+export const BACKTEST_EXECUTION_MODEL_VERSION = "1.0.0" as const
+const INITIAL_EQUITY_CENTS = 10_000_000
+
+const positiveSafeInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
+const nonnegativeSafeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+const timestamp = z.iso.datetime({ offset: true, precision: 3 })
+
+const signalSnapshotSchema = z
+  .object({
+    completedDailyClosesMicros: z.array(positiveSafeInteger).length(50),
+    completedMinuteBars: z
+      .array(
+        z
+          .object({
+            vwapMicros: positiveSafeInteger,
+            volume: positiveSafeInteger,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(390),
+    underlyingBidMicros: positiveSafeInteger,
+    underlyingAskMicros: positiveSafeInteger,
+  })
+  .strict()
+  .refine(({ underlyingBidMicros, underlyingAskMicros }) => underlyingAskMicros >= underlyingBidMicros, {
+    path: ["underlyingAskMicros"],
+    message: "Underlying ask cannot be below bid",
+  })
+
+const monitorCycleSchema = z
+  .object({
+    decidedAt: timestamp,
+    marketOpen: z.boolean(),
+    lateFill: z.boolean(),
+    dte: z.number().int().min(0).max(365),
+    minutesToClose: z.number().int().min(0).max(1_440),
+    staleMinutes: z.number().int().min(0).max(1_440),
+    markHalfCentsPerShare: positiveSafeInteger.optional(),
+    completedDailyCloseMicros: positiveSafeInteger.optional(),
+    sma20Micros: positiveSafeInteger.optional(),
+    holdingSessionIndex: z.number().int().min(1).max(365),
+  })
+  .strict()
+
+const commonScenarioFields = {
+  scenarioId: z.string().min(1).max(128),
+} as const
+
+const exactScenarioSchema = z
+  .object({
+    ...commonScenarioFields,
+    monitorCycles: z.array(monitorCycleSchema).min(1).max(10_000),
+    fidelity: z.literal("EXACT_SNAPSHOT"),
+    signal: signalSnapshotSchema,
+    candidates: z.array(riskEvaluationInputV1Schema).min(1).max(10_000),
+  })
+  .strict()
+
+const proxyScenarioSchema = z
+  .object({
+    ...commonScenarioFields,
+    monitorCycles: z.array(monitorCycleSchema).min(1).max(10_000).optional(),
+    fidelity: z.literal("HISTORICAL_BAR_PROXY"),
+    retainedIntent: tradeIntentV1Schema,
+  })
+  .strict()
+
+export const backtestReplayScenarioV1Schema = z.discriminatedUnion("fidelity", [
+  exactScenarioSchema,
+  proxyScenarioSchema,
+])
+
+export const backtestReplayInputV1Schema = z
+  .object({
+    replayVersion: z.literal(BACKTEST_REPLAY_VERSION),
+    execution: z
+      .object({
+        modelVersion: z.literal(BACKTEST_EXECUTION_MODEL_VERSION),
+        entrySlippageHalfCentsPerShare: nonnegativeSafeInteger,
+        exitSlippageHalfCentsPerShare: nonnegativeSafeInteger,
+        commissionCentsPerContract: nonnegativeSafeInteger,
+      })
+      .strict(),
+    scenarios: z.array(backtestReplayScenarioV1Schema).min(1).max(10_000),
+  })
+  .strict()
+
+export type BacktestReplayInputV1 = Readonly<z.infer<typeof backtestReplayInputV1Schema>>
+export type BacktestSignalDirectionV1 = "BULLISH" | "BEARISH" | "NO_ACTION"
+export type BacktestExitReasonV1 =
+  | "LATE_FILL"
+  | "EXPIRATION"
+  | "STALE_DATA"
+  | "STOP_LOSS"
+  | "PROFIT_TARGET"
+  | "TREND_INVALIDATION"
+  | "MAX_HOLDING_PERIOD"
+  | "END_OF_REPLAY"
+
+const mean = (values: readonly number[]) =>
+  values.reduce((total, value) => total + value, 0) / values.length
+
+/** Replays the strategy's strict daily-regime and session-VWAP signal. */
+export const evaluateBacktestSignalV1 = (
+  input: z.infer<typeof signalSnapshotSchema>,
+): Readonly<{
+  direction: BacktestSignalDirectionV1
+  dailyCloseMicros: number
+  sma20Micros: number
+  sma50Micros: number
+  sessionVwapMicros: number
+  spotMidpointMicros: number
+}> => {
+  const parsed = signalSnapshotSchema.parse(input)
+  const dailyCloseMicros = parsed.completedDailyClosesMicros.at(-1)!
+  const last20 = parsed.completedDailyClosesMicros.slice(-20)
+  const sma20Micros = mean(last20)
+  const sma50Micros = mean(parsed.completedDailyClosesMicros)
+  const volume = parsed.completedMinuteBars.reduce((total, bar) => total + bar.volume, 0)
+  const weightedVwap = parsed.completedMinuteBars.reduce(
+    (total, bar) => total + BigInt(bar.vwapMicros) * BigInt(bar.volume),
+    0n,
+  )
+  const exactVolume = parsed.completedMinuteBars.reduce(
+    (total, bar) => total + BigInt(bar.volume),
+    0n,
+  )
+  const sessionVwapMicros = Number(weightedVwap) / volume
+  const spotMidpointMicros =
+    (parsed.underlyingBidMicros + parsed.underlyingAskMicros) / 2
+  const close = BigInt(dailyCloseMicros)
+  const sum20 = last20.reduce((total, value) => total + BigInt(value), 0n)
+  const sum50 = parsed.completedDailyClosesMicros.reduce(
+    (total, value) => total + BigInt(value),
+    0n,
+  )
+  const spotTwice = BigInt(parsed.underlyingBidMicros) + BigInt(parsed.underlyingAskMicros)
+  const direction =
+    close * 20n > sum20 &&
+    sum20 * 50n > sum50 * 20n &&
+    spotTwice * exactVolume > weightedVwap * 2n
+      ? "BULLISH"
+      : close * 20n < sum20 &&
+          sum20 * 50n < sum50 * 20n &&
+          spotTwice * exactVolume < weightedVwap * 2n
+        ? "BEARISH"
+        : "NO_ACTION"
+  return {
+    direction,
+    dailyCloseMicros,
+    sma20Micros,
+    sma50Micros,
+    sessionVwapMicros,
+    spotMidpointMicros,
+  }
+}
+
+const daysBetween = (from: string, to: string) =>
+  (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) /
+  86_400_000
+
+const candidateTuple = (input: z.infer<typeof riskEvaluationInputV1Schema>) => {
+  const { intent, context } = input
+  const long = context.contracts.legs.find(({ role }) => role === "LONG")!
+  const short = context.contracts.legs.find(({ role }) => role === "SHORT")!
+  return [
+    Math.abs(daysBetween(context.eligibility.sessionDate!, intent.expiration) - 21),
+    Math.abs(Math.abs(long.delta) - 0.5) + Math.abs(Math.abs(short.delta) - 0.3),
+    intent.widthCentsPerShare,
+    intent.expiration,
+    intent.longContractSymbol,
+    intent.shortContractSymbol,
+  ] as const
+}
+
+const compareTuples = (left: readonly (number | string)[], right: readonly (number | string)[]) => {
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index]!
+    const b = right[index]!
+    if (a < b) return -1
+    if (a > b) return 1
+  }
+  return 0
+}
+
+const exitReason = (
+  intent: TradeIntentV1,
+  cycle: z.infer<typeof monitorCycleSchema>,
+): BacktestExitReasonV1 | undefined => {
+  if (cycle.lateFill) return "LATE_FILL"
+  if (
+    cycle.marketOpen &&
+    (cycle.dte < 3 || (cycle.dte === 3 && cycle.minutesToClose <= 60))
+  ) return "EXPIRATION"
+  if (cycle.marketOpen && cycle.staleMinutes >= 5) return "STALE_DATA"
+  if (
+    cycle.markHalfCentsPerShare !== undefined &&
+    cycle.markHalfCentsPerShare <= intent.stopLossMarkHalfCentsPerShare
+  ) return "STOP_LOSS"
+  if (
+    cycle.markHalfCentsPerShare !== undefined &&
+    cycle.markHalfCentsPerShare >= intent.profitTargetMarkHalfCentsPerShare
+  ) return "PROFIT_TARGET"
+  if (
+    cycle.completedDailyCloseMicros !== undefined &&
+    cycle.sma20Micros !== undefined &&
+    (intent.direction === "BULLISH"
+      ? cycle.completedDailyCloseMicros <= cycle.sma20Micros
+      : cycle.completedDailyCloseMicros >= cycle.sma20Micros)
+  ) return "TREND_INVALIDATION"
+  if (
+    cycle.marketOpen &&
+    (cycle.holdingSessionIndex > 5 ||
+      (cycle.holdingSessionIndex === 5 && cycle.minutesToClose <= 30))
+  ) return "MAX_HOLDING_PERIOD"
+  return undefined
+}
+
+const sessionForTimestamp = (
+  sessions: readonly MarketSessionRecordV1[],
+  value: string,
+) => sessions.find(({ open, close }) => value >= open && value <= close)
+
+/** Derives conservative proxy marks from synchronized option minute bars. */
+export function deriveHistoricalBarProxyCyclesV1(
+  records: readonly BacktestDatasetRecordV1[],
+  intent: TradeIntentV1,
+) {
+  const sessions = records
+    .filter((record): record is MarketSessionRecordV1 => record.recordType === "MARKET_SESSION")
+    .sort((left, right) => left.open.localeCompare(right.open))
+  const dailyBars = records
+    .filter(
+      (record): record is UnderlyingBarRecordV1 =>
+        record.recordType === "UNDERLYING_BAR" && record.timeframe === "1DAY",
+    )
+    .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+  const minuteBars = records.filter(
+    (record): record is OptionBarRecordV1 =>
+      record.recordType === "OPTION_BAR" && record.timeframe === "1MINUTE",
+  )
+  const shortByTimestamp = new Map(
+    minuteBars
+      .filter(({ contractSymbol }) => contractSymbol === intent.shortContractSymbol)
+      .map((bar) => [bar.timestamp, bar]),
+  )
+  const matchingEntrySession = sessions.findIndex(
+    ({ open, close }) => intent.evaluatedAt >= open && intent.evaluatedAt <= close,
+  )
+  if (matchingEntrySession < 0) return []
+  const entrySessionIndex = matchingEntrySession
+  return minuteBars
+    .filter(
+      ({ contractSymbol, timestamp: value }) =>
+        contractSymbol === intent.longContractSymbol && value >= intent.evaluatedAt,
+    )
+    .flatMap((longBar) => {
+      const shortBar = shortByTimestamp.get(longBar.timestamp)
+      const session = sessionForTimestamp(sessions, longBar.timestamp)
+      if (shortBar === undefined || session === undefined) return []
+      const sessionIndex = sessions.indexOf(session)
+      if (sessionIndex < entrySessionIndex) return []
+      const trendBars = dailyBars
+        .filter(({ timestamp: value }) => value < session.open)
+        .slice(-20)
+      const spreadMicros = longBar.lowMicros - shortBar.highMicros
+      const markHalfCentsPerShare = Math.floor(spreadMicros / 5_000)
+      if (markHalfCentsPerShare <= 0) return []
+      const completedDailyCloseMicros = trendBars.at(-1)?.closeMicros
+      const sma20Micros =
+        trendBars.length === 20
+          ? mean(trendBars.map(({ closeMicros }) => closeMicros))
+          : undefined
+      return [{
+        decidedAt: longBar.timestamp,
+        marketOpen: true,
+        lateFill: false,
+        dte: daysBetween(session.date, intent.expiration),
+        minutesToClose: Math.max(
+          0,
+          Math.floor((Date.parse(session.close) - Date.parse(longBar.timestamp)) / 60_000),
+        ),
+        staleMinutes: 0,
+        markHalfCentsPerShare,
+        ...(completedDailyCloseMicros === undefined || sma20Micros === undefined
+          ? {}
+          : { completedDailyCloseMicros, sma20Micros }),
+        holdingSessionIndex: sessionIndex - entrySessionIndex + 1,
+      }]
+    })
+    .sort((left, right) => left.decidedAt.localeCompare(right.decidedAt))
+}
+
+type SelectedIntent = Readonly<{
+  intent?: TradeIntentV1
+  riskStatus: "APPROVED" | "REJECTED" | "NOT_EVALUABLE"
+  riskEvaluations: readonly RiskEvaluationV1[]
+  signalDirection: BacktestSignalDirectionV1 | "NOT_EVALUABLE"
+}>
+
+const selectIntent = (
+  scenario: z.infer<typeof backtestReplayScenarioV1Schema>,
+): SelectedIntent => {
+  if (scenario.fidelity === "HISTORICAL_BAR_PROXY") {
+    return {
+      intent: scenario.retainedIntent,
+      riskStatus: "NOT_EVALUABLE",
+      riskEvaluations: [],
+      signalDirection: "NOT_EVALUABLE",
+    }
+  }
+  const signal = evaluateBacktestSignalV1(scenario.signal)
+  const evaluated = scenario.candidates.map((input) => ({
+    input,
+    evaluation: evaluateTradeIntentRiskV1(input),
+  }))
+  const approved = evaluated
+    .filter(
+      (candidate) =>
+        signal.direction !== "NO_ACTION" &&
+        candidate.input.intent.direction === signal.direction &&
+        candidate.evaluation.outcome === "APPROVED",
+    )
+    .sort((left, right) => compareTuples(candidateTuple(left.input), candidateTuple(right.input)))
+  return {
+    ...(approved[0] === undefined ? {} : { intent: approved[0].input.intent }),
+    riskStatus: approved.length > 0 ? "APPROVED" : "REJECTED",
+    riskEvaluations: evaluated.map(({ evaluation }) => evaluation),
+    signalDirection: signal.direction,
+  }
+}
+
+/** Runs a pure, deterministic replay. No broker or network capability is accepted. */
+export function runBacktestReplayV1(
+  manifestInput: unknown,
+  replayInput: unknown,
+  records: readonly BacktestDatasetRecordV1[] = [],
+) {
+  const manifest = backtestDatasetManifestV1Schema.parse(manifestInput)
+  if (!manifest.complete) throw new Error("Backtest dataset must be complete")
+  const replay = backtestReplayInputV1Schema.parse(replayInput)
+  const scenarioResults = replay.scenarios.map((scenario) => {
+    const selected = selectIntent(scenario)
+    if (selected.intent === undefined) {
+      return {
+        scenarioId: scenario.scenarioId,
+        fidelity: scenario.fidelity,
+        signalDirection: selected.signalDirection,
+        riskStatus: selected.riskStatus,
+        riskEvaluations: selected.riskEvaluations,
+        outcome: "NO_ENTRY" as const,
+        pnlCents: 0,
+      }
+    }
+    const monitorCycles =
+      scenario.fidelity === "HISTORICAL_BAR_PROXY" && scenario.monitorCycles === undefined
+        ? deriveHistoricalBarProxyCyclesV1(records, selected.intent)
+        : scenario.monitorCycles!
+    if (monitorCycles.length === 0) {
+      throw new Error(`Scenario ${scenario.scenarioId} has no synchronized replay marks`)
+    }
+    const triggered = monitorCycles.find((cycle) => exitReason(selected.intent!, cycle))
+    const finalCycle = triggered ?? monitorCycles.at(-1)!
+    const reason = triggered === undefined ? "END_OF_REPLAY" : exitReason(selected.intent, triggered)!
+    const rawExitMark = finalCycle.markHalfCentsPerShare ?? 0
+    const entryMark = selected.intent.entryLimitCentsPerShare * 2
+    const exitMark = Math.max(
+      0,
+      rawExitMark - replay.execution.exitSlippageHalfCentsPerShare,
+    )
+    const pnlCents =
+      (exitMark - entryMark) * 50 -
+      replay.execution.entrySlippageHalfCentsPerShare * 50 -
+      replay.execution.commissionCentsPerContract * 4
+    return {
+      scenarioId: scenario.scenarioId,
+      fidelity: scenario.fidelity,
+      signalDirection: selected.signalDirection,
+      riskStatus: selected.riskStatus,
+      riskEvaluations: selected.riskEvaluations,
+      outcome: "CLOSED" as const,
+      intent: selected.intent,
+      exitReason: reason,
+      exitDecidedAt: finalCycle.decidedAt,
+      entryFillHalfCentsPerShare: entryMark,
+      exitFillHalfCentsPerShare: exitMark,
+      pnlCents,
+    }
+  })
+  const closed = scenarioResults.filter((result) => result.outcome === "CLOSED")
+  const totalPnlCents = scenarioResults.reduce((total, result) => total + result.pnlCents, 0)
+  let equityCents = INITIAL_EQUITY_CENTS
+  let peakEquityCents = equityCents
+  let maxDrawdownCents = 0
+  for (const result of scenarioResults) {
+    equityCents += result.pnlCents
+    peakEquityCents = Math.max(peakEquityCents, equityCents)
+    maxDrawdownCents = Math.max(maxDrawdownCents, peakEquityCents - equityCents)
+  }
+  const riskRejectionCounts: Record<string, number> = {}
+  for (const result of scenarioResults) {
+    for (const evaluation of result.riskEvaluations) {
+      if (evaluation.outcome !== "REJECTED") continue
+      for (const reason of evaluation.reasonCodes) {
+        riskRejectionCounts[reason] = (riskRejectionCounts[reason] ?? 0) + 1
+      }
+    }
+  }
+  const reportWithoutChecksum = {
+    replayVersion: BACKTEST_REPLAY_VERSION,
+    executionModelVersion: BACKTEST_EXECUTION_MODEL_VERSION,
+    datasetId: manifest.definition.datasetId,
+    datasetChecksum: manifest.checksum,
+    scenarioCount: scenarioResults.length,
+    tradeCount: closed.length,
+    exactScenarioCount: scenarioResults.filter(({ fidelity }) => fidelity === "EXACT_SNAPSHOT").length,
+    proxyScenarioCount: scenarioResults.filter(({ fidelity }) => fidelity === "HISTORICAL_BAR_PROXY").length,
+    initialEquityCents: INITIAL_EQUITY_CENTS,
+    finalEquityCents: equityCents,
+    totalPnlCents,
+    returnBps: Math.trunc((totalPnlCents * 10_000) / INITIAL_EQUITY_CENTS),
+    maxDrawdownCents,
+    hitRateBps:
+      closed.length === 0
+        ? 0
+        : Math.floor((closed.filter(({ pnlCents }) => pnlCents > 0).length * 10_000) / closed.length),
+    riskRejectionCounts,
+    results: scenarioResults,
+  }
+  return {
+    ...reportWithoutChecksum,
+    checksum: canonicalJsonSha256(reportWithoutChecksum),
+  }
+}
