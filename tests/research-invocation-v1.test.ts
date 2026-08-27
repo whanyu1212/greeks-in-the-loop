@@ -189,4 +189,46 @@ describe("ResearchInvocationV1", () => {
       }).success,
     ).toBe(false)
   })
+
+  it.each([
+    ["agentName", "research@example.com"],
+    ["promptVersion", "https://prompt.example/1.3.0"],
+    ["skillName", "skill\nmetadata"],
+    ["skillVersion", "1.1.0?token=secret"],
+    ["strategyVersion", "strategy#private"],
+    ["decisionContractVersion", "contract@internal"],
+    ["reportVersion", "https://report.example/2.0.0"],
+  ] as const)("replaces unsafe durable provenance in %s", (field, value) => {
+    const invocation = createResearchInvocationV1(
+      {
+        agentName: "research",
+        cycleMode: "STANDARD",
+        promptVersion: "1.3.0",
+        skillName: "spy-debit-spread-research",
+        skillVersion: "1.1.0",
+        strategyVersion: "1.1.0",
+        decisionContractVersion: "1.0.0",
+        reportVersion: "2.0.0",
+        [field]: value,
+      },
+      {
+        providerId: "provider",
+        modelId: "model",
+        responseError: false,
+        toolCallCount: 0,
+        toolErrorCount: 0,
+        toolIncompleteCount: 0,
+        toolCalls: [],
+        omittedToolCallCount: 0,
+      },
+    )
+
+    expect(invocation[field]).toBe("unknown")
+    expect(
+      researchInvocationV1Schema.safeParse({
+        ...invocation,
+        [field]: value,
+      }).success,
+    ).toBe(false)
+  })
 })
