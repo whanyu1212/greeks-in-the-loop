@@ -27,11 +27,15 @@ import {
 import { createSqliteLedgerStore } from "./event-ledger/sqlite-ledger-store.js"
 import { createAlpacaOptionQuoteProvider } from "./market-data/alpaca-option-quotes.js"
 import { createAlpacaCalendarClient } from "./market-data/alpaca-calendar-client.js"
+import { summarizeOpenCodeInvocation } from "./observability/opencode-telemetry-summary.js"
 import { startResearchTelemetry } from "./observability/research-telemetry.js"
 import { startOpencode } from "./opencode-runtime.js"
 import {
   buildResearchCyclePrompt,
   RESEARCH_AGENT_NAME,
+  RESEARCH_PROMPT_VERSION,
+  RESEARCH_SKILL_NAME,
+  RESEARCH_SKILL_VERSION,
 } from "./research/research-agent.js"
 import {
   loadResearchRunV1,
@@ -199,6 +203,9 @@ const ledgerPath = readSetting("RESEARCH_LEDGER_PATH")?.trim() ||
   ".state/research-ledger.sqlite"
 const traceVersions = {
   agentName: RESEARCH_AGENT_NAME,
+  promptVersion: RESEARCH_PROMPT_VERSION,
+  skillName: RESEARCH_SKILL_NAME,
+  skillVersion: RESEARCH_SKILL_VERSION,
   strategyVersion: STRATEGY_VERSION,
   decisionContractVersion: RESEARCH_DECISION_CONTRACT_VERSION,
   reportVersion: RESEARCH_REPORT_VERSION,
@@ -399,10 +406,12 @@ try {
                       response.error,
                     )
                   }
-                  cycleTrace.setModel({
-                    providerId: response.data.info.providerID,
-                    modelId: response.data.info.modelID,
-                  })
+                  cycleTrace.recordOpenCodeResult(
+                    summarizeOpenCodeInvocation(
+                      response.data.info,
+                      response.data.parts,
+                    ),
+                  )
                   return response
                 },
               )

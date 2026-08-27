@@ -2,6 +2,11 @@ import { readFileSync } from "node:fs"
 
 import { describe, expect, it } from "vitest"
 
+import {
+  RESEARCH_SKILL_NAME,
+  RESEARCH_SKILL_VERSION,
+} from "../src/research/research-agent.js"
+
 type PermissionAction = "allow" | "ask" | "deny"
 type Permission = PermissionAction | Record<string, PermissionAction>
 
@@ -30,6 +35,10 @@ const manifest = JSON.parse(
 const config = JSON.parse(readFileSync("opencode.json", "utf8")) as OpenCodeConfig
 const systemPrompt = readFileSync(
   "src/research/research-agent-system.md",
+  "utf8",
+)
+const researchSkill = readFileSync(
+  ".opencode/skills/spy-debit-spread-research/SKILL.md",
   "utf8",
 )
 const mcpLauncher = readFileSync("scripts/run-research-mcp.mjs", "utf8")
@@ -67,8 +76,12 @@ describe("research agent policy", () => {
     }
     expect(permission.skill).toEqual({
       "*": "deny",
-      "spy-debit-spread-research": "allow",
+      [RESEARCH_SKILL_NAME]: "allow",
     })
+    expect(researchSkill).toContain(`name: ${RESEARCH_SKILL_NAME}`)
+    expect(researchSkill).toContain(
+      `skill-version: "${RESEARCH_SKILL_VERSION}"`,
+    )
   })
 
   it("limits file reads and edits to reviewed project paths", () => {

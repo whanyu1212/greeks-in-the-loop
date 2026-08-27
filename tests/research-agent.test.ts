@@ -3,12 +3,18 @@ import { describe, expect, it } from "vitest"
 import {
   buildResearchCyclePrompt,
   RESEARCH_AGENT_NAME,
+  RESEARCH_PROMPT_VERSION,
+  RESEARCH_SKILL_NAME,
+  RESEARCH_SKILL_VERSION,
 } from "../src/research/research-agent.js"
 import { projectResearchContextV1 } from "../src/research/research-context-v1.js"
 
 describe("research agent request construction", () => {
   it("uses the fixed checked-in agent identity", () => {
     expect(RESEARCH_AGENT_NAME).toBe("research")
+    expect(RESEARCH_PROMPT_VERSION).toBe("1.0.0")
+    expect(RESEARCH_SKILL_NAME).toBe("spy-debit-spread-research")
+    expect(RESEARCH_SKILL_VERSION).toBe("1.0.0")
   })
 
   it("builds a bounded cycle request with an optional operator objective", () => {
