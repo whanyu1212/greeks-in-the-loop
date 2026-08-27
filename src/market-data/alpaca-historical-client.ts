@@ -292,8 +292,11 @@ export function createAlpacaHistoricalClient(
             `Alpaca historical request failed with HTTP ${response.status}`,
           )
         }
-        const retryAfter = Number(response.headers.get("retry-after"))
-        const delay = Number.isFinite(retryAfter)
+        const retryAfterHeader = response.headers.get("retry-after")
+        const retryAfter = retryAfterHeader === null || retryAfterHeader.trim() === ""
+          ? Number.NaN
+          : Number(retryAfterHeader)
+        const delay = Number.isFinite(retryAfter) && retryAfter >= 0
           ? Math.min(5_000, Math.max(0, retryAfter * 1_000))
           : attempt * 250
         await sleep(delay, signal)

@@ -232,4 +232,36 @@ describe("Alpaca historical client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(sleep).toHaveBeenCalledWith(1_000, expect.any(AbortSignal))
   })
+
+  it.each([undefined, "", "invalid", "-1"])(
+    "backs off when Retry-After is absent or invalid: %s",
+    async (retryAfter) => {
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(jsonResponse(
+          {},
+          429,
+          retryAfter === undefined ? undefined : { "retry-after": retryAfter },
+        ))
+        .mockResolvedValueOnce(jsonResponse({ bars: {} }))
+      const sleep = vi.fn().mockResolvedValue(undefined)
+      const client = createAlpacaHistoricalClient({
+        apiKey: "key",
+        secretKey: "secret",
+        fetch: fetchMock,
+        dataBaseUrl: "https://data.test.invalid",
+        tradingBaseUrl: "https://paper.test.invalid",
+        sleep,
+      })
+
+      await client.getUnderlyingBarsPage({
+        timeframe: "1DAY",
+        fromDate: "2024-02-01",
+        toDate: "2024-02-02",
+        signal: new AbortController().signal,
+      })
+
+      expect(sleep).toHaveBeenCalledWith(250, expect.any(AbortSignal))
+    },
+  )
 })

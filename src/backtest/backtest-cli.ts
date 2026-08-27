@@ -21,8 +21,12 @@ const datasetPath = option("--dataset")
 const scenariosPath = option("--scenarios")
 const outputPath = option("--output")
 if (datasetPath === undefined || scenariosPath === undefined) throw new Error(usage)
-if (outputPath !== undefined && pathsReferToSameFile(datasetPath, outputPath)) {
-  throw new Error("Backtest output must not overwrite the replay dataset")
+if (
+  outputPath !== undefined &&
+  (pathsReferToSameFile(datasetPath, outputPath) ||
+    pathsReferToSameFile(scenariosPath, outputPath))
+) {
+  throw new Error("Backtest output must not overwrite a replay input")
 }
 
 const store = createBacktestDatasetStore({ path: datasetPath, readonly: true })

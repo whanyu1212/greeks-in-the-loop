@@ -111,7 +111,8 @@ the intent entry session through each monitor cycle, and minutes to close are
 recomputed from that cycle's retained session close.
 Cycles marked open must fall within the retained session's open and close
 instants. CLI report output is rejected when it aliases the SQLite dataset by
-path, symlink, or hard link.
+path, symlink, or hard link, and the same protection applies to the scenario
+input JSON.
 
 ## Known limitations
 
