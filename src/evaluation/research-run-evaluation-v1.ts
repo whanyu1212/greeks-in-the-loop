@@ -36,6 +36,7 @@ import {
   DRY_RUN_ANYTIME_SHADOW_MODE,
   newYorkDate,
   newYorkLocalTime,
+  researchEligibilityV1Schema,
   TRADE_INTENT_START_GRACE_MS,
   TRADE_INTENT_WINDOW_DURATION_MS,
 } from "../scheduling/research-eligibility.js"
@@ -372,7 +373,12 @@ export function evaluateResearchRunV1(
   const parsedInvocation = run.researchInvocation === undefined
     ? undefined
     : researchInvocationV1Schema.safeParse(run.researchInvocation)
-  const expectedCycleMode = run.initialEligibility?.researchMode ?? "STANDARD"
+  const parsedEligibility = run.initialEligibility === undefined
+    ? undefined
+    : researchEligibilityV1Schema.safeParse(run.initialEligibility)
+  const expectedCycleMode = parsedEligibility?.success === true
+    ? parsedEligibility.data.researchMode ?? "STANDARD"
+    : "STANDARD"
   const invocation = parsedInvocation?.success === true
     ? parsedInvocation.data
     : undefined
@@ -383,7 +389,7 @@ export function evaluateResearchRunV1(
     : RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[invocation.invocationVersion]
   if (
     (expectedInvocationVersion !== undefined && invocation === undefined) ||
-    (expectedInvocationVersion !== undefined && run.initialEligibility === undefined) ||
+    (expectedInvocationVersion !== undefined && parsedEligibility?.success !== true) ||
     (expectedInvocationVersion === undefined && run.researchInvocation !== undefined) ||
     (parsedInvocation?.success === false) ||
     (invocation !== undefined &&
@@ -1055,7 +1061,7 @@ export function evaluateResearchRunV1(
           ((preliminaryCouldBeRetained &&
             !plausibleLaterPreliminaryEligibilityRejection &&
             !plausiblePreliminaryObservationRejectionMatches) ||
-            noActionCouldBeRetained)) ||
+            (noActionCouldBeRetained && !expectedStrategyVersionRejection))) ||
         !reportFreeRejectionIssuesMatch ||
         (expectedCommonReportRejectionIssues !== undefined &&
           !rejectionIssuesMatch(expectedCommonReportRejectionIssues)) ||

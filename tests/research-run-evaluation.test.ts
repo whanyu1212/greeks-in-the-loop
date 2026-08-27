@@ -416,6 +416,23 @@ describe("research run evaluation", () => {
     )
   })
 
+  it("requires schema-valid eligibility metadata for current runs", () => {
+    const source = noActionRun()
+    const evaluation = evaluateResearchRunV1({
+      ...source,
+      runVersion: "1.2.0",
+      researchInvocation: currentInvocation,
+      initialEligibility: {
+        ...source.initialEligibility!,
+        evaluatedAt: "not-a-time",
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
+    )
+  })
+
   it("requires safe schema categories on current rejected runs", () => {
     const {
       researchReport: _researchReport,
@@ -519,6 +536,10 @@ describe("research run evaluation", () => {
     expect(canonical.dimensions.contractCompliance.issueCodes).not.toContain(
       "RUN_METADATA_INVALID",
     )
+    expect(canonical.dimensions.contractCompliance.issueCodes).not.toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+    expect(canonical.dimensions.contractCompliance.status).toBe("PASS")
     expect(wrongDiagnostic.dimensions.contractCompliance.issueCodes).toContain(
       "RUN_METADATA_INVALID",
     )
