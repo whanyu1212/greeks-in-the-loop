@@ -28,6 +28,7 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "UNKNOWN_SNAPSHOT_REFERENCE",
   "CANDIDATE_IDENTITY_MISMATCH",
   "INELIGIBLE_CYCLE_DERIVED_INTENT",
+  "INTENT_ELIGIBILITY_CONTEXT_INVALID",
   "INTENT_ELIGIBILITY_CONTEXT_MISSING",
   "INTENT_OUTSIDE_RETAINED_TRADE_WINDOW",
   "INTENT_WITHOUT_VALIDATED_PROPOSAL",
@@ -334,44 +335,45 @@ export function evaluateResearchRunV1(
     candidateIssues.push("CANDIDATE_IDENTITY_MISMATCH")
   }
 
-  if (
-    run.initialEligibility?.tradeIntentEligible === false &&
-    run.outcome.status === "INTENT_DERIVED"
-  ) {
-    failClosedIssues.push("INELIGIBLE_CYCLE_DERIVED_INTENT")
-  }
-  if (
-    run.outcome.status === "INTENT_DERIVED" &&
-    (run.initialEligibility === undefined ||
-      (run.initialEligibility.tradeIntentEligible &&
-        run.initialEligibility.tradeIntentWindow === undefined))
-  ) {
-    failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_MISSING")
-  }
-  if (
-    run.outcome.status === "INTENT_DERIVED" &&
-    run.initialEligibility?.tradeIntentWindow !== undefined
-  ) {
-    const evaluatedAt = Date.parse(run.outcome.intent.evaluatedAt)
-    const slotStartedAt = Date.parse(
-      run.initialEligibility.tradeIntentWindow.slotStartedAt,
-    )
-    const deadline = Date.parse(run.initialEligibility.tradeIntentWindow.deadline)
-    if (
-      !Number.isFinite(evaluatedAt) ||
-      !Number.isFinite(slotStartedAt) ||
-      !Number.isFinite(deadline) ||
-      evaluatedAt < slotStartedAt ||
-      evaluatedAt >= deadline
-    ) {
-      failClosedIssues.push("INTENT_OUTSIDE_RETAINED_TRADE_WINDOW")
+  if (run.outcome.status === "INTENT_DERIVED") {
+    const eligibility = run.initialEligibility
+    if (eligibility === undefined) {
+      failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_MISSING")
+    } else if (!eligibility.tradeIntentEligible) {
+      failClosedIssues.push("INELIGIBLE_CYCLE_DERIVED_INTENT")
+    } else if (eligibility.tradeIntentWindow === undefined) {
+      failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_MISSING")
+    } else {
+      const eligibilityEvaluatedAt = Date.parse(eligibility.evaluatedAt)
+      const intentEvaluatedAt = Date.parse(run.outcome.intent.evaluatedAt)
+      const slotStartedAt = Date.parse(
+        eligibility.tradeIntentWindow.slotStartedAt,
+      )
+      const deadline = Date.parse(eligibility.tradeIntentWindow.deadline)
+      const eligibilityContextValid =
+        Number.isFinite(eligibilityEvaluatedAt) &&
+        Number.isFinite(slotStartedAt) &&
+        Number.isFinite(deadline) &&
+        slotStartedAt < deadline &&
+        eligibilityEvaluatedAt >= slotStartedAt &&
+        eligibilityEvaluatedAt < deadline
+      if (!eligibilityContextValid) {
+        failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_INVALID")
+      }
+      if (
+        !Number.isFinite(intentEvaluatedAt) ||
+        !Number.isFinite(slotStartedAt) ||
+        !Number.isFinite(deadline) ||
+        intentEvaluatedAt < slotStartedAt ||
+        intentEvaluatedAt < eligibilityEvaluatedAt ||
+        intentEvaluatedAt >= deadline
+      ) {
+        failClosedIssues.push("INTENT_OUTSIDE_RETAINED_TRADE_WINDOW")
+      }
     }
-  }
-  if (
-    run.outcome.status === "INTENT_DERIVED" &&
-    run.validatedDecision?.outcome !== "PROPOSE_TRADE"
-  ) {
-    failClosedIssues.push("INTENT_WITHOUT_VALIDATED_PROPOSAL")
+    if (run.validatedDecision?.outcome !== "PROPOSE_TRADE") {
+      failClosedIssues.push("INTENT_WITHOUT_VALIDATED_PROPOSAL")
+    }
   }
 
   const versionedResult = reportResult ?? retainedResult

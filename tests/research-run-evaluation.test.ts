@@ -496,4 +496,24 @@ describe("research run evaluation", () => {
       issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_MISSING"],
     })
   })
+
+  it("rejects eligibility evaluated outside its retained trade window", () => {
+    const run = derivedIntentRun()
+    if (run.initialEligibility === undefined) {
+      throw new Error("Expected retained eligibility")
+    }
+
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      initialEligibility: {
+        ...run.initialEligibility,
+        evaluatedAt: "2026-08-26T11:59:59.000Z",
+      },
+    })
+
+    expect(evaluation.dimensions.failClosedBehavior).toEqual({
+      status: "FAIL",
+      issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_INVALID"],
+    })
+  })
 })
