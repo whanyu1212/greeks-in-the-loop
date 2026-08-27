@@ -178,13 +178,32 @@ const INTENT_DERIVATION_REJECTION_REASONS = new Set([
   "ARITHMETIC_OVERFLOW",
 ])
 
-const isCanonicalProposalQuoteSnapshot = (
+const hasCanonicalProposalQuoteProvenance = (
   snapshot: ResearchRunV1["evidenceSnapshots"][number],
 ) =>
   snapshot.snapshotRef === PROPOSAL_QUOTE_SNAPSHOT_REF &&
   snapshot.provider === "ALPACA" &&
   snapshot.source === ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE &&
   snapshot.temporalClass === "LIVE"
+
+const hasAlpacaQuoteFreshnessBound = (
+  snapshot: ResearchRunV1["evidenceSnapshots"][number],
+) => {
+  const retrievedAt = Date.parse(snapshot.retrievedAt)
+  const freshUntil = Date.parse(snapshot.freshUntil)
+  return (
+    Number.isFinite(retrievedAt) &&
+    Number.isFinite(freshUntil) &&
+    freshUntil >= retrievedAt &&
+    freshUntil <= retrievedAt + 60_000
+  )
+}
+
+const isCanonicalProposalQuoteSnapshot = (
+  snapshot: ResearchRunV1["evidenceSnapshots"][number],
+) =>
+  hasCanonicalProposalQuoteProvenance(snapshot) &&
+  hasAlpacaQuoteFreshnessBound(snapshot)
 
 /**
  * Evaluates one already-projected research run without I/O or wall-clock input.
@@ -647,10 +666,20 @@ export function evaluateResearchRunV1(
   if (
     run.outcome.status === "INTENT_DERIVATION_REJECTED" &&
     run.evidenceSnapshots.some(
-      (snapshot) => !isCanonicalProposalQuoteSnapshot(snapshot),
+      (snapshot) => !hasCanonicalProposalQuoteProvenance(snapshot),
     )
   ) {
     groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
+  }
+  if (
+    run.outcome.status === "INTENT_DERIVATION_REJECTED" &&
+    run.evidenceSnapshots.some(
+      (snapshot) =>
+        hasCanonicalProposalQuoteProvenance(snapshot) &&
+        !hasAlpacaQuoteFreshnessBound(snapshot),
+    )
+  ) {
+    groundingIssues.push("QUOTE_SNAPSHOT_METADATA_MISMATCH")
   }
   if (run.outcome.status === "DECISION_REJECTED") {
     if (run.evidenceSnapshots.length > 1) {
@@ -658,10 +687,19 @@ export function evaluateResearchRunV1(
     }
     if (
       run.evidenceSnapshots.some(
-        (snapshot) => !isCanonicalProposalQuoteSnapshot(snapshot),
+        (snapshot) => !hasCanonicalProposalQuoteProvenance(snapshot),
       )
     ) {
       groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
+    }
+    if (
+      run.evidenceSnapshots.some(
+        (snapshot) =>
+          hasCanonicalProposalQuoteProvenance(snapshot) &&
+          !hasAlpacaQuoteFreshnessBound(snapshot),
+      )
+    ) {
+      groundingIssues.push("QUOTE_SNAPSHOT_METADATA_MISMATCH")
     }
   }
   if (run.outcome.status === "INTENT_DERIVED") {
@@ -693,7 +731,7 @@ export function evaluateResearchRunV1(
       const snapshot = snapshotsByReference.get(snapshotReference)
       if (snapshot === undefined) continue
       if (
-        !isCanonicalProposalQuoteSnapshot(snapshot)
+        !hasCanonicalProposalQuoteProvenance(snapshot)
       ) {
         groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
       }
@@ -797,13 +835,15 @@ export function evaluateResearchRunV1(
       candidateIssues.push("CANDIDATE_DTE_MISMATCH")
     }
   }
-  if (
-    (run.outcome.status === "INTENT_DERIVED" ||
-      postQuoteRejectionEvaluatedAt !== undefined ||
-      quoteConfirmationRejection ||
-      decisionRejectionEvaluatedAt !== undefined) &&
-    diagnostics !== undefined
-  ) {
+  const proposalHistoryRequired =
+    run.outcome.status === "INTENT_DERIVED" ||
+    postQuoteRejectionEvaluatedAt !== undefined ||
+    quoteConfirmationRejection ||
+    decisionRejectionEvaluatedAt !== undefined
+  if (proposalHistoryRequired && diagnostics === undefined) {
+    candidateIssues.push("OPEN_INTEREST_HISTORY_INVALID")
+  }
+  if (proposalHistoryRequired && diagnostics !== undefined) {
     const sessionDate = run.initialEligibility?.sessionDate
     const previousSessionDates = run.initialEligibility?.previousSessionDates
     const priorSessionHistoryIsValid =

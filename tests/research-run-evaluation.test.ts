@@ -617,6 +617,26 @@ describe("research run evaluation", () => {
     )
   })
 
+  it("bounds rejected quote snapshots to Alpaca's freshness window", () => {
+    const run = derivedIntentRun()
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      evidenceSnapshots: run.evidenceSnapshots.map((snapshot) => ({
+        ...snapshot,
+        freshUntil: "2026-08-26T16:04:00.000Z",
+      })),
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["NON_POSITIVE_NET_DEBIT"],
+      },
+    })
+
+    expect(evaluation.dimensions.grounding.issueCodes).toContain(
+      "QUOTE_SNAPSHOT_METADATA_MISMATCH",
+    )
+  })
+
   it.each(["NON_POSITIVE_NET_DEBIT", "MARKET_WINDOW_INELIGIBLE"] as const)(
     "reapplies proposal freshness checks to post-quote %s rejections",
     (reason) => {
@@ -1465,6 +1485,51 @@ describe("research run evaluation", () => {
     expect(evaluation.dimensions.candidateIdentity.issueCodes).toContain(
       "OPEN_INTEREST_HISTORY_INVALID",
     )
+  })
+
+  it("requires candidate diagnostics after proposal history validation", () => {
+    const run = derivedIntentRun()
+    if (run.researchReport === undefined) {
+      throw new Error("Expected retained research report")
+    }
+    const { candidateEvaluation: _candidateEvaluation, ...analysis } =
+      run.researchReport.analysis
+    const reportWithoutDiagnostics = {
+      ...run.researchReport,
+      analysis,
+    }
+    const { validatedDecision: _validatedDecision, ...quoteFailureBase } = run
+    const evaluations = [
+      evaluateResearchRunV1({
+        ...run,
+        researchReport: reportWithoutDiagnostics,
+      }),
+      evaluateResearchRunV1({
+        ...run,
+        researchReport: reportWithoutDiagnostics,
+        outcome: {
+          outcomeVersion: "1.0.0",
+          status: "INTENT_DERIVATION_REJECTED",
+          reasons: ["NON_POSITIVE_NET_DEBIT"],
+        },
+      }),
+      evaluateResearchRunV1({
+        ...quoteFailureBase,
+        evidenceSnapshots: [],
+        researchReport: reportWithoutDiagnostics,
+        outcome: {
+          outcomeVersion: "1.0.0",
+          status: "INTENT_DERIVATION_REJECTED",
+          reasons: ["QUOTE_REQUEST_FAILED"],
+        },
+      }),
+    ]
+
+    for (const evaluation of evaluations) {
+      expect(evaluation.dimensions.candidateIdentity.issueCodes).toContain(
+        "OPEN_INTEREST_HISTORY_INVALID",
+      )
+    }
   })
 
   it("fails closed when an ineligible cycle claims to derive an intent", () => {
