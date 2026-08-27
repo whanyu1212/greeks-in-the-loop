@@ -22,7 +22,7 @@ construct, submit, replace, or cancel an order.
 - application-verified account status, multileg approval, buying power, and
   equity values;
 - reconciled position, pending-entry, same-day-entry, and breaker state; and
-- one application-verified contract snapshot reference, observation time, and
+- one application-verified contract snapshot slot and observation time, plus
   contract identity, status, Greeks, volume, and open interest for the exact
   long and short legs.
 
@@ -47,8 +47,8 @@ thresholds.
 | --- | --- |
 | Entry window | Application eligibility is true and evaluation precedes the retained deadline |
 | Market freshness | Quotes and contract observations are not future-dated and are at most 60 seconds old; comparisons retain RFC 3339 nanosecond precision |
-| Snapshot order | Intent evaluation and both quote timestamps must be no later than the bound contract snapshot observation time |
-| Snapshot binding | The contract snapshot reference must equal the intent quote snapshot reference |
+| Snapshot identity | Contract snapshot slot must equal the application trade window slot; the slot and observation time identify one immutable market snapshot |
+| Snapshot order | Intent evaluation must equal the contract snapshot observation time and lie inside that slot; both quote timestamps must be no later than that observation time |
 | State freshness | Account and reconciliation observations are not future-dated and are at most five minutes old |
 | Contract identity | One exact matching long leg and short leg |
 | Contract status | Active, tradable, American-style, multiplier 100 |

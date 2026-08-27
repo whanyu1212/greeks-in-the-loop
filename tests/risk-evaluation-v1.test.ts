@@ -113,7 +113,7 @@ const makeInput = (intent = makeIntent()) => ({
       competitionBreakerActive: false,
     },
     contracts: {
-      snapshotRef: intent.quoteSnapshotRef,
+      slotStartedAt: "2026-08-27T14:30:00.000Z",
       observedAt: "2026-08-27T14:30:00.000Z",
       legs: [
         {
@@ -218,8 +218,8 @@ describe("evaluateTradeIntentRiskV1", () => {
       input.context.contracts.observedAt = "2026-08-27T14:28:59.999Z"
     }, "MARKET_DATA_STALE")
     expectRejection((input) => {
-      input.context.contracts.snapshotRef =
-        "another-snapshot" as typeof input.context.contracts.snapshotRef
+      input.context.contracts.slotStartedAt =
+        "2026-08-27T14:15:00.000Z" as typeof input.context.contracts.slotStartedAt
     }, "SNAPSHOT_INTEGRITY_INVALID")
     expectRejection((input) => {
       input.context.contracts.observedAt = "2026-08-27T14:29:29.999Z"
@@ -243,6 +243,18 @@ describe("evaluateTradeIntentRiskV1", () => {
       "2026-08-27T14:30:00.001Z"
     expect(evaluateTradeIntentRiskV1(subMillisecondQuote).outcome).toBe(
       "APPROVED",
+    )
+
+    const priorSlotIntent = makeInput(
+      makeIntent({
+        evaluatedAt: "2026-08-27T14:29:59.999Z",
+        providerTimestamp: "2026-08-27T14:29:30.000Z",
+      }),
+    )
+    priorSlotIntent.context.contracts.observedAt =
+      "2026-08-27T14:29:59.999Z"
+    expect(rejectionReasons(priorSlotIntent)).toContain(
+      "SNAPSHOT_INTEGRITY_INVALID",
     )
   })
 

@@ -106,7 +106,7 @@ const reconciledPortfolioV1Schema = z
 
 const contractSnapshotV1Schema = z
   .object({
-    snapshotRef: z.string().min(1).max(128),
+    slotStartedAt: timestamp,
     observedAt: timestamp,
     legs: z.array(riskContractLegV1Schema).length(2),
   })
@@ -192,6 +192,16 @@ const timestampAfter = (candidate: string, boundary: string) => {
   )
 }
 
+const timestampsEqual = (left: string, right: string) => {
+  const leftNanoseconds = parseRfc3339Nanoseconds(left)
+  const rightNanoseconds = parseRfc3339Nanoseconds(right)
+  return (
+    leftNanoseconds !== undefined &&
+    rightNanoseconds !== undefined &&
+    leftNanoseconds === rightNanoseconds
+  )
+}
+
 const timestampAgeIsInvalid = (
   observedAt: string,
   evaluatedAt: string,
@@ -271,9 +281,20 @@ export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
   ) {
     reject("MARKET_DATA_STALE")
   }
+  const snapshotFallsWithinTradeWindow =
+    tradeWindow !== undefined &&
+    !timestampAfter(tradeWindow.slotStartedAt, contracts.observedAt) &&
+    timestampAfter(tradeWindow.deadline, contracts.observedAt)
+  const intentFallsWithinTradeWindow =
+    tradeWindow !== undefined &&
+    !timestampAfter(tradeWindow.slotStartedAt, intent.evaluatedAt) &&
+    timestampAfter(tradeWindow.deadline, intent.evaluatedAt)
   if (
-    contracts.snapshotRef !== intent.quoteSnapshotRef ||
-    timestampAfter(intent.evaluatedAt, contracts.observedAt) ||
+    tradeWindow === undefined ||
+    !timestampsEqual(contracts.slotStartedAt, tradeWindow.slotStartedAt) ||
+    !timestampsEqual(intent.evaluatedAt, contracts.observedAt) ||
+    !snapshotFallsWithinTradeWindow ||
+    !intentFallsWithinTradeWindow ||
     timestampAfter(intent.longQuote.providerTimestamp, contracts.observedAt) ||
     timestampAfter(intent.shortQuote.providerTimestamp, contracts.observedAt)
   ) {
