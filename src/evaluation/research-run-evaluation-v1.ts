@@ -271,15 +271,16 @@ export function evaluateResearchRunV1(
     temporalIssues.push("CYCLE_TIME_RANGE_INVALID")
   } else {
     if (
-      run.researchReport !== undefined &&
-      !timestampWithin(run.researchReport.analysis.asOf, cycleStart, cycleEnd)
+      parsedReport?.success === true &&
+      !timestampWithin(parsedReport.data.analysis.asOf, cycleStart, cycleEnd)
     ) {
       temporalIssues.push("REPORT_AS_OF_OUTSIDE_CYCLE")
     }
     if (
-      run.researchReport?.analysis.externalContext.some(
+      parsedReport?.success === true &&
+      parsedReport.data.analysis.externalContext.some(
         ({ retrievedAt }) => !timestampWithin(retrievedAt, cycleStart, cycleEnd),
-      ) === true
+      )
     ) {
       temporalIssues.push("SOURCE_RETRIEVAL_OUTSIDE_CYCLE")
     }
@@ -404,6 +405,14 @@ export function evaluateResearchRunV1(
   ) {
     groundingIssues.push("UNEXPECTED_SNAPSHOT_REFERENCE")
   }
+  if (
+    ["PRELIMINARY_RESEARCH_RETAINED", "VALIDATED_NO_ACTION"].includes(
+      run.outcome.status,
+    ) &&
+    run.evidenceSnapshots.length > 0
+  ) {
+    groundingIssues.push("UNEXPECTED_SNAPSHOT_REFERENCE")
+  }
   if (snapshotReferences.some((snapshotRef) => !knownSnapshots.has(snapshotRef))) {
     groundingIssues.push("UNKNOWN_SNAPSHOT_REFERENCE")
   }
@@ -505,7 +514,9 @@ export function evaluateResearchRunV1(
   if (new Set(candidateIdentities.map(candidateKey)).size > 1) {
     candidateIssues.push("CANDIDATE_IDENTITY_MISMATCH")
   }
-  const diagnostics = run.researchReport?.analysis.candidateEvaluation
+  const diagnostics = parsedReport?.success === true
+    ? parsedReport.data.analysis.candidateEvaluation
+    : undefined
   const canonicalCandidate = candidateIdentities[0]
   if (diagnostics !== undefined && canonicalCandidate !== undefined) {
     const diagnosticSymbols = new Map(
@@ -648,9 +659,9 @@ export function evaluateResearchRunV1(
     outcomeStatus: run.outcome.status,
     versions: {
       runVersion: run.runVersion,
-      ...(run.researchReport === undefined
+      ...(parsedReport?.success !== true
         ? {}
-        : { reportVersion: run.researchReport.reportVersion }),
+        : { reportVersion: parsedReport.data.reportVersion }),
       ...(versionedResult === undefined
         ? {}
         : {
@@ -671,13 +682,17 @@ export function evaluateResearchRunV1(
       groundedInferenceCount,
       snapshotReferenceCount: snapshotReferences.length,
       exaSourceCount:
-        run.researchReport?.analysis.externalContext.filter(
-          ({ provider }) => provider === "EXA",
-        ).length ?? 0,
+        parsedReport?.success === true
+          ? parsedReport.data.analysis.externalContext.filter(
+              ({ provider }) => provider === "EXA",
+            ).length
+          : 0,
       fmpSourceCount:
-        run.researchReport?.analysis.externalContext.filter(
-          ({ provider }) => provider === "FMP",
-        ).length ?? 0,
+        parsedReport?.success === true
+          ? parsedReport.data.analysis.externalContext.filter(
+              ({ provider }) => provider === "FMP",
+            ).length
+          : 0,
     },
   }
   return researchRunEvaluationV1Schema.parse(evaluation)

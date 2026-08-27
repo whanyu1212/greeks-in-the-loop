@@ -466,6 +466,21 @@ describe("research run evaluation", () => {
     })
   })
 
+  it("returns contract failure instead of throwing for malformed reports", () => {
+    const run = preliminaryRun()
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      researchReport: {
+        reportVersion: "2.0.0",
+      } as unknown as ResearchReportV2,
+    })
+
+    expect(evaluation.dimensions.contractCompliance).toEqual({
+      status: "FAIL",
+      issueCodes: ["REPORT_CONTRACT_INVALID"],
+    })
+  })
+
   it("rejects sourced snapshot evidence on a validated no-action run", () => {
     const run = noActionRun()
     if (
@@ -505,8 +520,34 @@ describe("research run evaluation", () => {
 
     expect(evaluation.dimensions.grounding).toEqual({
       status: "FAIL",
-      issueCodes: ["NO_ACTION_SOURCED_EVIDENCE"],
+      issueCodes: [
+        "NO_ACTION_SOURCED_EVIDENCE",
+        "UNEXPECTED_SNAPSHOT_REFERENCE",
+      ],
     })
+  })
+
+  it("rejects snapshots on preliminary and no-action outcomes", () => {
+    for (const run of [preliminaryRun(), noActionRun()]) {
+      const evaluation = evaluateResearchRunV1({
+        ...run,
+        evidenceSnapshots: [
+          {
+            snapshotRef: "unexpected-snapshot",
+            provider: "EXA",
+            source: "web-search",
+            retrievedAt: "2026-08-26T12:02:00.000Z",
+            freshUntil: "2026-08-26T12:05:00.000Z",
+            temporalClass: "LIVE",
+          },
+        ],
+      })
+
+      expect(evaluation.dimensions.grounding).toEqual({
+        status: "FAIL",
+        issueCodes: ["UNEXPECTED_SNAPSHOT_REFERENCE"],
+      })
+    }
   })
 
   it("reports decision references to unknown snapshots", () => {
