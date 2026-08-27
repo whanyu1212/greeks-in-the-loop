@@ -17,6 +17,7 @@ import type {
   ResearchCycleOutcomeV1,
   ResearchCycleTerminalRecordV1,
 } from "../src/research/research-cycle-outcome-v1.js"
+import type { ResearchInvocationV1 } from "../src/research/research-invocation-v1.js"
 
 const noAction = {
   contractVersion: "1.0.0",
@@ -26,6 +27,37 @@ const noAction = {
 } as const
 
 const previousSessionDates = ["2026-08-21", "2026-08-24"] as const
+
+const researchInvocation: ResearchInvocationV1 = {
+  invocationVersion: "1.0.0",
+  agentName: "research",
+  cycleMode: "STANDARD",
+  promptVersion: "1.3.0",
+  skillName: "spy-debit-spread-research",
+  skillVersion: "1.1.0",
+  strategyVersion: "1.1.0",
+  decisionContractVersion: "1.0.0",
+  reportVersion: "2.0.0",
+  providerId: "test-provider",
+  modelId: "test-model",
+  responseError: false,
+  tokens: {},
+  tools: {
+    totalCount: 0,
+    errorCount: 0,
+    incompleteCount: 0,
+    omittedCount: 0,
+    calls: [],
+  },
+}
+
+const expectRecords = (
+  actual: readonly ResearchCycleTerminalRecordV1[],
+  expected: readonly Record<string, unknown>[],
+) => expect(actual).toEqual(expected.map((record) => ({
+  researchInvocation,
+  ...record,
+})))
 
 const proposal = {
   contractVersion: "1.0.0",
@@ -285,6 +317,7 @@ const setup = () => {
   }))
 
   return {
+    researchInvocation,
     cycleStartedAt: "2026-08-25T11:45:00.000Z",
     outcomes,
     records,
@@ -324,7 +357,7 @@ describe("processResearchCycle", () => {
     })
     expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
-    expect(dependencies.records).toEqual([
+    expectRecords(dependencies.records, [
       {
         outcome: result.outcome,
         evidenceSnapshots: [],
@@ -394,7 +427,11 @@ describe("processResearchCycle", () => {
       outcomeVersion: "1.0.0",
       status: "DECISION_REJECTED",
       issues: [
-        { code: "SCHEMA_INVALID", path: ["result", "strategyVersion"] },
+        {
+          code: "SCHEMA_INVALID",
+          schemaCategory: "VALUE_NOT_ALLOWED",
+          path: ["result", "strategyVersion"],
+        },
       ],
     })
     expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
@@ -820,7 +857,7 @@ describe("processResearchCycle", () => {
       "ledger.cycle.terminalize",
     ])
     expect(dependencies.outcomes).toEqual([result.outcome])
-    expect(dependencies.records).toEqual([
+    expectRecords(dependencies.records, [
       {
         outcome: result.outcome,
         evidenceSnapshots: [],
@@ -852,7 +889,7 @@ describe("processResearchCycle", () => {
     expect(JSON.stringify(result)).not.toContain(secretMarker)
     expect(dependencies.quoteProvider.confirmQuotes).not.toHaveBeenCalled()
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
-    expect(dependencies.records).toEqual([
+    expectRecords(dependencies.records, [
       {
         outcome: result.outcome,
         evidenceSnapshots: [],
@@ -956,6 +993,7 @@ describe("processResearchCycle", () => {
       {
         outcome: result.outcome,
         evidenceSnapshots: [],
+        researchInvocation,
       },
       expect.any(AbortSignal),
     )
@@ -974,9 +1012,21 @@ describe("processResearchCycle", () => {
     })
 
     expect(result.outcome.status).toBe("DECISION_REJECTED")
+    if (result.outcome.status !== "DECISION_REJECTED") {
+      throw new Error("Expected decision rejection")
+    }
+    expect(result.outcome.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "SCHEMA_INVALID",
+          schemaCategory: expect.any(String),
+        }),
+      ]),
+    )
+    expect(JSON.stringify(result.outcome)).not.toContain("1.01")
     expect(dependencies.quoteProvider.confirmQuotes).not.toHaveBeenCalled()
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
-    expect(dependencies.records).toEqual([
+    expectRecords(dependencies.records, [
       {
         outcome: result.outcome,
         evidenceSnapshots: [],
@@ -1003,7 +1053,7 @@ describe("processResearchCycle", () => {
     }
     expect(result.outcome.issues.length).toBeGreaterThan(0)
     expect(result.outcome.issues.length).toBeLessThanOrEqual(64)
-    expect(dependencies.records).toEqual([
+    expectRecords(dependencies.records, [
       {
         outcome: result.outcome,
         evidenceSnapshots: [],
@@ -1143,7 +1193,7 @@ describe("processResearchCycle", () => {
       reasons: ["QUOTE_STALE"],
     })
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
-    expect(dependencies.records).toEqual([
+    expectRecords(dependencies.records, [
       {
         outcome: result.outcome,
         evidenceSnapshots: [],
@@ -1196,7 +1246,7 @@ describe("processResearchCycle", () => {
     })
     expect(dependencies.deriveIntent).toHaveBeenCalledOnce()
     expect(dependencies.outcomes).toEqual([result.outcome])
-    expect(dependencies.records).toEqual([
+    expectRecords(dependencies.records, [
       {
         outcome: result.outcome,
         evidenceSnapshots: [
@@ -1291,6 +1341,7 @@ describe("processResearchCycle", () => {
       shadowRiskEvaluator: dependencies.shadowRiskEvaluator,
       outcomeSink: dependencies.outcomeSink,
       getEligibility: dependencies.getEligibility,
+      researchInvocation,
     })
 
     expect(result.outcome).toMatchObject({
@@ -1329,7 +1380,7 @@ describe("processResearchCycle", () => {
       issues: [{ code: "STALE_SNAPSHOT" }],
     })
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
-    expect(dependencies.records).toEqual([
+    expectRecords(dependencies.records, [
       {
         outcome: result.outcome,
         evidenceSnapshots: [
@@ -1364,7 +1415,7 @@ describe("processResearchCycle", () => {
       status: "INTENT_DERIVATION_REJECTED",
       reasons: ["NON_POSITIVE_NET_DEBIT"],
     })
-    expect(dependencies.records).toEqual([
+    expectRecords(dependencies.records, [
       {
         outcome: result.outcome,
         evidenceSnapshots: [
@@ -1403,7 +1454,7 @@ describe("processResearchCycle", () => {
       throw new Error("Expected intent derivation rejection")
     }
     expect(result.outcome.reasons).toHaveLength(64)
-    expect(dependencies.records).toEqual([
+    expectRecords(dependencies.records, [
       {
         outcome: result.outcome,
         evidenceSnapshots: [
@@ -1440,6 +1491,7 @@ describe("processResearchCycle", () => {
       {
         outcome,
         evidenceSnapshots: [],
+        researchInvocation,
         validatedDecision: decision,
       },
       new AbortController().signal,

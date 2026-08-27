@@ -16,6 +16,10 @@ import {
   type ResearchRunV1,
 } from "../research/research-artifact.js"
 import {
+  RESEARCH_INVOCATION_PROVENANCE_BY_VERSION,
+  researchInvocationV1Schema,
+} from "../research/research-invocation-v1.js"
+import {
   ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS,
   ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE,
 } from "../market-data/alpaca-option-quotes.js"
@@ -32,6 +36,7 @@ import {
   DRY_RUN_ANYTIME_SHADOW_MODE,
   newYorkDate,
   newYorkLocalTime,
+  researchEligibilityV1Schema,
   TRADE_INTENT_START_GRACE_MS,
   TRADE_INTENT_WINDOW_DURATION_MS,
 } from "../scheduling/research-eligibility.js"
@@ -42,8 +47,18 @@ import {
 
 export const RESEARCH_RUN_EVALUATION_VERSION = "1.0.0" as const
 
+const INVOCATION_VERSION_BY_RUN_VERSION = {
+  "1.0.0": undefined,
+  "1.1.0": undefined,
+  "1.2.0": "1.0.0",
+} as const satisfies Record<
+  (typeof SUPPORTED_RESEARCH_RUN_VERSIONS)[number],
+  keyof typeof RESEARCH_INVOCATION_PROVENANCE_BY_VERSION | undefined
+>
+
 export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "RUN_VERSION_INVALID",
+  "RUN_METADATA_INVALID",
   "REPORT_CONTRACT_INVALID",
   "RESEARCH_REPORT_MISSING",
   "OUTCOME_CONTRACT_INVALID",
@@ -355,6 +370,55 @@ export function evaluateResearchRunV1(
     contractIssues.push("RUN_VERSION_INVALID")
   }
 
+  const parsedInvocation = run.researchInvocation === undefined
+    ? undefined
+    : researchInvocationV1Schema.safeParse(run.researchInvocation)
+  const parsedEligibility = run.initialEligibility === undefined
+    ? undefined
+    : researchEligibilityV1Schema.safeParse(run.initialEligibility)
+  const expectedCycleMode = parsedEligibility?.success === true
+    ? parsedEligibility.data.researchMode ?? "STANDARD"
+    : "STANDARD"
+  const invocation = parsedInvocation?.success === true
+    ? parsedInvocation.data
+    : undefined
+  const expectedInvocationVersion =
+    INVOCATION_VERSION_BY_RUN_VERSION[run.runVersion]
+  const expectedInvocationProvenance = invocation === undefined
+    ? undefined
+    : RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[invocation.invocationVersion]
+  if (
+    (expectedInvocationVersion !== undefined && invocation === undefined) ||
+    (expectedInvocationVersion !== undefined && parsedEligibility?.success !== true) ||
+    (expectedInvocationVersion === undefined && run.researchInvocation !== undefined) ||
+    (parsedInvocation?.success === false) ||
+    (invocation !== undefined &&
+      (invocation.invocationVersion !== expectedInvocationVersion ||
+        expectedInvocationProvenance === undefined ||
+        invocation.agentName !== expectedInvocationProvenance.agentName ||
+        invocation.cycleMode !== expectedCycleMode ||
+        invocation.promptVersion !== expectedInvocationProvenance.promptVersion ||
+        invocation.skillName !== expectedInvocationProvenance.skillName ||
+        invocation.skillVersion !== expectedInvocationProvenance.skillVersion ||
+        invocation.strategyVersion !== expectedInvocationProvenance.strategyVersion ||
+        invocation.decisionContractVersion !==
+          expectedInvocationProvenance.decisionContractVersion ||
+        invocation.reportVersion !== expectedInvocationProvenance.reportVersion))
+  ) {
+    contractIssues.push("RUN_METADATA_INVALID")
+  }
+  if (
+    expectedInvocationVersion !== undefined &&
+    run.outcome.status === "DECISION_REJECTED" &&
+    run.outcome.issues.some(
+      (issue) =>
+        issue.code === "SCHEMA_INVALID" &&
+        issue.schemaCategory === undefined,
+    )
+  ) {
+    contractIssues.push("RUN_METADATA_INVALID")
+  }
+
   const initialEligibility = run.initialEligibility
   const isAnytimeDryRun =
     initialEligibility?.researchMode === DRY_RUN_ANYTIME_RESEARCH_MODE
@@ -413,6 +477,29 @@ export function evaluateResearchRunV1(
   const validReport =
     parsedReport?.success === true ? parsedReport.data : undefined
   const reportResult = validReport?.result
+  const expectedStrategyVersionRejection =
+    invocation !== undefined &&
+    reportResult !== undefined &&
+    invocation.strategyVersion !== reportResult.strategyVersion &&
+    run.evidenceSnapshots.length === 0 &&
+    run.outcome.status === "DECISION_REJECTED" &&
+    isDeepStrictEqual(run.outcome.issues, [
+      {
+        code: "SCHEMA_INVALID",
+        schemaCategory: "VALUE_NOT_ALLOWED",
+        path: ["result", "strategyVersion"],
+      },
+    ])
+  if (
+    invocation !== undefined &&
+    reportResult !== undefined &&
+    ((invocation.strategyVersion !== reportResult.strategyVersion &&
+      !expectedStrategyVersionRejection) ||
+      invocation.decisionContractVersion !== reportResult.contractVersion ||
+      invocation.reportVersion !== validReport?.reportVersion)
+  ) {
+    contractIssues.push("RUN_METADATA_INVALID")
+  }
   const expectedCommonReportRejectionIssues = (() => {
     if (validReport === undefined) return undefined
     const cycleStart = Date.parse(run.cycle.startedAt)
@@ -974,33 +1061,34 @@ export function evaluateResearchRunV1(
       if (
         run.preliminaryResearch !== undefined ||
         run.validatedDecision !== undefined ||
-        (run.evidenceSnapshots.length === 0 &&
-          ((preliminaryCouldBeRetained &&
-            !plausibleLaterPreliminaryEligibilityRejection &&
-            !plausiblePreliminaryObservationRejectionMatches) ||
-            noActionCouldBeRetained)) ||
-        !reportFreeRejectionIssuesMatch ||
-        (expectedCommonReportRejectionIssues !== undefined &&
-          !rejectionIssuesMatch(expectedCommonReportRejectionIssues)) ||
-        (retainedCommonReportRejectionMatches &&
-          run.evidenceSnapshots.length > 0) ||
-        (expectedPreliminaryDecisionRejectionIssues !== undefined &&
-          !plausiblePreliminaryObservationRejectionMatches &&
-          !rejectionIssuesMatch(expectedPreliminaryDecisionRejectionIssues)) ||
-        (run.evidenceSnapshots.length === 0 &&
-          noActionValidation?.success === false &&
-          !rejectionIssuesMatch(noActionValidation.issues)) ||
-        (proposalPreflightValidation?.success === false &&
-          (run.evidenceSnapshots.length > 0 ||
-            !rejectionIssuesMatch(proposalPreflightValidation.issues))) ||
-        !proposalRejectionIssuesMatch ||
-        (run.evidenceSnapshots.length > 0 &&
-          (parsedReport?.success !== true ||
-            parsedReport.data.result.outcome !== "PROPOSE_TRADE")) ||
-        (canonicalRetainedQuoteSnapshot !== undefined &&
-          (!hasRetainedEligibleTradeWindow ||
-            expectedSnapshotDecisionRejectionIssues === undefined ||
-            !rejectionIssuesMatch(expectedSnapshotDecisionRejectionIssues)))
+        (!expectedStrategyVersionRejection &&
+          ((run.evidenceSnapshots.length === 0 &&
+            ((preliminaryCouldBeRetained &&
+              !plausibleLaterPreliminaryEligibilityRejection &&
+              !plausiblePreliminaryObservationRejectionMatches) ||
+              noActionCouldBeRetained)) ||
+            !reportFreeRejectionIssuesMatch ||
+            (expectedCommonReportRejectionIssues !== undefined &&
+              !rejectionIssuesMatch(expectedCommonReportRejectionIssues)) ||
+            (retainedCommonReportRejectionMatches &&
+              run.evidenceSnapshots.length > 0) ||
+            (expectedPreliminaryDecisionRejectionIssues !== undefined &&
+              !plausiblePreliminaryObservationRejectionMatches &&
+              !rejectionIssuesMatch(expectedPreliminaryDecisionRejectionIssues)) ||
+            (run.evidenceSnapshots.length === 0 &&
+              noActionValidation?.success === false &&
+              !rejectionIssuesMatch(noActionValidation.issues)) ||
+            (proposalPreflightValidation?.success === false &&
+              (run.evidenceSnapshots.length > 0 ||
+                !rejectionIssuesMatch(proposalPreflightValidation.issues))) ||
+            !proposalRejectionIssuesMatch ||
+            (run.evidenceSnapshots.length > 0 &&
+              (parsedReport?.success !== true ||
+                parsedReport.data.result.outcome !== "PROPOSE_TRADE")) ||
+            (canonicalRetainedQuoteSnapshot !== undefined &&
+              (!hasRetainedEligibleTradeWindow ||
+                expectedSnapshotDecisionRejectionIssues === undefined ||
+                !rejectionIssuesMatch(expectedSnapshotDecisionRejectionIssues)))))
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
       }

@@ -1,4 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -12,6 +18,29 @@ import {
 } from "../src/research/research-artifact.js"
 import type { StoredLedgerEventV1 } from "../src/event-ledger/ledger-event-v1.js"
 import type { ResearchCycleOutcomeV1 } from "../src/research/research-cycle-outcome-v1.js"
+
+const researchInvocation = {
+  invocationVersion: "1.0.0" as const,
+  agentName: "research",
+  cycleMode: "DRY_RUN_ANYTIME" as const,
+  promptVersion: "1.3.0",
+  skillName: "spy-debit-spread-research",
+  skillVersion: "1.1.0",
+  strategyVersion: "1.1.0",
+  decisionContractVersion: "1.0.0",
+  reportVersion: "2.0.0",
+  providerId: "test-provider",
+  modelId: "test-model",
+  responseError: false,
+  tokens: {},
+  tools: {
+    totalCount: 0,
+    errorCount: 0,
+    incompleteCount: 0,
+    omittedCount: 0,
+    calls: [],
+  },
+}
 
 const temporaryDirectories: string[] = []
 
@@ -197,6 +226,19 @@ describe("research cycle artifact", () => {
     ])
     expect(legacyRun.cycle.sessionDate).toBe("2026-08-26")
     expect(legacyRun.initialEligibility).toBeUndefined()
+
+    const currentEvents = events.map((event) =>
+      event.eventType === "RESEARCH_CYCLE_COMPLETED"
+        ? {
+            ...event,
+            payload: { ...event.payload, researchInvocation },
+          }
+        : event,
+    ) as StoredLedgerEventV1[]
+    expect(projectResearchRunV1(currentEvents)).toMatchObject({
+      runVersion: "1.2.0",
+      researchInvocation,
+    })
   })
 
   it("writes the full validated outcome to a unique inspection-only JSON file", async () => {
@@ -296,6 +338,11 @@ describe("research cycle artifact", () => {
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
       ...run,
     })
+    expect(statSync(path).mode & 0o777).toBe(0o600)
+
+    chmodSync(path, 0o644)
+    await writeResearchRunArtifact({ run, root, overwrite: true })
+    expect(statSync(path).mode & 0o777).toBe(0o600)
   })
 
   it("does not overwrite an existing cycle artifact", async () => {

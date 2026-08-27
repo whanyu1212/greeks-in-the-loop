@@ -30,7 +30,7 @@ export type OpenCodeInvocationSummary = Readonly<{
 const safeCount = (value: number) =>
   Number.isSafeInteger(value) && value >= 0 ? value : undefined
 
-const configuredToolName = (name: string) => {
+export const configuredToolName = (name: string) => {
   if (["trusted_time", "read", "skill"].includes(name)) return name
   return /^(?:alpaca_get_|fmp_|exa_)[A-Za-z0-9_]+$/.test(name)
     ? name

@@ -1,5 +1,10 @@
 import { z } from "zod"
 
+import {
+  safeSchemaDiagnostics,
+  type SchemaViolationCategory,
+} from "../shared/schema-diagnostics.js"
+
 export const RESEARCH_DECISION_CONTRACT_VERSION = "1.0.0" as const
 export const LEGACY_STRATEGY_VERSION = "1.0.0" as const
 export const STRATEGY_VERSION = "1.1.0" as const
@@ -245,6 +250,7 @@ export type ResearchDecisionValidationIssueCode =
 export type ResearchDecisionValidationIssue = {
   code: ResearchDecisionValidationIssueCode
   path: readonly (string | number)[]
+  schemaCategory?: SchemaViolationCategory
 }
 
 export type ResearchDecisionValidationResult =
@@ -305,10 +311,7 @@ export function validateResearchDecisionV1(
   if (!parsedDecision.success) {
     return {
       success: false,
-      issues: parsedDecision.error.issues.map(({ path }) => ({
-        code: "SCHEMA_INVALID",
-        path: schemaIssuePath(path),
-      })),
+      issues: safeSchemaDiagnostics(parsedDecision.error.issues, input),
     }
   }
 

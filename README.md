@@ -68,6 +68,10 @@ dedicated `.state/shadow-anytime.sqlite` ledger and cannot use the configured
 production ledger. The agent may still return `NO_ACTION` or preliminary
 research when the strategy does not support a proposal.
 
+The shadow-anytime trade-intent window is a synthetic processing boundary used
+to exercise the chain. It is not evidence that the proposal was valid during a
+production trading slot and must not be interpreted as live trade validity.
+
 To use another isolated ledger, pass it explicitly. The command rejects the
 configured production ledger:
 
@@ -122,7 +126,7 @@ pnpm research:run -- --ledger .state/research-anytime.sqlite
 pnpm research:run -- --ledger .state/research-anytime.sqlite --cycle <cycle-id>
 ```
 
-Regenerate its human-readable JSON export from SQLite (`--force` replaces an existing export):
+Regenerate its canonical portable JSON export from SQLite (`--force` replaces an existing export):
 
 ```bash
 pnpm research:run -- --ledger .state/research-anytime.sqlite --export --force
@@ -157,8 +161,9 @@ SQLite stores an append-only event stream in `ledger_events`. Each row contains 
 | Shadow-risk decision | For every live derived intent, as `RISK_SHADOW_DECISION_RECORDED` | Yes, in the `shadowRisk` section | Stores exact decision/evaluation/rule versions, outcome or bounded failure reasons, refreshed intent, observation timestamps, and reconciliation codes. Account balances, positions, orders, and raw responses are omitted. |
 | Breaker transitions | When newly activated, as `RISK_BREAKER_LATCHED` | Yes, in the `shadowRisk` section | Daily latches apply to their trading date; competition latches carry forward. Shadow approval never counts as an order submission. |
 | Rejections | Yes | Yes, inside the outcome | Stores bounded reason codes or validation issue codes/paths, not rejected raw content. |
+| Invocation provenance | On new completed cycles | Yes, in `researchInvocation` | Stores prompt/skill/strategy/contract versions, cycle mode, provider/model labels, token counts, and bounded tool names/outcomes/durations. Prompts, responses, tool arguments/results, provider metadata, and error text are excluded. |
 
-The JSON artifact is a deterministic `ResearchRunV1` view intended for humans and downstream inspection. It can be deleted and regenerated from SQLite. The SQLite ledger is the authoritative restart/audit record; artifact-write failure does not roll back a committed ledger outcome.
+The JSON artifact is a deterministic canonical `ResearchRunV1` view for portable downstream inspection. It can be deleted and regenerated from SQLite. New files are private to the owner (`0600`). The SQLite ledger is the authoritative restart/audit record; artifact-write failure does not roll back a committed ledger outcome.
 
 The project intentionally does **not** retain raw model responses, hidden reasoning, full OpenCode transcripts, raw Alpaca/FMP/Exa responses, credentials, or secret-bearing URLs. The bounded report is the retained analysis record, and all its observations remain labeled `AGENT_REPORTED`; only application-confirmed quotes and deterministic intent calculations cross that trust boundary.
 

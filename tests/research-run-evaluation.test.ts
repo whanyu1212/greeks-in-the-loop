@@ -150,6 +150,29 @@ const noActionRun = (): ResearchRunV1 => {
   }
 }
 
+const currentInvocation = {
+  invocationVersion: "1.0.0" as const,
+  agentName: "research",
+  cycleMode: "STANDARD" as const,
+  promptVersion: "1.3.0",
+  skillName: "spy-debit-spread-research",
+  skillVersion: "1.1.0",
+  strategyVersion: "1.1.0",
+  decisionContractVersion: "1.0.0",
+  reportVersion: "2.0.0",
+  providerId: "test-provider",
+  modelId: "test-model",
+  responseError: false,
+  tokens: {},
+  tools: {
+    totalCount: 0,
+    errorCount: 0,
+    incompleteCount: 0,
+    omittedCount: 0,
+    calls: [],
+  },
+}
+
 const derivedIntentRun = (): ResearchRunV1 => {
   const {
     preliminaryResearch: _preliminaryResearch,
@@ -331,6 +354,201 @@ describe("research run evaluation", () => {
 
     expect(evaluation.dimensions.contractCompliance.issueCodes).not.toContain(
       "RUN_VERSION_INVALID",
+    )
+  })
+
+  it("uses versioned invocation requirements for historical runs", () => {
+    const historical = evaluateResearchRunV1({
+      ...noActionRun(),
+      runVersion: "1.1.0",
+    })
+    const historicalWithCurrentInvocation = evaluateResearchRunV1({
+      ...noActionRun(),
+      runVersion: "1.1.0",
+      researchInvocation: currentInvocation,
+    })
+
+    expect(historical.dimensions.contractCompliance.issueCodes).not.toContain(
+      "RUN_METADATA_INVALID",
+    )
+    expect(
+      historicalWithCurrentInvocation.dimensions.contractCompliance.issueCodes,
+    ).toContain("RUN_METADATA_INVALID")
+  })
+
+  it("requires matching invocation metadata for current runs", () => {
+    const healthy = evaluateResearchRunV1({
+      ...noActionRun(),
+      runVersion: "1.2.0",
+      researchInvocation: currentInvocation,
+    })
+    const missing = evaluateResearchRunV1({
+      ...noActionRun(),
+      runVersion: "1.2.0",
+    })
+    const mismatched = evaluateResearchRunV1({
+      ...noActionRun(),
+      runVersion: "1.2.0",
+      researchInvocation: {
+        ...currentInvocation,
+        strategyVersion: "0.0.0",
+      },
+    })
+    const { initialEligibility: _initialEligibility, ...withoutEligibility } =
+      noActionRun()
+    const missingEligibility = evaluateResearchRunV1({
+      ...withoutEligibility,
+      runVersion: "1.2.0",
+      researchInvocation: currentInvocation,
+    })
+
+    expect(healthy.dimensions.contractCompliance.issueCodes).not.toContain(
+      "RUN_METADATA_INVALID",
+    )
+    expect(missing.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
+    )
+    expect(mismatched.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
+    )
+    expect(missingEligibility.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
+    )
+  })
+
+  it("requires schema-valid eligibility metadata for current runs", () => {
+    const source = noActionRun()
+    const evaluation = evaluateResearchRunV1({
+      ...source,
+      runVersion: "1.2.0",
+      researchInvocation: currentInvocation,
+      initialEligibility: {
+        ...source.initialEligibility!,
+        evaluatedAt: "not-a-time",
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
+    )
+  })
+
+  it("requires safe schema categories on current rejected runs", () => {
+    const {
+      researchReport: _researchReport,
+      preliminaryResearch: _preliminaryResearch,
+      ...base
+    } = preliminaryRun()
+    const rejected = {
+      ...base,
+      runVersion: "1.2.0" as const,
+      researchInvocation: currentInvocation,
+      outcome: {
+        outcomeVersion: "1.0.0" as const,
+        status: "DECISION_REJECTED" as const,
+        issues: [{ code: "SCHEMA_INVALID", path: ["result"] }],
+      },
+    }
+
+    const missingCategory = evaluateResearchRunV1(rejected)
+    const categorized = evaluateResearchRunV1({
+      ...rejected,
+      outcome: {
+        ...rejected.outcome,
+        issues: [{
+          code: "SCHEMA_INVALID",
+          schemaCategory: "TYPE_MISMATCH",
+          path: ["result"],
+        }],
+      },
+    })
+
+    expect(missingCategory.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
+    )
+    expect(categorized.dimensions.contractCompliance.issueCodes).not.toContain(
+      "RUN_METADATA_INVALID",
+    )
+  })
+
+  it.each([
+    { agentName: "other-agent" },
+    { promptVersion: "0.0.0" },
+    { skillName: "other-skill" },
+    { skillVersion: "0.0.0" },
+  ])("rejects mismatched runtime provenance", (override) => {
+    const evaluation = evaluateResearchRunV1({
+      ...noActionRun(),
+      runVersion: "1.2.0",
+      researchInvocation: {
+        ...currentInvocation,
+        ...override,
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
+    )
+  })
+
+  it("accepts the canonical rejection of a legacy strategy version", () => {
+    const rejectedRun = (source: ResearchRunV1, useLegacyVersion = true) => {
+      const {
+        preliminaryResearch: _preliminaryResearch,
+        validatedDecision: _validatedDecision,
+        shadowRisk: _shadowRisk,
+        ...base
+      } = source
+      return {
+        ...base,
+        runVersion: "1.2.0" as const,
+        researchInvocation: currentInvocation,
+        evidenceSnapshots: [],
+        researchReport: {
+          ...source.researchReport!,
+          result: {
+            ...source.researchReport!.result,
+            ...(useLegacyVersion ? { strategyVersion: "1.0.0" as const } : {}),
+          },
+        },
+        outcome: {
+          outcomeVersion: "1.0.0" as const,
+          status: "DECISION_REJECTED" as const,
+          issues: [{
+            code: "SCHEMA_INVALID",
+            schemaCategory: "VALUE_NOT_ALLOWED" as const,
+            path: ["result", "strategyVersion"],
+          }],
+        },
+      }
+    }
+    const canonical = [preliminaryRun(), noActionRun(), derivedIntentRun()].map(
+      (source) => evaluateResearchRunV1(rejectedRun(source)),
+    )
+    const forged = evaluateResearchRunV1(rejectedRun(noActionRun(), false))
+    const wrongDiagnosticRun = rejectedRun(noActionRun())
+    const wrongDiagnostic = evaluateResearchRunV1({
+      ...wrongDiagnosticRun,
+      outcome: {
+        ...wrongDiagnosticRun.outcome,
+        issues: [{
+          code: "SCHEMA_INVALID",
+          schemaCategory: "VALUE_NOT_ALLOWED",
+          path: ["result", "contractVersion"],
+        }],
+      },
+    })
+
+    expect(canonical.map(({ dimensions }) => dimensions.contractCompliance)).toEqual([
+      { status: "PASS", issueCodes: [] },
+      { status: "PASS", issueCodes: [] },
+      { status: "PASS", issueCodes: [] },
+    ])
+    expect(forged.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+    expect(wrongDiagnostic.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
     )
   })
 

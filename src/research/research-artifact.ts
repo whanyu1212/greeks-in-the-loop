@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, open } from "node:fs/promises"
 import { join } from "node:path"
 
 import { z } from "zod"
@@ -9,6 +9,7 @@ import type { ResearchReportV2 } from "../contracts/research-report-v2.js"
 import type { TradeIntentV1 } from "../contracts/trade-intent-v1.js"
 import type { StoredLedgerEventV1 } from "../event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
+import type { SchemaViolationCategory } from "../shared/schema-diagnostics.js"
 import type {
   RiskBreakerTransitionV1,
   ShadowRiskDecisionV1,
@@ -17,11 +18,14 @@ import {
   newYorkDate,
   type ResearchEligibilityV1,
 } from "../scheduling/research-eligibility.js"
+import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
 
 export const LEGACY_RESEARCH_RUN_VERSION = "1.0.0" as const
-export const RESEARCH_RUN_VERSION = "1.1.0" as const
+export const SHADOW_RESEARCH_RUN_VERSION = "1.1.0" as const
+export const RESEARCH_RUN_VERSION = "1.2.0" as const
 export const SUPPORTED_RESEARCH_RUN_VERSIONS = [
   LEGACY_RESEARCH_RUN_VERSION,
+  SHADOW_RESEARCH_RUN_VERSION,
   RESEARCH_RUN_VERSION,
 ] as const
 export const DEFAULT_RESEARCH_ARTIFACT_ROOT = "workspace/research" as const
@@ -29,6 +33,7 @@ export const DEFAULT_RESEARCH_ARTIFACT_ROOT = "workspace/research" as const
 type RejectionIssue = Readonly<{
   code: string
   path: readonly (string | number)[]
+  schemaCategory?: SchemaViolationCategory
 }>
 
 export type ResearchRunOutcomeV1 =
@@ -71,6 +76,7 @@ export type ResearchRunV1 = Readonly<{
     sessionDate: string
   }>
   initialEligibility?: ResearchEligibilityV1
+  researchInvocation?: ResearchInvocationV1
   evidenceSnapshots: readonly Readonly<{
     snapshotRef: string
     provider: "ALPACA" | "FMP" | "EXA"
@@ -194,7 +200,17 @@ export function projectResearchRunV1(
       break
     case "DECISION_REJECTED":
       if (decisionRejectionEvent === undefined) throw new Error("Decision rejection details are missing")
-      outcome = { outcomeVersion: "1.0.0", status: completed.payload.status, issues: decisionRejectionEvent.payload.issues }
+      outcome = {
+        outcomeVersion: "1.0.0",
+        status: completed.payload.status,
+        issues: decisionRejectionEvent.payload.issues.map((issue) => ({
+          code: issue.code,
+          path: issue.path,
+          ...(issue.schemaCategory === undefined
+            ? {}
+            : { schemaCategory: issue.schemaCategory }),
+        })),
+      }
       break
     case "INTENT_DERIVATION_REJECTED":
       if (derivationRejectionEvent === undefined) throw new Error("Intent derivation rejection details are missing")
@@ -215,10 +231,11 @@ export function projectResearchRunV1(
   const sessionId = start.sessionId
   if (cycleId === undefined || sessionId === undefined) throw new Error("Research cycle identity is incomplete")
   return {
-    runVersion:
-      riskEvent === undefined
+    runVersion: completed.payload.researchInvocation !== undefined
+      ? RESEARCH_RUN_VERSION
+      : riskEvent === undefined
         ? LEGACY_RESEARCH_RUN_VERSION
-        : RESEARCH_RUN_VERSION,
+        : SHADOW_RESEARCH_RUN_VERSION,
     cycle: {
       cycleId,
       cycleNumber: start.payload.cycleNumber,
@@ -230,6 +247,9 @@ export function projectResearchRunV1(
         start.payload.sessionDate ?? newYorkDate(new Date(start.occurredAt)),
     },
     ...(start.payload.initialEligibility === undefined ? {} : { initialEligibility: start.payload.initialEligibility }),
+    ...(completed.payload.researchInvocation === undefined
+      ? {}
+      : { researchInvocation: completed.payload.researchInvocation }),
     evidenceSnapshots: events
       .filter((event) => event.eventType === "EVIDENCE_SNAPSHOT_REFERENCED")
       .map((event) => event.payload),
@@ -265,7 +285,7 @@ export type WriteResearchRunArtifactOptions = Readonly<{
   overwrite?: boolean
 }>
 
-/** Writes a human-readable export of an already committed SQLite research run. */
+/** Writes the canonical portable JSON export of a committed SQLite research run. */
 export async function writeResearchRunArtifact({
   run,
   root = DEFAULT_RESEARCH_ARTIFACT_ROOT,
@@ -276,9 +296,12 @@ export async function writeResearchRunArtifact({
   const directory = join(root, sessionDate)
   const path = join(directory, `cycle-${run.cycle.cycleNumber}-${cycleId}.json`)
   await mkdir(directory, { recursive: true })
-  await writeFile(path, `${JSON.stringify(run, null, 2)}\n`, {
-    encoding: "utf8",
-    flag: overwrite ? "w" : "wx",
-  })
+  const handle = await open(path, overwrite ? "w" : "wx", 0o600)
+  try {
+    await handle.chmod(0o600)
+    await handle.writeFile(`${JSON.stringify(run, null, 2)}\n`, "utf8")
+  } finally {
+    await handle.close()
+  }
   return path
 }

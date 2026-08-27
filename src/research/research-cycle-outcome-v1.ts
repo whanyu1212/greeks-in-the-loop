@@ -15,6 +15,7 @@ import type {
   OptionQuoteConfirmationFailureCode,
 } from "../market-data/alpaca-option-quotes.js"
 import type { ShadowRiskResultV1 } from "../risk/shadow-risk-v1.js"
+import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
 
 export const RESEARCH_CYCLE_OUTCOME_VERSION = "1.0.0" as const
 
@@ -69,6 +70,7 @@ export type ResearchCycleEvidenceSnapshotReferenceV1 = Readonly<{
 
 type ResearchCycleTerminalRecordMetadataV1 = Readonly<{
   evidenceSnapshots: readonly ResearchCycleEvidenceSnapshotReferenceV1[]
+  researchInvocation: ResearchInvocationV1
   validatedDecision?: ResearchDecisionV1
   preliminaryResearch?: PreliminaryResearchV1
   researchReport?: ResearchReportV2

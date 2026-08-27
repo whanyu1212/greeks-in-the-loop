@@ -7,7 +7,6 @@ import {
   validateResearchDecisionV1,
   type ProposedTradeDecisionV1,
   type ResearchDecisionV1,
-  type ResearchDecisionValidationIssue,
 } from "../contracts/research-decision-v1.js"
 import {
   researchReportV2Schema,
@@ -32,12 +31,14 @@ import {
 } from "../scheduling/research-eligibility.js"
 import type { ShadowRiskEvaluator } from "../risk/shadow-risk-service.js"
 import type { ShadowRiskResultV1 } from "../risk/shadow-risk-v1.js"
+import { safeSchemaDiagnostics } from "../shared/schema-diagnostics.js"
 import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
   type ResearchCycleOutcomeSink,
   type ResearchCycleOutcomeV1,
   type ResearchCycleTerminalRecordV1,
 } from "./research-cycle-outcome-v1.js"
+import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
 
 export const PROPOSAL_QUOTE_SNAPSHOT_REF =
   "alpaca-proposal-quotes-v1" as const
@@ -69,6 +70,7 @@ export type ProcessResearchCycleOptions = Readonly<{
   shadowRiskEvaluator: ShadowRiskEvaluator
   outcomeSink: ResearchCycleOutcomeSink
   getEligibility: () => ResearchEligibilityV1
+  researchInvocation: ResearchInvocationV1
   now?: () => Date
   deriveIntent?: (
     decision: ProposedTradeDecisionV1,
@@ -84,16 +86,6 @@ export type ProcessedResearchCycle = Readonly<{
   researchReport?: ResearchReportV2
   shadowRisk?: ShadowRiskResultV1
 }>
-
-const schemaIssues = (
-  issues: readonly { path: readonly PropertyKey[] }[],
-): ResearchDecisionValidationIssue[] =>
-  issues.map(({ path }) => ({
-    code: "SCHEMA_INVALID",
-    path: path.map((part) =>
-      typeof part === "symbol" ? String(part) : part,
-    ),
-  }))
 
 const observationIsFresh = (
   observedAt: string,
@@ -224,6 +216,7 @@ const recordOutcome = async (
   outcome: ResearchCycleOutcomeV1,
   sink: ResearchCycleOutcomeSink,
   signal: AbortSignal,
+  researchInvocation: ResearchInvocationV1,
   metadata: TerminalRecordMetadata = {},
   trace: ResearchCycleTrace = NOOP_RESEARCH_CYCLE_TRACE,
   stageReporter: TerminalStageReporter = NOOP_TERMINAL_STAGE_REPORTER,
@@ -231,6 +224,7 @@ const recordOutcome = async (
   signal.throwIfAborted()
   const boundedOutcome = boundTerminalOutcome(outcome)
   const commonRecord = {
+    researchInvocation,
     evidenceSnapshots: metadata.evidenceSnapshots ?? [],
     ...(metadata.validatedDecision === undefined
       ? {}
@@ -324,6 +318,7 @@ export async function processResearchCycle({
   shadowRiskEvaluator,
   outcomeSink,
   getEligibility,
+  researchInvocation,
   now = () => new Date(),
   deriveIntent = deriveTradeIntentV1,
   trace = NOOP_RESEARCH_CYCLE_TRACE,
@@ -348,7 +343,10 @@ export async function processResearchCycle({
     }
     const report = researchReportV2Schema.safeParse(input)
     if (!report.success) {
-      return { success: false as const, issues: schemaIssues(report.error.issues) }
+      return {
+        success: false as const,
+        issues: safeSchemaDiagnostics(report.error.issues, input),
+      }
     }
     if (
       Buffer.byteLength(JSON.stringify({ researchReport: report.data }), "utf8") >
@@ -373,6 +371,7 @@ export async function processResearchCycle({
       },
       outcomeSink,
       signal,
+      researchInvocation,
       {},
       trace,
       stageReporter,
@@ -389,6 +388,7 @@ export async function processResearchCycle({
       outcome,
       outcomeSink,
       signal,
+      researchInvocation,
       { ...metadata, researchReport },
       trace,
       stageReporter,
@@ -407,7 +407,11 @@ export async function processResearchCycle({
     return recordReportOutcome({
       outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
       status: "DECISION_REJECTED",
-      issues: [{ code: "SCHEMA_INVALID", path: ["result", "strategyVersion"] }],
+      issues: [{
+        code: "SCHEMA_INVALID",
+        schemaCategory: "VALUE_NOT_ALLOWED",
+        path: ["result", "strategyVersion"],
+      }],
     })
   }
   const processingEvaluatedAt = now()
@@ -711,7 +715,11 @@ export async function processResearchCycle({
       {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
         status: "DECISION_REJECTED",
-        issues: [{ code: "SCHEMA_INVALID", path: ["outcome"] }],
+        issues: [{
+          code: "SCHEMA_INVALID",
+          schemaCategory: "VALUE_NOT_ALLOWED",
+          path: ["outcome"],
+        }],
       },
       { evidenceSnapshots },
     )
