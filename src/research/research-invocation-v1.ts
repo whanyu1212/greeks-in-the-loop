@@ -54,7 +54,35 @@ export const researchInvocationV1Schema = z
           )
           .max(MAX_RESEARCH_INVOCATION_TOOL_CALLS),
       })
-      .strict(),
+      .strict()
+      .superRefine((tools, refinement) => {
+        const retainedErrorCount = tools.calls.filter(
+          ({ outcome }) => outcome === "error",
+        ).length
+        const retainedIncompleteCount = tools.calls.filter(
+          ({ outcome }) => outcome === "incomplete",
+        ).length
+        if (tools.totalCount !== tools.calls.length + tools.omittedCount) {
+          refinement.addIssue({
+            code: "custom",
+            path: ["totalCount"],
+            message: "Tool totals must reconcile retained and omitted calls",
+          })
+        }
+        if (
+          tools.errorCount + tools.incompleteCount > tools.totalCount ||
+          tools.errorCount < retainedErrorCount ||
+          tools.incompleteCount < retainedIncompleteCount ||
+          tools.errorCount > retainedErrorCount + tools.omittedCount ||
+          tools.incompleteCount > retainedIncompleteCount + tools.omittedCount
+        ) {
+          refinement.addIssue({
+            code: "custom",
+            path: ["errorCount"],
+            message: "Tool outcome counts must match retained or omitted calls",
+          })
+        }
+      }),
   })
   .strict()
 

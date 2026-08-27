@@ -50,4 +50,54 @@ describe("ResearchInvocationV1", () => {
     expect(invocation).not.toHaveProperty("prompt")
     expect(invocation).not.toHaveProperty("response")
   })
+
+  it.each([
+    {
+      totalCount: 0,
+      errorCount: 1,
+      incompleteCount: 0,
+      omittedCount: 0,
+      calls: [],
+    },
+    {
+      totalCount: 2,
+      errorCount: 0,
+      incompleteCount: 0,
+      omittedCount: 0,
+      calls: [{ name: "other", outcome: "completed" as const }],
+    },
+    {
+      totalCount: 1,
+      errorCount: 0,
+      incompleteCount: 0,
+      omittedCount: 0,
+      calls: [{ name: "other", outcome: "error" as const }],
+    },
+    {
+      totalCount: 2,
+      errorCount: 2,
+      incompleteCount: 1,
+      omittedCount: 1,
+      calls: [{ name: "other", outcome: "completed" as const }],
+    },
+  ])("rejects inconsistent tool aggregates", (tools) => {
+    const result = researchInvocationV1Schema.safeParse({
+      invocationVersion: "1.0.0",
+      agentName: "research",
+      cycleMode: "STANDARD",
+      promptVersion: "1.3.0",
+      skillName: "spy-debit-spread-research",
+      skillVersion: "1.1.0",
+      strategyVersion: "1.1.0",
+      decisionContractVersion: "1.0.0",
+      reportVersion: "2.0.0",
+      providerId: "provider",
+      modelId: "model",
+      responseError: false,
+      tokens: {},
+      tools,
+    })
+
+    expect(result.success).toBe(false)
+  })
 })
