@@ -717,6 +717,59 @@ describe("research run evaluation", () => {
     )
   })
 
+  it("rejects decision-rejected statuses for otherwise retainable reports", () => {
+    const preliminary = preliminaryRun()
+    const noAction = noActionRun()
+    const { preliminaryResearch: _preliminaryResearch, ...preliminaryBase } =
+      preliminary
+    const { validatedDecision: _validatedDecision, ...noActionBase } = noAction
+    const rejectedOutcome = {
+      outcomeVersion: "1.0.0" as const,
+      status: "DECISION_REJECTED" as const,
+      issues: [{ code: "CONTEXT_INVALID", path: ["result"] }],
+    }
+
+    for (const run of [preliminaryBase, noActionBase]) {
+      const evaluation = evaluateResearchRunV1({
+        ...run,
+        outcome: rejectedOutcome,
+      })
+      expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+        "OUTCOME_RECORD_MISMATCH",
+      )
+    }
+  })
+
+  it("keeps a semantically invalid no-action report reachable as rejected", () => {
+    const run = noActionRun()
+    if (run.researchReport === undefined) {
+      throw new Error("Expected a no-action report fixture")
+    }
+    const { validatedDecision: _validatedDecision, ...base } = run
+    const invalidDecision = {
+      ...run.researchReport.result,
+      evidence: [
+        {
+          claimId: "unknown-snapshot",
+          kind: "SOURCED_FACT" as const,
+          claim: "Retained only to exercise rejection validation.",
+          snapshotRef: "missing-snapshot",
+        },
+      ],
+    }
+    const evaluation = evaluateResearchRunV1({
+      ...base,
+      researchReport: { ...run.researchReport, result: invalidDecision },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{ code: "UNKNOWN_SNAPSHOT", path: ["evidence", 0] }],
+      },
+    } as ResearchRunV1)
+
+    expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
+  })
+
   it("returns contract failure instead of throwing for malformed retained results", () => {
     const runs = [
       {
@@ -1324,6 +1377,41 @@ describe("research run evaluation", () => {
       status: "FAIL",
       issueCodes: ["OPEN_INTEREST_HISTORY_INVALID"],
     })
+  })
+
+  it("validates retained history before a quote-confirmation rejection", () => {
+    const run = derivedIntentRun()
+    if (run.researchReport?.analysis.candidateEvaluation === undefined) {
+      throw new Error("Expected retained proposal history")
+    }
+    const { validatedDecision: _validatedDecision, ...base } = run
+    const candidateEvaluation = run.researchReport.analysis.candidateEvaluation
+    const evaluation = evaluateResearchRunV1({
+      ...base,
+      evidenceSnapshots: [],
+      researchReport: {
+        ...run.researchReport,
+        analysis: {
+          ...run.researchReport.analysis,
+          candidateEvaluation: {
+            ...candidateEvaluation,
+            legs: candidateEvaluation.legs.map((leg) => ({
+              ...leg,
+              openInterestDate: "2026-08-21",
+            })) as typeof candidateEvaluation.legs,
+          },
+        },
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["QUOTE_REQUEST_FAILED"],
+      },
+    })
+
+    expect(evaluation.dimensions.candidateIdentity.issueCodes).toContain(
+      "OPEN_INTEREST_HISTORY_INVALID",
+    )
   })
 
   it("fails closed when an ineligible cycle claims to derive an intent", () => {

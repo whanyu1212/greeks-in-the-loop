@@ -3,7 +3,10 @@ import { isDeepStrictEqual } from "node:util"
 import { z } from "zod"
 
 import { preliminaryResearchV1Schema } from "../contracts/preliminary-research-v1.js"
-import { researchDecisionV1Schema } from "../contracts/research-decision-v1.js"
+import {
+  researchDecisionV1Schema,
+  validateResearchDecisionV1,
+} from "../contracts/research-decision-v1.js"
 import { researchReportV2Schema } from "../contracts/research-report-v2.js"
 import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
 import {
@@ -246,6 +249,12 @@ export function evaluateResearchRunV1(
       : parsedValidatedDecision?.success === true
         ? parsedValidatedDecision.data
         : undefined
+  const quoteConfirmationRejection =
+    run.outcome.status === "INTENT_DERIVATION_REJECTED" &&
+    run.outcome.reasons.length > 0 &&
+    run.outcome.reasons.every((reason) =>
+      QUOTE_CONFIRMATION_REJECTION_REASONS.has(reason),
+    )
   if (
     reportResult !== undefined &&
     retainedResult !== undefined &&
@@ -297,9 +306,34 @@ export function evaluateResearchRunV1(
       }
       break
     case "DECISION_REJECTED":
+      const parsedRejectedReport =
+        parsedReport?.success === true ? parsedReport.data : undefined
+      const parsedRejectedResult = parsedRejectedReport?.result
+      const preliminaryCouldBeRetained =
+        parsedRejectedReport !== undefined &&
+        parsedRejectedResult?.outcome === "PRELIMINARY_RESEARCH" &&
+        run.initialEligibility?.researchEligible === true &&
+        run.initialEligibility.sessionDate ===
+          parsedRejectedResult.targetSessionDate &&
+        run.cycle.sessionDate === parsedRejectedResult.targetSessionDate &&
+        Date.parse(parsedRejectedReport.analysis.asOf) <=
+          Date.parse(run.cycle.completedAt) &&
+        parsedRejectedResult.evidence.every(
+          (claim) =>
+            claim.kind !== "SOURCED_FACT" ||
+            Date.parse(claim.observedAt) <= Date.parse(run.cycle.completedAt),
+        )
+      const noActionCouldBeRetained =
+        parsedRejectedResult?.outcome === "NO_ACTION" &&
+        validateResearchDecisionV1(parsedRejectedResult, {
+          evaluatedAt: run.cycle.completedAt,
+          snapshots: {},
+        }).success
       if (
         run.preliminaryResearch !== undefined ||
         run.validatedDecision !== undefined ||
+        (run.evidenceSnapshots.length === 0 &&
+          (preliminaryCouldBeRetained || noActionCouldBeRetained)) ||
         (run.evidenceSnapshots.length > 0 &&
           (parsedReport?.success !== true ||
             parsedReport.data.result.outcome !== "PROPOSE_TRADE"))
@@ -309,11 +343,6 @@ export function evaluateResearchRunV1(
       break
     case "INTENT_DERIVATION_REJECTED":
       const reasons = run.outcome.reasons
-      const quoteConfirmationRejected =
-        reasons.length > 0 &&
-        reasons.every((reason) =>
-          QUOTE_CONFIRMATION_REJECTION_REASONS.has(reason),
-        )
       const derivationRejected =
         reasons.length > 0 &&
         reasons.every((reason) =>
@@ -330,7 +359,7 @@ export function evaluateResearchRunV1(
         parsedValidatedDecision?.success === true &&
         parsedValidatedDecision.data.outcome === "PROPOSE_TRADE"
       const rejectionRecordsMatch =
-        (quoteConfirmationRejected &&
+        (quoteConfirmationRejection &&
           run.validatedDecision === undefined &&
           run.evidenceSnapshots.length === 0) ||
         (derivationRejected &&
@@ -425,6 +454,14 @@ export function evaluateResearchRunV1(
     if (marketAge < 0 || marketAge > 60_000) {
       temporalIssues.push("MARKET_REGIME_STALE_AT_INTENT")
     }
+  }
+  if (
+    parsedReport?.success === true &&
+    (proposalEvaluatedAt !== undefined || quoteConfirmationRejection)
+  ) {
+    const marketObservedAt = Date.parse(
+      parsedReport.data.analysis.marketRegime.observedAt,
+    )
     const sessionDate = run.initialEligibility?.sessionDate
     const expectedIntradayBars =
       sessionDate === undefined
@@ -700,7 +737,8 @@ export function evaluateResearchRunV1(
   }
   if (
     (run.outcome.status === "INTENT_DERIVED" ||
-      postQuoteRejectionEvaluatedAt !== undefined) &&
+      postQuoteRejectionEvaluatedAt !== undefined ||
+      quoteConfirmationRejection) &&
     diagnostics !== undefined
   ) {
     const sessionDate = run.initialEligibility?.sessionDate
