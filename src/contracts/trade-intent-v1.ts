@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { parseRfc3339Nanoseconds } from "../shared/value-normalization.js"
+import { calculateDebitSpreadEconomicsV1 } from "./debit-spread-economics-v1.js"
 import {
   RESEARCH_DECISION_CONTRACT_VERSION,
   STRATEGY_VERSION,
@@ -27,20 +28,6 @@ type ParsedOptionSymbol = Readonly<{
   expiration: string
   optionType: "C" | "P"
   strikeCentsPerShare: number
-}>
-
-type ExactQuotePrices = Readonly<{
-  bidCentsPerShare: number
-  askCentsPerShare: number
-}>
-
-type DerivedEconomics = Readonly<{
-  entryLimitCentsPerShare: number
-  widthCentsPerShare: number
-  maxLossCentsPerContract: number
-  maxProfitCentsPerContract: number
-  stopLossMarkHalfCentsPerShare: number
-  profitTargetMarkHalfCentsPerShare: number
 }>
 
 /**
@@ -75,77 +62,6 @@ const parseOptionSymbol = (symbol: string): ParsedOptionSymbol | undefined => {
     expiration: `20${expiration.slice(0, 2)}-${expiration.slice(2, 4)}-${expiration.slice(4, 6)}`,
     optionType,
     strikeCentsPerShare: strikeThousandths / 10,
-  }
-}
-
-/**
- * Calculates exact spread economics from cent-denominated quotes and strikes.
- *
- * @param longQuote Confirmed long-leg bid and ask.
- * @param shortQuote Confirmed short-leg bid and ask.
- * @param longStrikeCents Exact long strike in cents per share.
- * @param shortStrikeCents Exact short strike in cents per share.
- * @returns Exact derived fields or the first bounded arithmetic rejection.
- */
-const calculateEconomics = (
-  longQuote: ExactQuotePrices,
-  shortQuote: ExactQuotePrices,
-  longStrikeCents: number,
-  shortStrikeCents: number,
-):
-  | { success: true; economics: DerivedEconomics }
-  | {
-      success: false
-      reason:
-        | "NON_POSITIVE_NET_DEBIT"
-        | "ENTRY_LIMIT_NOT_BELOW_WIDTH"
-        | "ARITHMETIC_OVERFLOW"
-    } => {
-  const widthCents = BigInt(Math.abs(longStrikeCents - shortStrikeCents))
-  const netMidpointHalfCents =
-    BigInt(longQuote.bidCentsPerShare) +
-    BigInt(longQuote.askCentsPerShare) -
-    BigInt(shortQuote.bidCentsPerShare) -
-    BigInt(shortQuote.askCentsPerShare)
-
-  if (netMidpointHalfCents <= 0n) {
-    return { success: false, reason: "NON_POSITIVE_NET_DEBIT" }
-  }
-
-  // The numerator is in half-cents. Adding one before integer division rounds
-  // a positive odd numerator upward without floating-point arithmetic.
-  const entryLimitCents = (netMidpointHalfCents + 1n) / 2n
-  if (entryLimitCents >= widthCents) {
-    return { success: false, reason: "ENTRY_LIMIT_NOT_BELOW_WIDTH" }
-  }
-
-  const maxLossCents = entryLimitCents * 100n
-  const maxProfitCents = (widthCents - entryLimitCents) * 100n
-  const profitTargetMarkHalfCents = entryLimitCents + widthCents
-  const derivedValues = [
-    widthCents,
-    entryLimitCents,
-    maxLossCents,
-    maxProfitCents,
-    profitTargetMarkHalfCents,
-  ]
-  if (derivedValues.some((value) => value > BigInt(Number.MAX_SAFE_INTEGER))) {
-    return { success: false, reason: "ARITHMETIC_OVERFLOW" }
-  }
-
-  const entryLimitCentsPerShare = Number(entryLimitCents)
-  return {
-    success: true,
-    economics: {
-      entryLimitCentsPerShare,
-      widthCentsPerShare: Number(widthCents),
-      maxLossCentsPerContract: Number(maxLossCents),
-      maxProfitCentsPerContract: Number(maxProfitCents),
-      stopLossMarkHalfCentsPerShare: entryLimitCentsPerShare,
-      profitTargetMarkHalfCentsPerShare: Number(
-        profitTargetMarkHalfCents,
-      ),
-    },
   }
 }
 
@@ -269,7 +185,7 @@ export const tradeIntentV1Schema = z
       }
     }
 
-    const calculation = calculateEconomics(
+    const calculation = calculateDebitSpreadEconomicsV1(
       intent.longQuote,
       intent.shortQuote,
       longSymbol.strikeCentsPerShare,
@@ -378,7 +294,7 @@ export function deriveTradeIntentV1(
     return { success: false, reasons: ["STRIKE_PRECISION_UNSUPPORTED"] }
   }
 
-  const calculation = calculateEconomics(
+  const calculation = calculateDebitSpreadEconomicsV1(
     parsedContext.data.longQuote,
     parsedContext.data.shortQuote,
     longSymbol.strikeCentsPerShare,

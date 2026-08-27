@@ -154,6 +154,30 @@ reported as data and do not make the command fail; a missing, interrupted, or
 invalid run does. See [Offline research evaluation](docs/research-evaluation.md)
 for the dimensions, privacy boundary, and current limitations.
 
+## Backtest replay
+
+Acquire a resumable, checksummed Alpaca dataset for fully completed historical
+dates. Repeat `--option` for each retained spread leg whose bars and trades are
+needed:
+
+```bash
+pnpm backtest:data -- --from 2024-06-03 --to 2024-06-28 \
+  --option SPY240621C00530000 --option SPY240621C00535000
+```
+
+Run the standalone deterministic replay against that immutable SQLite dataset:
+
+```bash
+pnpm backtest -- --dataset .state/backtests/SPY-2024-06-03-2024-06-28.sqlite \
+  --scenarios scenarios.json --output report.json
+```
+
+Exact forward-captured snapshots rerun the strategy signal, production risk
+rules, and candidate ranking. Historical option-bar runs are explicitly labeled
+proxy fidelity and cannot claim historical signal or risk approval. See
+[Backtest Replay V1](docs/backtest-replay-v1.md) for scenario contracts,
+execution assumptions, output metrics, and Alpaca data limitations.
+
 ## Observability
 
 Optional manual OpenTelemetry/OpenInference tracing shows coarse research-cycle
