@@ -288,7 +288,7 @@ export function evaluateResearchRunV1(
         : undefined
   const quoteConfirmationRejection =
     run.outcome.status === "INTENT_DERIVATION_REJECTED" &&
-    run.outcome.reasons.length > 0 &&
+    run.outcome.reasons.length === 1 &&
     run.outcome.reasons.every((reason) =>
       QUOTE_CONFIRMATION_REJECTION_REASONS.has(reason),
     )
@@ -501,6 +501,22 @@ export function evaluateResearchRunV1(
             })
           : undefined
       const noActionCouldBeRetained = noActionValidation?.success === true
+      const reportFreeRejectionIssuesMatch =
+        parsedRejectedReport !== undefined ||
+        isDeepStrictEqual(rejectedIssues, [
+          { code: "MALFORMED_JSON", path: [] },
+        ]) ||
+        isDeepStrictEqual(rejectedIssues, [
+          { code: "RESPONSE_TOO_LARGE", path: [] },
+        ]) ||
+        (rejectedIssues.length > 0 &&
+          rejectedIssues.every(({ code }) => code === "SCHEMA_INVALID"))
+      const plausibleLaterPreliminaryEligibilityRejection =
+        parsedRejectedResult?.outcome === "PRELIMINARY_RESEARCH" &&
+        expectedPreliminaryDecisionRejectionIssues === undefined &&
+        isDeepStrictEqual(rejectedIssues, [
+          { code: "CONTEXT_INVALID", path: ["targetSessionDate"] },
+        ])
       const proposalRejectionIssuesMatch =
         proposalPreflightValidation?.success !== true ||
         (expectedPreQuoteDecisionRejectionIssues === undefined
@@ -520,7 +536,10 @@ export function evaluateResearchRunV1(
         run.preliminaryResearch !== undefined ||
         run.validatedDecision !== undefined ||
         (run.evidenceSnapshots.length === 0 &&
-          (preliminaryCouldBeRetained || noActionCouldBeRetained)) ||
+          ((preliminaryCouldBeRetained &&
+            !plausibleLaterPreliminaryEligibilityRejection) ||
+            noActionCouldBeRetained)) ||
+        !reportFreeRejectionIssuesMatch ||
         (expectedPreliminaryDecisionRejectionIssues !== undefined &&
           !isDeepStrictEqual(
             run.outcome.issues,

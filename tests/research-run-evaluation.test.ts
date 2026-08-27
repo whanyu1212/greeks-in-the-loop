@@ -570,6 +570,7 @@ describe("research run evaluation", () => {
 
   it("matches intent-rejection reasons to retained quote and proposal records", () => {
     const run = derivedIntentRun()
+    const { validatedDecision: _validatedDecision, ...withoutDecision } = run
     const quoteFailure = evaluateResearchRunV1({
       ...run,
       outcome: {
@@ -594,6 +595,15 @@ describe("research run evaluation", () => {
         reasons: ["NON_POSITIVE_NET_DEBIT", "ARITHMETIC_OVERFLOW"],
       },
     })
+    const multipleQuoteFailures = evaluateResearchRunV1({
+      ...withoutDecision,
+      evidenceSnapshots: [],
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["QUOTE_REQUEST_FAILED", "QUOTE_RESPONSE_INVALID"],
+      },
+    })
 
     expect(quoteFailure.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
@@ -602,6 +612,38 @@ describe("research run evaluation", () => {
     expect(
       multipleDerivationFailures.dimensions.contractCompliance.issueCodes,
     ).toContain("OUTCOME_RECORD_MISMATCH")
+    expect(
+      multipleQuoteFailures.dimensions.contractCompliance.issueCodes,
+    ).toContain("OUTCOME_RECORD_MISMATCH")
+  })
+
+  it("requires reachable issues for report-free decision rejections", () => {
+    const {
+      researchReport: _researchReport,
+      preliminaryResearch: _preliminaryResearch,
+      ...base
+    } = preliminaryRun()
+    const malformed = evaluateResearchRunV1({
+      ...base,
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{ code: "MALFORMED_JSON", path: [] }],
+      },
+    })
+    const arbitrary = evaluateResearchRunV1({
+      ...base,
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{ code: "CONTEXT_INVALID", path: ["result"] }],
+      },
+    })
+
+    expect(malformed.dimensions.contractCompliance.status).toBe("PASS")
+    expect(arbitrary.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
   })
 
   it("rejects non-Alpaca quote provenance on post-quote rejections", () => {
@@ -1068,6 +1110,25 @@ describe("research run evaluation", () => {
     expect(misattributed.dimensions.contractCompliance.issueCodes).toContain(
       "OUTCOME_RECORD_MISMATCH",
     )
+  })
+
+  it("allows preliminary rejection when eligibility expires during processing", () => {
+    const run = preliminaryRun()
+    const { preliminaryResearch: _preliminaryResearch, ...base } = run
+    const evaluation = evaluateResearchRunV1({
+      ...base,
+      cycle: {
+        ...base.cycle,
+        completedAt: "2026-08-26T20:05:00.000Z",
+      },
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{ code: "CONTEXT_INVALID", path: ["targetSessionDate"] }],
+      },
+    })
+
+    expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
   })
 
   it("returns contract failure instead of throwing for malformed retained results", () => {
