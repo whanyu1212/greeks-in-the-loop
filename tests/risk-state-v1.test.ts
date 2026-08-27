@@ -113,6 +113,20 @@ describe("risk-state reconciliation v1", () => {
     })
   })
 
+  it("fails closed when broker activity changes during capture", () => {
+    const result = reconcile({
+      brokerStateChangedDuringCapture: true,
+      submittedOrders: [order({ status: "rejected" })],
+    })
+    expect(result.success && result.portfolio).toMatchObject({
+      consistent: false,
+      entriesSubmittedToday: 1,
+    })
+    expect(result.success && result.reasonCodes).toEqual([
+      "BROKER_STATE_CHANGED",
+    ])
+  })
+
   it("does not count recognized closing-only option orders as same-day entries", () => {
     const result = reconcile({
       submittedOrders: [closingOrder()],

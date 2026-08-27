@@ -12,6 +12,7 @@ import {
 export const DURABLE_RISK_CONTROL_STATE_VERSION = "1.0.0" as const
 
 const timestamp = z.iso.datetime({ offset: true, precision: 3 })
+const providerTimestamp = z.iso.datetime({ offset: true })
 const boundedCount = z.number().int().nonnegative().max(1_000_000)
 const finiteProviderNumber = z
   .number()
@@ -68,7 +69,7 @@ export const normalizedBrokerOrderV1Schema = z
   .object({
     id: brokerIdentifier,
     assetClass: z.string().min(1).max(64),
-    submittedAt: timestamp,
+    submittedAt: providerTimestamp,
     status: z.string().min(1).max(64),
     orderClass: z.string().min(1).max(64),
     orderType: z.string().min(1).max(64),
@@ -123,6 +124,7 @@ const reconciliationInputSchema = z
     initialBrokerState: brokerStateSchema,
     finalBrokerState: brokerStateSchema,
     submittedOrders: z.array(normalizedBrokerOrderV1Schema).max(10_000),
+    brokerStateChangedDuringCapture: z.boolean().optional().default(false),
   })
   .strict()
 
@@ -313,11 +315,15 @@ export function reconcileBrokerPortfolioV1(
     initialBrokerState,
     finalBrokerState,
     submittedOrders,
+    brokerStateChangedDuringCapture,
   } = parsed.data
   const reasonSet = new Set<RiskReconciliationReasonCode>()
   const addReason = (reason: RiskReconciliationReasonCode) => reasonSet.add(reason)
 
-  if (stableBrokerState(initialBrokerState) !== stableBrokerState(finalBrokerState)) {
+  if (
+    brokerStateChangedDuringCapture ||
+    stableBrokerState(initialBrokerState) !== stableBrokerState(finalBrokerState)
+  ) {
     addReason("BROKER_STATE_CHANGED")
   }
   if (

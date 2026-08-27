@@ -9,6 +9,7 @@ import { newYorkLocalTime } from "../scheduling/research-eligibility.js"
 import {
   floorNanosecondsToIsoMilliseconds,
   parseExactCents,
+  parseRfc3339Nanoseconds,
 } from "../shared/value-normalization.js"
 import {
   applicationVerifiedAccountV1Schema,
@@ -267,8 +268,10 @@ const positiveInteger = (value: unknown) => {
 }
 
 const canonicalTimestamp = (value: string) => {
-  const parsed = Date.parse(value)
-  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined
+  const parsed = parseRfc3339Nanoseconds(value)
+  return parsed === undefined
+    ? undefined
+    : floorNanosecondsToIsoMilliseconds(parsed)
 }
 
 const newYorkDate = (value: string | Date) =>
@@ -309,11 +312,12 @@ const positionIntent = (value: string | null | undefined) => {
 const normalizeOrder = (
   raw: z.infer<typeof rawOrderSchema>,
 ): NormalizedBrokerOrderV1 | undefined => {
-  const submittedAt = canonicalTimestamp(raw.submitted_at ?? raw.created_at ?? "")
+  const submittedAt = raw.submitted_at ?? raw.created_at ?? ""
+  const submittedAtNanoseconds = parseRfc3339Nanoseconds(submittedAt)
   const quantity = positiveNumber(raw.qty)
   const notional = positiveNumber(raw.notional)
   if (
-    submittedAt === undefined ||
+    submittedAtNanoseconds === undefined ||
     (quantity === undefined && notional === undefined) ||
     raw.id.length === 0
   ) {
@@ -536,10 +540,18 @@ export function createAlpacaRiskStateProvider(
       }
       retained.push(...normalized as NormalizedBrokerOrderV1[])
       if (parsed.data.length < ORDER_PAGE_SIZE) return retained
-      const nextTimestamp = normalized.at(-1)?.submittedAt
+      const nextTimestamp = parsed.data.at(-1)?.submitted_at ??
+        parsed.data.at(-1)?.created_at ?? undefined
+      const nextTimestampNanoseconds = nextTimestamp === undefined
+        ? undefined
+        : parseRfc3339Nanoseconds(nextTimestamp)
+      const afterTimestampNanoseconds = afterTimestamp === undefined
+        ? undefined
+        : parseRfc3339Nanoseconds(afterTimestamp)
       if (
-        nextTimestamp === undefined ||
-        (afterTimestamp !== undefined && nextTimestamp <= afterTimestamp)
+        nextTimestampNanoseconds === undefined ||
+        (afterTimestampNanoseconds !== undefined &&
+          nextTimestampNanoseconds <= afterTimestampNanoseconds)
       ) {
         throw new CaptureFailure("ORDER_HISTORY_INCOMPLETE")
       }
@@ -611,7 +623,6 @@ export function createAlpacaRiskStateProvider(
           rawLongContract,
           rawShortContract,
           rawSnapshots,
-          submittedOrders,
         ] = await Promise.all([
           getAccount(input.signal),
           getContract(parsedInput.data.longContractSymbol, input.signal),
@@ -620,12 +631,6 @@ export function createAlpacaRiskStateProvider(
             parsedInput.data.longContractSymbol,
             parsedInput.data.shortContractSymbol,
             input.signal,
-          ),
-          getOrders(
-            input.signal,
-            "HISTORY",
-            historyAfter,
-            requestStartedAt.toISOString(),
           ),
         ])
         const [finalPositions, finalOpenOrders] = await Promise.all([
@@ -637,6 +642,12 @@ export function createAlpacaRiskStateProvider(
           return { success: false, reasons: ["CAPTURE_TIME_INVALID"] }
         }
         const evaluatedAt = evaluatedAtDate.toISOString()
+        const submittedOrders = await getOrders(
+          input.signal,
+          "HISTORY",
+          historyAfter,
+          evaluatedAt,
+        )
 
         const accountRaw = rawAccountSchema.safeParse(rawAccount)
         if (!accountRaw.success) throw new CaptureFailure("ACCOUNT_RESPONSE_INVALID")
@@ -715,10 +726,17 @@ export function createAlpacaRiskStateProvider(
         })
         if (!contracts.success) throw new CaptureFailure("CONTRACT_RESPONSE_INVALID")
 
-        const currentDateOrders = submittedOrders.filter(
-          ({ submittedAt }) =>
+        const requestStartedAtNanoseconds =
+          BigInt(requestStartedAt.getTime()) * 1_000_000n
+        const currentDateOrders = submittedOrders.filter(({ submittedAt }) => {
+          const submittedAtNanoseconds = parseRfc3339Nanoseconds(submittedAt)
+          return submittedAtNanoseconds !== undefined &&
             newYorkDate(submittedAt) === parsedInput.data.sessionDate &&
-            submittedAt <= requestStartedAt.toISOString(),
+            submittedAtNanoseconds <= evaluatedAtNanoseconds
+        })
+        const brokerStateChangedDuringCapture = currentDateOrders.some(
+          ({ submittedAt }) =>
+            parseRfc3339Nanoseconds(submittedAt)! > requestStartedAtNanoseconds,
         )
         const reconciliation = reconcileBrokerPortfolioV1({
           observedAt: evaluatedAt,
@@ -737,6 +755,7 @@ export function createAlpacaRiskStateProvider(
             openOrders: finalOpenOrders,
           },
           submittedOrders: currentDateOrders,
+          brokerStateChangedDuringCapture,
         })
         if (!reconciliation.success) {
           return { success: false, reasons: ["CAPTURE_INPUT_INVALID"] }

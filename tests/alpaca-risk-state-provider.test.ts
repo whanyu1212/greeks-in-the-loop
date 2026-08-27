@@ -146,12 +146,15 @@ const router = (overrides: Readonly<{
   })
 }
 
-const provider = (fetchImplementation: typeof fetch) =>
+const provider = (
+  fetchImplementation: typeof fetch,
+  now: () => Date = () => evaluatedAt,
+) =>
   createAlpacaRiskStateProvider({
     apiKey: "test-key",
     secretKey: "test-secret",
     fetch: fetchImplementation,
-    now: () => evaluatedAt,
+    now,
   })
 
 const expectFailure = async (
@@ -329,7 +332,7 @@ describe("Alpaca risk-state provider", () => {
       asset_class: "us_equity",
       submitted_at: new Date(
         Date.parse("2026-08-27T13:00:00.000Z") + index,
-      ).toISOString(),
+      ).toISOString().replace("Z", "123456Z"),
       status: "filled",
       order_class: "simple",
       type: "market",
@@ -351,6 +354,36 @@ describe("Alpaca risk-state provider", () => {
       evaluatedAt.toISOString(),
     )
     expect(historyUrls[1]?.searchParams.has("after_order_id")).toBe(false)
+  })
+
+  it("captures terminal orders submitted during the capture interval", async () => {
+    const requestStartedAt = new Date("2026-08-27T14:30:30.000Z")
+    const captureFinishedAt = new Date("2026-08-27T14:30:31.000Z")
+    const duringCapture = openingOrder({
+      status: "rejected",
+      submitted_at: "2026-08-27T14:30:30.500123456Z",
+    })
+    const historyUrls: URL[] = []
+    const fetchImplementation = router({
+      history: (_call: number, url: URL) => {
+        historyUrls.push(new URL(url))
+        return [duringCapture]
+      },
+    })
+    const now = vi.fn()
+      .mockReturnValueOnce(requestStartedAt)
+      .mockReturnValueOnce(captureFinishedAt)
+    const result = await provider(fetchImplementation, now).capture(input)
+    expect(result.success && result.snapshot.portfolio).toMatchObject({
+      consistent: false,
+      entriesSubmittedToday: 1,
+    })
+    expect(result.success && result.snapshot.reconciliationReasonCodes).toEqual([
+      "BROKER_STATE_CHANGED",
+    ])
+    expect(historyUrls[0]?.searchParams.get("until")).toBe(
+      captureFinishedAt.toISOString(),
+    )
   })
 
   it("fails closed on malformed account money", async () => {
