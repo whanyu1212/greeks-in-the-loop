@@ -154,6 +154,26 @@ const candidateKey = (candidate: CandidateIdentity) =>
     candidate.shortContractSymbol,
   ].join("|")
 
+const QUOTE_CONFIRMATION_REJECTION_REASONS = new Set([
+  "QUOTE_REQUEST_FAILED",
+  "QUOTE_RESPONSE_INVALID",
+  "QUOTE_SYMBOL_MISSING",
+  "QUOTE_PRICE_INVALID",
+  "QUOTE_TIMESTAMP_INVALID",
+  "QUOTE_FROM_FUTURE",
+  "QUOTE_STALE",
+  "EVALUATION_TIME_INVALID",
+])
+
+const INTENT_DERIVATION_REJECTION_REASONS = new Set([
+  "DERIVATION_INPUT_INVALID",
+  "QUOTE_SYMBOL_MISMATCH",
+  "STRIKE_PRECISION_UNSUPPORTED",
+  "NON_POSITIVE_NET_DEBIT",
+  "ENTRY_LIMIT_NOT_BELOW_WIDTH",
+  "ARITHMETIC_OVERFLOW",
+])
+
 /**
  * Evaluates one already-projected research run without I/O or wall-clock input.
  *
@@ -273,12 +293,41 @@ export function evaluateResearchRunV1(
       }
       break
     case "INTENT_DERIVATION_REJECTED":
+      const reasons = run.outcome.reasons
+      const quoteConfirmationRejected =
+        reasons.length > 0 &&
+        reasons.every((reason) =>
+          QUOTE_CONFIRMATION_REJECTION_REASONS.has(reason),
+        )
+      const derivationRejected =
+        reasons.length > 0 &&
+        reasons.every((reason) =>
+          INTENT_DERIVATION_REJECTION_REASONS.has(reason),
+        )
+      const marketWindowRejected =
+        reasons.length > 0 &&
+        reasons.every((reason) => reason === "MARKET_WINDOW_INELIGIBLE")
+      const hasCanonicalQuoteSnapshot =
+        run.evidenceSnapshots.length === 1 &&
+        run.evidenceSnapshots[0]?.snapshotRef === PROPOSAL_QUOTE_SNAPSHOT_REF
+      const hasValidatedProposal =
+        parsedValidatedDecision?.success === true &&
+        parsedValidatedDecision.data.outcome === "PROPOSE_TRADE"
+      const rejectionRecordsMatch =
+        (quoteConfirmationRejected &&
+          run.validatedDecision === undefined &&
+          run.evidenceSnapshots.length === 0) ||
+        (derivationRejected &&
+          hasValidatedProposal &&
+          hasCanonicalQuoteSnapshot) ||
+        (marketWindowRejected &&
+          run.validatedDecision === undefined &&
+          (run.evidenceSnapshots.length === 0 || hasCanonicalQuoteSnapshot))
       if (
         (parsedReport?.success === true &&
           parsedReport.data.result.outcome !== "PROPOSE_TRADE") ||
         run.preliminaryResearch !== undefined ||
-        (parsedValidatedDecision?.success === true &&
-          parsedValidatedDecision.data.outcome !== "PROPOSE_TRADE")
+        !rejectionRecordsMatch
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
       }
@@ -586,10 +635,19 @@ export function evaluateResearchRunV1(
   if (run.outcome.status === "INTENT_DERIVED" && diagnostics !== undefined) {
     const sessionDate = run.initialEligibility?.sessionDate
     const previousSessionDates = run.initialEligibility?.previousSessionDates
+    const priorSessionHistoryIsValid =
+      previousSessionDates !== undefined &&
+      previousSessionDates.length >= 2 &&
+      sessionDate !== undefined &&
+      new Set(previousSessionDates).size === previousSessionDates.length &&
+      previousSessionDates.every((date) => date < sessionDate) &&
+      previousSessionDates.every(
+        (date, index) => index === 0 || previousSessionDates[index - 1]! < date,
+      )
     if (
       sessionDate === undefined ||
       previousSessionDates === undefined ||
-      previousSessionDates.length < 2
+      !priorSessionHistoryIsValid
     ) {
       candidateIssues.push("OPEN_INTEREST_HISTORY_INVALID")
     } else {

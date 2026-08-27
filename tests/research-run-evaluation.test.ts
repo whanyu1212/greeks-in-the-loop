@@ -509,6 +509,31 @@ describe("research run evaluation", () => {
     )
   })
 
+  it("matches intent-rejection reasons to retained quote and proposal records", () => {
+    const run = derivedIntentRun()
+    const quoteFailure = evaluateResearchRunV1({
+      ...run,
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["QUOTE_REQUEST_FAILED"],
+      },
+    })
+    const derivationFailure = evaluateResearchRunV1({
+      ...run,
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "INTENT_DERIVATION_REJECTED",
+        reasons: ["NON_POSITIVE_NET_DEBIT"],
+      },
+    })
+
+    expect(quoteFailure.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
+    expect(derivationFailure.dimensions.contractCompliance.status).toBe("PASS")
+  })
+
   it("returns contract failure instead of throwing for malformed retained results", () => {
     const runs = [
       {
@@ -1048,6 +1073,21 @@ describe("research run evaluation", () => {
       name: "stale leg date",
       previousSessionDates: ["2026-08-24", "2026-08-25"],
       openInterestDate: "2026-08-21",
+    },
+    {
+      name: "duplicate prior sessions",
+      previousSessionDates: ["2026-08-25", "2026-08-25"],
+      openInterestDate: "2026-08-25",
+    },
+    {
+      name: "non-prior session date",
+      previousSessionDates: ["2026-08-25", "2026-08-26"],
+      openInterestDate: "2026-08-25",
+    },
+    {
+      name: "out-of-order prior sessions",
+      previousSessionDates: ["2026-08-25", "2026-08-24"],
+      openInterestDate: "2026-08-24",
     },
   ])("rejects $name in retained open-interest history", (fixture) => {
     const run = derivedIntentRun()
