@@ -144,4 +144,15 @@ describe("parseAgentOptions", () => {
       rmSync(directory, { recursive: true, force: true })
     }
   })
+
+  it("rejects case-only reserved anytime ledger aliases on case-folding platforms", () => {
+    const parse = () =>
+      parseAgentOptions(["--ledger", ".state/Research-Anytime.sqlite"])
+
+    if (process.platform === "darwin" || process.platform === "win32") {
+      expect(parse).toThrow("reserved anytime dry-run ledger")
+    } else {
+      expect(parse().ledgerPath).toBe(".state/Research-Anytime.sqlite")
+    }
+  })
 })

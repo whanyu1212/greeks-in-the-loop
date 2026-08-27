@@ -66,6 +66,51 @@ const ledgerFileIdentity = (ledgerPath: string) => {
   }
 }
 
+const alternateAsciiCase = (value: string) => {
+  const index = value.search(/[A-Za-z]/u)
+  if (index === -1) return value
+  const character = value[index]!
+  const alternate =
+    character === character.toLowerCase()
+      ? character.toUpperCase()
+      : character.toLowerCase()
+  return `${value.slice(0, index)}${alternate}${value.slice(index + 1)}`
+}
+
+const pathLookupMayFoldCase = (targetPath: string): boolean => {
+  let currentPath = targetPath
+
+  while (true) {
+    try {
+      const currentStats = lstatSync(currentPath)
+      const currentName = basename(currentPath)
+      const alternateName = alternateAsciiCase(currentName)
+      if (alternateName !== currentName) {
+        try {
+          const alternateStats = lstatSync(
+            resolve(dirname(currentPath), alternateName),
+          )
+          return (
+            currentStats.dev === alternateStats.dev &&
+            currentStats.ino === alternateStats.ino
+          )
+        } catch (error) {
+          if (isMissingPathError(error)) return false
+          throw error
+        }
+      }
+    } catch (error) {
+      if (!isMissingPathError(error)) throw error
+    }
+
+    const parentPath = dirname(currentPath)
+    if (parentPath === currentPath) {
+      return process.platform === "darwin" || process.platform === "win32"
+    }
+    currentPath = parentPath
+  }
+}
+
 const ledgerTargetsMatch = (firstPath: string, secondPath: string) => {
   const firstCanonicalPath = canonicalLedgerTargetPath(firstPath)
   const secondCanonicalPath = canonicalLedgerTargetPath(secondPath)
@@ -73,7 +118,15 @@ const ledgerTargetsMatch = (firstPath: string, secondPath: string) => {
 
   const firstIdentity = ledgerFileIdentity(firstPath)
   const secondIdentity = ledgerFileIdentity(secondPath)
-  return firstIdentity !== undefined && firstIdentity === secondIdentity
+  if (firstIdentity !== undefined || secondIdentity !== undefined) {
+    return firstIdentity !== undefined && firstIdentity === secondIdentity
+  }
+
+  return (
+    firstCanonicalPath.toLowerCase() === secondCanonicalPath.toLowerCase() &&
+    (pathLookupMayFoldCase(firstCanonicalPath) ||
+      pathLookupMayFoldCase(secondCanonicalPath))
+  )
 }
 
 /** Parses the worker CLI and checks existing ledger targets for aliasing. */
