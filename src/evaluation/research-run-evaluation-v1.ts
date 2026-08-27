@@ -10,6 +10,7 @@ import {
   RESEARCH_RUN_VERSION,
   type ResearchRunV1,
 } from "../research/research-artifact.js"
+import { newYorkDate } from "../scheduling/research-eligibility.js"
 
 export const RESEARCH_RUN_EVALUATION_VERSION = "1.0.0" as const
 
@@ -272,9 +273,14 @@ export function evaluateResearchRunV1(
     groundingIssues.push("UNGROUNDED_INFERENCE")
   }
 
-  const snapshotReferences = sourcedFacts.flatMap((claim) =>
-    "snapshotRef" in claim ? [claim.snapshotRef] : [],
-  )
+  const snapshotReferences = [
+    ...sourcedFacts.flatMap((claim) =>
+      "snapshotRef" in claim ? [claim.snapshotRef] : [],
+    ),
+    ...(run.outcome.status === "INTENT_DERIVED"
+      ? [run.outcome.intent.quoteSnapshotRef]
+      : []),
+  ]
   const knownSnapshots = new Set(
     run.evidenceSnapshots.map(({ snapshotRef }) => snapshotRef),
   )
@@ -350,13 +356,26 @@ export function evaluateResearchRunV1(
         eligibility.tradeIntentWindow.slotStartedAt,
       )
       const deadline = Date.parse(eligibility.tradeIntentWindow.deadline)
+      const sessionDate = eligibility.sessionDate
+      const slotDate = new Date(slotStartedAt)
+      const slotIsQuarterHour =
+        Number.isFinite(slotStartedAt) &&
+        slotDate.getUTCMinutes() % 15 === 0 &&
+        slotDate.getUTCSeconds() === 0 &&
+        slotDate.getUTCMilliseconds() === 0
+      const slotMatchesSession =
+        sessionDate !== undefined &&
+        Number.isFinite(slotStartedAt) &&
+        newYorkDate(slotDate) === sessionDate
       const eligibilityContextValid =
         Number.isFinite(eligibilityEvaluatedAt) &&
         Number.isFinite(slotStartedAt) &&
         Number.isFinite(deadline) &&
-        slotStartedAt < deadline &&
+        slotIsQuarterHour &&
+        slotMatchesSession &&
+        deadline === slotStartedAt + 5 * 60 * 1_000 &&
         eligibilityEvaluatedAt >= slotStartedAt &&
-        eligibilityEvaluatedAt < deadline
+        eligibilityEvaluatedAt - slotStartedAt <= 119_999
       if (!eligibilityContextValid) {
         failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_INVALID")
       }

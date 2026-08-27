@@ -301,6 +301,29 @@ describe("research run evaluation", () => {
     expect(serialized).not.toContain("SPY260918C00600000")
   })
 
+  it("reports an intent quote reference to an unknown snapshot", () => {
+    const run = derivedIntentRun()
+    if (run.outcome.status !== "INTENT_DERIVED") {
+      throw new Error("Expected a derived-intent fixture")
+    }
+
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      outcome: {
+        ...run.outcome,
+        intent: {
+          ...run.outcome.intent,
+          quoteSnapshotRef: "missing-intent-snapshot",
+        },
+      },
+    })
+
+    expect(evaluation.dimensions.grounding).toEqual({
+      status: "FAIL",
+      issueCodes: ["UNKNOWN_SNAPSHOT_REFERENCE"],
+    })
+  })
+
   it("reports report and source timestamps outside the cycle", () => {
     const run = preliminaryRun()
     const report = {
@@ -508,6 +531,29 @@ describe("research run evaluation", () => {
       initialEligibility: {
         ...run.initialEligibility,
         evaluatedAt: "2026-08-26T11:59:59.000Z",
+      },
+    })
+
+    expect(evaluation.dimensions.failClosedBehavior).toEqual({
+      status: "FAIL",
+      issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_INVALID"],
+    })
+  })
+
+  it("rejects a retained trade window with impossible runtime boundaries", () => {
+    const run = derivedIntentRun()
+    if (run.initialEligibility?.tradeIntentWindow === undefined) {
+      throw new Error("Expected retained trade-intent window")
+    }
+
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      initialEligibility: {
+        ...run.initialEligibility,
+        tradeIntentWindow: {
+          ...run.initialEligibility.tradeIntentWindow,
+          deadline: "2026-08-26T12:06:00.000Z",
+        },
       },
     })
 
