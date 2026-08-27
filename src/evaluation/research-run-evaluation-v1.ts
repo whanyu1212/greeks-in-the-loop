@@ -462,10 +462,20 @@ export function evaluateResearchRunV1(
   const validReport =
     parsedReport?.success === true ? parsedReport.data : undefined
   const reportResult = validReport?.result
+  const expectedStrategyVersionRejection =
+    run.outcome.status === "DECISION_REJECTED" &&
+    isDeepStrictEqual(run.outcome.issues, [
+      {
+        code: "SCHEMA_INVALID",
+        schemaCategory: "VALUE_NOT_ALLOWED",
+        path: ["result", "strategyVersion"],
+      },
+    ])
   if (
     invocation !== undefined &&
     reportResult !== undefined &&
-    (invocation.strategyVersion !== reportResult.strategyVersion ||
+    ((invocation.strategyVersion !== reportResult.strategyVersion &&
+      !expectedStrategyVersionRejection) ||
       invocation.decisionContractVersion !== reportResult.contractVersion ||
       invocation.reportVersion !== validReport?.reportVersion)
   ) {

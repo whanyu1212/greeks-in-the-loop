@@ -455,6 +455,56 @@ describe("research run evaluation", () => {
     )
   })
 
+  it("accepts the canonical rejection of a legacy strategy version", () => {
+    const source = noActionRun()
+    const { validatedDecision: _validatedDecision, ...sourceWithoutDecision } =
+      source
+    const legacyDecision = {
+      ...source.researchReport!.result,
+      strategyVersion: "1.0.0" as const,
+    }
+    const baseRun = {
+      ...sourceWithoutDecision,
+      runVersion: "1.2.0" as const,
+      researchInvocation: currentInvocation,
+      researchReport: {
+        ...source.researchReport!,
+        result: legacyDecision,
+      },
+    }
+    const canonical = evaluateResearchRunV1({
+      ...baseRun,
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{
+          code: "SCHEMA_INVALID",
+          schemaCategory: "VALUE_NOT_ALLOWED",
+          path: ["result", "strategyVersion"],
+        }],
+      },
+    })
+    const wrongDiagnostic = evaluateResearchRunV1({
+      ...baseRun,
+      outcome: {
+        outcomeVersion: "1.0.0",
+        status: "DECISION_REJECTED",
+        issues: [{
+          code: "SCHEMA_INVALID",
+          schemaCategory: "VALUE_NOT_ALLOWED",
+          path: ["result", "contractVersion"],
+        }],
+      },
+    })
+
+    expect(canonical.dimensions.contractCompliance.issueCodes).not.toContain(
+      "RUN_METADATA_INVALID",
+    )
+    expect(wrongDiagnostic.dimensions.contractCompliance.issueCodes).toContain(
+      "RUN_METADATA_INVALID",
+    )
+  })
+
   it("evaluates a healthy preliminary run deterministically", () => {
     const run = preliminaryRun()
     const first = evaluateResearchRunV1(run)
