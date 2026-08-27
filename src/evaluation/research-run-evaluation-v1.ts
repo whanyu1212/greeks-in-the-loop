@@ -4,6 +4,8 @@ import { z } from "zod"
 
 import { preliminaryResearchV1Schema } from "../contracts/preliminary-research-v1.js"
 import {
+  LEGACY_STRATEGY_VERSION,
+  STRATEGY_VERSION,
   researchDecisionV1Schema,
   validateResearchDecisionV1,
 } from "../contracts/research-decision-v1.js"
@@ -186,6 +188,7 @@ const isEvaluableEvidenceClaim = (
 const retainedTradeWindowContextIsValid = (
   eligibility: NonNullable<ResearchRunV1["initialEligibility"]>,
   cycle: ResearchRunV1["cycle"],
+  strategyVersion: string | undefined,
 ) => {
   const window = eligibility.tradeIntentWindow
   if (
@@ -222,6 +225,12 @@ const retainedTradeWindowContextIsValid = (
     )
   }
   const slotDate = new Date(slotStartedAt)
+  const tradeIntentWindowDurationMs =
+    strategyVersion === LEGACY_STRATEGY_VERSION
+      ? 5 * 60 * 1_000
+      : strategyVersion === STRATEGY_VERSION
+        ? TRADE_INTENT_WINDOW_DURATION_MS
+        : undefined
   const slotIsQuarterHour =
     Number.isFinite(slotStartedAt) &&
     slotDate.getUTCMinutes() % 15 === 0 &&
@@ -256,8 +265,9 @@ const retainedTradeWindowContextIsValid = (
     Number.isFinite(deadline) &&
     slotIsQuarterHour &&
     slotMatchesSession &&
+    tradeIntentWindowDurationMs !== undefined &&
     deadline ===
-      Math.min(slotStartedAt + TRADE_INTENT_WINDOW_DURATION_MS, entryCutoff) &&
+      Math.min(slotStartedAt + tradeIntentWindowDurationMs, entryCutoff) &&
     eligibilityEvaluatedAt >= slotStartedAt &&
     eligibilityEvaluatedAt - slotStartedAt < TRADE_INTENT_START_GRACE_MS &&
     eligibilityEvaluatedAt <= cycleStartedAt &&
@@ -518,9 +528,6 @@ export function evaluateResearchRunV1(
         ).toISOString()
       : undefined
   })()
-  const hasRetainedEligibleTradeWindow =
-    run.initialEligibility !== undefined &&
-    retainedTradeWindowContextIsValid(run.initialEligibility, run.cycle)
   const retainedResult = run.preliminaryResearch ?? run.validatedDecision
   const validRetainedResult =
     parsedPreliminaryResearch?.success === true
@@ -528,6 +535,14 @@ export function evaluateResearchRunV1(
       : parsedValidatedDecision?.success === true
         ? parsedValidatedDecision.data
         : undefined
+  const versionedResult = reportResult ?? validRetainedResult
+  const hasRetainedEligibleTradeWindow =
+    run.initialEligibility !== undefined &&
+    retainedTradeWindowContextIsValid(
+      run.initialEligibility,
+      run.cycle,
+      versionedResult?.strategyVersion,
+    )
   const quoteConfirmationRejection =
     run.outcome.status === "INTENT_DERIVATION_REJECTED" &&
     run.outcome.reasons.length === 1 &&
@@ -1494,7 +1509,13 @@ export function evaluateResearchRunV1(
         eligibility.tradeIntentWindow.slotStartedAt,
       )
       const deadline = Date.parse(eligibility.tradeIntentWindow.deadline)
-      if (!retainedTradeWindowContextIsValid(eligibility, run.cycle)) {
+      if (
+        !retainedTradeWindowContextIsValid(
+          eligibility,
+          run.cycle,
+          versionedResult?.strategyVersion,
+        )
+      ) {
         failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_INVALID")
       }
       if (
@@ -1513,7 +1534,6 @@ export function evaluateResearchRunV1(
     }
   }
 
-  const versionedResult = reportResult ?? validRetainedResult
   const evaluation = {
     evaluationVersion: RESEARCH_RUN_EVALUATION_VERSION,
     cycleId: run.cycle.cycleId,

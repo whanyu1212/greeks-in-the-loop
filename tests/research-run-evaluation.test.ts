@@ -496,6 +496,50 @@ describe("research run evaluation", () => {
     })
   })
 
+  it("accepts the retained five-minute window for a legacy derived intent", () => {
+    const run = derivedIntentRun()
+    if (
+      run.researchReport?.result.outcome !== "PROPOSE_TRADE" ||
+      run.validatedDecision?.outcome !== "PROPOSE_TRADE" ||
+      run.outcome.status !== "INTENT_DERIVED" ||
+      run.initialEligibility?.tradeIntentWindow === undefined
+    ) {
+      throw new Error("Expected a derived-intent fixture")
+    }
+    const decision = {
+      ...run.validatedDecision,
+      strategyVersion: "1.0.0" as const,
+    }
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      initialEligibility: {
+        ...run.initialEligibility,
+        tradeIntentWindow: {
+          ...run.initialEligibility.tradeIntentWindow,
+          deadline: "2026-08-26T14:05:00.000Z",
+        },
+      },
+      researchReport: {
+        ...run.researchReport,
+        result: decision,
+      },
+      validatedDecision: decision,
+      outcome: {
+        ...run.outcome,
+        decision,
+        intent: {
+          ...run.outcome.intent,
+          strategyVersion: "1.0.0",
+        },
+      },
+    })
+
+    expect(evaluation.dimensions.failClosedBehavior).toEqual({
+      status: "PASS",
+      issueCodes: [],
+    })
+  })
+
   it("treats diagnostics without a canonical candidate as not applicable", () => {
     const run = noActionRun()
     const proposal = derivedIntentRun()
