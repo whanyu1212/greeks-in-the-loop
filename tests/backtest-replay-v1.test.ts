@@ -161,24 +161,64 @@ const execution = {
   commissionCentsPerContract: 65,
 } as const
 
+const signalSnapshot = (
+  closes: readonly number[] = Array.from(
+    { length: 50 },
+    (_, index) => 50_000_000 + index * 100_000,
+  ),
+  minuteVwapMicros = 54_000_000,
+) => ({
+  sessionDate: "2026-08-27",
+  observedAt: intent.evaluatedAt,
+  precedingSessionDates: closes.map((_, index) =>
+    new Date(Date.parse("2026-07-08T00:00:00.000Z") + index * 86_400_000)
+      .toISOString()
+      .slice(0, 10)),
+  completedDailyBars: closes.map((closeMicros, index) => ({
+    sessionDate: new Date(Date.parse("2026-07-08T00:00:00.000Z") + index * 86_400_000)
+      .toISOString()
+      .slice(0, 10),
+    closeMicros,
+  })),
+  completedMinuteBars: Array.from({ length: 60 }, (_, index) => ({
+    startedAt: new Date(Date.parse("2026-08-27T13:30:00.000Z") + index * 60_000)
+      .toISOString(),
+    vwapMicros: minuteVwapMicros,
+    volume: 10,
+  })),
+  underlyingBidMicros: 55_000_000,
+  underlyingAskMicros: 55_000_000,
+})
+
 describe("backtest replay v1", () => {
   it("uses strict SMA and VWAP inequalities", () => {
     const closes = Array.from({ length: 50 }, (_, index) => 50_000_000 + index * 100_000)
-    const bullish = evaluateBacktestSignalV1({
-      completedDailyClosesMicros: closes,
-      completedMinuteBars: [{ vwapMicros: 54_000_000, volume: 10 }],
-      underlyingBidMicros: 55_000_000,
-      underlyingAskMicros: 55_000_000,
-    })
+    const bullish = evaluateBacktestSignalV1(signalSnapshot(closes))
     expect(bullish.direction).toBe("BULLISH")
-    expect(
-      evaluateBacktestSignalV1({
-        completedDailyClosesMicros: closes,
-        completedMinuteBars: [{ vwapMicros: 55_000_000, volume: 10 }],
-        underlyingBidMicros: 55_000_000,
-        underlyingAskMicros: 55_000_000,
-      }).direction,
-    ).toBe("NO_ACTION")
+    expect(evaluateBacktestSignalV1(signalSnapshot(closes, 55_000_000)).direction)
+      .toBe("NO_ACTION")
+  })
+
+  it("rejects incomplete or duplicate exact signal intervals", () => {
+    const signal = signalSnapshot()
+    expect(() => evaluateBacktestSignalV1({
+      ...signal,
+      completedMinuteBars: signal.completedMinuteBars.slice(1),
+    })).toThrow(/every completed regular-session minute/u)
+    expect(() => evaluateBacktestSignalV1({
+      ...signal,
+      completedMinuteBars: [
+        ...signal.completedMinuteBars.slice(0, -1),
+        signal.completedMinuteBars.at(-2)!,
+      ],
+    })).toThrow(/unique, complete, and chronological/u)
+    expect(() => evaluateBacktestSignalV1({
+      ...signal,
+      completedDailyBars: [
+        ...signal.completedDailyBars.slice(0, -1),
+        signal.completedDailyBars.at(-2)!,
+      ],
+    })).toThrow(/one-to-one to 50 unique preceding sessions/u)
   })
 
   it("runs exact snapshots through production risk and a deterministic profit exit", () => {
@@ -189,15 +229,7 @@ describe("backtest replay v1", () => {
         {
           scenarioId: "exact-1",
           fidelity: "EXACT_SNAPSHOT",
-          signal: {
-            completedDailyClosesMicros: Array.from(
-              { length: 50 },
-              (_, index) => 50_000_000 + index * 100_000,
-            ),
-            completedMinuteBars: [{ vwapMicros: 54_000_000, volume: 10 }],
-            underlyingBidMicros: 55_000_000,
-            underlyingAskMicros: 55_000_000,
-          },
+          signal: signalSnapshot(),
           candidates: [riskInput],
           monitorCycles: [monitorCycle],
         },
@@ -310,7 +342,31 @@ describe("backtest replay v1", () => {
     })).toThrow(/monitor cycle before intent evaluation/u)
   })
 
+  it("compares offset timestamps by instant", () => {
+    const report = runBacktestReplayV1(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [
+        {
+          scenarioId: "offset-instants",
+          fidelity: "HISTORICAL_BAR_PROXY",
+          retainedIntent: intent,
+          monitorCycles: [
+            { ...monitorCycle, decidedAt: "2026-08-27T14:31:00.000Z", markHalfCentsPerShare: 400 },
+            { ...monitorCycle, decidedAt: "2026-08-27T10:32:00.000-04:00" },
+          ],
+        },
+      ],
+    })
+
+    expect(report.results[0]).toMatchObject({
+      exitReason: "PROFIT_TARGET",
+      exitDecidedAt: "2026-08-27T10:32:00.000-04:00",
+    })
+  })
+
   it("derives proxy marks from synchronized bars in the selected dataset", () => {
+    const offsetIntent = { ...intent, evaluatedAt: "2026-08-27T10:30:00.000-04:00" }
     const bar = {
       timeframe: "1MINUTE",
       timestamp: intent.evaluatedAt,
@@ -331,7 +387,7 @@ describe("backtest replay v1", () => {
           {
             scenarioId: "dataset-proxy",
             fidelity: "HISTORICAL_BAR_PROXY",
-            retainedIntent: intent,
+            retainedIntent: offsetIntent,
           },
         ],
       },

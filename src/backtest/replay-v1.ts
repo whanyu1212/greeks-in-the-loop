@@ -9,7 +9,7 @@ import {
   riskEvaluationInputV1Schema,
   type RiskEvaluationV1,
 } from "../risk/risk-evaluation-v1.js"
-import { newYorkDate } from "../scheduling/research-eligibility.js"
+import { newYorkDate, newYorkLocalTime } from "../scheduling/research-eligibility.js"
 import { canonicalJsonSha256 } from "../shared/canonical-json.js"
 import {
   backtestDatasetManifestV1Schema,
@@ -26,14 +26,28 @@ const INITIAL_EQUITY_CENTS = 10_000_000
 const positiveSafeInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
 const nonnegativeSafeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const timestamp = z.iso.datetime({ offset: true, precision: 3 })
+const instant = (value: string) => Date.parse(value)
 
 const signalSnapshotSchema = z
   .object({
-    completedDailyClosesMicros: z.array(positiveSafeInteger).length(50),
+    sessionDate: z.iso.date(),
+    observedAt: timestamp,
+    precedingSessionDates: z.array(z.iso.date()).length(50),
+    completedDailyBars: z
+      .array(
+        z
+          .object({
+            sessionDate: z.iso.date(),
+            closeMicros: positiveSafeInteger,
+          })
+          .strict(),
+      )
+      .length(50),
     completedMinuteBars: z
       .array(
         z
           .object({
+            startedAt: timestamp,
             vwapMicros: positiveSafeInteger,
             volume: positiveSafeInteger,
           })
@@ -45,9 +59,59 @@ const signalSnapshotSchema = z
     underlyingAskMicros: positiveSafeInteger,
   })
   .strict()
-  .refine(({ underlyingBidMicros, underlyingAskMicros }) => underlyingAskMicros >= underlyingBidMicros, {
-    path: ["underlyingAskMicros"],
-    message: "Underlying ask cannot be below bid",
+  .superRefine((snapshot, context) => {
+    if (snapshot.underlyingAskMicros < snapshot.underlyingBidMicros) {
+      context.addIssue({
+        code: "custom",
+        path: ["underlyingAskMicros"],
+        message: "Underlying ask cannot be below bid",
+      })
+    }
+    if (newYorkDate(new Date(snapshot.observedAt)) !== snapshot.sessionDate) {
+      context.addIssue({
+        code: "custom",
+        path: ["observedAt"],
+        message: "Signal observation must belong to its New York session date",
+      })
+    }
+    const sessionOpen = newYorkLocalTime(snapshot.sessionDate, "09:30").getTime()
+    const expectedMinuteCount = Math.floor((instant(snapshot.observedAt) - sessionOpen) / 60_000)
+    if (
+      expectedMinuteCount < 1 ||
+      expectedMinuteCount > 390 ||
+      snapshot.completedMinuteBars.length !== expectedMinuteCount
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["completedMinuteBars"],
+        message: "Signal snapshot must contain every completed regular-session minute",
+      })
+    }
+    for (let index = 0; index < snapshot.completedMinuteBars.length; index += 1) {
+      if (instant(snapshot.completedMinuteBars[index]!.startedAt) === sessionOpen + index * 60_000) {
+        continue
+      }
+      context.addIssue({
+        code: "custom",
+        path: ["completedMinuteBars", index, "startedAt"],
+        message: "Signal minute bars must be unique, complete, and chronological",
+      })
+    }
+    for (let index = 0; index < snapshot.completedDailyBars.length; index += 1) {
+      const date = snapshot.completedDailyBars[index]!.sessionDate
+      const expectedDate = snapshot.precedingSessionDates[index]
+      const previous = snapshot.precedingSessionDates[index - 1]
+      if (
+        date === expectedDate &&
+        date < snapshot.sessionDate &&
+        (previous === undefined || expectedDate! > previous)
+      ) continue
+      context.addIssue({
+        code: "custom",
+        path: ["completedDailyBars", index, "sessionDate"],
+        message: "Signal daily bars must map one-to-one to 50 unique preceding sessions",
+      })
+    }
   })
 
 const monitorCycleSchema = z
@@ -71,7 +135,7 @@ const monitorCyclesSchema = z
   .max(10_000)
   .superRefine((cycles, context) => {
     for (let index = 1; index < cycles.length; index += 1) {
-      if (cycles[index]!.decidedAt > cycles[index - 1]!.decidedAt) continue
+      if (instant(cycles[index]!.decidedAt) > instant(cycles[index - 1]!.decidedAt)) continue
       context.addIssue({
         code: "custom",
         path: [index, "decidedAt"],
@@ -93,6 +157,33 @@ const exactScenarioSchema = z
     candidates: z.array(riskEvaluationInputV1Schema).min(1).max(10_000),
   })
   .strict()
+  .superRefine((scenario, context) => {
+    for (let index = 0; index < scenario.candidates.length; index += 1) {
+      const eligibility = scenario.candidates[index]!.context.eligibility
+      if (
+        instant(scenario.candidates[index]!.intent.evaluatedAt) !== instant(scenario.signal.observedAt) ||
+        eligibility.sessionDate !== scenario.signal.sessionDate
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["candidates", index],
+          message: "Exact candidates must share the signal snapshot instant and session",
+        })
+      }
+      for (let priorIndex = 0; priorIndex < (eligibility.previousSessionDates?.length ?? 0); priorIndex += 1) {
+        if (
+          scenario.signal.completedDailyBars.at(-(priorIndex + 1))?.sessionDate ===
+          eligibility.previousSessionDates![priorIndex]
+        ) continue
+        context.addIssue({
+          code: "custom",
+          path: ["signal", "completedDailyBars"],
+          message: "Exact daily bars must match the application-owned preceding sessions",
+        })
+        break
+      }
+    }
+  })
 
 const proxyScenarioSchema = z
   .object({
@@ -150,10 +241,11 @@ export const evaluateBacktestSignalV1 = (
   spotMidpointMicros: number
 }> => {
   const parsed = signalSnapshotSchema.parse(input)
-  const dailyCloseMicros = parsed.completedDailyClosesMicros.at(-1)!
-  const last20 = parsed.completedDailyClosesMicros.slice(-20)
+  const dailyClosesMicros = parsed.completedDailyBars.map(({ closeMicros }) => closeMicros)
+  const dailyCloseMicros = dailyClosesMicros.at(-1)!
+  const last20 = dailyClosesMicros.slice(-20)
   const sma20Micros = mean(last20)
-  const sma50Micros = mean(parsed.completedDailyClosesMicros)
+  const sma50Micros = mean(dailyClosesMicros)
   const volume = parsed.completedMinuteBars.reduce((total, bar) => total + bar.volume, 0)
   const weightedVwap = parsed.completedMinuteBars.reduce(
     (total, bar) => total + BigInt(bar.vwapMicros) * BigInt(bar.volume),
@@ -168,7 +260,7 @@ export const evaluateBacktestSignalV1 = (
     (parsed.underlyingBidMicros + parsed.underlyingAskMicros) / 2
   const close = BigInt(dailyCloseMicros)
   const sum20 = last20.reduce((total, value) => total + BigInt(value), 0n)
-  const sum50 = parsed.completedDailyClosesMicros.reduce(
+  const sum50 = dailyClosesMicros.reduce(
     (total, value) => total + BigInt(value),
     0n,
   )
@@ -256,7 +348,7 @@ const exitReason = (
 const sessionForTimestamp = (
   sessions: readonly MarketSessionRecordV1[],
   value: string,
-) => sessions.find(({ open, close }) => value >= open && value <= close)
+) => sessions.find(({ open, close }) => instant(value) >= instant(open) && instant(value) <= instant(close))
 
 const minuteBarCompletedAt = (timestamp: string) =>
   new Date(Date.parse(timestamp) + 60_000).toISOString()
@@ -268,13 +360,13 @@ export function deriveHistoricalBarProxyCyclesV1(
 ) {
   const sessions = records
     .filter((record): record is MarketSessionRecordV1 => record.recordType === "MARKET_SESSION")
-    .sort((left, right) => left.open.localeCompare(right.open))
+    .sort((left, right) => instant(left.open) - instant(right.open))
   const dailyBars = records
     .filter(
       (record): record is UnderlyingBarRecordV1 =>
         record.recordType === "UNDERLYING_BAR" && record.timeframe === "1DAY",
     )
-    .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+    .sort((left, right) => instant(left.timestamp) - instant(right.timestamp))
   const dailyBarsBySessionDate = new Map<string, UnderlyingBarRecordV1[]>()
   for (const bar of dailyBars) {
     const sessionDate = newYorkDate(new Date(bar.timestamp))
@@ -289,20 +381,21 @@ export function deriveHistoricalBarProxyCyclesV1(
   const shortByTimestamp = new Map(
     minuteBars
       .filter(({ contractSymbol }) => contractSymbol === intent.shortContractSymbol)
-      .map((bar) => [bar.timestamp, bar]),
+      .map((bar) => [instant(bar.timestamp), bar]),
   )
   const matchingEntrySession = sessions.findIndex(
-    ({ open, close }) => intent.evaluatedAt >= open && intent.evaluatedAt <= close,
+    ({ open, close }) =>
+      instant(intent.evaluatedAt) >= instant(open) && instant(intent.evaluatedAt) <= instant(close),
   )
   if (matchingEntrySession < 0) return []
   const entrySessionIndex = matchingEntrySession
   const cycles = minuteBars
     .filter(
       ({ contractSymbol, timestamp: value }) =>
-        contractSymbol === intent.longContractSymbol && value >= intent.evaluatedAt,
+        contractSymbol === intent.longContractSymbol && instant(value) >= instant(intent.evaluatedAt),
     )
     .flatMap((longBar) => {
-      const shortBar = shortByTimestamp.get(longBar.timestamp)
+      const shortBar = shortByTimestamp.get(instant(longBar.timestamp))
       const decidedAt = minuteBarCompletedAt(longBar.timestamp)
       const session = sessionForTimestamp(sessions, decidedAt)
       if (shortBar === undefined || session === undefined) return []
@@ -342,7 +435,7 @@ export function deriveHistoricalBarProxyCyclesV1(
         holdingSessionIndex: sessionIndex - entrySessionIndex + 1,
       }]
     })
-    .sort((left, right) => left.decidedAt.localeCompare(right.decidedAt))
+    .sort((left, right) => instant(left.decidedAt) - instant(right.decidedAt))
 
   let previousCycle: (typeof cycles)[number] | undefined
   return cycles.map((cycle) => {
@@ -432,7 +525,7 @@ export function runBacktestReplayV1(
     if (monitorCycles.length === 0) {
       throw new Error(`Scenario ${scenario.scenarioId} has no synchronized replay marks`)
     }
-    if (monitorCycles.some(({ decidedAt }) => decidedAt < selected.intent!.evaluatedAt)) {
+    if (monitorCycles.some(({ decidedAt }) => instant(decidedAt) < instant(selected.intent!.evaluatedAt))) {
       throw new Error(`Scenario ${scenario.scenarioId} has a monitor cycle before intent evaluation`)
     }
     const triggered = monitorCycles.find((cycle) => exitReason(selected.intent!, cycle))

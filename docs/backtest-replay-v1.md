@@ -60,12 +60,16 @@ curve.
 
 ## Fidelity modes
 
-`EXACT_SNAPSHOT` contains the 50 completed daily closes, completed intraday bars,
+`EXACT_SNAPSHOT` contains the expected 50-session calendar, one dated completed
+daily bar for each of those sessions, and every uniquely dated completed
+regular-session minute bar through the retained observation instant,
 underlying quote, candidate intents, historical option quotes and Greeks,
 account state, reconciled portfolio, and contract metadata at one decision
 instant. Replay recalculates the strict SMA/VWAP signal, runs the production
 `evaluateTradeIntentRiskV1` rules for every candidate, and applies the frozen
-lexicographic candidate ranking. Exact snapshots must be captured forward; the
+lexicographic candidate ranking. Snapshot validation rejects missing, duplicate,
+out-of-order, cross-session, or candidate-misaligned signal evidence before a
+result can claim exact fidelity. Exact snapshots must be captured forward; the
 Alpaca historical API cannot recreate them.
 
 `HISTORICAL_BAR_PROXY` contains a retained `TradeIntentV1`. When monitor cycles
