@@ -51,8 +51,8 @@ Canonicalize external URLs conceptually by ignoring fragments and tracking param
 
 Use two distinct instants and never substitute the cycle-start timestamp for either one:
 
-1. Immediately after every required underlying and option snapshot-forming response has completed, call `trusted_time` and use its returned UTC timestamp as `observed_at`. Freeze the expected daily sessions and intraday intervals at this instant.
-2. After the final Alpaca clock response completes, call `trusted_time` again and use its returned UTC timestamp as `approval_evaluated_at`. Do not use the timestamp contained in the clock payload.
+1. Immediately after every required underlying and option snapshot-forming response has completed, with no intervening tool call, call `trusted_time` and use its returned UTC timestamp as `observed_at`. Freeze the expected daily sessions and intraday intervals at this instant.
+2. Immediately after the final Alpaca clock response completes, with no intervening tool call, call `trusted_time` again and use its returned UTC timestamp as `approval_evaluated_at`. Do not use the timestamp contained in the clock payload.
 
 If `trusted_time` is unavailable or invalid for either capture, return `NO_ACTION`; never make data appear fresher or a deadline appear unexpired by using cycle start or a provider timestamp.
 

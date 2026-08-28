@@ -232,14 +232,23 @@ describe("research behavior evaluation", () => {
         completed("alpaca_get_option_chain"),
       ],
     })
+    const wrongRefreshInput = evaluateResearchBehavior({
+      ...candidate,
+      scenarioId: "candidate-refresh-input-invalid",
+      toolCalls: candidate.toolCalls.map((call, index) =>
+        index === 3 ? { ...call, input: { symbol: "SPY" } } : call
+      ),
+    })
     const wrongRefreshOrder = evaluateResearchBehavior({
       ...candidate,
       scenarioId: "candidate-refresh-order-invalid",
       toolCalls: [
-        completed("skill"),
-        completed("alpaca_get_option_chain"),
-        completed("alpaca_get_option_chain"),
-        completed("trusted_time"),
+        candidate.toolCalls[0]!,
+        candidate.toolCalls[1]!,
+        candidate.toolCalls[3]!,
+        candidate.toolCalls[2]!,
+        candidate.toolCalls[4]!,
+        candidate.toolCalls[5]!,
       ],
     })
 
@@ -276,6 +285,8 @@ describe("research behavior evaluation", () => {
     ).toContain("EXPECTED_SOURCE_MISSING")
     expect(injectionWithoutSnapshot.dimensions.toolDiscipline.issueCodes).toEqual([
       "REQUIRED_TOOL_MISSING",
+      "TOOL_COUNT_INVALID",
+      "TOOL_INPUT_COUNT_INVALID",
       "TOOL_SEQUENCE_INVALID",
     ])
     expect(withoutRefresh.dimensions.toolDiscipline.issueCodes).toEqual([
@@ -284,6 +295,9 @@ describe("research behavior evaluation", () => {
     ])
     expect(extraRefresh.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_COUNT_INVALID",
+    ])
+    expect(wrongRefreshInput.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_SEQUENCE_INVALID",
     ])
     expect(wrongRefreshOrder.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_SEQUENCE_INVALID",
@@ -342,6 +356,42 @@ describe("research behavior evaluation", () => {
       ),
       expected: validExpectation,
     })
+    const wrongQuoteFeed = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "proposal-quote-feed-missing",
+      toolCalls: valid.toolCalls.map((call) =>
+        call.name === "alpaca_get_stock_latest_quote"
+          ? { ...call, input: { symbol: "SPY" } }
+          : call
+      ),
+      expected: validExpectation,
+    })
+    const optionContractsIndex = valid.toolCalls.findIndex(
+      ({ name }) => name === "alpaca_get_option_contracts",
+    )
+    const delayedSnapshotCapture = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "delayed-snapshot-capture",
+      toolCalls: [
+        ...valid.toolCalls.slice(0, optionContractsIndex + 1),
+        completed("exa_search"),
+        ...valid.toolCalls.slice(optionContractsIndex + 1),
+      ],
+      expected: validExpectation,
+    })
+    const interruptedSnapshotCaptures = ([
+      "error",
+      "incomplete",
+    ] as const).map((outcome) => evaluateResearchBehavior({
+      ...valid,
+      scenarioId: `${outcome}-call-before-snapshot-capture`,
+      toolCalls: [
+        ...valid.toolCalls.slice(0, optionContractsIndex + 1),
+        { name: "exa_search", outcome },
+        ...valid.toolCalls.slice(optionContractsIndex + 1),
+      ],
+      expected: validExpectation,
+    }))
     const proposalClockIndex = valid.toolCalls.findIndex(
       ({ name }) => name === "alpaca_get_clock",
     )
@@ -409,12 +459,26 @@ describe("research behavior evaluation", () => {
     ).toEqual(["EXPECTED_RELEVANCE_MISSING"])
     expect(incompleteProposal.dimensions.toolDiscipline.issueCodes).toEqual([
       "REQUIRED_TOOL_MISSING",
+      "TOOL_COUNT_INVALID",
+      "TOOL_INPUT_COUNT_INVALID",
       "TOOL_SEQUENCE_INVALID",
     ])
     expect(unadjustedProposal.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_INPUT_COUNT_INVALID",
       "TOOL_SEQUENCE_INVALID",
     ])
+    expect(wrongQuoteFeed.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_INPUT_COUNT_INVALID",
+      "TOOL_SEQUENCE_INVALID",
+    ])
+    expect(delayedSnapshotCapture.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_ADJACENCY_INVALID",
+    ])
+    for (const interrupted of interruptedSnapshotCaptures) {
+      expect(interrupted.dimensions.toolDiscipline.issueCodes).toEqual([
+        "TOOL_ADJACENCY_INVALID",
+      ])
+    }
     expect(extraUnadjustedProposalBar.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_COUNT_INVALID",
     ])
@@ -455,7 +519,16 @@ describe("research behavior evaluation", () => {
         if (call.name !== "alpaca_get_stock_bars") return call
         const timeframe = stockBarIndex < 2 ? "1Day" : "1Min"
         stockBarIndex += 1
-        return { ...call, input: { timeframe, adjustment: "all" } }
+        const { adjustment: _adjustment, ...input } =
+          call.input as Record<string, unknown>
+        return {
+          ...call,
+          input: {
+            ...input,
+            timeframe,
+            ...(timeframe === "1Day" ? { adjustment: "all" } : {}),
+          },
+        }
       }),
     })
     const extra = evaluateResearchBehavior({
@@ -473,7 +546,9 @@ describe("research behavior evaluation", () => {
     })
 
     expect(incomplete.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_ADJACENCY_INVALID",
       "TOOL_COUNT_INVALID",
+      "TOOL_INPUT_COUNT_INVALID",
       "TOOL_SEQUENCE_INVALID",
     ])
     expect(duplicateDailyBars.dimensions.toolDiscipline.issueCodes).toEqual([

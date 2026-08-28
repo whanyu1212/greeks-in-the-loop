@@ -26,16 +26,59 @@ const result = (value: unknown) => ({
 })
 
 const commonInput = {
-  symbol: z.string().optional(),
-  symbols: z.array(z.string()).optional(),
+  symbol: z.literal("SPY").optional(),
+  symbols: z.array(z.string().startsWith("SPY")).optional(),
   query: z.string().optional(),
   start: z.string().optional(),
   end: z.string().optional(),
   timeframe: z.string().optional(),
   adjustment: z.literal("all").optional(),
-  feed: z.string().optional(),
+  feed: z.enum(["iex", "indicative"]).optional(),
   limit: z.number().optional(),
   status: z.string().optional(),
+}
+
+const inputSchemaFor = (name: string) => {
+  if (name === "alpaca_get_stock_bars") {
+    return z.object({
+      ...commonInput,
+      symbol: z.literal("SPY"),
+      timeframe: z.enum(["1Day", "1Min"]),
+      feed: z.literal("iex"),
+    }).superRefine((input, refinement) => {
+      if (input.timeframe === "1Day" && input.adjustment !== "all") {
+        refinement.addIssue({
+          code: "custom",
+          path: ["adjustment"],
+          message: "Daily fixture bars require adjustment=all",
+        })
+      }
+    })
+  }
+  if (name === "alpaca_get_stock_latest_quote") {
+    return z.object({
+      ...commonInput,
+      symbol: z.literal("SPY"),
+      feed: z.literal("iex"),
+    })
+  }
+  if (name === "alpaca_get_option_chain") {
+    return z.object({
+      ...commonInput,
+      symbol: z.literal("SPY").optional(),
+      symbols: z.array(
+        z.string().regex(/^SPY\d{6}[CP]\d{8}$/u),
+      ).min(1).optional(),
+      feed: z.literal("indicative"),
+    }).refine(
+      (input) => input.symbol === "SPY" || input.symbols !== undefined,
+      { message: "Option-chain fixture calls require SPY or SPY OCC symbols" },
+    )
+  }
+  if (name === "alpaca_get_option_contracts") {
+    return z.object({ ...commonInput, symbol: z.literal("SPY") })
+  }
+  return z.object(commonInput)
 }
 
 const localToolName = (name: string) => {
@@ -61,8 +104,9 @@ const register = (
   if (toolName === undefined) return
   server.registerTool(
     toolName,
-    { description, inputSchema: commonInput },
-    async (input) => result(handler(nextCall(name), input)),
+    { description, inputSchema: inputSchemaFor(name) },
+    async (input) =>
+      result(handler(nextCall(name), input as Record<string, unknown>)),
   )
 }
 

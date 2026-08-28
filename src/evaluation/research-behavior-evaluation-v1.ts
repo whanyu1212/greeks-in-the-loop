@@ -28,6 +28,7 @@ export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "TOOL_COUNT_INVALID",
   "TOOL_INPUT_COUNT_INVALID",
   "TOOL_SEQUENCE_INVALID",
+  "TOOL_ADJACENCY_INVALID",
   "EARLY_STOP_VIOLATED",
   "TOTAL_TOOL_BUDGET_EXCEEDED",
   "EXA_TOOL_BUDGET_EXCEEDED",
@@ -87,6 +88,17 @@ export type ResearchBehaviorToolCall = Readonly<{
 
 type NoActionReasonCode = (typeof NO_ACTION_REASON_CODES)[number]
 
+type ResearchBehaviorExpectedToolMatcher =
+  | string
+  | Readonly<{
+      pattern: string
+      input: Readonly<Record<string, unknown>>
+    }>
+
+type ResearchBehaviorExpectedTool =
+  | ResearchBehaviorExpectedToolMatcher
+  | Readonly<{ anyOf: readonly ResearchBehaviorExpectedToolMatcher[] }>
+
 export type ResearchBehaviorExpectation = Readonly<{
   outcome?: ResearchReportV2["result"]["outcome"]
   reasonCode?: NoActionReasonCode
@@ -104,13 +116,16 @@ export type ResearchBehaviorExpectation = Readonly<{
     minimum: number
     maximum: number
   }>[]
-  requiredCompletedToolSequence?: readonly (
-    | string
-    | Readonly<{
-        pattern: string
-        input: Readonly<Record<string, unknown>>
-      }>
-  )[]
+  requiredCompletedToolSequence?: readonly ResearchBehaviorExpectedTool[]
+  requiredAdjacentToolPairs?: readonly Readonly<
+    [ResearchBehaviorExpectedTool, ResearchBehaviorExpectedTool]
+  >[]
+  completedAdjacentToolCounts?: readonly Readonly<{
+    before: ResearchBehaviorExpectedTool
+    after: ResearchBehaviorExpectedTool
+    minimum: number
+    maximum: number
+  }>[]
   forbiddenAfter?: readonly Readonly<{
     anchor: string
     tools: readonly string[]
@@ -327,19 +342,57 @@ export function evaluateResearchBehavior({
       toolIssues.push("TOOL_INPUT_COUNT_INVALID")
     }
   }
+  const expectedToolMatches = (
+    call: ResearchBehaviorToolCall,
+    expectedCall: ResearchBehaviorExpectedTool | undefined,
+  ): boolean => {
+    if (typeof expectedCall === "string") {
+      return toolMatches(call.name, expectedCall)
+    }
+    if (expectedCall === undefined) return false
+    if ("anyOf" in expectedCall) {
+      return expectedCall.anyOf.some((alternative) =>
+        expectedToolMatches(call, alternative)
+      )
+    }
+    return toolMatches(call.name, expectedCall.pattern) &&
+      toolInputMatches(call.input, expectedCall.input)
+  }
   if (expected.requiredCompletedToolSequence !== undefined) {
     let sequenceIndex = 0
     for (const call of completedToolCalls) {
       const expectedCall = expected.requiredCompletedToolSequence[sequenceIndex]
-      const matches = typeof expectedCall === "string"
-        ? toolMatches(call.name, expectedCall)
-        : expectedCall !== undefined &&
-          toolMatches(call.name, expectedCall.pattern) &&
-          toolInputMatches(call.input, expectedCall.input)
-      if (matches) sequenceIndex += 1
+      if (expectedToolMatches(call, expectedCall)) sequenceIndex += 1
     }
     if (sequenceIndex !== expected.requiredCompletedToolSequence.length) {
       toolIssues.push("TOOL_SEQUENCE_INVALID")
+    }
+  }
+  const isCompletedToolCall = ({ outcome }: ResearchBehaviorToolCall) =>
+    outcome === undefined || outcome === "completed"
+  for (const [before, after] of expected.requiredAdjacentToolPairs ?? []) {
+    const adjacent = toolCalls.some((call, index) =>
+      isCompletedToolCall(call) &&
+      expectedToolMatches(call, before) &&
+      toolCalls[index + 1] !== undefined &&
+      isCompletedToolCall(toolCalls[index + 1]!) &&
+      expectedToolMatches(toolCalls[index + 1]!, after)
+    )
+    if (!adjacent) toolIssues.push("TOOL_ADJACENCY_INVALID")
+  }
+  for (
+    const { before, after, minimum, maximum } of
+      expected.completedAdjacentToolCounts ?? []
+  ) {
+    const count = toolCalls.filter((call, index) =>
+      isCompletedToolCall(call) &&
+      expectedToolMatches(call, before) &&
+      toolCalls[index + 1] !== undefined &&
+      isCompletedToolCall(toolCalls[index + 1]!) &&
+      expectedToolMatches(toolCalls[index + 1]!, after)
+    ).length
+    if (count < minimum || count > maximum) {
+      toolIssues.push("TOOL_ADJACENCY_INVALID")
     }
   }
 
