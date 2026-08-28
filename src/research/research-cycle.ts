@@ -6,7 +6,6 @@ import {
   STRATEGY_VERSION,
   validateResearchDecisionV1,
   type ProposedTradeDecisionV1,
-  type ResearchDecisionV1,
 } from "../contracts/research-decision-v1.js"
 import {
   researchReportV2Schema,
@@ -29,7 +28,6 @@ import {
   type ResearchEligibilityV1,
 } from "../scheduling/research-eligibility.js"
 import type { ShadowRiskEvaluator } from "../risk/shadow-risk-service.js"
-import type { ShadowRiskResultV1 } from "../risk/shadow-risk-v1.js"
 import { safeSchemaDiagnostics } from "../shared/schema-diagnostics.js"
 import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
@@ -37,16 +35,23 @@ import {
   type ResearchCycleOutcomeV1,
   type ResearchCycleTerminalRecordV1,
 } from "./research-cycle-outcome-v1.js"
+import { createResearchCycleStageReports } from "./research-cycle-stage-reporting.js"
 import {
-  createResearchCycleStageReports,
-  type ResearchCycleStageReports,
-} from "./research-cycle-stage-reporting.js"
+  recordResearchCycleOutcome,
+  type ProcessedResearchCycle,
+  type ResearchCycleTerminalMetadata,
+  type ResearchCycleTerminalResolution,
+} from "./research-cycle-terminal.js"
 import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
+
+export {
+  MAX_TERMINAL_REJECTION_DETAILS,
+  type ProcessedResearchCycle,
+} from "./research-cycle-terminal.js"
 
 export const PROPOSAL_QUOTE_SNAPSHOT_REF =
   "alpaca-proposal-quotes-v1" as const
 export const MAX_RESEARCH_RESPONSE_BYTES = 64 * 1024
-export const MAX_TERMINAL_REJECTION_DETAILS = 64
 const MAX_PROPOSAL_MARKET_REGIME_AGE_MS = 60_000
 const MAX_PROPOSAL_ACCOUNT_CHECK_AGE_MS = 5 * 60_000
 
@@ -81,13 +86,6 @@ export type ProcessResearchCycleOptions = Readonly<{
   ) => TradeIntentDerivationResult
   trace?: ResearchCycleTrace
   stageReporter?: TerminalStageReporter
-}>
-
-export type ProcessedResearchCycle = Readonly<{
-  outcome: ResearchCycleOutcomeV1
-  report: string
-  researchReport?: ResearchReportV2
-  shadowRisk?: ShadowRiskResultV1
 }>
 
 const observationIsFresh = (
@@ -182,98 +180,6 @@ export const proposalHistoryIssuePath = (
   return undefined
 }
 
-const boundTerminalOutcome = (
-  outcome: ResearchCycleOutcomeV1,
-): ResearchCycleOutcomeV1 => {
-  if (outcome.status === "DECISION_REJECTED") {
-    return {
-      ...outcome,
-      issues: outcome.issues.slice(0, MAX_TERMINAL_REJECTION_DETAILS),
-    }
-  }
-  if (outcome.status === "INTENT_DERIVATION_REJECTED") {
-    return {
-      ...outcome,
-      reasons: outcome.reasons.slice(0, MAX_TERMINAL_REJECTION_DETAILS),
-    }
-  }
-  return outcome
-}
-
-type TerminalRecordMetadata = Readonly<{
-  evidenceSnapshots?: ResearchCycleTerminalRecordV1["evidenceSnapshots"]
-  validatedDecision?: ResearchDecisionV1
-  preliminaryResearch?: ResearchCycleTerminalRecordV1["preliminaryResearch"]
-  researchReport?: ResearchReportV2
-  shadowRisk?: ShadowRiskResultV1
-}>
-
-/**
- * Records one bounded cycle outcome before returning it to the scheduler.
- *
- * @param outcome Bounded processing result.
- * @param sink Awaited storage-neutral record sink.
- * @returns The outcome and a concise printable status.
- */
-const recordOutcome = async (
-  outcome: ResearchCycleOutcomeV1,
-  sink: ResearchCycleOutcomeSink,
-  signal: AbortSignal,
-  researchInvocation: ResearchInvocationV1,
-  metadata: TerminalRecordMetadata = {},
-  trace: ResearchCycleTrace,
-  stages: ResearchCycleStageReports,
-): Promise<ProcessedResearchCycle> => {
-  signal.throwIfAborted()
-  const boundedOutcome = boundTerminalOutcome(outcome)
-  const commonRecord = {
-    researchInvocation,
-    evidenceSnapshots: metadata.evidenceSnapshots ?? [],
-    ...(metadata.validatedDecision === undefined
-      ? {}
-      : { validatedDecision: metadata.validatedDecision }),
-    ...(metadata.preliminaryResearch === undefined
-      ? {}
-      : { preliminaryResearch: metadata.preliminaryResearch }),
-    ...(metadata.researchReport === undefined
-      ? {}
-      : { researchReport: metadata.researchReport }),
-  }
-  let record: ResearchCycleTerminalRecordV1
-  if (boundedOutcome.status === "INTENT_DERIVED") {
-    if (metadata.shadowRisk === undefined) {
-      throw new Error("Derived intent outcome requires shadow risk")
-    }
-    record = {
-      ...commonRecord,
-      outcome: boundedOutcome,
-      shadowRisk: metadata.shadowRisk,
-    }
-  } else {
-    if (metadata.shadowRisk !== undefined) {
-      throw new Error("Shadow risk requires a derived intent outcome")
-    }
-    record = { ...commonRecord, outcome: boundedOutcome }
-  }
-  await trace.run("ledger.cycle.terminalize", () => sink.record(record, signal))
-  stages.ledgerCommitted(record)
-  stages.cycleOutcomeRecorded(record)
-  return {
-    outcome: boundedOutcome,
-    report: `Research cycle outcome: ${boundedOutcome.status}${
-      metadata.shadowRisk === undefined
-        ? ""
-        : `\nShadow risk: ${metadata.shadowRisk.decision.outcome}`
-    }`,
-    ...(metadata.researchReport === undefined
-      ? {}
-      : { researchReport: metadata.researchReport }),
-    ...(metadata.shadowRisk === undefined
-      ? {}
-      : { shadowRisk: metadata.shadowRisk }),
-  }
-}
-
 /**
  * Parses, validates, confirms, and derives one research-agent response.
  *
@@ -336,18 +242,21 @@ export async function processResearchCycle({
   })
   if (!parsed.success) {
     stages.researchReportRejected(parsed.issues)
-    return recordOutcome(
+    return recordResearchCycleOutcome(
       {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "DECISION_REJECTED",
-        issues: parsed.issues,
+        outcome: {
+          outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+          status: "DECISION_REJECTED",
+          issues: parsed.issues,
+        },
       },
-      outcomeSink,
-      signal,
-      researchInvocation,
-      {},
-      trace,
-      stages,
+      {
+        sink: outcomeSink,
+        signal,
+        researchInvocation,
+        trace,
+        stages,
+      },
     )
   }
 
@@ -355,16 +264,18 @@ export async function processResearchCycle({
   const result = researchReport.result
   const recordReportOutcome = (
     outcome: ResearchCycleOutcomeV1,
-    metadata: TerminalRecordMetadata = {},
+    metadata: ResearchCycleTerminalMetadata = {},
   ) =>
-    recordOutcome(
-      outcome,
-      outcomeSink,
-      signal,
-      researchInvocation,
-      { ...metadata, researchReport },
-      trace,
-      stages,
+    recordResearchCycleOutcome(
+      { outcome, metadata } as ResearchCycleTerminalResolution,
+      {
+        sink: outcomeSink,
+        signal,
+        researchInvocation,
+        researchReport,
+        trace,
+        stages,
+      },
     )
   stages.researchReportCompleted(researchReport)
   if (result.strategyVersion !== STRATEGY_VERSION) {
