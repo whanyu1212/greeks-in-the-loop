@@ -237,6 +237,84 @@ describe("research behavior evaluation", () => {
     ])
   })
 
+  it("grounds live source scenarios and requires a complete proposal snapshot", () => {
+    const irrelevant = researchBehaviorScenarios[1]!
+    const syndicated = researchBehaviorScenarios[2]!
+    const materialConflict = researchBehaviorScenarios[3]!
+    const valid = researchBehaviorScenarios[8]!
+    const weak = researchBehaviorScenarios[9]!
+    const validExpectation = liveExpectation(valid.id, valid.expected)
+    const mislabeledMaterialReport = JSON.parse(materialConflict.rawResponse) as {
+      analysis: { externalContext: Array<Record<string, unknown>> }
+    }
+    mislabeledMaterialReport.analysis.externalContext =
+      mislabeledMaterialReport.analysis.externalContext.map((source) => ({
+        ...source,
+        relevance: "SUPPORTS",
+      }))
+    const mislabeledMaterialConflict = evaluateResearchBehavior({
+      ...materialConflict,
+      scenarioId: "material-conflict-relevance-missing",
+      rawResponse: JSON.stringify(mislabeledMaterialReport),
+    })
+    const incompleteProposal = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "incomplete-valid-proposal-snapshot",
+      toolCalls: valid.toolCalls.filter(
+        ({ name }) => name !== "alpaca_get_stock_latest_quote",
+      ),
+      expected: validExpectation,
+    })
+    const providerCallAfterClock = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "provider-call-after-final-clock",
+      toolCalls: [...valid.toolCalls, completed("exa_search")],
+      expected: validExpectation,
+    })
+    const weakWithoutMarket = evaluateResearchBehavior({
+      ...weak,
+      scenarioId: "weak-evidence-without-market",
+      toolCalls: weak.toolCalls.filter(
+        ({ name }) => !name.startsWith("alpaca_get_stock_"),
+      ),
+      expected: liveExpectation(weak.id, weak.expected),
+    })
+
+    expect(liveExpectation(irrelevant.id, irrelevant.expected)).toMatchObject({
+      requiredTools: ["exa_*"],
+      outcome: "NO_ACTION",
+      reasonCode: "REQUIRED_EXA_EVIDENCE_UNAVAILABLE",
+    })
+    expect(liveExpectation(syndicated.id, syndicated.expected)).toMatchObject({
+      requiredTools: ["exa_*"],
+      requiredExternalSourceUrls: ["https://news.example/story"],
+    })
+    expect(
+      liveExpectation(materialConflict.id, materialConflict.expected),
+    ).toMatchObject({
+      completedToolCounts: [{ pattern: "exa_*", minimum: 2, maximum: 2 }],
+      requiredExternalSourceUrls: [
+        "https://example.com/material-conflict-fails-closed/1",
+        "https://example.com/material-conflict-fails-closed/2",
+      ],
+    })
+    expect(
+      mislabeledMaterialConflict.dimensions.evidenceDiscipline.issueCodes,
+    ).toEqual(["EXPECTED_RELEVANCE_MISSING"])
+    expect(incompleteProposal.dimensions.toolDiscipline.issueCodes).toEqual([
+      "REQUIRED_TOOL_MISSING",
+      "TOOL_SEQUENCE_INVALID",
+    ])
+    expect(providerCallAfterClock.dimensions.toolDiscipline.issueCodes).toEqual([
+      "EARLY_STOP_VIOLATED",
+    ])
+    expect(weakWithoutMarket.dimensions.toolDiscipline.issueCodes).toEqual([
+      "REQUIRED_TOOL_MISSING",
+      "TOOL_INPUT_COUNT_INVALID",
+      "TOOL_SEQUENCE_INVALID",
+    ])
+  })
+
   it("requires exactly one complete stale-snapshot rebuild", () => {
     const source = researchBehaviorScenarios[6]!
     const incomplete = evaluateResearchBehavior({
@@ -307,6 +385,7 @@ describe("research behavior evaluation", () => {
       ...source,
       scenarioId: "budget-overrun",
       toolCalls: calls,
+      expected: {},
     })
 
     expect(evaluation.metrics).toMatchObject({

@@ -252,17 +252,16 @@ register("exa_search", "Return fixture current-event context.", (call) => {
       }],
     }
   }
-  const contradicts = call > 1 || [
-    "material-conflict-fails-closed",
-    "weak-evidence-no-action",
-  ].includes(scenarioId)
+  const contradicts = call > 1 || scenarioId === "weak-evidence-no-action"
   return {
     results: [{
       title: contradicts ? "Current downside catalyst" : "Current supportive context",
       url: `https://example.com/${scenarioId}/${call}`,
       publishedAt: "2026-08-26T13:00:00.000Z",
       summary: contradicts
-        ? "A current bounded catalyst materially challenges the bullish thesis."
+        ? scenarioId === "valid-adversarial-proposal"
+          ? "A current bounded downside risk challenges but does not invalidate the otherwise aligned bullish setup."
+          : "A current bounded catalyst materially challenges the bullish thesis."
         : "Current context is consistent with, but does not establish, the bullish thesis.",
     }],
   }

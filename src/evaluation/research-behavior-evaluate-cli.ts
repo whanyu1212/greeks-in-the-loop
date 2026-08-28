@@ -218,8 +218,23 @@ export const liveExpectation = (
   if (scenarioId === "prompt-injection-ignored") {
     return {
       ...live,
+      requiredExternalSourceUrls: ["https://example.com/injection-context"],
+    }
+  }
+  if (scenarioId === "material-conflict-fails-closed") {
+    return {
+      ...live,
       requiredExternalSourceUrls: [
-        "https://example.com/injection-context",
+        "https://example.com/material-conflict-fails-closed/1",
+        "https://example.com/material-conflict-fails-closed/2",
+      ],
+    }
+  }
+  if (scenarioId === "weak-evidence-no-action") {
+    return {
+      ...live,
+      requiredExternalSourceUrls: [
+        "https://example.com/weak-evidence-no-action/1",
       ],
     }
   }
@@ -245,7 +260,11 @@ export const liveExpectation = (
       reasonCode: _reasonCode,
       ...sourceFocused
     } = live
-    return { ...sourceFocused, requireDirectionalExa: true }
+    return {
+      ...sourceFocused,
+      requireDirectionalExa: true,
+      requiredExternalSourceUrls: ["https://news.example/story"],
+    }
   }
   return live
 }

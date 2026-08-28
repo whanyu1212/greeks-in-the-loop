@@ -34,6 +34,7 @@ export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "FMP_TOOL_BUDGET_EXCEEDED",
   "DIRECTIONAL_EXA_EVIDENCE_MISSING",
   "EXPECTED_SOURCE_MISSING",
+  "EXPECTED_RELEVANCE_MISSING",
   "FORBIDDEN_SOURCE_RETAINED",
   "DUPLICATE_EXTERNAL_SOURCE",
   "MATERIAL_CONFLICT_NOT_RETAINED",
@@ -117,6 +118,9 @@ export type ResearchBehaviorExpectation = Readonly<{
   requireDirectionalExa?: boolean
   requiredExternalSourceIds?: readonly string[]
   requiredExternalSourceUrls?: readonly string[]
+  requiredExternalSourceRelevances?: readonly (
+    "SUPPORTS" | "CONTRADICTS" | "NEUTRAL"
+  )[]
   forbiddenExternalSourceIds?: readonly string[]
   requireMaterialConflict?: boolean
 }>
@@ -378,6 +382,16 @@ export function evaluateResearchBehavior({
     }
     for (const sourceId of expected.forbiddenExternalSourceIds ?? []) {
       if (sourceIds.has(sourceId)) evidenceIssues.push("FORBIDDEN_SOURCE_RETAINED")
+    }
+    const sourceRelevances = new Set(
+      externalSources.map(({ relevance }) => relevance),
+    )
+    for (
+      const relevance of expected.requiredExternalSourceRelevances ?? []
+    ) {
+      if (!sourceRelevances.has(relevance)) {
+        evidenceIssues.push("EXPECTED_RELEVANCE_MISSING")
+      }
     }
     const canonicalUrls = externalSources.flatMap((source) =>
       source.provider === "EXA" ? [canonicalExternalUrl(source.url)] : [],
