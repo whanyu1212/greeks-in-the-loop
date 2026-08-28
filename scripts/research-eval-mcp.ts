@@ -2,6 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 
+import { researchEvalBarRequestMatchesFixture } from "../src/evaluation/research-eval-bar-window.js"
+
 const scenarioId = process.argv[2]?.trim()
 const serverKind = process.argv[3]?.trim()
 if (!scenarioId) throw new Error("A research evaluation scenario id is required")
@@ -41,19 +43,17 @@ const commonInput = {
 const inputSchemaFor = (name: string) => {
   if (name === "alpaca_get_stock_bars") {
     return z.object({
-      ...commonInput,
       symbol: z.literal("SPY"),
       timeframe: z.enum(["1Day", "1Min"]),
+      adjustment: z.literal("all"),
       feed: z.literal("iex"),
-    }).superRefine((input, refinement) => {
-      if (input.timeframe === "1Day" && input.adjustment !== "all") {
-        refinement.addIssue({
-          code: "custom",
-          path: ["adjustment"],
-          message: "Daily fixture bars require adjustment=all",
-        })
-      }
-    })
+      start: z.string().datetime({ offset: true }),
+      end: z.string().datetime({ offset: true }),
+      limit: z.number().int().positive().max(1_000),
+    }).strict().refine(
+      ({ start, end }) => Date.parse(start) < Date.parse(end),
+      { message: "Stock-bar start must precede end" },
+    )
   }
   if (name === "alpaca_get_stock_latest_quote") {
     return z.object({
@@ -164,21 +164,49 @@ register("alpaca_get_calendar", "Return fixture market sessions.", () => ({
     close: `${date}T20:00:00.000Z`,
   })),
 }))
-register("alpaca_get_stock_bars", "Return fixture completed SPY bars.", () => {
-  if (scenarioId === "weak-evidence-no-action") {
-    return {
-      dailyBars: dailyBars.map((bar, index) => ({
+register("alpaca_get_stock_bars", "Return fixture completed SPY bars.", (_call, input) => {
+  const requestedStart = Date.parse(String(input.start))
+  const requestedEnd = Date.parse(String(input.end))
+  const requestedLimit = Number(input.limit)
+  const requestMatchesFixture = researchEvalBarRequestMatchesFixture({
+    timeframe: input.timeframe as "1Day" | "1Min",
+    start: String(input.start),
+    end: String(input.end),
+    limit: requestedLimit,
+  })
+  const withinRequestedWindow = <Bar extends { timestamp: string }>(
+    bars: readonly Bar[],
+  ) => bars.filter(({ timestamp }) => {
+    const instant = Date.parse(timestamp)
+    return instant >= requestedStart && instant < requestedEnd
+  }).slice(0, requestedLimit)
+  const scenarioDailyBars = scenarioId === "weak-evidence-no-action"
+    ? dailyBars.map((bar, index) => ({
         ...bar,
         close: index % 2 === 0 ? 600 : 604,
-      })),
-      intradayBars: intradayBars.map((bar, index) => ({
+      }))
+    : dailyBars
+  const scenarioIntradayBars = scenarioId === "weak-evidence-no-action"
+    ? intradayBars.map((bar, index) => ({
         ...bar,
         vwap: 604 + (index % 2 === 0 ? 1 : -1),
-      })),
-      feed: "iex",
-    }
-  }
-  return { dailyBars, intradayBars, feed: "iex" }
+      }))
+    : intradayBars
+  return input.timeframe === "1Day"
+    ? {
+        dailyBars: requestMatchesFixture
+          ? withinRequestedWindow(scenarioDailyBars)
+          : [],
+        intradayBars: [],
+        feed: "iex",
+      }
+    : {
+        dailyBars: [],
+        intradayBars: requestMatchesFixture
+          ? withinRequestedWindow(scenarioIntradayBars)
+          : [],
+        feed: "iex",
+      }
 })
 register("alpaca_get_stock_latest_quote", "Return the fixture current SPY quote.", () => ({
   symbol: "SPY",

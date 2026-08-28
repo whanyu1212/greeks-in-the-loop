@@ -261,6 +261,10 @@ const completeProposalToolExpectation = {
     "exa_*",
     "trusted_time",
   ],
+  requiredOrder: [
+    ["alpaca_get_orders", "exa_*"],
+    ["exa_*", "alpaca_get_stock_bars"],
+  ],
   completedToolCounts: [
     { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 2 },
     { pattern: "alpaca_get_stock_latest_quote", minimum: 1, maximum: 1 },
@@ -306,7 +310,14 @@ const completeProposalToolExpectation = {
       maximum: 1,
     },
   ],
-  requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
+  requiredCompletedToolPrefix: [
+    "skill",
+    "alpaca_get_account",
+    "trusted_time",
+    "alpaca_get_account_configurations",
+    "alpaca_get_all_positions",
+    "alpaca_get_orders",
+  ],
   requiredCompletedToolSequence: [
     "skill",
     "alpaca_get_account",

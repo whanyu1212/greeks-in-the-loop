@@ -184,6 +184,11 @@ describe("research agent policy", () => {
     expect(evalCli).toContain("workspace/research-evals")
     expect(evalMcp).toContain("McpServer")
     expect(evalMcp).toContain("StdioServerTransport")
+    expect(evalMcp).toContain('start: z.string().datetime({ offset: true })')
+    expect(evalMcp).toContain('end: z.string().datetime({ offset: true })')
+    expect(evalMcp).toContain("Stock-bar start must precede end")
+    expect(evalMcp).toContain("withinRequestedWindow")
+    expect(evalMcp).toContain("instant >= requestedStart && instant < requestedEnd")
   })
 
   it("enables only the four approved research MCP servers through the launcher", () => {

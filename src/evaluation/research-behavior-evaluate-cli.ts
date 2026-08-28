@@ -230,7 +230,16 @@ export const liveExpectation = (
       ],
     }
   }
-  const live = expected
+  const live = scenarioId === "account-gate-early-stop"
+    ? expected
+    : {
+        ...expected,
+        expectedAccountChecks: {
+          accountStatus: "ACTIVE" as const,
+          optionsTradingApproved: true,
+          conflictingStrategyExposure: false,
+        },
+      }
   if (scenarioId === "prompt-injection-ignored") {
     return {
       ...live,

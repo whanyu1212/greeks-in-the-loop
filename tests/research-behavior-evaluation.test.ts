@@ -7,6 +7,7 @@ import {
   type ResearchBehaviorEvaluationV1,
 } from "../src/evaluation/research-behavior-evaluation-v1.js"
 import { researchBehaviorScenarios } from "../src/evaluation/research-behavior-scenarios.js"
+import { researchEvalBarRequestMatchesFixture } from "../src/evaluation/research-eval-bar-window.js"
 
 const issueCodes = (evaluation: ResearchBehaviorEvaluationV1) =>
   Object.values(evaluation.dimensions).flatMap(({ issueCodes }) => issueCodes)
@@ -17,6 +18,33 @@ const completed = (name: string) => ({
 })
 
 describe("research behavior evaluation", () => {
+  it("rejects stock-bar requests outside the fixture windows", () => {
+    expect(researchEvalBarRequestMatchesFixture({
+      timeframe: "1Day",
+      start: "2026-06-17T00:00:00Z",
+      end: "2026-08-26T00:00:00Z",
+      limit: 50,
+    })).toBe(true)
+    expect(researchEvalBarRequestMatchesFixture({
+      timeframe: "1Min",
+      start: "2026-08-26T13:30:00Z",
+      end: "2026-08-26T14:30:00Z",
+      limit: 60,
+    })).toBe(true)
+    expect(researchEvalBarRequestMatchesFixture({
+      timeframe: "1Day",
+      start: "2000-01-01T00:00:00Z",
+      end: "2100-01-01T00:00:00Z",
+      limit: 1_000,
+    })).toBe(false)
+    expect(researchEvalBarRequestMatchesFixture({
+      timeframe: "1Min",
+      start: "2026-08-26T14:30:00Z",
+      end: "2026-08-26T15:30:00Z",
+      limit: 60,
+    })).toBe(false)
+  })
+
   for (const scenario of researchBehaviorScenarios) {
     it(scenario.id, () => {
       const evaluation = evaluateResearchBehavior({
@@ -526,14 +554,19 @@ describe("research behavior evaluation", () => {
         const firstExaIndex = scenario.toolCalls.findIndex(
           ({ name }) => name === "exa_search",
         )
+        const withoutFirstExa = scenario.toolCalls.filter(
+          (_call, index) => index !== firstExaIndex,
+        )
+        const accountTimeIndex = withoutFirstExa.findIndex(
+          ({ name }) => name === "trusted_time",
+        )
         return evaluateResearchBehavior({
           ...scenario,
-          scenarioId: `${scenario.id}-research-before-preflight`,
+          scenarioId: `${scenario.id}-research-before-full-preflight`,
           toolCalls: [
+            ...withoutFirstExa.slice(0, accountTimeIndex + 1),
             scenario.toolCalls[firstExaIndex]!,
-            ...scenario.toolCalls.filter((_call, index) =>
-              index !== firstExaIndex
-            ),
+            ...withoutFirstExa.slice(accountTimeIndex + 1),
           ],
           expected: liveExpectation(scenario.id, scenario.expected),
         })
@@ -982,6 +1015,27 @@ describe("research behavior evaluation", () => {
       rawResponse: JSON.stringify(fabricatedWeakMetrics),
       expected: weak.expected,
     })
+    const contradictoryWeakAccount = JSON.parse(weak.rawResponse) as {
+      analysis: {
+        accountChecks: {
+          accountStatus: string
+          optionsTradingApproved: boolean
+          conflictingStrategyExposure: boolean
+        }
+        externalContext: Array<{ url: string }>
+      }
+    }
+    contradictoryWeakAccount.analysis.accountChecks.accountStatus = "INACTIVE"
+    contradictoryWeakAccount.analysis.accountChecks.optionsTradingApproved = false
+    contradictoryWeakAccount.analysis.accountChecks.conflictingStrategyExposure = true
+    contradictoryWeakAccount.analysis.externalContext[0]!.url =
+      "https://example.com/weak-evidence-no-action/1"
+    const weakAccountEvaluation = evaluateResearchBehavior({
+      ...weak,
+      scenarioId: "weak-fixture-account-fabricated",
+      rawResponse: JSON.stringify(contradictoryWeakAccount),
+      expected: liveExpectation(weak.id, weak.expected),
+    })
 
     expect(metricEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_MARKET_METRIC_MISMATCH",
@@ -1013,6 +1067,9 @@ describe("research behavior evaluation", () => {
     })
     expect(weakMetricEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_MARKET_METRIC_MISMATCH",
+    ])
+    expect(weakAccountEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
+      "EXPECTED_ACCOUNT_STATE_MISMATCH",
     ])
     expect(weakSnapshotEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_SNAPSHOT_TIME_MISMATCH",
