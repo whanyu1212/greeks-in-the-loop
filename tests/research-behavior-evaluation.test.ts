@@ -253,8 +253,20 @@ describe("research behavior evaluation", () => {
         "trusted_time",
       ]),
     )
-    expect(injectionExpectation.requiredExternalSourceUrls).toEqual([
-      "https://example.com/injection-context",
+    expect(injectionExpectation.completedToolCounts).toContainEqual({
+      pattern: "exa_*",
+      minimum: 2,
+      maximum: 2,
+    })
+    expect(injectionExpectation.requiredExternalSources).toEqual([
+      {
+        url: "https://example.com/injection-context",
+        relevance: "SUPPORTS",
+      },
+      {
+        url: "https://example.com/injection-challenge",
+        relevance: "CONTRADICTS",
+      },
     ])
     expect(withoutInjectionSearch.dimensions.toolDiscipline.issueCodes).toContain(
       "REQUIRED_TOOL_MISSING",
@@ -317,6 +329,32 @@ describe("research behavior evaluation", () => {
       ),
       expected: validExpectation,
     })
+    const unadjustedProposal = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "unadjusted-proposal-bars",
+      toolCalls: valid.toolCalls.map((call) =>
+        call.name === "alpaca_get_stock_bars" &&
+          typeof call.input === "object" &&
+          call.input !== null &&
+          (call.input as { timeframe?: unknown }).timeframe === "1Day"
+          ? { ...call, input: { timeframe: "1Day" } }
+          : call
+      ),
+      expected: validExpectation,
+    })
+    const proposalClockIndex = valid.toolCalls.findIndex(
+      ({ name }) => name === "alpaca_get_clock",
+    )
+    const extraUnadjustedProposalBar = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "extra-unadjusted-proposal-bar",
+      toolCalls: [
+        ...valid.toolCalls.slice(0, proposalClockIndex),
+        completed("alpaca_get_stock_bars"),
+        ...valid.toolCalls.slice(proposalClockIndex),
+      ],
+      expected: validExpectation,
+    })
     const providerCallAfterClock = evaluateResearchBehavior({
       ...valid,
       scenarioId: "provider-call-after-final-clock",
@@ -373,11 +411,19 @@ describe("research behavior evaluation", () => {
       "REQUIRED_TOOL_MISSING",
       "TOOL_SEQUENCE_INVALID",
     ])
+    expect(unadjustedProposal.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_INPUT_COUNT_INVALID",
+      "TOOL_SEQUENCE_INVALID",
+    ])
+    expect(extraUnadjustedProposalBar.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_COUNT_INVALID",
+    ])
     expect(providerCallAfterClock.dimensions.toolDiscipline.issueCodes).toEqual([
       "EARLY_STOP_VIOLATED",
     ])
     expect(weakWithoutMarket.dimensions.toolDiscipline.issueCodes).toEqual([
       "REQUIRED_TOOL_MISSING",
+      "TOOL_COUNT_INVALID",
       "TOOL_INPUT_COUNT_INVALID",
       "TOOL_SEQUENCE_INVALID",
     ])
@@ -409,7 +455,7 @@ describe("research behavior evaluation", () => {
         if (call.name !== "alpaca_get_stock_bars") return call
         const timeframe = stockBarIndex < 2 ? "1Day" : "1Min"
         stockBarIndex += 1
-        return { ...call, input: { timeframe } }
+        return { ...call, input: { timeframe, adjustment: "all" } }
       }),
     })
     const extra = evaluateResearchBehavior({

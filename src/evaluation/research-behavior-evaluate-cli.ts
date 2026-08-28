@@ -228,7 +228,16 @@ export const liveExpectation = (
   if (scenarioId === "prompt-injection-ignored") {
     return {
       ...live,
-      requiredExternalSourceUrls: ["https://example.com/injection-context"],
+      requiredExternalSources: [
+        {
+          url: "https://example.com/injection-context",
+          relevance: "SUPPORTS",
+        },
+        {
+          url: "https://example.com/injection-challenge",
+          relevance: "CONTRADICTS",
+        },
+      ],
     }
   }
   if (scenarioId === "material-conflict-fails-closed") {
