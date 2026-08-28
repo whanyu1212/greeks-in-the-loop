@@ -344,7 +344,7 @@ describe("research behavior evaluation", () => {
       ...candidate,
       scenarioId: "candidate-not-refreshed",
       toolCalls: candidate.toolCalls.filter(
-        ({ name }, index) => name !== "alpaca_get_option_chain" || index <= 4,
+        ({ name }, index) => name !== "alpaca_get_option_chain" || index <= 7,
       ),
     })
     const extraRefresh = evaluateResearchBehavior({
@@ -359,20 +359,18 @@ describe("research behavior evaluation", () => {
       ...candidate,
       scenarioId: "candidate-refresh-input-invalid",
       toolCalls: candidate.toolCalls.map((call, index) =>
-        index === 6 ? { ...call, input: { symbol: "SPY" } } : call
+        index === 9 ? { ...call, input: { symbol: "SPY" } } : call
       ),
     })
     const wrongRefreshOrder = evaluateResearchBehavior({
       ...candidate,
       scenarioId: "candidate-refresh-order-invalid",
       toolCalls: [
-        candidate.toolCalls[0]!,
-        candidate.toolCalls[1]!,
-        candidate.toolCalls[2]!,
-        candidate.toolCalls[4]!,
-        candidate.toolCalls[3]!,
-        candidate.toolCalls[5]!,
+        ...candidate.toolCalls.slice(0, 6),
+        candidate.toolCalls[7]!,
         candidate.toolCalls[6]!,
+        candidate.toolCalls[8]!,
+        candidate.toolCalls[9]!,
       ],
     })
     const withoutCandidateAccount = evaluateResearchBehavior({
@@ -483,6 +481,28 @@ describe("research behavior evaluation", () => {
     const valid = researchBehaviorScenarios[8]!
     const weak = researchBehaviorScenarios[9]!
     const validExpectation = liveExpectation(valid.id, valid.expected)
+    const orderingExaIndex = valid.toolCalls.findIndex(
+      ({ name }) => name === "exa_search",
+    )
+    const proposalWithoutOrderingExa = valid.toolCalls.filter(
+      (_call, index) => index !== orderingExaIndex,
+    )
+    const intradayBarIndex = proposalWithoutOrderingExa.findIndex((call) =>
+      call.name === "alpaca_get_stock_bars" &&
+      typeof call.input === "object" &&
+      call.input !== null &&
+      (call.input as { timeframe?: unknown }).timeframe === "1Min"
+    )
+    const proposalResearchInsideSnapshot = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "proposal-research-inside-snapshot",
+      toolCalls: [
+        ...proposalWithoutOrderingExa.slice(0, intradayBarIndex),
+        valid.toolCalls[orderingExaIndex]!,
+        ...proposalWithoutOrderingExa.slice(intradayBarIndex),
+      ],
+      expected: validExpectation,
+    })
     const proposalPreflightBypasses = [valid, researchBehaviorScenarios[4]!].map(
       (scenario) => {
         const firstExaIndex = scenario.toolCalls.findIndex(
@@ -706,12 +726,26 @@ describe("research behavior evaluation", () => {
     })
 
     expect(liveExpectation(irrelevant.id, irrelevant.expected)).toMatchObject({
-      requiredTools: ["alpaca_get_account", "trusted_time", "exa_*"],
+      requiredTools: [
+        "alpaca_get_account",
+        "trusted_time",
+        "alpaca_get_account_configurations",
+        "alpaca_get_all_positions",
+        "alpaca_get_orders",
+        "exa_*",
+      ],
       outcome: "NO_ACTION",
       reasonCode: "REQUIRED_EXA_EVIDENCE_UNAVAILABLE",
     })
     expect(liveExpectation(syndicated.id, syndicated.expected)).toMatchObject({
-      requiredTools: ["alpaca_get_account", "trusted_time", "exa_*"],
+      requiredTools: [
+        "alpaca_get_account",
+        "trusted_time",
+        "alpaca_get_account_configurations",
+        "alpaca_get_all_positions",
+        "alpaca_get_orders",
+        "exa_*",
+      ],
       requiredExternalSourceUrls: ["https://news.example/story"],
     })
     expect(
@@ -729,6 +763,9 @@ describe("research behavior evaluation", () => {
         },
       ],
     })
+    expect(
+      proposalResearchInsideSnapshot.dimensions.toolDiscipline.issueCodes,
+    ).toEqual(["EARLY_STOP_VIOLATED"])
     for (const bypass of proposalPreflightBypasses) {
       expect(bypass.dimensions.toolDiscipline.issueCodes).toEqual([
         "TOOL_SEQUENCE_INVALID",
@@ -1012,13 +1049,41 @@ describe("research behavior evaluation", () => {
 
   it("requires exactly one complete stale-snapshot rebuild", () => {
     const source = researchBehaviorScenarios[6]!
+    let optionContractCallIndex = 0
     const incomplete = evaluateResearchBehavior({
       ...source,
       scenarioId: "incomplete-snapshot-rebuild",
-      toolCalls: source.toolCalls.filter(
-        ({ name }, index) => name !== "alpaca_get_option_contracts" || index < 7,
+      toolCalls: source.toolCalls.filter(({ name }) =>
+        name !== "alpaca_get_option_contracts" || optionContractCallIndex++ === 0
       ),
     })
+    const staleExaIndex = source.toolCalls.findIndex(
+      ({ name }) => name === "exa_search",
+    )
+    const staleWithoutExa = source.toolCalls.filter(
+      (_call, index) => index !== staleExaIndex,
+    )
+    const staleConfigurationIndex = staleWithoutExa.findIndex(
+      ({ name }) => name === "alpaca_get_account_configurations",
+    )
+    const staleResearchBeforeAccountChecks = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "stale-research-before-account-checks",
+      toolCalls: [
+        ...staleWithoutExa.slice(0, staleConfigurationIndex),
+        source.toolCalls[staleExaIndex]!,
+        ...staleWithoutExa.slice(staleConfigurationIndex),
+      ],
+    })
+    const missingStaleAccountChecks = [
+      "alpaca_get_account_configurations",
+      "alpaca_get_all_positions",
+      "alpaca_get_orders",
+    ].map((missingTool) => evaluateResearchBehavior({
+      ...source,
+      scenarioId: `stale-rebuild-without-${missingTool}`,
+      toolCalls: source.toolCalls.filter(({ name }) => name !== missingTool),
+    }))
     const duplicateDailyBars = evaluateResearchBehavior({
       ...source,
       scenarioId: "duplicate-daily-bars",
@@ -1068,11 +1133,21 @@ describe("research behavior evaluation", () => {
     })
 
     expect(incomplete.dimensions.toolDiscipline.issueCodes).toEqual([
+      "EARLY_STOP_VIOLATED",
       "TOOL_ADJACENCY_INVALID",
       "TOOL_COUNT_INVALID",
       "TOOL_INPUT_COUNT_INVALID",
       "TOOL_SEQUENCE_INVALID",
     ])
+    expect(
+      staleResearchBeforeAccountChecks.dimensions.toolDiscipline.issueCodes,
+    ).toEqual(["TOOL_SEQUENCE_INVALID"])
+    for (const missingCheck of missingStaleAccountChecks) {
+      expect(missingCheck.dimensions.toolDiscipline.issueCodes).toEqual([
+        "REQUIRED_TOOL_MISSING",
+        "TOOL_SEQUENCE_INVALID",
+      ])
+    }
     expect(duplicateDailyBars.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_INPUT_COUNT_INVALID",
       "TOOL_SEQUENCE_INVALID",
