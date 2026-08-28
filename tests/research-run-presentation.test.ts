@@ -1,4 +1,12 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -426,5 +434,23 @@ describe("research run presentation", () => {
     await writeResearchRunArtifacts({ ...options, overwrite: true })
     expect(statSync(first.jsonPath).mode & 0o777).toBe(0o600)
     expect(statSync(first.markdownPath).mode & 0o777).toBe(0o600)
+  })
+
+  it("removes a newly created JSON artifact when Markdown creation fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "research-presentation-test-"))
+    temporaryDirectories.push(root)
+    const options = { run: noActionRun(), root }
+    const directory = join(root, "2026-08-27")
+    const baseName = "cycle-3-cycle-presentation-1"
+    const jsonPath = join(directory, `${baseName}.json`)
+    const markdownPath = join(directory, `${baseName}.md`)
+    mkdirSync(markdownPath, { recursive: true })
+
+    await expect(writeResearchRunArtifacts(options)).rejects.toThrow()
+    expect(existsSync(jsonPath)).toBe(false)
+
+    rmSync(markdownPath, { recursive: true })
+    const retried = await writeResearchRunArtifacts(options)
+    expect(retried).toMatchObject({ jsonPath, markdownPath })
   })
 })

@@ -1,4 +1,4 @@
-import { open } from "node:fs/promises"
+import { open, unlink } from "node:fs/promises"
 
 import {
   evaluateResearchRunV1,
@@ -415,12 +415,19 @@ export async function writeResearchRunArtifacts({
     overwrite,
   })
   const markdownPath = `${jsonPath.slice(0, -".json".length)}.md`
-  const handle = await open(markdownPath, overwrite ? "w" : "wx", 0o600)
   try {
-    await handle.chmod(0o600)
-    await handle.writeFile(presentation.markdown, "utf8")
-  } finally {
-    await handle.close()
+    const handle = await open(markdownPath, overwrite ? "w" : "wx", 0o600)
+    try {
+      await handle.chmod(0o600)
+      await handle.writeFile(presentation.markdown, "utf8")
+    } finally {
+      await handle.close()
+    }
+  } catch (error) {
+    if (!overwrite) {
+      await Promise.allSettled([unlink(markdownPath), unlink(jsonPath)])
+    }
+    throw error
   }
   return { jsonPath, markdownPath, presentation }
 }
