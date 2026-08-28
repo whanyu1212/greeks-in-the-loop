@@ -23,7 +23,6 @@ import {
 import {
   NOOP_TERMINAL_STAGE_REPORTER,
   type TerminalStageReporter,
-  type TerminalStageValue,
 } from "../observability/terminal-stage-reporter.js"
 import {
   newYorkLocalTime,
@@ -38,6 +37,10 @@ import {
   type ResearchCycleOutcomeV1,
   type ResearchCycleTerminalRecordV1,
 } from "./research-cycle-outcome-v1.js"
+import {
+  createResearchCycleStageReports,
+  type ResearchCycleStageReports,
+} from "./research-cycle-stage-reporting.js"
 import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
 
 export const PROPOSAL_QUOTE_SNAPSHOT_REF =
@@ -218,8 +221,8 @@ const recordOutcome = async (
   signal: AbortSignal,
   researchInvocation: ResearchInvocationV1,
   metadata: TerminalRecordMetadata = {},
-  trace: ResearchCycleTrace = NOOP_RESEARCH_CYCLE_TRACE,
-  stageReporter: TerminalStageReporter = NOOP_TERMINAL_STAGE_REPORTER,
+  trace: ResearchCycleTrace,
+  stages: ResearchCycleStageReports,
 ): Promise<ProcessedResearchCycle> => {
   signal.throwIfAborted()
   const boundedOutcome = boundTerminalOutcome(outcome)
@@ -253,37 +256,8 @@ const recordOutcome = async (
     record = { ...commonRecord, outcome: boundedOutcome }
   }
   await trace.run("ledger.cycle.terminalize", () => sink.record(record, signal))
-  stageReporter.report("ledger.commit", "COMPLETED", {
-    outcomeStatus: boundedOutcome.status,
-    evidenceSnapshotCount: commonRecord.evidenceSnapshots.length,
-    shadowRiskRecorded: metadata.shadowRisk !== undefined,
-  })
-  const terminalDetails: Record<string, TerminalStageValue> = {
-    outcomeStatus: boundedOutcome.status,
-  }
-  if (boundedOutcome.status === "DECISION_REJECTED") {
-    terminalDetails.issues = boundedOutcome.issues.map(
-      ({ code, path }) => `${code}:${path.join(".")}`,
-    )
-  } else if (boundedOutcome.status === "INTENT_DERIVATION_REJECTED") {
-    terminalDetails.reasonCodes = boundedOutcome.reasons
-  } else if (boundedOutcome.status === "VALIDATED_NO_ACTION") {
-    terminalDetails.reasonCodes = boundedOutcome.decision.reasonCodes
-  } else if (boundedOutcome.status === "PRELIMINARY_RESEARCH_RETAINED") {
-    terminalDetails.direction = boundedOutcome.research.direction
-  } else {
-    terminalDetails.direction = boundedOutcome.decision.direction
-    terminalDetails.riskOutcome = metadata.shadowRisk!.decision.outcome
-  }
-  stageReporter.report(
-    "cycle.outcome",
-    boundedOutcome.status === "INTENT_DERIVED" ||
-      boundedOutcome.status === "VALIDATED_NO_ACTION" ||
-      boundedOutcome.status === "PRELIMINARY_RESEARCH_RETAINED"
-      ? "COMPLETED"
-      : "REJECTED",
-    terminalDetails,
-  )
+  stages.ledgerCommitted(record)
+  stages.cycleOutcomeRecorded(record)
   return {
     outcome: boundedOutcome,
     report: `Research cycle outcome: ${boundedOutcome.status}${
@@ -325,6 +299,7 @@ export async function processResearchCycle({
   stageReporter = NOOP_TERMINAL_STAGE_REPORTER,
 }: ProcessResearchCycleOptions): Promise<ProcessedResearchCycle> {
   signal.throwIfAborted()
+  const stages = createResearchCycleStageReports(stageReporter)
   const parsed = await trace.run("research.report.parse", () => {
     if (Buffer.byteLength(rawResponse, "utf8") > MAX_RESEARCH_RESPONSE_BYTES) {
       return {
@@ -360,9 +335,7 @@ export async function processResearchCycle({
     return { success: true as const, report: report.data }
   })
   if (!parsed.success) {
-    stageReporter.report("research.report", "REJECTED", {
-      issues: parsed.issues.map(({ code, path }) => `${code}:${path.join(".")}`),
-    })
+    stages.researchReportRejected(parsed.issues)
     return recordOutcome(
       {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
@@ -374,7 +347,7 @@ export async function processResearchCycle({
       researchInvocation,
       {},
       trace,
-      stageReporter,
+      stages,
     )
   }
 
@@ -391,18 +364,9 @@ export async function processResearchCycle({
       researchInvocation,
       { ...metadata, researchReport },
       trace,
-      stageReporter,
+      stages,
     )
-  stageReporter.report("research.report", "COMPLETED", {
-    reportVersion: researchReport.reportVersion,
-    strategyVersion: result.strategyVersion,
-    resultOutcome: result.outcome,
-    externalSourceCount: researchReport.analysis.externalContext.length,
-    hasCandidate:
-      result.outcome === "PROPOSE_TRADE" ||
-      (result.outcome === "PRELIMINARY_RESEARCH" &&
-        result.candidate !== undefined),
-  })
+  stages.researchReportCompleted(researchReport)
   if (result.strategyVersion !== STRATEGY_VERSION) {
     return recordReportOutcome({
       outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
@@ -492,12 +456,7 @@ export async function processResearchCycle({
         },
       )
     }
-    stageReporter.report("preliminary.validate", "COMPLETED", {
-      direction: result.direction,
-      targetSessionDate: result.targetSessionDate,
-      evidenceCount: result.evidence.length,
-      hasCandidate: result.candidate !== undefined,
-    })
+    stages.preliminaryValidated(result)
     return recordReportOutcome(
       {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
@@ -525,10 +484,7 @@ export async function processResearchCycle({
       )
     }
 
-    stageReporter.report("decision.validate", "COMPLETED", {
-      outcome: validation.data.outcome,
-      reasonCodes: result.reasonCodes,
-    })
+    stages.decisionValidated(validation.data)
 
     return recordReportOutcome(
       {
@@ -611,9 +567,7 @@ export async function processResearchCycle({
   signal.throwIfAborted()
 
   if (!quoteConfirmation.success) {
-    stageReporter.report("quotes.confirm", "REJECTED", {
-      reasonCodes: quoteConfirmation.reasons,
-    })
+    stages.quotesRejected(quoteConfirmation.reasons)
     return recordReportOutcome(
       {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
@@ -623,13 +577,7 @@ export async function processResearchCycle({
     )
   }
 
-  stageReporter.report("quotes.confirm", "COMPLETED", {
-    longContractSymbol: quoteConfirmation.snapshot.longQuote.contractSymbol,
-    shortContractSymbol: quoteConfirmation.snapshot.shortQuote.contractSymbol,
-    source: quoteConfirmation.snapshot.snapshotMetadata.source,
-    retrievedAt: quoteConfirmation.snapshot.snapshotMetadata.retrievedAt,
-    freshUntil: quoteConfirmation.snapshot.snapshotMetadata.freshUntil,
-  })
+  stages.quotesConfirmed(quoteConfirmation.snapshot)
 
   const evidenceSnapshots: ResearchCycleTerminalRecordV1["evidenceSnapshots"] = [
     {
@@ -725,13 +673,7 @@ export async function processResearchCycle({
     )
   }
   const proposedDecision = validation.data
-  stageReporter.report("decision.validate", "COMPLETED", {
-    outcome: proposedDecision.outcome,
-    direction: proposedDecision.direction,
-    structure: proposedDecision.candidate.structure,
-    expiration: proposedDecision.candidate.expiration,
-    evidenceCount: proposedDecision.evidence.length,
-  })
+  stages.decisionValidated(proposedDecision)
 
   const derivation = await trace.run("research.intent.derive", () =>
     deriveIntent(proposedDecision, {
@@ -742,9 +684,7 @@ export async function processResearchCycle({
     }),
   )
   if (!derivation.success) {
-    stageReporter.report("intent.derive", "REJECTED", {
-      reasonCodes: derivation.reasons,
-    })
+    stages.intentRejected(derivation.reasons)
     return recordReportOutcome(
       {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
@@ -758,14 +698,7 @@ export async function processResearchCycle({
     )
   }
 
-  stageReporter.report("intent.derive", "COMPLETED", {
-    direction: derivation.intent.direction,
-    structure: derivation.intent.structure,
-    expiration: derivation.intent.expiration,
-    entryLimitCentsPerShare: derivation.intent.entryLimitCentsPerShare,
-    maxLossCentsPerContract: derivation.intent.maxLossCentsPerContract,
-    maxProfitCentsPerContract: derivation.intent.maxProfitCentsPerContract,
-  })
+  stages.intentDerived(derivation.intent)
 
   if (
     proposalEligibility.sessionDate === undefined ||
@@ -799,27 +732,7 @@ export async function processResearchCycle({
     }),
   )
 
-  const riskDecision = shadowRisk.decision
-  const riskReasonCodes =
-    riskDecision.stage === "STATE_CAPTURE_FAILED"
-      ? riskDecision.captureReasonCodes
-      : riskDecision.stage === "INTENT_REFRESH_FAILED"
-        ? riskDecision.derivationReasonCodes
-        : riskDecision.evaluation.outcome === "REJECTED"
-          ? riskDecision.evaluation.reasonCodes
-          : []
-  stageReporter.report(
-    "risk.evaluate",
-    riskDecision.outcome === "APPROVED" ? "COMPLETED" : "REJECTED",
-    {
-      evaluationStage: riskDecision.stage,
-      outcome: riskDecision.outcome,
-      reasonCodes: riskReasonCodes,
-      breakerTransitions: shadowRisk.breakerTransitions.map(
-        ({ breaker }) => breaker,
-      ),
-    },
-  )
+  stages.riskEvaluated(shadowRisk)
 
   return recordReportOutcome(
     {
