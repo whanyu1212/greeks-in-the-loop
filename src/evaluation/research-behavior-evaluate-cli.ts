@@ -205,12 +205,22 @@ export const liveExpectation = (
   if (scenarioId === "valid-adversarial-proposal") {
     // Models choose bounded source identifiers, but retained fixture URLs are
     // stable and prove that both the supporting and challenging calls survived.
-    const { requiredExternalSourceIds: _fixtureSourceIds, ...live } = expected
+    const {
+      requiredExternalSourceIds: _fixtureSourceIds,
+      requiredExternalSourceRelevances: _fixtureRelevances,
+      ...live
+    } = expected
     return {
       ...live,
-      requiredExternalSourceUrls: [
-        "https://example.com/valid-adversarial-proposal/1",
-        "https://example.com/valid-adversarial-proposal/2",
+      requiredExternalSources: [
+        {
+          url: "https://example.com/valid-adversarial-proposal/1",
+          relevance: "SUPPORTS",
+        },
+        {
+          url: "https://example.com/valid-adversarial-proposal/2",
+          relevance: "CONTRADICTS",
+        },
       ],
     }
   }
@@ -222,11 +232,21 @@ export const liveExpectation = (
     }
   }
   if (scenarioId === "material-conflict-fails-closed") {
+    const {
+      requiredExternalSourceRelevances: _fixtureRelevances,
+      ...materialConflict
+    } = live
     return {
-      ...live,
-      requiredExternalSourceUrls: [
-        "https://example.com/material-conflict-fails-closed/1",
-        "https://example.com/material-conflict-fails-closed/2",
+      ...materialConflict,
+      requiredExternalSources: [
+        {
+          url: "https://example.com/material-conflict-fails-closed/1",
+          relevance: "SUPPORTS",
+        },
+        {
+          url: "https://example.com/material-conflict-fails-closed/2",
+          relevance: "CONTRADICTS",
+        },
       ],
     }
   }

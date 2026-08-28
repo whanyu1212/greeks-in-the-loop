@@ -118,6 +118,10 @@ export type ResearchBehaviorExpectation = Readonly<{
   requireDirectionalExa?: boolean
   requiredExternalSourceIds?: readonly string[]
   requiredExternalSourceUrls?: readonly string[]
+  requiredExternalSources?: readonly Readonly<{
+    url: string
+    relevance: "SUPPORTS" | "CONTRADICTS" | "NEUTRAL"
+  }>[]
   requiredExternalSourceRelevances?: readonly (
     "SUPPORTS" | "CONTRADICTS" | "NEUTRAL"
   )[]
@@ -393,13 +397,33 @@ export function evaluateResearchBehavior({
         evidenceIssues.push("EXPECTED_RELEVANCE_MISSING")
       }
     }
-    const canonicalUrls = externalSources.flatMap((source) =>
-      source.provider === "EXA" ? [canonicalExternalUrl(source.url)] : [],
+    const canonicalExternalSources = externalSources.flatMap((source) =>
+      source.provider === "EXA"
+        ? [{ ...source, canonicalUrl: canonicalExternalUrl(source.url) }]
+        : [],
+    )
+    const canonicalUrls = canonicalExternalSources.map(
+      ({ canonicalUrl }) => canonicalUrl,
     )
     const canonicalUrlSet = new Set(canonicalUrls)
     for (const sourceUrl of expected.requiredExternalSourceUrls ?? []) {
       if (!canonicalUrlSet.has(canonicalExternalUrl(sourceUrl))) {
         evidenceIssues.push("EXPECTED_SOURCE_MISSING")
+      }
+    }
+    for (const required of expected.requiredExternalSources ?? []) {
+      const matchingSources = canonicalExternalSources.filter(
+        ({ canonicalUrl }) =>
+          canonicalUrl === canonicalExternalUrl(required.url),
+      )
+      if (matchingSources.length === 0) {
+        evidenceIssues.push("EXPECTED_SOURCE_MISSING")
+      } else if (
+        !matchingSources.some(({ relevance }) =>
+          relevance === required.relevance
+        )
+      ) {
+        evidenceIssues.push("EXPECTED_RELEVANCE_MISSING")
       }
     }
     if (new Set(canonicalUrls).size !== canonicalUrls.length) {

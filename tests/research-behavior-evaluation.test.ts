@@ -288,15 +288,26 @@ describe("research behavior evaluation", () => {
     const mislabeledMaterialReport = JSON.parse(materialConflict.rawResponse) as {
       analysis: { externalContext: Array<Record<string, unknown>> }
     }
-    mislabeledMaterialReport.analysis.externalContext =
-      mislabeledMaterialReport.analysis.externalContext.map((source) => ({
+    const originalMaterialSources =
+      mislabeledMaterialReport.analysis.externalContext
+    mislabeledMaterialReport.analysis.externalContext = [
+      ...originalMaterialSources.map((source, index) => ({
         ...source,
-        relevance: "SUPPORTS",
-      }))
+        sourceId: `fixture-${index + 1}`,
+        url: `https://example.com/material-conflict-fails-closed/${index + 1}`,
+        relevance: "NEUTRAL",
+      })),
+      ...originalMaterialSources.map((source, index) => ({
+        ...source,
+        sourceId: `invented-${index + 1}`,
+        url: `https://invented.example/${index + 1}`,
+      })),
+    ]
     const mislabeledMaterialConflict = evaluateResearchBehavior({
       ...materialConflict,
       scenarioId: "material-conflict-relevance-missing",
       rawResponse: JSON.stringify(mislabeledMaterialReport),
+      expected: liveExpectation(materialConflict.id, materialConflict.expected),
     })
     const incompleteProposal = evaluateResearchBehavior({
       ...valid,
@@ -334,11 +345,27 @@ describe("research behavior evaluation", () => {
       liveExpectation(materialConflict.id, materialConflict.expected),
     ).toMatchObject({
       completedToolCounts: [{ pattern: "exa_*", minimum: 2, maximum: 2 }],
-      requiredExternalSourceUrls: [
-        "https://example.com/material-conflict-fails-closed/1",
-        "https://example.com/material-conflict-fails-closed/2",
+      requiredExternalSources: [
+        {
+          url: "https://example.com/material-conflict-fails-closed/1",
+          relevance: "SUPPORTS",
+        },
+        {
+          url: "https://example.com/material-conflict-fails-closed/2",
+          relevance: "CONTRADICTS",
+        },
       ],
     })
+    expect(validExpectation.requiredExternalSources).toEqual([
+      {
+        url: "https://example.com/valid-adversarial-proposal/1",
+        relevance: "SUPPORTS",
+      },
+      {
+        url: "https://example.com/valid-adversarial-proposal/2",
+        relevance: "CONTRADICTS",
+      },
+    ])
     expect(
       mislabeledMaterialConflict.dimensions.evidenceDiscipline.issueCodes,
     ).toEqual(["EXPECTED_RELEVANCE_MISSING"])
