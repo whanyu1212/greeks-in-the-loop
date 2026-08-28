@@ -127,8 +127,10 @@ The standard daemon and a standard `--once` invocation conflict when they use
 the same ledger. Research-anytime and shadow-anytime use separate ledgers by
 default, so they do not conflict with production; two runs targeting the same
 explicit anytime ledger do conflict. Read-only commands such as
-`research:run`, `research:evaluate`, and `risk:report` do not acquire worker
-ownership and may inspect the WAL-backed ledger concurrently.
+`research:evaluate` and `risk:report` do not acquire worker ownership and may
+inspect the WAL-backed ledger concurrently. `research:run` remains unlocked but
+may migrate the ledger before projecting or exporting a run, so do not invoke it
+concurrently with the worker.
 
 This is a single-host lock scoped to the canonical ledger, not a distributed
 lease. Deploy one production ledger per Alpaca account, complete shutdown before
