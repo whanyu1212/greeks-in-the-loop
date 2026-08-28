@@ -1,10 +1,12 @@
-import { open, unlink } from "node:fs/promises"
+import { mkdir, mkdtemp, open, rename, rm, unlink } from "node:fs/promises"
+import { basename, dirname, join, relative } from "node:path"
 
 import {
   evaluateResearchRunV1,
   type ResearchRunEvaluationV1,
 } from "../evaluation/research-run-evaluation-v1.js"
 import {
+  DEFAULT_RESEARCH_ARTIFACT_ROOT,
   writeResearchRunArtifact,
   type ResearchRunV1,
 } from "./research-artifact.js"
@@ -46,6 +48,7 @@ export type ResearchRunArtifactBundle = Readonly<{
 
 const markdownText = (value: string) =>
   value
+    .replace(/[\u0000-\u001F\u007F-\u009F]/gu, " ")
     .replace(/\s+/gu, " ")
     .trim()
     .replace(/([\\`*_[\]<>|])/gu, "\\$1")
@@ -270,9 +273,14 @@ export function buildResearchRunPresentation(
   }
 
   if (run.outcome.status === "INTENT_DERIVED") {
-    const intent = run.outcome.intent
+    const evaluatedRisk = run.shadowRisk?.decision.stage === "EVALUATED"
+      ? run.shadowRisk.decision
+      : undefined
+    const intent = evaluatedRisk?.evaluatedIntent ?? run.outcome.intent
     lines.push("## Derived Intent", "")
     table(lines, [
+      ["Basis", evaluatedRisk === undefined ? "INITIAL_DERIVATION" : "SHADOW_RISK_REFRESH"],
+      ["Quote snapshot", intent.quoteSnapshotRef],
       ["Evaluated", intent.evaluatedAt],
       ["Long quote", `${dollarsFromCents(intent.longQuote.bidCentsPerShare)} bid / ${dollarsFromCents(intent.longQuote.askCentsPerShare)} ask`],
       ["Short quote", `${dollarsFromCents(intent.shortQuote.bidCentsPerShare)} bid / ${dollarsFromCents(intent.shortQuote.askCentsPerShare)} ask`],
@@ -402,36 +410,134 @@ export function buildResearchRunPresentation(
   }
 }
 
+const writeMarkdown = async (
+  path: string,
+  markdown: string,
+  overwrite: boolean,
+) => {
+  const handle = await open(path, overwrite ? "w" : "wx", 0o600)
+  try {
+    await handle.chmod(0o600)
+    await handle.writeFile(markdown, "utf8")
+    await handle.close()
+  } catch (error) {
+    await handle.close().catch(() => undefined)
+    if (!overwrite) {
+      await unlink(path).catch(() => undefined)
+    }
+    throw error
+  }
+}
+
+const moveExistingToBackup = async (path: string, backupPath: string) => {
+  try {
+    await rename(path, backupPath)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false
+    throw error
+  }
+}
+
+const replaceResearchRunArtifacts = async (
+  run: ResearchRunV1,
+  root: string,
+  presentation: ResearchRunPresentation,
+): Promise<ResearchRunArtifactBundle> => {
+  await mkdir(root, { recursive: true })
+  const stagingRoot = await mkdtemp(join(root, ".research-artifacts-"))
+  let removeStaging = true
+  try {
+    const stagedJsonPath = await writeResearchRunArtifact({
+      run,
+      root: stagingRoot,
+    })
+    const stagedMarkdownPath = `${stagedJsonPath.slice(0, -".json".length)}.md`
+    await writeMarkdown(stagedMarkdownPath, presentation.markdown, false)
+
+    const jsonPath = join(root, relative(stagingRoot, stagedJsonPath))
+    const markdownPath = join(root, relative(stagingRoot, stagedMarkdownPath))
+    await mkdir(dirname(jsonPath), { recursive: true })
+    const jsonBackupPath = join(stagingRoot, `previous-${basename(jsonPath)}`)
+    const markdownBackupPath = join(
+      stagingRoot,
+      `previous-${basename(markdownPath)}`,
+    )
+    let jsonBackedUp = false
+    let markdownBackedUp = false
+    let jsonInstalled = false
+    let markdownInstalled = false
+    try {
+      jsonBackedUp = await moveExistingToBackup(jsonPath, jsonBackupPath)
+      markdownBackedUp = await moveExistingToBackup(
+        markdownPath,
+        markdownBackupPath,
+      )
+      await rename(stagedJsonPath, jsonPath)
+      jsonInstalled = true
+      await rename(stagedMarkdownPath, markdownPath)
+      markdownInstalled = true
+    } catch (error) {
+      const rollbackErrors: unknown[] = []
+      const attemptRollback = async (operation: () => Promise<unknown>) => {
+        try {
+          await operation()
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError)
+        }
+      }
+      if (markdownInstalled) {
+        await attemptRollback(() =>
+          rm(markdownPath, { recursive: true, force: true }),
+        )
+      }
+      if (jsonInstalled) {
+        await attemptRollback(() =>
+          rm(jsonPath, { recursive: true, force: true }),
+        )
+      }
+      if (markdownBackedUp) {
+        await attemptRollback(() => rename(markdownBackupPath, markdownPath))
+      }
+      if (jsonBackedUp) {
+        await attemptRollback(() => rename(jsonBackupPath, jsonPath))
+      }
+      if (rollbackErrors.length > 0) {
+        removeStaging = false
+        throw new AggregateError(
+          [error, ...rollbackErrors],
+          `Research artifact replacement failed; recovery files remain at ${stagingRoot}`,
+        )
+      }
+      throw error
+    }
+    return { jsonPath, markdownPath, presentation }
+  } finally {
+    if (removeStaging) {
+      await rm(stagingRoot, { recursive: true, force: true })
+    }
+  }
+}
+
 /** Writes the canonical JSON and its derived Markdown operator brief. */
 export async function writeResearchRunArtifacts({
   run,
-  root,
+  root = DEFAULT_RESEARCH_ARTIFACT_ROOT,
   overwrite = false,
   presentation = buildResearchRunPresentation(run),
 }: WriteResearchRunArtifactsOptions): Promise<ResearchRunArtifactBundle> {
+  if (overwrite) {
+    return replaceResearchRunArtifacts(run, root, presentation)
+  }
   const jsonPath = await writeResearchRunArtifact({
     run,
-    ...(root === undefined ? {} : { root }),
-    overwrite,
+    root,
   })
   const markdownPath = `${jsonPath.slice(0, -".json".length)}.md`
-  let markdownCreated = false
   try {
-    const handle = await open(markdownPath, overwrite ? "w" : "wx", 0o600)
-    markdownCreated = !overwrite
-    try {
-      await handle.chmod(0o600)
-      await handle.writeFile(presentation.markdown, "utf8")
-    } finally {
-      await handle.close()
-    }
+    await writeMarkdown(markdownPath, presentation.markdown, false)
   } catch (error) {
-    if (!overwrite) {
-      await Promise.allSettled([
-        unlink(jsonPath),
-        ...(markdownCreated ? [unlink(markdownPath)] : []),
-      ])
-    }
+    await unlink(jsonPath).catch(() => undefined)
     throw error
   }
   return { jsonPath, markdownPath, presentation }

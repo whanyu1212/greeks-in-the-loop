@@ -97,7 +97,7 @@ const noActionRun = (): ResearchRunV1 => {
         ],
         supportingFactors: ["Close remained above the 50-session average."],
         contradictingFactors: [
-          "<script>alert(`unsafe`)</script> | Signal remained mixed.",
+          "<script>alert(`unsafe`)</script> | \u001b]0;owned\u0007\u009b31m Signal remained mixed.",
         ],
         conflicts: [],
       },
@@ -277,6 +277,9 @@ describe("research run presentation", () => {
     expect(first.markdown).toContain("Inflation \\[context\\]")
     expect(first.markdown).not.toContain("<script>")
     expect(first.markdown).toContain("\\<script\\>")
+    expect(first.markdown).not.toContain("\u001b")
+    expect(first.markdown).not.toContain("\u0007")
+    expect(first.markdown).not.toContain("\u009b")
     expect(first.markdown).not.toContain("session-presentation-1")
   })
 
@@ -350,6 +353,21 @@ describe("research run presentation", () => {
       evaluationVersion: "1.0.0",
       ruleVersion: "1.0.0",
     } as const
+    const riskEvaluatedIntent = {
+      ...derivedIntent,
+      quoteSnapshotRef: "alpaca-shadow-risk-quotes-v1",
+      evaluatedAt: "2026-08-27T15:37:21.000Z",
+      longQuote: {
+        ...derivedIntent.longQuote,
+        bidCentsPerShare: 230,
+        askCentsPerShare: 233,
+      },
+      entryLimitCentsPerShare: 111,
+      maxLossCentsPerContract: 11_100,
+      maxProfitCentsPerContract: 38_900,
+      stopLossMarkHalfCentsPerShare: 111,
+      profitTargetMarkHalfCentsPerShare: 611,
+    }
     const decision = variant === "STATE_CAPTURE_FAILED"
       ? {
           ...common,
@@ -373,7 +391,7 @@ describe("research run presentation", () => {
             outcome: variant === "EVALUATED_APPROVED"
               ? "APPROVED" as const
               : "REJECTED" as const,
-            evaluatedIntent: derivedIntent,
+            evaluatedIntent: riskEvaluatedIntent,
             stateProvenance,
             evaluation: variant === "EVALUATED_APPROVED"
               ? {
@@ -406,6 +424,17 @@ describe("research run presentation", () => {
     if (reason !== undefined) {
       expect(presentation.markdown).toContain(reason.replaceAll("_", "\\_"))
     }
+    if (variant.startsWith("EVALUATED")) {
+      expect(presentation.markdown).toContain(
+        "| Basis | SHADOW\\_RISK\\_REFRESH |",
+      )
+      expect(presentation.markdown).toContain(
+        "| Maximum loss | $111.00 per contract |",
+      )
+      expect(presentation.markdown).not.toContain(
+        "| Maximum loss | $101.00 per contract |",
+      )
+    }
   })
 
   it("writes private paired artifacts and enforces overwrite behavior", async () => {
@@ -429,6 +458,22 @@ describe("research run presentation", () => {
     expect(statSync(first.jsonPath).mode & 0o777).toBe(0o600)
     expect(statSync(first.markdownPath).mode & 0o777).toBe(0o600)
     await expect(writeResearchRunArtifacts(options)).rejects.toThrow()
+
+    const originalJson = readFileSync(first.jsonPath, "utf8")
+    const originalMarkdown = readFileSync(first.markdownPath, "utf8")
+    const invalidPresentation = {
+      ...first.presentation,
+      markdown: 1 as unknown as string,
+    }
+    await expect(
+      writeResearchRunArtifacts({
+        ...options,
+        overwrite: true,
+        presentation: invalidPresentation,
+      }),
+    ).rejects.toThrow()
+    expect(readFileSync(first.jsonPath, "utf8")).toBe(originalJson)
+    expect(readFileSync(first.markdownPath, "utf8")).toBe(originalMarkdown)
 
     chmodSync(first.jsonPath, 0o644)
     chmodSync(first.markdownPath, 0o644)
