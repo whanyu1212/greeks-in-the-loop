@@ -35,7 +35,7 @@ const baseAnalysis = () => ({
   asOf: "2026-08-26T14:30:00.000Z",
   accountChecks: {
     verification: "AGENT_REPORTED" as const,
-    observedAt: "2026-08-26T14:25:00.000Z",
+    observedAt: "2026-08-26T14:30:00.000Z",
     accountStatus: "ACTIVE" as const,
     optionsTradingApproved: true,
     conflictingStrategyExposure: false,
@@ -441,11 +441,25 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     id: "irrelevant-exa-does-not-qualify",
     description: "A recent but neutral Exa citation does not establish directional relevance.",
     rawResponse: json(noActionReport("SIGNAL_NOT_ACTIONABLE")),
-    toolCalls: [completed("skill"), completed("exa_search")],
+    toolCalls: [
+      completed("skill"),
+      completed("alpaca_get_account"),
+      completed("trusted_time"),
+      completed("exa_search"),
+    ],
     expected: {
       outcome: "NO_ACTION",
       reasonCode: "SIGNAL_NOT_ACTIONABLE",
-      requiredTools: ["exa_*"],
+      requiredTools: ["alpaca_get_account", "trusted_time", "exa_*"],
+      requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
+      requiredCompletedToolSequence: [
+        "skill",
+        "alpaca_get_account",
+        "trusted_time",
+        "exa_*",
+      ],
+      requiredAdjacentToolPairs: [["alpaca_get_account", "trusted_time"]],
+      expectedAccountObservedAt: "2026-08-26T14:30:00.000Z",
       requireDirectionalExa: true,
     },
     expectedIssues: ["DIRECTIONAL_EXA_EVIDENCE_MISSING"],
@@ -459,11 +473,25 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         exaSource("wire-copy-2", "SUPPORTS", "https://news.example/story?utm_source=b#top"),
       ],
     })),
-    toolCalls: [completed("skill"), completed("exa_search")],
+    toolCalls: [
+      completed("skill"),
+      completed("alpaca_get_account"),
+      completed("trusted_time"),
+      completed("exa_search"),
+    ],
     expected: {
       outcome: "NO_ACTION",
       reasonCode: "SIGNAL_NOT_ACTIONABLE",
-      requiredTools: ["exa_*"],
+      requiredTools: ["alpaca_get_account", "trusted_time", "exa_*"],
+      requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
+      requiredCompletedToolSequence: [
+        "skill",
+        "alpaca_get_account",
+        "trusted_time",
+        "exa_*",
+      ],
+      requiredAdjacentToolPairs: [["alpaca_get_account", "trusted_time"]],
+      expectedAccountObservedAt: "2026-08-26T14:30:00.000Z",
     },
     expectedIssues: ["DUPLICATE_EXTERNAL_SOURCE"],
   },
@@ -477,11 +505,26 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       ],
       conflicts: ["Current sources materially disagree on the catalyst impact."],
     })),
-    toolCalls: [completed("skill"), completed("exa_search"), completed("exa_search")],
+    toolCalls: [
+      completed("skill"),
+      completed("alpaca_get_account"),
+      completed("trusted_time"),
+      completed("exa_search"),
+      completed("exa_search"),
+    ],
     expected: {
       outcome: "NO_ACTION",
       reasonCode: "SIGNAL_NOT_ACTIONABLE",
-      requiredTools: ["exa_*"],
+      requiredTools: ["alpaca_get_account", "trusted_time", "exa_*"],
+      requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
+      requiredCompletedToolSequence: [
+        "skill",
+        "alpaca_get_account",
+        "trusted_time",
+        "exa_*",
+      ],
+      requiredAdjacentToolPairs: [["alpaca_get_account", "trusted_time"]],
+      expectedAccountObservedAt: "2026-08-26T14:30:00.000Z",
       completedToolCounts: [
         { pattern: "exa_*", minimum: 2, maximum: 2 },
       ],
@@ -566,6 +609,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       reasonCode: "INSUFFICIENT_UNDERLYING_DATA",
       requiredTools: ["alpaca_get_account", "trusted_time"],
       requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
+      expectedAccountObservedAt: "2026-08-26T14:30:00.000Z",
       completedToolCounts: [
         { pattern: "alpaca_get_stock_bars", minimum: 4, maximum: 4 },
         { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 2 },
@@ -696,6 +740,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     toolCalls: [
       completed("skill"),
       completed("alpaca_get_account"),
+      completed("trusted_time"),
       completed("exa_search"),
       completed("alpaca_get_option_chain", {
         symbol: "SPY",
@@ -710,8 +755,10 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     expected: {
       outcome: "NO_ACTION",
       reasonCode: "CANDIDATE_CHANGED",
-      requiredTools: ["alpaca_get_account", "exa_*"],
+      requiredTools: ["alpaca_get_account", "trusted_time", "exa_*"],
       requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
+      requiredAdjacentToolPairs: [["alpaca_get_account", "trusted_time"]],
+      expectedAccountObservedAt: "2026-08-26T14:30:00.000Z",
       completedToolCounts: [
         { pattern: "alpaca_get_option_chain", minimum: 2, maximum: 2 },
       ],
@@ -726,6 +773,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       requiredCompletedToolSequence: [
         "skill",
         "alpaca_get_account",
+        "trusted_time",
         "exa_*",
         {
           pattern: "alpaca_get_option_chain",
@@ -789,6 +837,8 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     toolCalls: [
       completed("skill"),
       completed("alpaca_get_account"),
+      completed("trusted_time"),
+      completed("exa_search"),
       completed("alpaca_get_stock_bars", {
         symbol: "SPY",
         timeframe: "1Day",
@@ -801,18 +851,20 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         feed: "iex",
       }),
       completed("alpaca_get_stock_latest_quote", { symbol: "SPY", feed: "iex" }),
-      completed("exa_search"),
+      completed("trusted_time"),
     ],
     expected: {
       outcome: "NO_ACTION",
       reasonCode: "SIGNAL_NOT_ACTIONABLE",
       requiredTools: [
         "alpaca_get_account",
+        "trusted_time",
         "alpaca_get_stock_bars",
         "alpaca_get_stock_latest_quote",
         "exa_*",
       ],
       completedToolCounts: [
+        { pattern: "trusted_time", minimum: 2, maximum: 4 },
         { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
         { pattern: "alpaca_get_stock_latest_quote", minimum: 1, maximum: 2 },
       ],
@@ -845,6 +897,8 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       requiredCompletedToolSequence: [
         "skill",
         "alpaca_get_account",
+        "trusted_time",
+        "exa_*",
         {
           pattern: "alpaca_get_stock_bars",
           input: {
@@ -862,8 +916,44 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
           pattern: "alpaca_get_stock_latest_quote",
           input: { symbol: "SPY", feed: "iex" },
         },
-        "exa_*",
+        "trusted_time",
       ],
+      requiredAdjacentToolPairs: [
+        ["alpaca_get_account", "trusted_time"],
+        [
+          {
+            anyOf: [
+              {
+                pattern: "alpaca_get_stock_latest_quote",
+                input: { symbol: "SPY", feed: "iex" },
+              },
+              {
+                pattern: "alpaca_get_option_chain",
+                input: { symbol: "SPY", feed: "indicative" },
+              },
+            ],
+          },
+          "trusted_time",
+        ],
+      ],
+      forbiddenAfterAdjacentToolPairs: [{
+        before: {
+          anyOf: [
+            {
+              pattern: "alpaca_get_stock_latest_quote",
+              input: { symbol: "SPY", feed: "iex" },
+            },
+            {
+              pattern: "alpaca_get_option_chain",
+              input: { symbol: "SPY", feed: "indicative" },
+            },
+          ],
+        },
+        after: "trusted_time",
+        tools: ["alpaca_get_*", "exa_*", "fmp_*"],
+      }],
+      expectedAccountObservedAt: "2026-08-26T14:30:00.000Z",
+      expectedSnapshotObservedAt: "2026-08-26T14:30:00.000Z",
       requireDirectionalExa: true,
       expectedMarketSignal: "MIXED",
       expectedMarketRegime: {

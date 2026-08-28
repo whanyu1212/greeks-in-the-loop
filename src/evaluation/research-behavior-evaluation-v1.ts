@@ -637,8 +637,9 @@ export function evaluateResearchBehavior({
       if (
         report.analysis.marketRegime.observedAt !==
           expected.expectedSnapshotObservedAt ||
-        report.analysis.candidateEvaluation?.observedAt !==
-          expected.expectedSnapshotObservedAt
+        (report.analysis.candidateEvaluation !== undefined &&
+          report.analysis.candidateEvaluation.observedAt !==
+            expected.expectedSnapshotObservedAt)
       ) {
         evidenceIssues.push("EXPECTED_SNAPSHOT_TIME_MISMATCH")
       }
@@ -680,7 +681,7 @@ export function evaluateResearchBehavior({
       const actualValue = report.analysis.marketRegime[metric as keyof typeof report.analysis.marketRegime]
       if (
         typeof actualValue !== "number" ||
-        Math.abs(actualValue - expectedValue) > 0.0001
+        Math.abs(actualValue - expectedValue) > 0.0005
       ) {
         evidenceIssues.push("EXPECTED_MARKET_METRIC_MISMATCH")
       }

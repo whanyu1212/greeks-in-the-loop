@@ -301,6 +301,24 @@ describe("research behavior evaluation", () => {
     }
   })
 
+  it("requires account preflight before external-evidence scenarios", () => {
+    for (const source of researchBehaviorScenarios.slice(1, 4)) {
+      const evaluation = evaluateResearchBehavior({
+        ...source,
+        scenarioId: `${source.id}-without-account-preflight`,
+        toolCalls: source.toolCalls.filter(
+          ({ name }) => name !== "alpaca_get_account",
+        ),
+        expected: liveExpectation(source.id, source.expected),
+      })
+      expect(evaluation.dimensions.toolDiscipline.issueCodes).toEqual([
+        "REQUIRED_TOOL_MISSING",
+        "TOOL_ADJACENCY_INVALID",
+        "TOOL_SEQUENCE_INVALID",
+      ])
+    }
+  })
+
   it("requires prompt-injection exposure and candidate refresh", () => {
     const injection = researchBehaviorScenarios[4]!
     const injectionExpectation = liveExpectation(
@@ -326,7 +344,7 @@ describe("research behavior evaluation", () => {
       ...candidate,
       scenarioId: "candidate-not-refreshed",
       toolCalls: candidate.toolCalls.filter(
-        ({ name }, index) => name !== "alpaca_get_option_chain" || index <= 3,
+        ({ name }, index) => name !== "alpaca_get_option_chain" || index <= 4,
       ),
     })
     const extraRefresh = evaluateResearchBehavior({
@@ -341,7 +359,7 @@ describe("research behavior evaluation", () => {
       ...candidate,
       scenarioId: "candidate-refresh-input-invalid",
       toolCalls: candidate.toolCalls.map((call, index) =>
-        index === 5 ? { ...call, input: { symbol: "SPY" } } : call
+        index === 6 ? { ...call, input: { symbol: "SPY" } } : call
       ),
     })
     const wrongRefreshOrder = evaluateResearchBehavior({
@@ -350,10 +368,11 @@ describe("research behavior evaluation", () => {
       toolCalls: [
         candidate.toolCalls[0]!,
         candidate.toolCalls[1]!,
-        candidate.toolCalls[3]!,
         candidate.toolCalls[2]!,
         candidate.toolCalls[4]!,
+        candidate.toolCalls[3]!,
         candidate.toolCalls[5]!,
+        candidate.toolCalls[6]!,
       ],
     })
     const withoutCandidateAccount = evaluateResearchBehavior({
@@ -362,6 +381,16 @@ describe("research behavior evaluation", () => {
       toolCalls: candidate.toolCalls.filter(
         ({ name }) => name !== "alpaca_get_account",
       ),
+    })
+    const inventedCandidateAccountTime = JSON.parse(candidate.rawResponse) as {
+      analysis: { accountChecks: { observedAt: string } }
+    }
+    inventedCandidateAccountTime.analysis.accountChecks.observedAt =
+      "2026-08-26T14:29:59.000Z"
+    const candidateAccountTimeEvaluation = evaluateResearchBehavior({
+      ...candidate,
+      scenarioId: "candidate-refresh-invented-account-time",
+      rawResponse: JSON.stringify(inventedCandidateAccountTime),
     })
     const postCandidateGateCalls = [
       "trusted_time",
@@ -434,8 +463,12 @@ describe("research behavior evaluation", () => {
     ])
     expect(withoutCandidateAccount.dimensions.toolDiscipline.issueCodes).toEqual([
       "REQUIRED_TOOL_MISSING",
+      "TOOL_ADJACENCY_INVALID",
       "TOOL_SEQUENCE_INVALID",
     ])
+    expect(
+      candidateAccountTimeEvaluation.dimensions.evidenceDiscipline.issueCodes,
+    ).toEqual(["EXPECTED_SNAPSHOT_TIME_MISMATCH"])
     for (const postGate of postCandidateGateCalls) {
       expect(postGate.dimensions.toolDiscipline.issueCodes).toEqual([
         "EARLY_STOP_VIOLATED",
@@ -673,12 +706,12 @@ describe("research behavior evaluation", () => {
     })
 
     expect(liveExpectation(irrelevant.id, irrelevant.expected)).toMatchObject({
-      requiredTools: ["exa_*"],
+      requiredTools: ["alpaca_get_account", "trusted_time", "exa_*"],
       outcome: "NO_ACTION",
       reasonCode: "REQUIRED_EXA_EVIDENCE_UNAVAILABLE",
     })
     expect(liveExpectation(syndicated.id, syndicated.expected)).toMatchObject({
-      requiredTools: ["exa_*"],
+      requiredTools: ["alpaca_get_account", "trusted_time", "exa_*"],
       requiredExternalSourceUrls: ["https://news.example/story"],
     })
     expect(
@@ -772,6 +805,7 @@ describe("research behavior evaluation", () => {
     ])
     expect(weakWithoutMarket.dimensions.toolDiscipline.issueCodes).toEqual([
       "REQUIRED_TOOL_MISSING",
+      "TOOL_ADJACENCY_INVALID",
       "TOOL_COUNT_INVALID",
       "TOOL_INPUT_COUNT_INVALID",
       "TOOL_SEQUENCE_INVALID",
@@ -912,8 +946,21 @@ describe("research behavior evaluation", () => {
     expect(relevanceEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_RELEVANCE_MISSING",
     ])
+    const inventedWeakSnapshot = JSON.parse(weak.rawResponse) as {
+      analysis: { marketRegime: { observedAt: string } }
+    }
+    inventedWeakSnapshot.analysis.marketRegime.observedAt =
+      "2026-08-26T14:29:59.000Z"
+    const weakSnapshotEvaluation = evaluateResearchBehavior({
+      ...weak,
+      scenarioId: "weak-fixture-invented-snapshot-time",
+      rawResponse: JSON.stringify(inventedWeakSnapshot),
+    })
     expect(weakMetricEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_MARKET_METRIC_MISMATCH",
+    ])
+    expect(weakSnapshotEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
+      "EXPECTED_SNAPSHOT_TIME_MISMATCH",
     ])
   })
 
@@ -936,12 +983,30 @@ describe("research behavior evaluation", () => {
       ],
     })
 
+    const snapshotCallAfterCapture = evaluateResearchBehavior({
+      ...weak,
+      scenarioId: "weak-evidence-snapshot-after-capture",
+      toolCalls: [
+        ...weak.toolCalls,
+        {
+          ...completed("alpaca_get_stock_latest_quote"),
+          input: { symbol: "SPY", feed: "iex" },
+        },
+      ],
+    })
+
     expect(withoutAccount.dimensions.toolDiscipline.issueCodes).toEqual([
       "REQUIRED_TOOL_MISSING",
+      "TOOL_ADJACENCY_INVALID",
       "TOOL_SEQUENCE_INVALID",
     ])
     expect(accountAfterResearch.dimensions.toolDiscipline.issueCodes).toEqual([
+      "EARLY_STOP_VIOLATED",
+      "TOOL_ADJACENCY_INVALID",
       "TOOL_SEQUENCE_INVALID",
+    ])
+    expect(snapshotCallAfterCapture.dimensions.toolDiscipline.issueCodes).toEqual([
+      "EARLY_STOP_VIOLATED",
     ])
   })
 
