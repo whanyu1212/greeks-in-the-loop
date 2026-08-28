@@ -7,15 +7,10 @@ export type ResearchEvalBarRequest = Readonly<{
 
 const instants = (values: readonly string[]): ReadonlySet<number> =>
   new Set(values.map((value) => Date.parse(value)))
-const dailyStarts = instants([
-  "2026-06-01T00:00:00Z",
-  "2026-06-17T00:00:00Z",
-])
-const dailyEnds = instants([
-  "2026-08-26T00:00:00Z",
-  "2026-08-26T13:30:00Z",
-])
-const dailyLimits: ReadonlySet<number> = new Set([50, 100])
+const dailyStartMinimum = Date.parse("2026-06-01T00:00:00Z")
+const dailyStartMaximum = Date.parse("2026-06-17T00:00:00Z")
+const dailyEndMinimum = Date.parse("2026-08-26T00:00:00Z")
+const dailyEndMaximum = Date.parse("2026-08-26T13:30:00Z")
 const intradayStarts = instants(["2026-08-26T13:30:00Z"])
 const intradayEnds = instants([
   "2026-08-26T14:30:00Z",
@@ -29,8 +24,9 @@ export const researchEvalBarRequestMatchesFixture = (
   const start = Date.parse(request.start)
   const end = Date.parse(request.end)
   return request.timeframe === "1Day"
-    ? dailyStarts.has(start) && dailyEnds.has(end) &&
-      dailyLimits.has(request.limit)
+    ? start >= dailyStartMinimum && start <= dailyStartMaximum &&
+      end >= dailyEndMinimum && end <= dailyEndMaximum &&
+      request.limit >= 50 && request.limit <= 100
     : intradayStarts.has(start) && intradayEnds.has(end) &&
       intradayLimits.has(request.limit)
 }

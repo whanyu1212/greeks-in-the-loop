@@ -115,6 +115,9 @@ describe("research behavior evaluation", () => {
 
   it("requires the inactive-account hard gate before research", () => {
     const source = researchBehaviorScenarios[0]!
+    expect(source.expected.expectedAccountChecks).not.toHaveProperty(
+      "conflictingStrategyExposure",
+    )
     const evaluation = evaluateResearchBehavior({
       ...source,
       scenarioId: "research-before-account-gate",
@@ -567,6 +570,29 @@ describe("research behavior evaluation", () => {
       expected: liveExpectation(irrelevant.id, irrelevant.expected),
     })
     const validExpectation = liveExpectation(valid.id, valid.expected)
+    const proposalWithClosedOrderQuery = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "proposal-with-closed-order-query",
+      toolCalls: valid.toolCalls.map((call) =>
+        call.name === "alpaca_get_orders"
+          ? { ...call, input: { status: "closed" } }
+          : call
+      ),
+      expected: validExpectation,
+    })
+    const orderIndex = valid.toolCalls.findIndex(
+      ({ name }) => name === "alpaca_get_orders",
+    )
+    const proposalWithDuplicateSkillLoad = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "proposal-with-duplicate-skill-load",
+      toolCalls: [
+        ...valid.toolCalls.slice(0, orderIndex + 1),
+        completed("skill"),
+        ...valid.toolCalls.slice(orderIndex + 1),
+      ],
+      expected: validExpectation,
+    })
     const validWithoutChallengeSearch = evaluateResearchBehavior({
       ...valid,
       scenarioId: "proposal-without-challenge-search",
@@ -869,7 +895,10 @@ describe("research behavior evaluation", () => {
     expect(
       liveExpectation(materialConflict.id, materialConflict.expected),
     ).toMatchObject({
-      completedToolCounts: [{ pattern: "exa_*", minimum: 2, maximum: 2 }],
+      completedToolCounts: expect.arrayContaining([
+        { pattern: "exa_*", minimum: 2, maximum: 2 },
+        { pattern: "skill", minimum: 1, maximum: 1 },
+      ]),
       requiredExternalSources: [
         {
           url: "https://example.com/material-conflict-fails-closed/1",
@@ -892,6 +921,12 @@ describe("research behavior evaluation", () => {
         "TOOL_SEQUENCE_INVALID",
       ])
     }
+    expect(
+      proposalWithClosedOrderQuery.dimensions.toolDiscipline.issueCodes,
+    ).toEqual(["TOOL_INPUT_COUNT_INVALID"])
+    expect(
+      proposalWithDuplicateSkillLoad.dimensions.toolDiscipline.issueCodes,
+    ).toEqual(["TOOL_COUNT_INVALID"])
     expect(validWithoutChallengeSearch.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_COUNT_INVALID",
     ])

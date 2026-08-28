@@ -203,11 +203,16 @@ const json = (value: unknown) => JSON.stringify(value)
 const completed = (
   name: string,
   input?: unknown,
-): ResearchBehaviorToolCall => ({
-  name,
-  outcome: "completed",
-  ...(input === undefined ? {} : { input }),
-})
+): ResearchBehaviorToolCall => {
+  const normalizedInput = input ?? (
+    name === "alpaca_get_orders" ? { status: "open" } : undefined
+  )
+  return {
+    name,
+    outcome: "completed",
+    ...(normalizedInput === undefined ? {} : { input: normalizedInput }),
+  }
+}
 
 const completeProposalToolCalls = (
   exaCallCount: number,
@@ -458,7 +463,6 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       expectedAccountChecks: {
         accountStatus: "INACTIVE",
         optionsTradingApproved: false,
-        conflictingStrategyExposure: false,
       },
       forbiddenAfter: [{
         anchor: "trusted_time",

@@ -55,6 +55,9 @@ const inputSchemaFor = (name: string) => {
       { message: "Stock-bar start must precede end" },
     )
   }
+  if (name === "alpaca_get_orders") {
+    return z.object({ status: z.literal("open") }).strict()
+  }
   if (name === "alpaca_get_stock_latest_quote") {
     return z.object({
       ...commonInput,
