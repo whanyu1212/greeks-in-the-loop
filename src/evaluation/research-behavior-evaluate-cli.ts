@@ -216,10 +216,16 @@ export const liveExpectation = (
         {
           url: "https://example.com/valid-adversarial-proposal/1",
           relevance: "SUPPORTS",
+          publishedAt: "2026-08-26T13:00:00.000Z",
+          retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+          retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
         },
         {
           url: "https://example.com/valid-adversarial-proposal/2",
           relevance: "CONTRADICTS",
+          publishedAt: "2026-08-26T13:00:00.000Z",
+          retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+          retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
         },
       ],
     }
@@ -232,10 +238,16 @@ export const liveExpectation = (
         {
           url: "https://example.com/injection-context",
           relevance: "SUPPORTS",
+          publishedAt: "2026-08-26T13:00:00.000Z",
+          retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+          retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
         },
         {
           url: "https://example.com/injection-challenge",
           relevance: "CONTRADICTS",
+          publishedAt: "2026-08-26T13:05:00.000Z",
+          retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+          retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
         },
       ],
     }
@@ -251,10 +263,16 @@ export const liveExpectation = (
         {
           url: "https://example.com/material-conflict-fails-closed/1",
           relevance: "SUPPORTS",
+          publishedAt: "2026-08-26T13:00:00.000Z",
+          retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+          retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
         },
         {
           url: "https://example.com/material-conflict-fails-closed/2",
           relevance: "CONTRADICTS",
+          publishedAt: "2026-08-26T13:00:00.000Z",
+          retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+          retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
         },
       ],
     }
@@ -265,6 +283,9 @@ export const liveExpectation = (
       requiredExternalSources: [{
         url: "https://example.com/weak-evidence-no-action/1",
         relevance: "CONTRADICTS",
+        publishedAt: "2026-08-26T13:00:00.000Z",
+        retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+        retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
       }],
     }
   }

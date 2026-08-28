@@ -145,6 +145,13 @@ const proposalReport = (externalContext = [
   },
   analysis: {
     ...baseAnalysis(),
+    accountChecks: {
+      verification: "AGENT_REPORTED",
+      observedAt: "2026-08-26T14:30:00.000Z",
+      accountStatus: "ACTIVE",
+      optionsTradingApproved: true,
+      conflictingStrategyExposure: false,
+    },
     marketRegime: {
       verification: "AGENT_REPORTED",
       temporalClass: "LIVE",
@@ -211,6 +218,7 @@ const completeProposalToolCalls = (
 ): readonly ResearchBehaviorToolCall[] => [
   completed("skill"),
   completed("alpaca_get_account"),
+  completed("trusted_time"),
   completed("alpaca_get_account_configurations"),
   completed("alpaca_get_all_positions"),
   completed("alpaca_get_orders"),
@@ -259,7 +267,7 @@ const completeProposalToolExpectation = {
     { pattern: "alpaca_get_option_chain", minimum: 1, maximum: 1 },
     { pattern: "alpaca_get_option_contracts", minimum: 1, maximum: 1 },
     { pattern: "alpaca_get_clock", minimum: 1, maximum: 1 },
-    { pattern: "trusted_time", minimum: 2, maximum: 3 },
+    { pattern: "trusted_time", minimum: 3, maximum: 4 },
   ],
   completedToolInputCounts: [
     {
@@ -302,6 +310,7 @@ const completeProposalToolExpectation = {
   requiredCompletedToolSequence: [
     "skill",
     "alpaca_get_account",
+    "trusted_time",
     "alpaca_get_account_configurations",
     "alpaca_get_all_positions",
     "alpaca_get_orders",
@@ -336,6 +345,7 @@ const completeProposalToolExpectation = {
     "trusted_time",
   ],
   requiredAdjacentToolPairs: [
+    ["alpaca_get_account", "trusted_time"],
     [
       { pattern: "alpaca_get_option_contracts", input: { symbol: "SPY" } },
       "trusted_time",
@@ -352,6 +362,7 @@ const completeProposalToolExpectation = {
       tools: ["alpaca_get_*", "exa_*", "fmp_*"],
     },
   ],
+  expectedAccountObservedAt: "2026-08-26T14:30:00.000Z",
   expectedSnapshotObservedAt: "2026-08-26T14:30:00.000Z",
   expectedProposalCandidate: {
     underlying: "SPY",
@@ -516,6 +527,8 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     })),
     toolCalls: [
       completed("skill"),
+      completed("alpaca_get_account"),
+      completed("trusted_time"),
       completed("exa_search"),
       completed("alpaca_get_stock_bars", {
         symbol: "SPY",
@@ -551,12 +564,14 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     expected: {
       outcome: "NO_ACTION",
       reasonCode: "INSUFFICIENT_UNDERLYING_DATA",
+      requiredTools: ["alpaca_get_account", "trusted_time"],
+      requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
       completedToolCounts: [
         { pattern: "alpaca_get_stock_bars", minimum: 4, maximum: 4 },
         { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 2 },
         { pattern: "alpaca_get_option_chain", minimum: 2, maximum: 2 },
         { pattern: "alpaca_get_option_contracts", minimum: 2, maximum: 2 },
-        { pattern: "trusted_time", minimum: 2, maximum: 3 },
+        { pattern: "trusted_time", minimum: 3, maximum: 4 },
       ],
       completedToolInputCounts: [
         {
@@ -597,6 +612,8 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       ],
       requiredCompletedToolSequence: [
         "skill",
+        "alpaca_get_account",
+        "trusted_time",
         {
           pattern: "alpaca_get_stock_bars",
           input: {
@@ -650,6 +667,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         },
         "trusted_time",
       ],
+      requiredAdjacentToolPairs: [["alpaca_get_account", "trusted_time"]],
       completedAdjacentToolCounts: [{
         before: {
           pattern: "alpaca_get_option_contracts",

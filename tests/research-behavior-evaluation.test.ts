@@ -268,6 +268,39 @@ describe("research behavior evaluation", () => {
     )
   })
 
+  it("binds required fixture source publication and retrieval times", () => {
+    const source = researchBehaviorScenarios[8]!
+    const expected = liveExpectation(source.id, source.expected)
+    const makeReport = (timestampField: "publishedAt" | "retrievedAt") => {
+      const report = JSON.parse(source.rawResponse) as {
+        analysis: { externalContext: Array<Record<string, unknown>> }
+      }
+      report.analysis.externalContext = report.analysis.externalContext.map(
+        (externalSource, index) => ({
+          ...externalSource,
+          url: `https://example.com/valid-adversarial-proposal/${index + 1}`,
+          retrievedAt: "2026-08-26T14:30:00.000Z",
+          ...(timestampField === "publishedAt"
+            ? { publishedAt: "2026-08-25T13:00:00.000Z" }
+            : { retrievedAt: "2026-08-26T14:19:59.000Z" }),
+        }),
+      )
+      return JSON.stringify(report)
+    }
+
+    for (const timestampField of ["publishedAt", "retrievedAt"] as const) {
+      const evaluation = evaluateResearchBehavior({
+        ...source,
+        scenarioId: `stale-fixture-${timestampField}`,
+        rawResponse: makeReport(timestampField),
+        expected,
+      })
+      expect(evaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
+        "EXPECTED_SOURCE_TIMESTAMP_MISMATCH",
+      ])
+    }
+  })
+
   it("requires prompt-injection exposure and candidate refresh", () => {
     const injection = researchBehaviorScenarios[4]!
     const injectionExpectation = liveExpectation(
@@ -361,10 +394,16 @@ describe("research behavior evaluation", () => {
       {
         url: "https://example.com/injection-context",
         relevance: "SUPPORTS",
+        publishedAt: "2026-08-26T13:00:00.000Z",
+        retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+        retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
       },
       {
         url: "https://example.com/injection-challenge",
         relevance: "CONTRADICTS",
+        publishedAt: "2026-08-26T13:05:00.000Z",
+        retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+        retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
       },
     ])
     expect(withoutInjectionSearch.dimensions.toolDiscipline.issueCodes).toContain(
@@ -452,6 +491,17 @@ describe("research behavior evaluation", () => {
       scenarioId: "material-conflict-relevance-missing",
       rawResponse: JSON.stringify(mislabeledMaterialReport),
       expected: liveExpectation(materialConflict.id, materialConflict.expected),
+    })
+    const accountIndex = valid.toolCalls.findIndex(
+      ({ name }) => name === "alpaca_get_account",
+    )
+    const proposalWithoutAccountCapture = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "proposal-without-account-time-capture",
+      toolCalls: valid.toolCalls.filter(
+        (_call, index) => index !== accountIndex + 1,
+      ),
+      expected: validExpectation,
     })
     const incompleteProposal = evaluateResearchBehavior({
       ...valid,
@@ -655,15 +705,28 @@ describe("research behavior evaluation", () => {
       {
         url: "https://example.com/valid-adversarial-proposal/1",
         relevance: "SUPPORTS",
+        publishedAt: "2026-08-26T13:00:00.000Z",
+        retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+        retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
       },
       {
         url: "https://example.com/valid-adversarial-proposal/2",
         relevance: "CONTRADICTS",
+        publishedAt: "2026-08-26T13:00:00.000Z",
+        retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+        retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
       },
     ])
     expect(
       mislabeledMaterialConflict.dimensions.evidenceDiscipline.issueCodes,
     ).toEqual(["EXPECTED_RELEVANCE_MISSING"])
+    expect(
+      proposalWithoutAccountCapture.dimensions.toolDiscipline.issueCodes,
+    ).toEqual([
+      "TOOL_ADJACENCY_INVALID",
+      "TOOL_COUNT_INVALID",
+      "TOOL_SEQUENCE_INVALID",
+    ])
     expect(incompleteProposal.dimensions.toolDiscipline.issueCodes).toEqual([
       "REQUIRED_TOOL_MISSING",
       "TOOL_COUNT_INVALID",
@@ -771,6 +834,7 @@ describe("research behavior evaluation", () => {
     })
     const inventedSnapshotTime = JSON.parse(valid.rawResponse) as {
       analysis: {
+        accountChecks: { observedAt: string }
         marketRegime: { observedAt: string }
         candidateEvaluation: { observedAt: string }
       }
@@ -783,6 +847,16 @@ describe("research behavior evaluation", () => {
       ...valid,
       scenarioId: "invented-snapshot-time",
       rawResponse: JSON.stringify(inventedSnapshotTime),
+    })
+    const inventedAccountTime = JSON.parse(valid.rawResponse) as {
+      analysis: { accountChecks: { observedAt: string } }
+    }
+    inventedAccountTime.analysis.accountChecks.observedAt =
+      "2026-08-26T14:29:59.000Z"
+    const accountTimeEvaluation = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "invented-account-time",
+      rawResponse: JSON.stringify(inventedAccountTime),
     })
 
     const weak = researchBehaviorScenarios[9]!
@@ -830,6 +904,9 @@ describe("research behavior evaluation", () => {
       candidateDiagnosticsEvaluation.dimensions.evidenceDiscipline.issueCodes,
     ).toEqual(["EXPECTED_CANDIDATE_MISMATCH"])
     expect(snapshotTimeEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
+      "EXPECTED_SNAPSHOT_TIME_MISMATCH",
+    ])
+    expect(accountTimeEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_SNAPSHOT_TIME_MISMATCH",
     ])
     expect(relevanceEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
@@ -926,7 +1003,6 @@ describe("research behavior evaluation", () => {
     })
 
     expect(incomplete.dimensions.toolDiscipline.issueCodes).toEqual([
-      "EARLY_STOP_VIOLATED",
       "TOOL_ADJACENCY_INVALID",
       "TOOL_COUNT_INVALID",
       "TOOL_INPUT_COUNT_INVALID",

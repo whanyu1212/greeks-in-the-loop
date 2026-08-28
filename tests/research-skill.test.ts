@@ -128,7 +128,8 @@ describe("SPY debit-spread research skill", () => {
     )
     expect(skill).toContain("Reject missing or duplicate intervals")
     expect(skill).toContain("no more than two completed Alpaca sessions")
-    expect(skill).toContain("Use two distinct instants")
+    expect(skill).toContain("Use three distinct response-completion captures")
+    expect(skill).toContain("analysis.accountChecks.observedAt")
     expect(skill).toContain(
       "call `trusted_time` and use its returned UTC timestamp as `observed_at`",
     )

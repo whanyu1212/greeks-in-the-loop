@@ -42,6 +42,7 @@ export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "EXPECTED_MARKET_METRIC_MISMATCH",
   "EXPECTED_CANDIDATE_MISMATCH",
   "EXPECTED_SNAPSHOT_TIME_MISMATCH",
+  "EXPECTED_SOURCE_TIMESTAMP_MISMATCH",
 ] as const
 
 export type ResearchBehaviorIssueCode =
@@ -150,6 +151,9 @@ export type ResearchBehaviorExpectation = Readonly<{
   requiredExternalSources?: readonly Readonly<{
     url: string
     relevance: "SUPPORTS" | "CONTRADICTS" | "NEUTRAL"
+    publishedAt?: string
+    retrievedAtMinimum?: string
+    retrievedAtMaximum?: string
   }>[]
   requiredExternalSourceRelevances?: readonly (
     "SUPPORTS" | "CONTRADICTS" | "NEUTRAL"
@@ -157,6 +161,7 @@ export type ResearchBehaviorExpectation = Readonly<{
   forbiddenExternalSourceIds?: readonly string[]
   requireMaterialConflict?: boolean
   expectedSnapshotObservedAt?: string
+  expectedAccountObservedAt?: string
   expectedMarketSignal?: ResearchReportV2["analysis"]["marketRegime"]["signal"]
   expectedProposalCandidate?: Extract<
     ResearchReportV2["result"],
@@ -590,6 +595,20 @@ export function evaluateResearchBehavior({
         )
       ) {
         evidenceIssues.push("EXPECTED_RELEVANCE_MISSING")
+      } else if (
+        !matchingSources.some((source) =>
+          source.relevance === required.relevance &&
+          (required.publishedAt === undefined ||
+            source.publishedAt === required.publishedAt) &&
+          (required.retrievedAtMinimum === undefined ||
+            Date.parse(source.retrievedAt) >=
+              Date.parse(required.retrievedAtMinimum)) &&
+          (required.retrievedAtMaximum === undefined ||
+            Date.parse(source.retrievedAt) <=
+              Date.parse(required.retrievedAtMaximum))
+        )
+      ) {
+        evidenceIssues.push("EXPECTED_SOURCE_TIMESTAMP_MISMATCH")
       }
     }
     if (new Set(canonicalUrls).size !== canonicalUrls.length) {
@@ -600,6 +619,13 @@ export function evaluateResearchBehavior({
       report.analysis.conflicts.length === 0
     ) {
       evidenceIssues.push("MATERIAL_CONFLICT_NOT_RETAINED")
+    }
+    if (
+      expected.expectedAccountObservedAt !== undefined &&
+      report.analysis.accountChecks.observedAt !==
+        expected.expectedAccountObservedAt
+    ) {
+      evidenceIssues.push("EXPECTED_SNAPSHOT_TIME_MISMATCH")
     }
     if (
       expected.expectedMarketSignal !== undefined &&

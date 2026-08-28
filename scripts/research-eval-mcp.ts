@@ -318,10 +318,8 @@ register("exa_search", "Return fixture current-event context.", (call) => {
     }],
   }
 })
-register("trusted_time", "Return fixture application-local trusted UTC time.", (call) => ({
-  utc: call <= 2
-    ? "2026-08-26T14:30:00.000Z"
-    : "2026-08-26T14:30:30.000Z",
+register("trusted_time", "Return fixture application-local trusted UTC time.", () => ({
+  utc: "2026-08-26T14:30:00.000Z",
 }))
 
 await server.connect(new StdioServerTransport())
