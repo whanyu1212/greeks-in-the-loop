@@ -39,6 +39,7 @@ export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "FORBIDDEN_SOURCE_RETAINED",
   "DUPLICATE_EXTERNAL_SOURCE",
   "MATERIAL_CONFLICT_NOT_RETAINED",
+  "EXPECTED_MARKET_METRIC_MISMATCH",
 ] as const
 
 export type ResearchBehaviorIssueCode =
@@ -117,6 +118,7 @@ export type ResearchBehaviorExpectation = Readonly<{
     maximum: number
   }>[]
   requiredCompletedToolSequence?: readonly ResearchBehaviorExpectedTool[]
+  requiredCompletedToolPrefix?: readonly ResearchBehaviorExpectedTool[]
   requiredAdjacentToolPairs?: readonly Readonly<
     [ResearchBehaviorExpectedTool, ResearchBehaviorExpectedTool]
   >[]
@@ -142,6 +144,16 @@ export type ResearchBehaviorExpectation = Readonly<{
   )[]
   forbiddenExternalSourceIds?: readonly string[]
   requireMaterialConflict?: boolean
+  expectedMarketRegime?: Readonly<Partial<Record<
+    | "dailyClose"
+    | "sma20"
+    | "sma50"
+    | "sessionVwap"
+    | "spotMidpoint"
+    | "dailySessionCount"
+    | "intradayBarCount",
+    number
+  >>>
 }>
 
 export type EvaluateResearchBehaviorInput = Readonly<{
@@ -358,6 +370,16 @@ export function evaluateResearchBehavior({
     return toolMatches(call.name, expectedCall.pattern) &&
       toolInputMatches(call.input, expectedCall.input)
   }
+  if (expected.requiredCompletedToolPrefix !== undefined) {
+    const prefixIsValid = expected.requiredCompletedToolPrefix.every(
+      (expectedCall, index) =>
+        toolCalls[index] !== undefined &&
+        (toolCalls[index]!.outcome === undefined ||
+          toolCalls[index]!.outcome === "completed") &&
+        expectedToolMatches(toolCalls[index]!, expectedCall),
+    )
+    if (!prefixIsValid) toolIssues.push("TOOL_SEQUENCE_INVALID")
+  }
   if (expected.requiredCompletedToolSequence !== undefined) {
     let sequenceIndex = 0
     for (const call of completedToolCalls) {
@@ -487,6 +509,17 @@ export function evaluateResearchBehavior({
       report.analysis.conflicts.length === 0
     ) {
       evidenceIssues.push("MATERIAL_CONFLICT_NOT_RETAINED")
+    }
+    for (const [metric, expectedValue] of Object.entries(
+      expected.expectedMarketRegime ?? {},
+    )) {
+      const actualValue = report.analysis.marketRegime[metric as keyof typeof report.analysis.marketRegime]
+      if (
+        typeof actualValue !== "number" ||
+        Math.abs(actualValue - expectedValue) > 0.0001
+      ) {
+        evidenceIssues.push("EXPECTED_MARKET_METRIC_MISMATCH")
+      }
     }
   }
 

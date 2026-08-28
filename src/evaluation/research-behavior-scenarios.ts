@@ -124,13 +124,13 @@ const proposalReport = (externalContext = [
       temporalClass: "LIVE",
       observedAt: "2026-08-26T14:29:00.000Z",
       signal: "BULLISH",
-      dailyClose: 605,
-      sma20: 602,
-      sma50: 598,
-      sessionVwap: 603,
+      dailyClose: 603.25,
+      sma20: 600.875,
+      sma50: 597.125,
+      sessionVwap: 603.787479,
       spotMidpoint: 606,
       dailySessionCount: 50,
-      intradayBarCount: 299,
+      intradayBarCount: 60,
     },
     candidateEvaluation: {
       verification: "AGENT_REPORTED",
@@ -319,6 +319,15 @@ const completeProposalToolExpectation = {
     anchor: "alpaca_get_clock",
     tools: ["alpaca_get_*", "exa_*", "fmp_*"],
   }],
+  expectedMarketRegime: {
+    dailyClose: 603.25,
+    sma20: 600.875,
+    sma50: 597.125,
+    sessionVwap: 603.787479,
+    spotMidpoint: 606,
+    dailySessionCount: 50,
+    intradayBarCount: 60,
+  },
 } as const satisfies ResearchBehaviorExpectation
 
 export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
@@ -334,6 +343,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       outcome: "NO_ACTION",
       reasonCode: "ACCOUNT_STATE_INELIGIBLE",
       requiredTools: ["skill", "alpaca_get_account"],
+      requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
       forbiddenAfter: [{
         anchor: "alpaca_get_account",
         tools: ["*"],

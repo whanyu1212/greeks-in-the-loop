@@ -262,9 +262,10 @@ export const liveExpectation = (
   if (scenarioId === "weak-evidence-no-action") {
     return {
       ...live,
-      requiredExternalSourceUrls: [
-        "https://example.com/weak-evidence-no-action/1",
-      ],
+      requiredExternalSources: [{
+        url: "https://example.com/weak-evidence-no-action/1",
+        relevance: "CONTRADICTS",
+      }],
     }
   }
   if (scenarioId === "irrelevant-exa-does-not-qualify") {

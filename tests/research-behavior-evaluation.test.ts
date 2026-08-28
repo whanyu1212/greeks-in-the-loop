@@ -84,6 +84,23 @@ describe("research behavior evaluation", () => {
     )
   })
 
+  it("requires the inactive-account hard gate before research", () => {
+    const source = researchBehaviorScenarios[0]!
+    const evaluation = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "research-before-account-gate",
+      toolCalls: [
+        completed("skill"),
+        completed("exa_search"),
+        completed("alpaca_get_account"),
+      ],
+    })
+
+    expect(evaluation.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_SEQUENCE_INVALID",
+    ])
+  })
+
   it("forbids every tool after an ineligible account hard gate", () => {
     const source = researchBehaviorScenarios[0]!
     const evaluation = evaluateResearchBehavior({
@@ -490,6 +507,52 @@ describe("research behavior evaluation", () => {
       "TOOL_COUNT_INVALID",
       "TOOL_INPUT_COUNT_INVALID",
       "TOOL_SEQUENCE_INVALID",
+    ])
+  })
+
+  it("grounds proposal metrics and weak relevance in fixture facts", () => {
+    const valid = researchBehaviorScenarios[8]!
+    const fabricatedMetrics = JSON.parse(valid.rawResponse) as {
+      analysis: { marketRegime: Record<string, unknown> }
+    }
+    fabricatedMetrics.analysis.marketRegime.intradayBarCount = 299
+    fabricatedMetrics.analysis.marketRegime.sessionVwap = 603
+    const metricEvaluation = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "fabricated-market-metrics",
+      rawResponse: JSON.stringify(fabricatedMetrics),
+      expected: valid.expected,
+    })
+
+    const weak = researchBehaviorScenarios[9]!
+    const mislabeledWeak = JSON.parse(weak.rawResponse) as {
+      analysis: { externalContext: Array<Record<string, unknown>> }
+    }
+    mislabeledWeak.analysis.externalContext = [
+      {
+        ...mislabeledWeak.analysis.externalContext[0],
+        url: "https://example.com/weak-evidence-no-action/1",
+        relevance: "NEUTRAL",
+      },
+      {
+        ...mislabeledWeak.analysis.externalContext[0],
+        sourceId: "invented-contradiction",
+        url: "https://invented.example/downside",
+        relevance: "CONTRADICTS",
+      },
+    ]
+    const relevanceEvaluation = evaluateResearchBehavior({
+      ...weak,
+      scenarioId: "weak-fixture-relevance-mislabeled",
+      rawResponse: JSON.stringify(mislabeledWeak),
+      expected: liveExpectation(weak.id, weak.expected),
+    })
+
+    expect(metricEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
+      "EXPECTED_MARKET_METRIC_MISMATCH",
+    ])
+    expect(relevanceEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
+      "EXPECTED_RELEVANCE_MISSING",
     ])
   })
 
