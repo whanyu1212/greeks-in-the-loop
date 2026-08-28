@@ -255,6 +255,17 @@ describe("research behavior evaluation", () => {
           : call
       ),
     })
+    let stockBarIndex = 0
+    const splitBarTimeframes = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "split-bar-timeframes",
+      toolCalls: source.toolCalls.map((call) => {
+        if (call.name !== "alpaca_get_stock_bars") return call
+        const timeframe = stockBarIndex < 2 ? "1Day" : "1Min"
+        stockBarIndex += 1
+        return { ...call, input: { timeframe } }
+      }),
+    })
     const extra = evaluateResearchBehavior({
       ...source,
       scenarioId: "extra-snapshot-rebuild",
@@ -275,6 +286,10 @@ describe("research behavior evaluation", () => {
     ])
     expect(duplicateDailyBars.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_INPUT_COUNT_INVALID",
+      "TOOL_SEQUENCE_INVALID",
+    ])
+    expect(splitBarTimeframes.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_SEQUENCE_INVALID",
     ])
     expect(extra.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_COUNT_INVALID",

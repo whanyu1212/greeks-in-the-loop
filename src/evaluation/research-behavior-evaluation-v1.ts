@@ -103,7 +103,13 @@ export type ResearchBehaviorExpectation = Readonly<{
     minimum: number
     maximum: number
   }>[]
-  requiredCompletedToolSequence?: readonly string[]
+  requiredCompletedToolSequence?: readonly (
+    | string
+    | Readonly<{
+        pattern: string
+        input: Readonly<Record<string, unknown>>
+      }>
+  )[]
   forbiddenAfter?: readonly Readonly<{
     anchor: string
     tools: readonly string[]
@@ -284,6 +290,16 @@ export function evaluateResearchBehavior({
   const completedToolCalls = toolCalls.filter(
     ({ outcome }) => outcome === undefined || outcome === "completed",
   )
+  const toolInputMatches = (
+    actualInput: unknown,
+    expectedInput: Readonly<Record<string, unknown>>,
+  ) => {
+    if (actualInput === null || typeof actualInput !== "object") return false
+    const actual = actualInput as Record<string, unknown>
+    return Object.entries(expectedInput).every(([key, value]) =>
+      isDeepStrictEqual(actual[key], value)
+    )
+  }
   for (const { pattern, minimum, maximum } of expected.completedToolCounts ?? []) {
     const count = completedToolCalls.filter(({ name }) =>
       toolMatches(name, pattern)
@@ -296,23 +312,23 @@ export function evaluateResearchBehavior({
     const { pattern, input, minimum, maximum } of
       expected.completedToolInputCounts ?? []
   ) {
-    const count = completedToolCalls.filter((call) => {
-      if (!toolMatches(call.name, pattern)) return false
-      if (call.input === null || typeof call.input !== "object") return false
-      const actual = call.input as Record<string, unknown>
-      return Object.entries(input).every(([key, value]) =>
-        isDeepStrictEqual(actual[key], value)
-      )
-    }).length
+    const count = completedToolCalls.filter((call) =>
+      toolMatches(call.name, pattern) && toolInputMatches(call.input, input)
+    ).length
     if (count < minimum || count > maximum) {
       toolIssues.push("TOOL_INPUT_COUNT_INVALID")
     }
   }
   if (expected.requiredCompletedToolSequence !== undefined) {
     let sequenceIndex = 0
-    for (const { name } of completedToolCalls) {
-      const pattern = expected.requiredCompletedToolSequence[sequenceIndex]
-      if (pattern !== undefined && toolMatches(name, pattern)) sequenceIndex += 1
+    for (const call of completedToolCalls) {
+      const expectedCall = expected.requiredCompletedToolSequence[sequenceIndex]
+      const matches = typeof expectedCall === "string"
+        ? toolMatches(call.name, expectedCall)
+        : expectedCall !== undefined &&
+          toolMatches(call.name, expectedCall.pattern) &&
+          toolInputMatches(call.input, expectedCall.input)
+      if (matches) sequenceIndex += 1
     }
     if (sequenceIndex !== expected.requiredCompletedToolSequence.length) {
       toolIssues.push("TOOL_SEQUENCE_INVALID")
