@@ -15,6 +15,7 @@ import { parse as parseEnv } from "dotenv"
 
 import { runAgentLoop } from "./agent-loop.js"
 import { parseAgentOptions } from "./agent-options.js"
+import { acquireWorkerInstanceLock } from "./worker-instance-lock.js"
 import {
   RESEARCH_DECISION_CONTRACT_VERSION,
   STRATEGY_VERSION,
@@ -246,28 +247,35 @@ const traceVersions = {
   reportVersion: RESEARCH_REPORT_VERSION,
 } as const
 mkdirSync(dirname(ledgerPath), { recursive: true })
-const ledgerStore = createSqliteLedgerStore({
-  path: ledgerPath,
-  knownCredentialValues,
-})
-const telemetry = startResearchTelemetry({
-  disabled: readSetting("OTEL_SDK_DISABLED"),
-  tracesEndpoint: readSetting("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
-  endpoint: readSetting("OTEL_EXPORTER_OTLP_ENDPOINT"),
-  tracesHeaders: readSetting("OTEL_EXPORTER_OTLP_TRACES_HEADERS"),
-  headers: readSetting("OTEL_EXPORTER_OTLP_HEADERS"),
-  tracesTimeoutMs: readSetting("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT"),
-  timeoutMs: readSetting("OTEL_EXPORTER_OTLP_TIMEOUT"),
-})
-
+const workerInstanceLock = acquireWorkerInstanceLock({ ledgerPath })
+let ledgerStore: ReturnType<typeof createSqliteLedgerStore> | undefined
+let telemetry: ReturnType<typeof startResearchTelemetry> | undefined
 try {
-  await ledgerStore.migrate(abortController.signal)
-  let researchContext = await reconstructResearchContextV1(ledgerStore)
+  const activeLedgerStore = createSqliteLedgerStore({
+    path: ledgerPath,
+    knownCredentialValues,
+  })
+  ledgerStore = activeLedgerStore
+  const activeTelemetry = startResearchTelemetry({
+    disabled: readSetting("OTEL_SDK_DISABLED"),
+    tracesEndpoint: readSetting("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
+    endpoint: readSetting("OTEL_EXPORTER_OTLP_ENDPOINT"),
+    tracesHeaders: readSetting("OTEL_EXPORTER_OTLP_TRACES_HEADERS"),
+    headers: readSetting("OTEL_EXPORTER_OTLP_HEADERS"),
+    tracesTimeoutMs: readSetting("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT"),
+    timeoutMs: readSetting("OTEL_EXPORTER_OTLP_TIMEOUT"),
+  })
+  telemetry = activeTelemetry
+
+  await activeLedgerStore.migrate(abortController.signal)
+  let researchContext = await reconstructResearchContextV1(activeLedgerStore)
   const shadowRiskEvaluator = createShadowRiskEvaluator({
     provider: riskStateProvider,
-    durableControl: createLedgerDurableRiskControlStateLoader(ledgerStore),
+    durableControl: createLedgerDurableRiskControlStateLoader(activeLedgerStore),
   })
-  const lifecycleRecorder = createResearchLifecycleRecorder({ store: ledgerStore })
+  const lifecycleRecorder = createResearchLifecycleRecorder({
+    store: activeLedgerStore,
+  })
   const runtime = await startOpencode({
     port,
     signal: abortController.signal,
@@ -280,7 +288,7 @@ try {
       intervalMs,
       maxCycles,
       signal: abortController.signal,
-      runCycle: async (attempt) => telemetry.runCycle(
+      runCycle: async (attempt) => activeTelemetry.runCycle(
         attempt,
         traceVersions,
         async (cycleTrace) => {
@@ -370,7 +378,7 @@ try {
             abortController.signal,
           )
           try {
-            researchContext = await loadResearchContextV1(ledgerStore)
+            researchContext = await loadResearchContextV1(activeLedgerStore)
           } catch (error) {
             throw new LedgerPersistenceError("context query", error)
           }
@@ -537,7 +545,10 @@ try {
             const artifacts = await cycleTrace.run(
               "research.artifact.project",
               async () => {
-                const run = await loadResearchRunV1(ledgerStore, cycle.cycleId)
+                const run = await loadResearchRunV1(
+                  activeLedgerStore,
+                  cycle.cycleId,
+                )
                 stageReporter.report("research.evaluate", "STARTED")
                 const presentation = buildResearchRunPresentation(run)
                 stageReporter.report(
@@ -622,8 +633,12 @@ try {
   }
 } finally {
   try {
-    await ledgerStore.close()
+    await ledgerStore?.close()
   } finally {
-    await telemetry.shutdown()
+    try {
+      await telemetry?.shutdown()
+    } finally {
+      workerInstanceLock.release()
+    }
   }
 }

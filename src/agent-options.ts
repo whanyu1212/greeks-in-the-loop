@@ -25,7 +25,8 @@ const isMissingPathError = (error: unknown) => {
   return code === "ENOENT" || code === "ENOTDIR"
 }
 
-const canonicalLedgerTargetPath = (
+/** Resolves an existing ledger or its nearest existing parent to a stable target. */
+export const canonicalLedgerTargetPath = (
   ledgerPath: string,
   seenPaths = new Set<string>(),
 ): string => {

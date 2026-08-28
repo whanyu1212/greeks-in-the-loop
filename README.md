@@ -111,6 +111,30 @@ Useful environment controls are documented in [`.env.example`](.env.example):
 
 The worker creates a fresh OpenCode session for every cycle and shuts down cleanly on `SIGINT` or `SIGTERM`. Every cycle selects the checked-in `research` agent; this identity cannot be overridden through `.env`. Each eligible cycle durably records exactly one bounded outcome: `VALIDATED_NO_ACTION`, `PRELIMINARY_RESEARCH_RETAINED`, `DECISION_REJECTED`, `INTENT_DERIVATION_REJECTED`, or `INTENT_DERIVED`. Cycles outside the configured research window are skipped before an OpenCode session is created.
 
+### Single-instance worker ownership
+
+One process on a host may own a selected worker ledger at a time. The worker
+acquires a persistent `<ledger>.worker-lock.sqlite` sidecar before opening or
+migrating the ledger, starting telemetry, launching OpenCode/MCP descendants, or
+running provider calls. A second process targeting the same canonical ledger
+fails immediately with an actionable error. The sidecar file is not ownership
+by itself: a live SQLite exclusive transaction is the lock, and the operating
+system releases it automatically after clean shutdown or process termination.
+The sidecar remains in place between runs and must not be deleted as part of
+normal cleanup.
+
+The standard daemon and a standard `--once` invocation conflict when they use
+the same ledger. Research-anytime and shadow-anytime use separate ledgers by
+default, so they do not conflict with production; two runs targeting the same
+explicit anytime ledger do conflict. Read-only commands such as
+`research:run`, `research:evaluate`, and `risk:report` do not acquire worker
+ownership and may inspect the WAL-backed ledger concurrently.
+
+This is a single-host lock scoped to the canonical ledger, not a distributed
+lease. Deploy one production ledger per Alpaca account, complete shutdown before
+a rolling replacement starts, and do not run active-active workers for the same
+account from different hosts or ledger paths.
+
 The append-only SQLite event ledger defaults to `.state/research-ledger.sqlite`; override it with `RESEARCH_LEDGER_PATH` only when the worker retains exclusive write ownership. On startup, incomplete cycles are marked `PROCESS_RESTART`, cycle numbering resumes from durable history, and a bounded context projection is rebuilt for the next prompt. Prior evidence is planning context only and must be refreshed. OpenCode session memory is never authoritative durable state.
 
 The anytime command intentionally ignores `RESEARCH_LEDGER_PATH` unless it is
