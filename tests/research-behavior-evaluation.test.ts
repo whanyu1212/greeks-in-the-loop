@@ -622,6 +622,62 @@ describe("research behavior evaluation", () => {
       rawResponse: JSON.stringify(fabricatedMetrics),
       expected: valid.expected,
     })
+    const nonexistentCandidate = JSON.parse(valid.rawResponse) as {
+      result: {
+        candidate: {
+          longLeg: { contractSymbol: string; strike: number }
+          shortLeg: { contractSymbol: string; strike: number }
+        }
+      }
+      analysis: {
+        candidateEvaluation: {
+          legs: Array<{ role: string; contractSymbol: string }>
+        }
+      }
+    }
+    nonexistentCandidate.result.candidate.longLeg = {
+      contractSymbol: "SPY260916C00601000",
+      strike: 601,
+    }
+    nonexistentCandidate.result.candidate.shortLeg = {
+      contractSymbol: "SPY260916C00606000",
+      strike: 606,
+    }
+    nonexistentCandidate.analysis.candidateEvaluation.legs.find(
+      ({ role }) => role === "LONG",
+    )!.contractSymbol = "SPY260916C00601000"
+    nonexistentCandidate.analysis.candidateEvaluation.legs.find(
+      ({ role }) => role === "SHORT",
+    )!.contractSymbol = "SPY260916C00606000"
+    const candidateIdentityEvaluation = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "nonexistent-proposal-candidate",
+      rawResponse: JSON.stringify(nonexistentCandidate),
+    })
+    const fabricatedDiagnostics = JSON.parse(valid.rawResponse) as {
+      analysis: { candidateEvaluation: { legs: Array<{ delta: number }> } }
+    }
+    fabricatedDiagnostics.analysis.candidateEvaluation.legs[0]!.delta = 0.53
+    const candidateDiagnosticsEvaluation = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "fabricated-candidate-diagnostics",
+      rawResponse: JSON.stringify(fabricatedDiagnostics),
+    })
+    const inventedSnapshotTime = JSON.parse(valid.rawResponse) as {
+      analysis: {
+        marketRegime: { observedAt: string }
+        candidateEvaluation: { observedAt: string }
+      }
+    }
+    inventedSnapshotTime.analysis.marketRegime.observedAt =
+      "2026-08-26T14:29:00.000Z"
+    inventedSnapshotTime.analysis.candidateEvaluation.observedAt =
+      "2026-08-26T14:29:00.000Z"
+    const snapshotTimeEvaluation = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "invented-snapshot-time",
+      rawResponse: JSON.stringify(inventedSnapshotTime),
+    })
 
     const weak = researchBehaviorScenarios[9]!
     const mislabeledWeak = JSON.parse(weak.rawResponse) as {
@@ -650,8 +706,45 @@ describe("research behavior evaluation", () => {
     expect(metricEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_MARKET_METRIC_MISMATCH",
     ])
+    expect(
+      candidateIdentityEvaluation.dimensions.evidenceDiscipline.issueCodes,
+    ).toEqual(["EXPECTED_CANDIDATE_MISMATCH"])
+    expect(
+      candidateDiagnosticsEvaluation.dimensions.evidenceDiscipline.issueCodes,
+    ).toEqual(["EXPECTED_CANDIDATE_MISMATCH"])
+    expect(snapshotTimeEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
+      "EXPECTED_SNAPSHOT_TIME_MISMATCH",
+    ])
     expect(relevanceEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_RELEVANCE_MISSING",
+    ])
+  })
+
+  it("requires the weak-evidence account gate before research", () => {
+    const weak = researchBehaviorScenarios[9]!
+    const withoutAccount = evaluateResearchBehavior({
+      ...weak,
+      scenarioId: "weak-evidence-without-account",
+      toolCalls: weak.toolCalls.filter(
+        ({ name }) => name !== "alpaca_get_account",
+      ),
+    })
+    const accountAfterResearch = evaluateResearchBehavior({
+      ...weak,
+      scenarioId: "weak-evidence-account-after-research",
+      toolCalls: [
+        weak.toolCalls[0]!,
+        ...weak.toolCalls.slice(2),
+        weak.toolCalls[1]!,
+      ],
+    })
+
+    expect(withoutAccount.dimensions.toolDiscipline.issueCodes).toEqual([
+      "REQUIRED_TOOL_MISSING",
+      "TOOL_SEQUENCE_INVALID",
+    ])
+    expect(accountAfterResearch.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_SEQUENCE_INVALID",
     ])
   })
 

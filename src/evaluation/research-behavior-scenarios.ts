@@ -122,7 +122,7 @@ const proposalReport = (externalContext = [
     marketRegime: {
       verification: "AGENT_REPORTED",
       temporalClass: "LIVE",
-      observedAt: "2026-08-26T14:29:00.000Z",
+      observedAt: "2026-08-26T14:30:00.000Z",
       signal: "BULLISH",
       dailyClose: 603.25,
       sma20: 600.875,
@@ -134,7 +134,7 @@ const proposalReport = (externalContext = [
     },
     candidateEvaluation: {
       verification: "AGENT_REPORTED",
-      observedAt: "2026-08-26T14:29:00.000Z",
+      observedAt: "2026-08-26T14:30:00.000Z",
       dte: 21,
       legs: [
         {
@@ -325,6 +325,49 @@ const completeProposalToolExpectation = {
       tools: ["alpaca_get_*", "exa_*", "fmp_*"],
     },
   ],
+  expectedSnapshotObservedAt: "2026-08-26T14:30:00.000Z",
+  expectedProposalCandidate: {
+    underlying: "SPY",
+    structure: "BULL_CALL_SPREAD",
+    expiration: "2026-09-16",
+    longLeg: {
+      contractSymbol: "SPY260916C00600000",
+      strike: 600,
+    },
+    shortLeg: {
+      contractSymbol: "SPY260916C00605000",
+      strike: 605,
+    },
+  },
+  expectedCandidateEvaluation: {
+    dte: 21,
+    legs: [
+      {
+        role: "LONG",
+        contractSymbol: "SPY260916C00600000",
+        delta: 0.52,
+        impliedVolatility: 0.2,
+        gamma: 0.02,
+        theta: -0.1,
+        vega: 0.15,
+        volume: 200,
+        openInterest: 1_000,
+        openInterestDate: "2026-08-26",
+      },
+      {
+        role: "SHORT",
+        contractSymbol: "SPY260916C00605000",
+        delta: 0.29,
+        impliedVolatility: 0.19,
+        gamma: 0.015,
+        theta: -0.08,
+        vega: 0.12,
+        volume: 180,
+        openInterest: 900,
+        openInterestDate: "2026-08-26",
+      },
+    ],
+  },
   expectedMarketRegime: {
     dailyClose: 603.25,
     sma20: 600.875,
@@ -690,6 +733,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       outcome: "NO_ACTION",
       reasonCode: "SIGNAL_NOT_ACTIONABLE",
       requiredTools: [
+        "alpaca_get_account",
         "alpaca_get_stock_bars",
         "alpaca_get_stock_latest_quote",
         "exa_*",
@@ -723,8 +767,10 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
           maximum: 2,
         },
       ],
+      requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
       requiredCompletedToolSequence: [
         "skill",
+        "alpaca_get_account",
         {
           pattern: "alpaca_get_stock_bars",
           input: {

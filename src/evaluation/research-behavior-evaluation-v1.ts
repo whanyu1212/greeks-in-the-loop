@@ -40,6 +40,8 @@ export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "DUPLICATE_EXTERNAL_SOURCE",
   "MATERIAL_CONFLICT_NOT_RETAINED",
   "EXPECTED_MARKET_METRIC_MISMATCH",
+  "EXPECTED_CANDIDATE_MISMATCH",
+  "EXPECTED_SNAPSHOT_TIME_MISMATCH",
 ] as const
 
 export type ResearchBehaviorIssueCode =
@@ -144,6 +146,17 @@ export type ResearchBehaviorExpectation = Readonly<{
   )[]
   forbiddenExternalSourceIds?: readonly string[]
   requireMaterialConflict?: boolean
+  expectedSnapshotObservedAt?: string
+  expectedProposalCandidate?: Extract<
+    ResearchReportV2["result"],
+    { outcome: "PROPOSE_TRADE" }
+  >["candidate"]
+  expectedCandidateEvaluation?: Readonly<{
+    dte: number
+    legs: NonNullable<
+      ResearchReportV2["analysis"]["candidateEvaluation"]
+    >["legs"]
+  }>
   expectedMarketRegime?: Readonly<Partial<Record<
     | "dailyClose"
     | "sma20"
@@ -509,6 +522,47 @@ export function evaluateResearchBehavior({
       report.analysis.conflicts.length === 0
     ) {
       evidenceIssues.push("MATERIAL_CONFLICT_NOT_RETAINED")
+    }
+    if (expected.expectedSnapshotObservedAt !== undefined) {
+      if (
+        report.analysis.marketRegime.observedAt !==
+          expected.expectedSnapshotObservedAt ||
+        report.analysis.candidateEvaluation?.observedAt !==
+          expected.expectedSnapshotObservedAt
+      ) {
+        evidenceIssues.push("EXPECTED_SNAPSHOT_TIME_MISMATCH")
+      }
+    }
+    if (expected.expectedProposalCandidate !== undefined) {
+      if (
+        report.result.outcome !== "PROPOSE_TRADE" ||
+        !isDeepStrictEqual(
+          report.result.candidate,
+          expected.expectedProposalCandidate,
+        )
+      ) {
+        evidenceIssues.push("EXPECTED_CANDIDATE_MISMATCH")
+      }
+    }
+    if (expected.expectedCandidateEvaluation !== undefined) {
+      const candidateEvaluation = report.analysis.candidateEvaluation
+      const actual = candidateEvaluation === undefined
+        ? undefined
+        : {
+            dte: candidateEvaluation.dte,
+            legs: [...candidateEvaluation.legs].sort((left, right) =>
+              left.role.localeCompare(right.role)
+            ),
+          }
+      const expectedEvaluation = {
+        dte: expected.expectedCandidateEvaluation.dte,
+        legs: [...expected.expectedCandidateEvaluation.legs].sort((left, right) =>
+          left.role.localeCompare(right.role)
+        ),
+      }
+      if (!isDeepStrictEqual(actual, expectedEvaluation)) {
+        evidenceIssues.push("EXPECTED_CANDIDATE_MISMATCH")
+      }
     }
     for (const [metric, expectedValue] of Object.entries(
       expected.expectedMarketRegime ?? {},
