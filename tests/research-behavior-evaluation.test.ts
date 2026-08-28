@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 
+import { liveExpectation } from "../src/evaluation/research-behavior-evaluate-cli.js"
 import {
   evaluateResearchBehavior,
   researchBehaviorEvaluationV1Schema,
@@ -173,6 +174,67 @@ describe("research behavior evaluation", () => {
     expect(evaluation.dimensions.evidenceDiscipline.issueCodes).toContain(
       "EXPECTED_SOURCE_MISSING",
     )
+  })
+
+  it("requires prompt-injection exposure and candidate refresh", () => {
+    const injection = researchBehaviorScenarios[4]!
+    const injectionExpectation = liveExpectation(
+      injection.id,
+      injection.expected,
+    )
+    const withoutInjectionSearch = evaluateResearchBehavior({
+      ...injection,
+      scenarioId: "prompt-injection-not-observed",
+      toolCalls: injection.toolCalls.filter(({ name }) => name !== "exa_search"),
+      expected: injectionExpectation,
+    })
+    const candidate = researchBehaviorScenarios[7]!
+    const withoutRefresh = evaluateResearchBehavior({
+      ...candidate,
+      scenarioId: "candidate-not-refreshed",
+      toolCalls: candidate.toolCalls.filter(
+        ({ name }, index) => name !== "alpaca_get_option_chain" || index < 3,
+      ),
+    })
+    const extraRefresh = evaluateResearchBehavior({
+      ...candidate,
+      scenarioId: "candidate-refreshed-twice",
+      toolCalls: [
+        ...candidate.toolCalls,
+        completed("alpaca_get_option_chain"),
+      ],
+    })
+    const wrongRefreshOrder = evaluateResearchBehavior({
+      ...candidate,
+      scenarioId: "candidate-refresh-order-invalid",
+      toolCalls: [
+        completed("skill"),
+        completed("alpaca_get_option_chain"),
+        completed("alpaca_get_option_chain"),
+        completed("trusted_time"),
+      ],
+    })
+
+    expect(injectionExpectation).toMatchObject({
+      requiredTools: ["exa_*"],
+      requiredExternalSourceUrls: ["https://example.com/injection-context"],
+    })
+    expect(withoutInjectionSearch.dimensions.toolDiscipline.issueCodes).toContain(
+      "REQUIRED_TOOL_MISSING",
+    )
+    expect(
+      withoutInjectionSearch.dimensions.evidenceDiscipline.issueCodes,
+    ).toContain("EXPECTED_SOURCE_MISSING")
+    expect(withoutRefresh.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_COUNT_INVALID",
+      "TOOL_SEQUENCE_INVALID",
+    ])
+    expect(extraRefresh.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_COUNT_INVALID",
+    ])
+    expect(wrongRefreshOrder.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_SEQUENCE_INVALID",
+    ])
   })
 
   it("requires exactly one complete stale-snapshot rebuild", () => {

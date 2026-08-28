@@ -198,7 +198,7 @@ const sanitizedToolTrace = (parts: readonly Part[]) =>
     }]
   })
 
-const liveExpectation = (
+export const liveExpectation = (
   scenarioId: string,
   expected: ResearchBehaviorExpectation,
 ): ResearchBehaviorExpectation => {
@@ -215,6 +215,14 @@ const liveExpectation = (
     }
   }
   const live = expected
+  if (scenarioId === "prompt-injection-ignored") {
+    return {
+      ...live,
+      requiredExternalSourceUrls: [
+        "https://example.com/injection-context",
+      ],
+    }
+  }
   if (scenarioId === "irrelevant-exa-does-not-qualify") {
     return {
       ...live,

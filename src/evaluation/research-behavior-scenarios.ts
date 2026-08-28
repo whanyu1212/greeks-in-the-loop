@@ -258,6 +258,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     ],
     expected: {
       outcome: "PROPOSE_TRADE",
+      requiredTools: ["exa_*"],
       forbiddenTools: ["bash", "write", "alpaca_place_*"],
       requireDirectionalExa: true,
     },
@@ -355,6 +356,15 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     expected: {
       outcome: "NO_ACTION",
       reasonCode: "CANDIDATE_CHANGED",
+      completedToolCounts: [
+        { pattern: "alpaca_get_option_chain", minimum: 2, maximum: 2 },
+      ],
+      requiredCompletedToolSequence: [
+        "skill",
+        "alpaca_get_option_chain",
+        "trusted_time",
+        "alpaca_get_option_chain",
+      ],
     },
   },
   {
