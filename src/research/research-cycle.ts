@@ -1,16 +1,9 @@
-import {
-  deriveTradeIntentV1,
-  type TradeIntentDerivationResult,
-} from "../contracts/trade-intent-v1.js"
+import { deriveTradeIntentV1 } from "../contracts/trade-intent-v1.js"
 import {
   STRATEGY_VERSION,
   validateResearchDecisionV1,
-  type ProposedTradeDecisionV1,
 } from "../contracts/research-decision-v1.js"
-import {
-  researchReportV2Schema,
-  type ResearchReportV2,
-} from "../contracts/research-report-v2.js"
+import { researchReportV2Schema } from "../contracts/research-report-v2.js"
 import { MAX_LEDGER_EVENT_PAYLOAD_BYTES } from "../event-ledger/ledger-event-v1.js"
 import type {
   OptionQuoteProvider,
@@ -23,18 +16,18 @@ import {
   NOOP_TERMINAL_STAGE_REPORTER,
   type TerminalStageReporter,
 } from "../observability/terminal-stage-reporter.js"
-import {
-  newYorkLocalTime,
-  type ResearchEligibilityV1,
-} from "../scheduling/research-eligibility.js"
+import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
 import type { ShadowRiskEvaluator } from "../risk/shadow-risk-service.js"
 import { safeSchemaDiagnostics } from "../shared/schema-diagnostics.js"
 import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
   type ResearchCycleOutcomeSink,
   type ResearchCycleOutcomeV1,
-  type ResearchCycleTerminalRecordV1,
 } from "./research-cycle-outcome-v1.js"
+import {
+  processResearchProposalPath,
+  type ProposalIntentDeriver,
+} from "./research-proposal-path.js"
 import { createResearchCycleStageReports } from "./research-cycle-stage-reporting.js"
 import {
   recordResearchCycleOutcome,
@@ -45,30 +38,18 @@ import {
 import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
 
 export {
+  PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
+  PROPOSAL_QUOTE_SNAPSHOT_REF,
+  proposalAccountChecksAreFresh,
+  proposalHistoryIssuePath,
+  proposalMarketRegimeIsFresh,
+} from "./research-proposal-path.js"
+export {
   MAX_TERMINAL_REJECTION_DETAILS,
   type ProcessedResearchCycle,
 } from "./research-cycle-terminal.js"
 
-export const PROPOSAL_QUOTE_SNAPSHOT_REF =
-  "alpaca-proposal-quotes-v1" as const
 export const MAX_RESEARCH_RESPONSE_BYTES = 64 * 1024
-const MAX_PROPOSAL_MARKET_REGIME_AGE_MS = 60_000
-const MAX_PROPOSAL_ACCOUNT_CHECK_AGE_MS = 5 * 60_000
-
-// This context validates proposal evidence topology and restricts every sourced
-// fact to the application-owned quote alias before any provider request. Real
-// quote timestamps replace it for the authoritative post-fetch validation.
-export const PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT = {
-  evaluatedAt: "2000-01-01T00:00:00.000Z",
-  snapshots: {
-    [PROPOSAL_QUOTE_SNAPSHOT_REF]: {
-      provider: "ALPACA",
-      source: "proposal-evidence-preflight",
-      retrievedAt: "2000-01-01T00:00:00.000Z",
-      freshUntil: "2000-01-01T00:00:00.000Z",
-    },
-  },
-} as const
 
 export type ProcessResearchCycleOptions = Readonly<{
   rawResponse: string
@@ -80,105 +61,10 @@ export type ProcessResearchCycleOptions = Readonly<{
   getEligibility: () => ResearchEligibilityV1
   researchInvocation: ResearchInvocationV1
   now?: () => Date
-  deriveIntent?: (
-    decision: ProposedTradeDecisionV1,
-    context: Parameters<typeof deriveTradeIntentV1>[1],
-  ) => TradeIntentDerivationResult
+  deriveIntent?: ProposalIntentDeriver
   trace?: ResearchCycleTrace
   stageReporter?: TerminalStageReporter
 }>
-
-const observationIsFresh = (
-  observedAt: string,
-  evaluatedAt: string,
-  maximumAgeMs: number,
-) => {
-  const evaluationTime = Date.parse(evaluatedAt)
-  const observationTime = Date.parse(observedAt)
-  const age = evaluationTime - observationTime
-  return (
-    Number.isFinite(evaluationTime) &&
-    Number.isFinite(observationTime) &&
-    age >= 0 &&
-    age <= maximumAgeMs
-  )
-}
-
-export const proposalMarketRegimeIsFresh = (
-  report: ResearchReportV2,
-  evaluatedAt: string,
-) =>
-  observationIsFresh(
-    report.analysis.marketRegime.observedAt,
-    evaluatedAt,
-    MAX_PROPOSAL_MARKET_REGIME_AGE_MS,
-  )
-
-export const proposalAccountChecksAreFresh = (
-  report: ResearchReportV2,
-  evaluatedAt: string,
-) =>
-  observationIsFresh(
-    report.analysis.accountChecks.observedAt,
-    evaluatedAt,
-    MAX_PROPOSAL_ACCOUNT_CHECK_AGE_MS,
-  )
-
-export const proposalHistoryIssuePath = (
-  report: ResearchReportV2,
-  eligibility: ResearchEligibilityV1,
-): readonly (string | number)[] | undefined => {
-  const sessionDate = eligibility.sessionDate
-  if (sessionDate === undefined) return ["analysis", "marketRegime", "observedAt"]
-
-  const observedAt = Date.parse(report.analysis.marketRegime.observedAt)
-  const sessionOpen = newYorkLocalTime(sessionDate, "09:30").getTime()
-  const expectedIntradayBars = Math.floor((observedAt - sessionOpen) / 60_000)
-  if (
-    !Number.isFinite(observedAt) ||
-    expectedIntradayBars <= 0 ||
-    report.analysis.marketRegime.intradayBarCount !== expectedIntradayBars
-  ) {
-    return ["analysis", "marketRegime", "intradayBarCount"]
-  }
-
-  if (report.analysis.candidateEvaluation === undefined) {
-    return ["analysis", "candidateEvaluation"]
-  }
-  const sessionDay = Date.parse(`${sessionDate}T00:00:00.000Z`)
-  const expirationDay = Date.parse(`${report.result.outcome === "PROPOSE_TRADE"
-    ? report.result.candidate.expiration
-    : sessionDate}T00:00:00.000Z`)
-  const expectedDte = (expirationDay - sessionDay) / 86_400_000
-  if (
-    !Number.isInteger(expectedDte) ||
-    report.analysis.candidateEvaluation.dte !== expectedDte
-  ) {
-    return ["analysis", "candidateEvaluation", "dte"]
-  }
-  const previousSessionDates = eligibility.previousSessionDates
-  if (previousSessionDates === undefined || previousSessionDates.length < 2) {
-    return ["analysis", "candidateEvaluation", "legs", 0, "openInterestDate"]
-  }
-  const eligibleOpenInterestDates = new Set([
-    sessionDate,
-    ...previousSessionDates.slice(-2),
-  ])
-  const staleOpenInterestIndex =
-    report.analysis.candidateEvaluation.legs.findIndex(
-      ({ openInterestDate }) => !eligibleOpenInterestDates.has(openInterestDate),
-    )
-  if (staleOpenInterestIndex >= 0) {
-    return [
-      "analysis",
-      "candidateEvaluation",
-      "legs",
-      staleOpenInterestIndex,
-      "openInterestDate",
-    ]
-  }
-  return undefined
-}
 
 /**
  * Parses, validates, confirms, and derives one research-agent response.
@@ -407,255 +293,24 @@ export async function processResearchCycle({
     )
   }
 
-  const evidencePreflight = await trace.run(
-    "research.decision.validate",
-    () => validateResearchDecisionV1(result, PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT),
-  )
-  if (!evidencePreflight.success) {
-    return recordReportOutcome(
-      {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "DECISION_REJECTED",
-        issues: evidencePreflight.issues,
-      },
-    )
-  }
-
-  const proposalEligibility = getEligibility()
-  if (!proposalEligibility.tradeIntentEligible) {
-    return recordReportOutcome(
-      {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "INTENT_DERIVATION_REJECTED",
-        reasons: ["MARKET_WINDOW_INELIGIBLE"],
-      },
-    )
-  }
-  if (!proposalMarketRegimeIsFresh(researchReport, proposalEligibility.evaluatedAt)) {
-    return recordReportOutcome({
-      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-      status: "DECISION_REJECTED",
-      issues: [
-        {
-          code: "CONTEXT_INVALID",
-          path: ["analysis", "marketRegime", "observedAt"],
-        },
-      ],
-    })
-  }
-  if (!proposalAccountChecksAreFresh(researchReport, proposalEligibility.evaluatedAt)) {
-    return recordReportOutcome({
-      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-      status: "DECISION_REJECTED",
-      issues: [
-        {
-          code: "CONTEXT_INVALID",
-          path: ["analysis", "accountChecks", "observedAt"],
-        },
-      ],
-    })
-  }
-  const historyIssuePath = proposalHistoryIssuePath(
+  const proposalResolution = await processResearchProposalPath({
+    report: researchReport,
+    result,
+    signal,
+    quoteProvider,
+    shadowRiskEvaluator,
+    getEligibility,
+    deriveIntent,
+    trace,
+    stages,
+    stageReporter,
+  })
+  return recordResearchCycleOutcome(proposalResolution, {
+    sink: outcomeSink,
+    signal,
+    researchInvocation,
     researchReport,
-    proposalEligibility,
-  )
-  if (historyIssuePath !== undefined) {
-    return recordReportOutcome({
-      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-      status: "DECISION_REJECTED",
-      issues: [{ code: "CONTEXT_INVALID", path: historyIssuePath }],
-    })
-  }
-
-  signal.throwIfAborted()
-  const quoteConfirmation = await trace.run("market.option_quotes.confirm", () =>
-    quoteProvider.confirmQuotes({
-      longContractSymbol: result.candidate.longLeg.contractSymbol,
-      shortContractSymbol: result.candidate.shortLeg.contractSymbol,
-      signal,
-    }),
-  )
-  signal.throwIfAborted()
-
-  if (!quoteConfirmation.success) {
-    stages.quotesRejected(quoteConfirmation.reasons)
-    return recordReportOutcome(
-      {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "INTENT_DERIVATION_REJECTED",
-        reasons: quoteConfirmation.reasons,
-      },
-    )
-  }
-
-  stages.quotesConfirmed(quoteConfirmation.snapshot)
-
-  const evidenceSnapshots: ResearchCycleTerminalRecordV1["evidenceSnapshots"] = [
-    {
-      snapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
-      ...quoteConfirmation.snapshot.snapshotMetadata,
-      temporalClass: "LIVE",
-    },
-  ]
-
-  if (
-    !proposalMarketRegimeIsFresh(
-      researchReport,
-      quoteConfirmation.snapshot.evaluatedAt,
-    )
-  ) {
-    return recordReportOutcome(
-      {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "DECISION_REJECTED",
-        issues: [
-          {
-            code: "CONTEXT_INVALID",
-            path: ["analysis", "marketRegime", "observedAt"],
-          },
-        ],
-      },
-      { evidenceSnapshots },
-    )
-  }
-  if (
-    !proposalAccountChecksAreFresh(
-      researchReport,
-      quoteConfirmation.snapshot.evaluatedAt,
-    )
-  ) {
-    return recordReportOutcome(
-      {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "DECISION_REJECTED",
-        issues: [
-          {
-            code: "CONTEXT_INVALID",
-            path: ["analysis", "accountChecks", "observedAt"],
-          },
-        ],
-      },
-      { evidenceSnapshots },
-    )
-  }
-
-  if (!getEligibility().tradeIntentEligible) {
-    return recordReportOutcome(
-      {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "INTENT_DERIVATION_REJECTED",
-        reasons: ["MARKET_WINDOW_INELIGIBLE"],
-      },
-      { evidenceSnapshots },
-    )
-  }
-
-  const validation = await trace.run("research.decision.validate", () =>
-    validateResearchDecisionV1(result, {
-      evaluatedAt: quoteConfirmation.snapshot.evaluatedAt,
-      snapshots: {
-        [PROPOSAL_QUOTE_SNAPSHOT_REF]:
-          quoteConfirmation.snapshot.snapshotMetadata,
-      },
-    }),
-  )
-  if (!validation.success) {
-    return recordReportOutcome(
-      {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "DECISION_REJECTED",
-        issues: validation.issues,
-      },
-      { evidenceSnapshots },
-    )
-  }
-  if (validation.data.outcome !== "PROPOSE_TRADE") {
-    return recordReportOutcome(
-      {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "DECISION_REJECTED",
-        issues: [{
-          code: "SCHEMA_INVALID",
-          schemaCategory: "VALUE_NOT_ALLOWED",
-          path: ["outcome"],
-        }],
-      },
-      { evidenceSnapshots },
-    )
-  }
-  const proposedDecision = validation.data
-  stages.decisionValidated(proposedDecision)
-
-  const derivation = await trace.run("research.intent.derive", () =>
-    deriveIntent(proposedDecision, {
-      quoteSnapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
-      evaluatedAt: quoteConfirmation.snapshot.evaluatedAt,
-      longQuote: quoteConfirmation.snapshot.longQuote,
-      shortQuote: quoteConfirmation.snapshot.shortQuote,
-    }),
-  )
-  if (!derivation.success) {
-    stages.intentRejected(derivation.reasons)
-    return recordReportOutcome(
-      {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "INTENT_DERIVATION_REJECTED",
-        reasons: derivation.reasons,
-      },
-      {
-        evidenceSnapshots,
-        validatedDecision: proposedDecision,
-      },
-    )
-  }
-
-  stages.intentDerived(derivation.intent)
-
-  if (
-    proposalEligibility.sessionDate === undefined ||
-    proposalEligibility.tradeIntentWindow === undefined
-  ) {
-    return recordReportOutcome(
-      {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "INTENT_DERIVATION_REJECTED",
-        reasons: ["MARKET_WINDOW_INELIGIBLE"],
-      },
-      {
-        evidenceSnapshots,
-        validatedDecision: proposedDecision,
-      },
-    )
-  }
-
-  const shadowRisk = await trace.run("risk.shadow.evaluate", () =>
-    shadowRiskEvaluator.evaluate({
-      decision: proposedDecision,
-      sourceIntent: derivation.intent,
-      captureEligibility: {
-        ...proposalEligibility,
-        sessionDate: proposalEligibility.sessionDate!,
-        tradeIntentWindow: proposalEligibility.tradeIntentWindow!,
-      },
-      getEvaluationEligibility: getEligibility,
-      signal,
-      stageReporter,
-    }),
-  )
-
-  stages.riskEvaluated(shadowRisk)
-
-  return recordReportOutcome(
-    {
-      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-      status: "INTENT_DERIVED",
-      decision: proposedDecision,
-      intent: derivation.intent,
-    },
-    {
-      evidenceSnapshots,
-      validatedDecision: proposedDecision,
-      shadowRisk,
-    },
-  )
+    trace,
+    stages,
+  })
 }
