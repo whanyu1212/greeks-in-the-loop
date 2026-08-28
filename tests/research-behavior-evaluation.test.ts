@@ -149,6 +149,76 @@ describe("research behavior evaluation", () => {
     ])
   })
 
+  it("requires every expected live fixture URL after canonicalization", () => {
+    const source = researchBehaviorScenarios[8]!
+    const report = JSON.parse(source.rawResponse) as {
+      analysis: { externalContext: unknown[] }
+    }
+    report.analysis.externalContext = report.analysis.externalContext.slice(0, 1)
+    const { requiredExternalSourceIds: _sourceIds, ...urlExpectation } =
+      source.expected
+    const evaluation = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "missing-adversarial-source",
+      rawResponse: JSON.stringify(report),
+      expected: {
+        ...urlExpectation,
+        requiredExternalSourceUrls: [
+          "https://example.com/exa-support?utm_source=fixture",
+          "https://example.com/exa-challenge",
+        ],
+      },
+    })
+
+    expect(evaluation.dimensions.evidenceDiscipline.issueCodes).toContain(
+      "EXPECTED_SOURCE_MISSING",
+    )
+  })
+
+  it("requires exactly one complete stale-snapshot rebuild", () => {
+    const source = researchBehaviorScenarios[6]!
+    const incomplete = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "incomplete-snapshot-rebuild",
+      toolCalls: source.toolCalls.filter(
+        ({ name }, index) => name !== "alpaca_get_option_contracts" || index < 7,
+      ),
+    })
+    const duplicateDailyBars = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "duplicate-daily-bars",
+      toolCalls: source.toolCalls.map((call) =>
+        call.name === "alpaca_get_stock_bars"
+          ? { ...call, input: { timeframe: "1Day" } }
+          : call
+      ),
+    })
+    const extra = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "extra-snapshot-rebuild",
+      toolCalls: [
+        ...source.toolCalls,
+        completed("alpaca_get_stock_bars"),
+        completed("alpaca_get_stock_bars"),
+        completed("alpaca_get_stock_latest_quote"),
+        completed("alpaca_get_option_chain"),
+        completed("alpaca_get_option_contracts"),
+        completed("trusted_time"),
+      ],
+    })
+
+    expect(incomplete.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_COUNT_INVALID",
+      "TOOL_SEQUENCE_INVALID",
+    ])
+    expect(duplicateDailyBars.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_INPUT_COUNT_INVALID",
+    ])
+    expect(extra.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_COUNT_INVALID",
+    ])
+  })
+
   it("reports total and provider-specific budget overruns", () => {
     const source = researchBehaviorScenarios[9]!
     const calls = [

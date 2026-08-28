@@ -202,13 +202,19 @@ const liveExpectation = (
   scenarioId: string,
   expected: ResearchBehaviorExpectation,
 ): ResearchBehaviorExpectation => {
-  // Models choose bounded source identifiers. Live evaluation checks relevance
-  // and deduplication rather than fixture-specific identifier spelling.
-  const {
-    requiredExternalSourceIds: _requiredExternalSourceIds,
-    forbiddenExternalSourceIds: _forbiddenExternalSourceIds,
-    ...live
-  } = expected
+  if (scenarioId === "valid-adversarial-proposal") {
+    // Models choose bounded source identifiers, but retained fixture URLs are
+    // stable and prove that both the supporting and challenging calls survived.
+    const { requiredExternalSourceIds: _fixtureSourceIds, ...live } = expected
+    return {
+      ...live,
+      requiredExternalSourceUrls: [
+        "https://example.com/valid-adversarial-proposal/1",
+        "https://example.com/valid-adversarial-proposal/2",
+      ],
+    }
+  }
+  const live = expected
   if (scenarioId === "irrelevant-exa-does-not-qualify") {
     return {
       ...live,

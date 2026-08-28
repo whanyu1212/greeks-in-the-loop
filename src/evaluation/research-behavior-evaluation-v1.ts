@@ -1,4 +1,5 @@
 import { isAbsolute, resolve, sep } from "node:path"
+import { isDeepStrictEqual } from "node:util"
 
 import { z } from "zod"
 
@@ -24,6 +25,9 @@ export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "READ_OUTSIDE_RESEARCH_PATH",
   "REQUIRED_TOOL_MISSING",
   "TOOL_ORDER_INVALID",
+  "TOOL_COUNT_INVALID",
+  "TOOL_INPUT_COUNT_INVALID",
+  "TOOL_SEQUENCE_INVALID",
   "EARLY_STOP_VIOLATED",
   "TOTAL_TOOL_BUDGET_EXCEEDED",
   "EXA_TOOL_BUDGET_EXCEEDED",
@@ -88,12 +92,25 @@ export type ResearchBehaviorExpectation = Readonly<{
   requiredTools?: readonly string[]
   forbiddenTools?: readonly string[]
   requiredOrder?: readonly (readonly [string, string])[]
+  completedToolCounts?: readonly Readonly<{
+    pattern: string
+    minimum: number
+    maximum: number
+  }>[]
+  completedToolInputCounts?: readonly Readonly<{
+    pattern: string
+    input: Readonly<Record<string, unknown>>
+    minimum: number
+    maximum: number
+  }>[]
+  requiredCompletedToolSequence?: readonly string[]
   forbiddenAfter?: readonly Readonly<{
     anchor: string
     tools: readonly string[]
   }>[]
   requireDirectionalExa?: boolean
   requiredExternalSourceIds?: readonly string[]
+  requiredExternalSourceUrls?: readonly string[]
   forbiddenExternalSourceIds?: readonly string[]
   requireMaterialConflict?: boolean
 }>
@@ -264,6 +281,44 @@ export function evaluateResearchBehavior({
     )
     if (!orderIsSatisfied) toolIssues.push("TOOL_ORDER_INVALID")
   }
+  const completedToolCalls = toolCalls.filter(
+    ({ outcome }) => outcome === undefined || outcome === "completed",
+  )
+  for (const { pattern, minimum, maximum } of expected.completedToolCounts ?? []) {
+    const count = completedToolCalls.filter(({ name }) =>
+      toolMatches(name, pattern)
+    ).length
+    if (count < minimum || count > maximum) {
+      toolIssues.push("TOOL_COUNT_INVALID")
+    }
+  }
+  for (
+    const { pattern, input, minimum, maximum } of
+      expected.completedToolInputCounts ?? []
+  ) {
+    const count = completedToolCalls.filter((call) => {
+      if (!toolMatches(call.name, pattern)) return false
+      if (call.input === null || typeof call.input !== "object") return false
+      const actual = call.input as Record<string, unknown>
+      return Object.entries(input).every(([key, value]) =>
+        isDeepStrictEqual(actual[key], value)
+      )
+    }).length
+    if (count < minimum || count > maximum) {
+      toolIssues.push("TOOL_INPUT_COUNT_INVALID")
+    }
+  }
+  if (expected.requiredCompletedToolSequence !== undefined) {
+    let sequenceIndex = 0
+    for (const { name } of completedToolCalls) {
+      const pattern = expected.requiredCompletedToolSequence[sequenceIndex]
+      if (pattern !== undefined && toolMatches(name, pattern)) sequenceIndex += 1
+    }
+    if (sequenceIndex !== expected.requiredCompletedToolSequence.length) {
+      toolIssues.push("TOOL_SEQUENCE_INVALID")
+    }
+  }
+
   for (const rule of expected.forbiddenAfter ?? []) {
     const anchorIndex = firstToolIndex(toolCalls, rule.anchor)
     if (
@@ -311,6 +366,12 @@ export function evaluateResearchBehavior({
     const canonicalUrls = externalSources.flatMap((source) =>
       source.provider === "EXA" ? [canonicalExternalUrl(source.url)] : [],
     )
+    const canonicalUrlSet = new Set(canonicalUrls)
+    for (const sourceUrl of expected.requiredExternalSourceUrls ?? []) {
+      if (!canonicalUrlSet.has(canonicalExternalUrl(sourceUrl))) {
+        evidenceIssues.push("EXPECTED_SOURCE_MISSING")
+      }
+    }
     if (new Set(canonicalUrls).size !== canonicalUrls.length) {
       evidenceIssues.push("DUPLICATE_EXTERNAL_SOURCE")
     }

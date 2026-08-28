@@ -171,9 +171,13 @@ const proposalReport = (externalContext = [
 })
 
 const json = (value: unknown) => JSON.stringify(value)
-const completed = (name: string): ResearchBehaviorToolCall => ({
+const completed = (
+  name: string,
+  input?: unknown,
+): ResearchBehaviorToolCall => ({
   name,
   outcome: "completed",
+  ...(input === undefined ? {} : { input }),
 })
 
 export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
@@ -279,20 +283,58 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     })),
     toolCalls: [
       completed("skill"),
-      completed("alpaca_get_stock_bars"),
+      completed("alpaca_get_stock_bars", { timeframe: "1Day" }),
+      completed("alpaca_get_stock_bars", { timeframe: "1Min" }),
+      completed("alpaca_get_stock_latest_quote"),
       completed("alpaca_get_option_chain"),
+      completed("alpaca_get_option_contracts"),
       completed("trusted_time"),
-      completed("alpaca_get_stock_bars"),
+      completed("alpaca_get_stock_bars", { timeframe: "1Day" }),
+      completed("alpaca_get_stock_bars", { timeframe: "1Min" }),
+      completed("alpaca_get_stock_latest_quote"),
       completed("alpaca_get_option_chain"),
+      completed("alpaca_get_option_contracts"),
       completed("trusted_time"),
       completed("exa_search"),
     ],
     expected: {
       outcome: "NO_ACTION",
       reasonCode: "INSUFFICIENT_UNDERLYING_DATA",
-      requiredOrder: [
-        ["skill", "alpaca_get_stock_bars"],
-        ["alpaca_get_stock_bars", "trusted_time"],
+      completedToolCounts: [
+        { pattern: "alpaca_get_stock_bars", minimum: 4, maximum: 4 },
+        { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 2 },
+        { pattern: "alpaca_get_option_chain", minimum: 2, maximum: 2 },
+        { pattern: "alpaca_get_option_contracts", minimum: 2, maximum: 2 },
+        { pattern: "trusted_time", minimum: 2, maximum: 2 },
+      ],
+      completedToolInputCounts: [
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: { timeframe: "1Day" },
+          minimum: 2,
+          maximum: 2,
+        },
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: { timeframe: "1Min" },
+          minimum: 2,
+          maximum: 2,
+        },
+      ],
+      requiredCompletedToolSequence: [
+        "skill",
+        "alpaca_get_stock_bars",
+        "alpaca_get_stock_bars",
+        "alpaca_get_stock_latest_quote",
+        "alpaca_get_option_chain",
+        "alpaca_get_option_contracts",
+        "trusted_time",
+        "alpaca_get_stock_bars",
+        "alpaca_get_stock_bars",
+        "alpaca_get_stock_latest_quote",
+        "alpaca_get_option_chain",
+        "alpaca_get_option_contracts",
+        "trusted_time",
       ],
     },
   },
