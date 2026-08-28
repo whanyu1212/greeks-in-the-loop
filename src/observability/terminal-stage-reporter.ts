@@ -61,6 +61,7 @@ const stageLabel = (stage: string) =>
     "risk.evaluate": "Risk evaluation",
     "ledger.commit": "Ledger commit",
     "cycle.outcome": "Cycle outcome",
+    "research.evaluate": "Offline audit",
     "artifact.write": "Artifact",
   })[stage] ?? stage
 
@@ -81,6 +82,18 @@ const prettySummary = (
   stage: string,
   details: Readonly<Record<string, TerminalStageValue>>,
 ) => {
+  if (stage === "research.evaluate") {
+    const issues = detail(details, "issues")
+    return [
+      `${String(detail(details, "passCount") ?? 0)} pass`,
+      `${String(detail(details, "failCount") ?? 0)} fail`,
+      `${String(detail(details, "notApplicableCount") ?? 0)} n/a`,
+      detail(details, "actionability"),
+      Array.isArray(issues) && issues.length > 0
+        ? issues.join(", ")
+        : undefined,
+    ].filter(Boolean).join(" | ")
+  }
   const reasons = reasonSummary(details)
   if (reasons !== undefined) return reasons
   switch (stage) {

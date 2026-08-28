@@ -43,10 +43,11 @@ import {
   RESEARCH_SKILL_NAME,
   RESEARCH_SKILL_VERSION,
 } from "./research/research-agent.js"
+import { loadResearchRunV1 } from "./research/research-artifact.js"
 import {
-  loadResearchRunV1,
-  writeResearchRunArtifact,
-} from "./research/research-artifact.js"
+  buildResearchRunPresentation,
+  writeResearchRunArtifacts,
+} from "./research/research-run-presentation.js"
 import {
   loadResearchContextV1,
   reconstructResearchContextV1,
@@ -533,17 +534,40 @@ try {
           })
           cycleTrace.setOutcome(processed.outcome.status)
           try {
-            const artifactPath = await cycleTrace.run(
+            const artifacts = await cycleTrace.run(
               "research.artifact.project",
               async () => {
                 const run = await loadResearchRunV1(ledgerStore, cycle.cycleId)
-                return writeResearchRunArtifact({ run })
+                stageReporter.report("research.evaluate", "STARTED")
+                const presentation = buildResearchRunPresentation(run)
+                stageReporter.report(
+                  "research.evaluate",
+                  presentation.audit.failCount === 0 ? "COMPLETED" : "REJECTED",
+                  {
+                    passCount: presentation.audit.passCount,
+                    failCount: presentation.audit.failCount,
+                    notApplicableCount:
+                      presentation.audit.notApplicableCount,
+                    issues: presentation.audit.issueCodes,
+                    actionability: presentation.actionability,
+                  },
+                )
+                stageReporter.report("artifact.write", "STARTED")
+                return writeResearchRunArtifacts({ run, presentation })
               },
             )
             stageReporter.report("artifact.write", "COMPLETED", {
-              path: artifactPath,
+              path: artifacts.markdownPath,
+              markdownPath: artifacts.markdownPath,
+              jsonPath: artifacts.jsonPath,
             })
-            return `${processed.report}\nResearch artifact: ${artifactPath}`
+            return [
+              processed.report,
+              `Actionability: ${artifacts.presentation.actionability}`,
+              `Audit: ${artifacts.presentation.audit.passCount} PASS / ${artifacts.presentation.audit.failCount} FAIL / ${artifacts.presentation.audit.notApplicableCount} N/A`,
+              `Research brief: ${artifacts.markdownPath}`,
+              `Canonical JSON: ${artifacts.jsonPath}`,
+            ].join("\n")
           } catch {
             stageReporter.report("artifact.write", "REJECTED", {
               reason: "WRITE_FAILED",
@@ -551,7 +575,7 @@ try {
             console.error(
               `[cycle ${cycleNumber}] validated outcome recorded, but research artifact could not be written`,
             )
-            return `${processed.report}\nResearch artifact: unavailable`
+            return `${processed.report}\nResearch artifacts: unavailable`
           }
         } catch (error) {
           if (error instanceof LedgerPersistenceError) {
