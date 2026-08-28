@@ -315,10 +315,16 @@ const completeProposalToolExpectation = {
     ],
     ["alpaca_get_clock", "trusted_time"],
   ],
-  forbiddenAfter: [{
-    anchor: "alpaca_get_clock",
-    tools: ["alpaca_get_*", "exa_*", "fmp_*"],
-  }],
+  forbiddenAfter: [
+    {
+      anchor: "alpaca_get_option_contracts",
+      tools: ["exa_*", "fmp_*"],
+    },
+    {
+      anchor: "alpaca_get_clock",
+      tools: ["alpaca_get_*", "exa_*", "fmp_*"],
+    },
+  ],
   expectedMarketRegime: {
     dailyClose: 603.25,
     sma20: 600.875,

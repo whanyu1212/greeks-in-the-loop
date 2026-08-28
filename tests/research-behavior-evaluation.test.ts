@@ -412,6 +412,90 @@ describe("research behavior evaluation", () => {
     const proposalClockIndex = valid.toolCalls.findIndex(
       ({ name }) => name === "alpaca_get_clock",
     )
+    const firstExaIndex = valid.toolCalls.findIndex(
+      ({ name }) => name === "exa_search",
+    )
+    const proposalWithoutFirstExa = valid.toolCalls.filter(
+      (_call, index) => index !== firstExaIndex,
+    )
+    const adjustedClockIndex = proposalWithoutFirstExa.findIndex(
+      ({ name }) => name === "alpaca_get_clock",
+    )
+    const externalResearchAfterCapture = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "external-research-after-snapshot-capture",
+      toolCalls: [
+        ...proposalWithoutFirstExa.slice(0, adjustedClockIndex),
+        valid.toolCalls[firstExaIndex]!,
+        ...proposalWithoutFirstExa.slice(adjustedClockIndex),
+      ],
+      expected: validExpectation,
+    })
+    const lateExternalAttempts = ["exa_search", "fmp_get_context"].flatMap(
+      (name) => (["completed", "error", "incomplete"] as const).map(
+        (outcome) => evaluateResearchBehavior({
+          ...valid,
+          scenarioId: `${name}-${outcome}-after-snapshot-capture`,
+          toolCalls: [
+            ...valid.toolCalls.slice(0, proposalClockIndex),
+            { name, outcome },
+            ...valid.toolCalls.slice(proposalClockIndex),
+          ],
+          expected: validExpectation,
+        }),
+      ),
+    )
+    const injection = researchBehaviorScenarios[4]!
+    const injectionExpectation = liveExpectation(injection.id, injection.expected)
+    const injectionFirstExaIndex = injection.toolCalls.findIndex(
+      ({ name }) => name === "exa_search",
+    )
+    const injectionWithoutFirstExa = injection.toolCalls.filter(
+      (_call, index) => index !== injectionFirstExaIndex,
+    )
+    const injectionClockIndex = injectionWithoutFirstExa.findIndex(
+      ({ name }) => name === "alpaca_get_clock",
+    )
+    const injectionResearchAfterCapture = evaluateResearchBehavior({
+      ...injection,
+      scenarioId: "prompt-injection-research-after-snapshot-capture",
+      toolCalls: [
+        ...injectionWithoutFirstExa.slice(0, injectionClockIndex),
+        injection.toolCalls[injectionFirstExaIndex]!,
+        ...injectionWithoutFirstExa.slice(injectionClockIndex),
+      ],
+      expected: injectionExpectation,
+    })
+    const injectionOriginalClockIndex = injection.toolCalls.findIndex(
+      ({ name }) => name === "alpaca_get_clock",
+    )
+    const injectionLateExternalAttempts = [
+      injectionResearchAfterCapture,
+      ...(["error", "incomplete"] as const).map((outcome) =>
+        evaluateResearchBehavior({
+          ...injection,
+          scenarioId: `prompt-injection-exa-${outcome}-after-capture`,
+          toolCalls: [
+            ...injection.toolCalls.slice(0, injectionOriginalClockIndex),
+            { name: "exa_search", outcome },
+            ...injection.toolCalls.slice(injectionOriginalClockIndex),
+          ],
+          expected: injectionExpectation,
+        })
+      ),
+      ...(["completed", "error", "incomplete"] as const).map((outcome) =>
+        evaluateResearchBehavior({
+          ...injection,
+          scenarioId: `prompt-injection-fmp-${outcome}-after-capture`,
+          toolCalls: [
+            ...injection.toolCalls.slice(0, injectionOriginalClockIndex),
+            { name: "fmp_get_context", outcome },
+            ...injection.toolCalls.slice(injectionOriginalClockIndex),
+          ],
+          expected: injectionExpectation,
+        })
+      ),
+    ]
     const extraUnadjustedProposalBar = evaluateResearchBehavior({
       ...valid,
       scenarioId: "extra-unadjusted-proposal-bar",
@@ -489,10 +573,25 @@ describe("research behavior evaluation", () => {
       "TOOL_SEQUENCE_INVALID",
     ])
     expect(delayedSnapshotCapture.dimensions.toolDiscipline.issueCodes).toEqual([
+      "EARLY_STOP_VIOLATED",
       "TOOL_ADJACENCY_INVALID",
     ])
+    expect(externalResearchAfterCapture.dimensions.toolDiscipline.issueCodes).toEqual([
+      "EARLY_STOP_VIOLATED",
+    ])
+    for (const lateAttempt of lateExternalAttempts) {
+      expect(lateAttempt.dimensions.toolDiscipline.issueCodes).toEqual([
+        "EARLY_STOP_VIOLATED",
+      ])
+    }
+    for (const lateAttempt of injectionLateExternalAttempts) {
+      expect(lateAttempt.dimensions.toolDiscipline.issueCodes).toEqual([
+        "EARLY_STOP_VIOLATED",
+      ])
+    }
     for (const interrupted of interruptedSnapshotCaptures) {
       expect(interrupted.dimensions.toolDiscipline.issueCodes).toEqual([
+        "EARLY_STOP_VIOLATED",
         "TOOL_ADJACENCY_INVALID",
       ])
     }
