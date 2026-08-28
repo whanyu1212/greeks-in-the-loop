@@ -897,6 +897,10 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     expected: {
       outcome: "PROPOSE_TRADE",
       ...completeProposalToolExpectation,
+      completedToolCounts: [
+        ...completeProposalToolExpectation.completedToolCounts,
+        { pattern: "exa_search", minimum: 2, maximum: 2 },
+      ],
       requireDirectionalExa: true,
       requiredExternalSourceIds: ["exa-support", "exa-challenge"],
       requiredExternalSourceRelevances: ["SUPPORTS", "CONTRADICTS"],

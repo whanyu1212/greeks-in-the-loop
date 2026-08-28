@@ -35,6 +35,7 @@
   },
   "dependencies": {
     "@arizeai/openinference-semantic-conventions": "2.8.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@opencode-ai/sdk": "1.18.21",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/exporter-trace-otlp-proto": "0.221.0",
@@ -48,7 +49,6 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "22.20.1",
     "tsx": "4.23.12",

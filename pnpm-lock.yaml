@@ -11,6 +11,9 @@ importers:
       '@arizeai/openinference-semantic-conventions':
         specifier: 2.8.0
         version: 2.8.0
+      '@modelcontextprotocol/sdk':
+        specifier: 1.30.0
+        version: 1.30.0(zod@4.4.3)
       '@opencode-ai/sdk':
         specifier: 1.18.21
         version: 1.18.21
@@ -45,9 +48,6 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
     devDependencies:
-      '@modelcontextprotocol/sdk':
-        specifier: 1.30.0
-        version: 1.30.0(zod@4.4.3)
       '@types/better-sqlite3':
         specifier: 9.6.0
         version: 9.6.0

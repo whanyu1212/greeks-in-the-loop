@@ -27,8 +27,8 @@ describe("research behavior evaluation", () => {
     })).toBe(true)
     expect(researchEvalBarRequestMatchesFixture({
       timeframe: "1Min",
-      start: "2026-08-26T13:30:00Z",
-      end: "2026-08-26T14:30:00Z",
+      start: "2026-08-26T13:30:00.000Z",
+      end: "2026-08-26T14:30:00.000Z",
       limit: 60,
     })).toBe(true)
     expect(researchEvalBarRequestMatchesFixture({
@@ -362,6 +362,28 @@ describe("research behavior evaluation", () => {
         "TOOL_ADJACENCY_INVALID",
         "TOOL_SEQUENCE_INVALID",
       ])
+      const firstExaIndex = source.toolCalls.findIndex(
+        ({ name }) => name === "exa_search",
+      )
+      const withoutFirstExa = source.toolCalls.filter(
+        (_call, index) => index !== firstExaIndex,
+      )
+      const accountTimeIndex = withoutFirstExa.findIndex(
+        ({ name }) => name === "trusted_time",
+      )
+      const earlyExternal = evaluateResearchBehavior({
+        ...source,
+        scenarioId: `${source.id}-external-before-full-preflight`,
+        toolCalls: [
+          ...withoutFirstExa.slice(0, accountTimeIndex + 1),
+          source.toolCalls[firstExaIndex]!,
+          ...withoutFirstExa.slice(accountTimeIndex + 1),
+        ],
+        expected: liveExpectation(source.id, source.expected),
+      })
+      expect(earlyExternal.dimensions.toolDiscipline.issueCodes).toEqual([
+        "TOOL_SEQUENCE_INVALID",
+      ])
     }
   })
 
@@ -526,7 +548,43 @@ describe("research behavior evaluation", () => {
     const materialConflict = researchBehaviorScenarios[3]!
     const valid = researchBehaviorScenarios[8]!
     const weak = researchBehaviorScenarios[9]!
+    const mislabeledIrrelevantReport = JSON.parse(irrelevant.rawResponse) as {
+      analysis: { externalContext: Array<Record<string, unknown>> }
+    }
+    mislabeledIrrelevantReport.analysis.externalContext = [{
+      ...mislabeledIrrelevantReport.analysis.externalContext[0],
+      url: "https://example.com/unrelated",
+      relevance: "SUPPORTS",
+      publishedAt: "2026-08-26T13:00:00.000Z",
+      retrievedAt: "2026-08-26T14:30:00.000Z",
+    }]
+    const mislabeledIrrelevant = evaluateResearchBehavior({
+      ...irrelevant,
+      scenarioId: "irrelevant-fixture-mislabeled-support",
+      rawResponse: JSON.stringify(mislabeledIrrelevantReport),
+      expected: liveExpectation(irrelevant.id, irrelevant.expected),
+    })
     const validExpectation = liveExpectation(valid.id, valid.expected)
+    const validWithoutChallengeSearch = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "proposal-without-challenge-search",
+      toolCalls: valid.toolCalls.filter(
+        ({ name }, index) => name !== "exa_search" ||
+          index === valid.toolCalls.findIndex((call) => call.name === "exa_search"),
+      ),
+      expected: validExpectation,
+    })
+    const validWithSubstitutedExaOperation = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "proposal-with-non-search-exa-substitution",
+      toolCalls: valid.toolCalls.map((call, index) =>
+        call.name === "exa_search" &&
+          index !== valid.toolCalls.findIndex((item) => item.name === "exa_search")
+          ? { ...call, name: "exa_fetch" }
+          : call
+      ),
+      expected: validExpectation,
+    })
     const orderingExaIndex = valid.toolCalls.findIndex(
       ({ name }) => name === "exa_search",
     )
@@ -787,6 +845,13 @@ describe("research behavior evaluation", () => {
       ],
       outcome: "NO_ACTION",
       reasonCode: "REQUIRED_EXA_EVIDENCE_UNAVAILABLE",
+      requiredExternalSources: [{
+        url: "https://example.com/unrelated",
+        relevance: "NEUTRAL",
+        publishedAt: "2026-08-26T13:00:00.000Z",
+        retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+        retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
+      }],
     })
     expect(liveExpectation(syndicated.id, syndicated.expected)).toMatchObject({
       requiredTools: [
@@ -815,6 +880,9 @@ describe("research behavior evaluation", () => {
       ],
     })
     expect(
+      mislabeledIrrelevant.dimensions.evidenceDiscipline.issueCodes,
+    ).toEqual(["EXPECTED_RELEVANCE_MISSING"])
+    expect(
       proposalResearchInsideSnapshot.dimensions.toolDiscipline.issueCodes,
     ).toEqual(["EARLY_STOP_VIOLATED"])
     for (const bypass of proposalPreflightBypasses) {
@@ -822,6 +890,12 @@ describe("research behavior evaluation", () => {
         "TOOL_SEQUENCE_INVALID",
       ])
     }
+    expect(validWithoutChallengeSearch.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_COUNT_INVALID",
+    ])
+    expect(
+      validWithSubstitutedExaOperation.dimensions.toolDiscipline.issueCodes,
+    ).toEqual(["TOOL_COUNT_INVALID"])
     expect(validExpectation.requiredExternalSources).toEqual([
       {
         url: "https://example.com/valid-adversarial-proposal/1",
@@ -865,14 +939,18 @@ describe("research behavior evaluation", () => {
     expect(delayedSnapshotCapture.dimensions.toolDiscipline.issueCodes).toEqual([
       "EARLY_STOP_VIOLATED",
       "TOOL_ADJACENCY_INVALID",
+      "TOOL_COUNT_INVALID",
     ])
     expect(externalResearchAfterCapture.dimensions.toolDiscipline.issueCodes).toEqual([
       "EARLY_STOP_VIOLATED",
     ])
     for (const lateAttempt of lateExternalAttempts) {
-      expect(lateAttempt.dimensions.toolDiscipline.issueCodes).toEqual([
+      expect(lateAttempt.dimensions.toolDiscipline.issueCodes).toContain(
         "EARLY_STOP_VIOLATED",
-      ])
+      )
+      expect(lateAttempt.dimensions.toolDiscipline.issueCodes.every(
+        (code) => code === "EARLY_STOP_VIOLATED" || code === "TOOL_COUNT_INVALID",
+      )).toBe(true)
     }
     for (const lateAttempt of injectionLateExternalAttempts) {
       expect(lateAttempt.dimensions.toolDiscipline.issueCodes).toEqual([
@@ -890,6 +968,7 @@ describe("research behavior evaluation", () => {
     ])
     expect(providerCallAfterClock.dimensions.toolDiscipline.issueCodes).toEqual([
       "EARLY_STOP_VIOLATED",
+      "TOOL_COUNT_INVALID",
     ])
     expect(weakWithoutMarket.dimensions.toolDiscipline.issueCodes).toEqual([
       "REQUIRED_TOOL_MISSING",
