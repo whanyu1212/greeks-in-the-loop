@@ -7,6 +7,7 @@ const skill = readFileSync(
   "utf8",
 )
 const sourcePolicy = readFileSync("docs/research-source-policy.md", "utf8")
+const reportContract = readFileSync("docs/research-report-v2.md", "utf8")
 const systemPrompt = readFileSync(
   "src/research/research-agent-system.md",
   "utf8",
@@ -48,18 +49,48 @@ describe("SPY debit-spread research skill", () => {
     )
   })
 
+  it("defines a bounded adversarial research procedure", () => {
+    for (const requirement of [
+      "hard 24-step bound",
+      "32 total research tool calls",
+      "four Exa calls",
+      "three FMP calls",
+      "at most one complete rebuild",
+      "actively seek evidence that would falsify",
+      "search explicitly for a current fact that would contradict or invalidate",
+      "A current but irrelevant source does not satisfy",
+      "Deduplicate canonical articles and syndicated copies",
+      "Do not force a proposal",
+    ]) {
+      expect(skill).toContain(requirement)
+    }
+  })
+
   it("defines a complete ordered research checklist", () => {
     for (const step of [
       "Inspect observable account state",
       "Check the research context",
       "Gather the authoritative SPY inputs",
-      "Gather optional external context",
-      "Resolve conflicts",
+      "Gather bounded external context",
+      "Challenge the provisional hypothesis and resolve conflicts",
       "Complete one snapshot and select one candidate",
       "Challenge and recheck the candidate",
       "Emit the contract",
     ]) {
       expect(skill).toContain(step)
+    }
+  })
+
+  it("requires source relevance, canonical deduplication, and independent conflict handling", () => {
+    for (const requirement of [
+      "thesis-relevant Exa citation",
+      "headline-only results",
+      "common tracking parameters",
+      "wire story",
+      "event time, publication time, provider observation time, and retrieval time",
+      "explicit bounded search for disconfirming",
+    ]) {
+      expect(sourcePolicy).toContain(requirement)
     }
   })
 
@@ -97,7 +128,8 @@ describe("SPY debit-spread research skill", () => {
     )
     expect(skill).toContain("Reject missing or duplicate intervals")
     expect(skill).toContain("no more than two completed Alpaca sessions")
-    expect(skill).toContain("Use two distinct instants")
+    expect(skill).toContain("Use three distinct response-completion captures")
+    expect(skill).toContain("analysis.accountChecks.observedAt")
     expect(skill).toContain(
       "call `trusted_time` and use its returned UTC timestamp as `observed_at`",
     )
@@ -240,6 +272,20 @@ describe("SPY debit-spread research skill", () => {
     expect(skill).toContain("select the lexicographically smallest tuple")
     expect(skill).toContain("abs(DTE - 21)")
     expect(skill).toContain("Do not substitute a lower-ranked spread")
+  })
+
+  it("documents exact result discriminators and field names", () => {
+    for (const requirement of [
+      '"outcome": "NO_ACTION"',
+      '"structure": "BULL_CALL_SPREAD"',
+      '"kind": "SOURCED_FACT"',
+      '"claim": "The exact legs were present',
+      "`decision`, `type`, `strategy`, and `statement` are not contract fields",
+    ]) {
+      expect(reportContract).toContain(requirement)
+    }
+    expect(systemPrompt).toContain("never emit a `decision` field")
+    expect(systemPrompt).toContain("never substitute `type` or `statement`")
   })
 
   it("keeps execution and deterministic risk fields outside model output", () => {

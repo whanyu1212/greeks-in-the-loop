@@ -3,10 +3,32 @@ import { describe, expect, it } from "vitest"
 import {
   createResearchInvocationV1,
   MAX_RESEARCH_INVOCATION_TOOL_CALLS,
+  RESEARCH_INVOCATION_PROVENANCE_BY_VERSION,
+  RESEARCH_INVOCATION_VERSION,
   researchInvocationV1Schema,
+  SUPPORTED_RESEARCH_INVOCATION_VERSIONS,
 } from "../src/research/research-invocation-v1.js"
 
 describe("ResearchInvocationV1", () => {
+  it("preserves historical provenance while selecting the current version", () => {
+    expect(SUPPORTED_RESEARCH_INVOCATION_VERSIONS).toEqual([
+      "1.0.0",
+      "1.1.0",
+    ])
+    expect(RESEARCH_INVOCATION_VERSION).toBe("1.1.0")
+    expect(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION["1.0.0"]).toMatchObject({
+      promptVersion: "1.3.0",
+      skillVersion: "1.1.0",
+    })
+    expect(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION["1.1.0"]).toMatchObject({
+      promptVersion: "1.4.0",
+      skillVersion: "1.2.0",
+      strategyVersion: "1.1.0",
+      decisionContractVersion: "1.0.0",
+      reportVersion: "2.0.0",
+    })
+  })
+
   it("retains bounded provenance without content-bearing fields", () => {
     const invocation = createResearchInvocationV1(
       {
@@ -39,6 +61,7 @@ describe("ResearchInvocationV1", () => {
     )
 
     expect(researchInvocationV1Schema.safeParse(invocation).success).toBe(true)
+    expect(invocation.invocationVersion).toBe(RESEARCH_INVOCATION_VERSION)
     expect(invocation.tools.calls).toHaveLength(
       MAX_RESEARCH_INVOCATION_TOOL_CALLS,
     )

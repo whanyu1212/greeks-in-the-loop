@@ -151,12 +151,12 @@ const noActionRun = (): ResearchRunV1 => {
 }
 
 const currentInvocation = {
-  invocationVersion: "1.0.0" as const,
+  invocationVersion: "1.1.0" as const,
   agentName: "research",
   cycleMode: "STANDARD" as const,
-  promptVersion: "1.3.0",
+  promptVersion: "1.4.0",
   skillName: "spy-debit-spread-research",
-  skillVersion: "1.1.0",
+  skillVersion: "1.2.0",
   strategyVersion: "1.1.0",
   decisionContractVersion: "1.0.0",
   reportVersion: "2.0.0",
@@ -171,6 +171,13 @@ const currentInvocation = {
     omittedCount: 0,
     calls: [],
   },
+}
+
+const priorInvocation = {
+  ...currentInvocation,
+  invocationVersion: "1.0.0" as const,
+  promptVersion: "1.3.0",
+  skillVersion: "1.1.0",
 }
 
 const derivedIntentRun = (): ResearchRunV1 => {
@@ -377,18 +384,23 @@ describe("research run evaluation", () => {
   })
 
   it("requires matching invocation metadata for current runs", () => {
-    const healthy = evaluateResearchRunV1({
+    const prior = evaluateResearchRunV1({
       ...noActionRun(),
       runVersion: "1.2.0",
+      researchInvocation: priorInvocation,
+    })
+    const healthy = evaluateResearchRunV1({
+      ...noActionRun(),
+      runVersion: "1.3.0",
       researchInvocation: currentInvocation,
     })
     const missing = evaluateResearchRunV1({
       ...noActionRun(),
-      runVersion: "1.2.0",
+      runVersion: "1.3.0",
     })
     const mismatched = evaluateResearchRunV1({
       ...noActionRun(),
-      runVersion: "1.2.0",
+      runVersion: "1.3.0",
       researchInvocation: {
         ...currentInvocation,
         strategyVersion: "0.0.0",
@@ -398,10 +410,13 @@ describe("research run evaluation", () => {
       noActionRun()
     const missingEligibility = evaluateResearchRunV1({
       ...withoutEligibility,
-      runVersion: "1.2.0",
+      runVersion: "1.3.0",
       researchInvocation: currentInvocation,
     })
 
+    expect(prior.dimensions.contractCompliance.issueCodes).not.toContain(
+      "RUN_METADATA_INVALID",
+    )
     expect(healthy.dimensions.contractCompliance.issueCodes).not.toContain(
       "RUN_METADATA_INVALID",
     )
@@ -420,7 +435,7 @@ describe("research run evaluation", () => {
     const source = noActionRun()
     const evaluation = evaluateResearchRunV1({
       ...source,
-      runVersion: "1.2.0",
+      runVersion: "1.3.0",
       researchInvocation: currentInvocation,
       initialEligibility: {
         ...source.initialEligibility!,
@@ -441,7 +456,7 @@ describe("research run evaluation", () => {
     } = preliminaryRun()
     const rejected = {
       ...base,
-      runVersion: "1.2.0" as const,
+      runVersion: "1.3.0" as const,
       researchInvocation: currentInvocation,
       outcome: {
         outcomeVersion: "1.0.0" as const,
@@ -479,7 +494,7 @@ describe("research run evaluation", () => {
   ])("rejects mismatched runtime provenance", (override) => {
     const evaluation = evaluateResearchRunV1({
       ...noActionRun(),
-      runVersion: "1.2.0",
+      runVersion: "1.3.0",
       researchInvocation: {
         ...currentInvocation,
         ...override,
@@ -501,7 +516,7 @@ describe("research run evaluation", () => {
       } = source
       return {
         ...base,
-        runVersion: "1.2.0" as const,
+        runVersion: "1.3.0" as const,
         researchInvocation: currentInvocation,
         evidenceSnapshots: [],
         researchReport: {

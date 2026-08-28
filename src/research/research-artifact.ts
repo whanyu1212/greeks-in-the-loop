@@ -22,10 +22,12 @@ import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
 
 export const LEGACY_RESEARCH_RUN_VERSION = "1.0.0" as const
 export const SHADOW_RESEARCH_RUN_VERSION = "1.1.0" as const
-export const RESEARCH_RUN_VERSION = "1.2.0" as const
+export const INVOCATION_RESEARCH_RUN_VERSION = "1.2.0" as const
+export const RESEARCH_RUN_VERSION = "1.3.0" as const
 export const SUPPORTED_RESEARCH_RUN_VERSIONS = [
   LEGACY_RESEARCH_RUN_VERSION,
   SHADOW_RESEARCH_RUN_VERSION,
+  INVOCATION_RESEARCH_RUN_VERSION,
   RESEARCH_RUN_VERSION,
 ] as const
 export const DEFAULT_RESEARCH_ARTIFACT_ROOT = "workspace/research" as const
@@ -232,7 +234,9 @@ export function projectResearchRunV1(
   if (cycleId === undefined || sessionId === undefined) throw new Error("Research cycle identity is incomplete")
   return {
     runVersion: completed.payload.researchInvocation !== undefined
-      ? RESEARCH_RUN_VERSION
+      ? completed.payload.researchInvocation.invocationVersion === "1.1.0"
+        ? RESEARCH_RUN_VERSION
+        : INVOCATION_RESEARCH_RUN_VERSION
       : riskEvent === undefined
         ? LEGACY_RESEARCH_RUN_VERSION
         : SHADOW_RESEARCH_RUN_VERSION,

@@ -15,11 +15,22 @@ import {
 /** Checked-in OpenCode primary agent used by every unattended cycle. */
 export const RESEARCH_AGENT_NAME = "research" as const
 /** Increment when the system prompt or cycle-request behavior changes. */
-export const RESEARCH_PROMPT_VERSION = "1.3.0" as const
+export const RESEARCH_PROMPT_VERSION = "1.4.0" as const
 /** Checked-in skill selected by the research agent policy. */
 export const RESEARCH_SKILL_NAME = "spy-debit-spread-research" as const
 /** Increment when the selected skill's research behavior changes. */
-export const RESEARCH_SKILL_VERSION = "1.1.0" as const
+export const RESEARCH_SKILL_VERSION = "1.2.0" as const
+
+/** Hard OpenCode turn bound mirrored by the checked-in agent configuration. */
+export const RESEARCH_MAX_AGENT_STEPS = 24
+/** Initial post-run budget for all research tool calls. */
+export const RESEARCH_MAX_TOOL_CALLS = 32
+/** Initial post-run budget for Exa calls in one research cycle. */
+export const RESEARCH_MAX_EXA_CALLS = 4
+/** Initial post-run budget for FMP calls in one research cycle. */
+export const RESEARCH_MAX_FMP_CALLS = 3
+/** A stale snapshot may be rebuilt completely at most once. */
+export const RESEARCH_MAX_SNAPSHOT_REBUILDS = 1
 
 /**
  * Builds the user-authored portion of one structured research cycle.
