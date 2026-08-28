@@ -415,8 +415,10 @@ export async function writeResearchRunArtifacts({
     overwrite,
   })
   const markdownPath = `${jsonPath.slice(0, -".json".length)}.md`
+  let markdownCreated = false
   try {
     const handle = await open(markdownPath, overwrite ? "w" : "wx", 0o600)
+    markdownCreated = !overwrite
     try {
       await handle.chmod(0o600)
       await handle.writeFile(presentation.markdown, "utf8")
@@ -425,7 +427,10 @@ export async function writeResearchRunArtifacts({
     }
   } catch (error) {
     if (!overwrite) {
-      await Promise.allSettled([unlink(markdownPath), unlink(jsonPath)])
+      await Promise.allSettled([
+        unlink(jsonPath),
+        ...(markdownCreated ? [unlink(markdownPath)] : []),
+      ])
     }
     throw error
   }
