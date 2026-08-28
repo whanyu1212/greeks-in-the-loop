@@ -3,6 +3,11 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
 import {
+  NO_ACTION_REASON_CODES,
+  STRATEGY_VERSION,
+} from "../src/contracts/research-decision-v1.js"
+import {
+  RESEARCH_MAX_AGENT_STEPS,
   RESEARCH_SKILL_NAME,
   RESEARCH_SKILL_VERSION,
 } from "../src/research/research-agent.js"
@@ -21,6 +26,7 @@ type OpenCodeConfig = {
       mode?: string
       permission?: Record<string, Permission>
       prompt?: string
+      steps?: number
     }
   >
   default_agent?: string
@@ -41,7 +47,13 @@ const researchSkill = readFileSync(
   ".opencode/skills/spy-debit-spread-research/SKILL.md",
   "utf8",
 )
+const sourcePolicy = readFileSync("docs/research-source-policy.md", "utf8")
 const mcpLauncher = readFileSync("scripts/run-research-mcp.mjs", "utf8")
+const evalMcp = readFileSync("scripts/research-eval-mcp.ts", "utf8")
+const evalCli = readFileSync(
+  "src/evaluation/research-behavior-evaluate-cli.ts",
+  "utf8",
+)
 const research = config.agent.research
 if (!research) throw new Error("research agent is required")
 const permission = research.permission ?? {}
@@ -52,6 +64,7 @@ describe("research agent policy", () => {
     expect(config.share).toBe("disabled")
     expect(research.mode).toBe("primary")
     expect(research.prompt).toBe("{file:./src/research/research-agent-system.md}")
+    expect(research.steps).toBe(RESEARCH_MAX_AGENT_STEPS)
   })
 
   it("denies unknown capabilities and permits only reviewed research MCP patterns", () => {
@@ -84,6 +97,15 @@ describe("research agent policy", () => {
     )
   })
 
+  it("keeps checked-in research versions aligned", () => {
+    expect(researchSkill).toContain(
+      `skill-version: "${RESEARCH_SKILL_VERSION}"`,
+    )
+    expect(researchSkill).toContain(`strategy-version: "${STRATEGY_VERSION}"`)
+    expect(sourcePolicy).toContain(`| Strategy version | \`${STRATEGY_VERSION}\` |`)
+    expect(sourcePolicy).not.toContain("Future risk engine")
+  })
+
   it("limits file reads and edits to reviewed project paths", () => {
     expect(permission.read).toEqual({
       "*": "deny",
@@ -100,29 +122,25 @@ describe("research agent policy", () => {
     expect(JSON.stringify(permission)).not.toContain('"ask"')
   })
 
-  it("provides every supported no-action code without exposing source files", () => {
-    for (const reasonCode of [
-      "MARKET_WINDOW_INELIGIBLE",
-      "ACCOUNT_STATE_INELIGIBLE",
-      "POSITION_OR_RISK_LIMIT_ACTIVE",
-      "INSUFFICIENT_UNDERLYING_DATA",
-      "REQUIRED_ALPACA_DATA_INVALID",
-      "SIGNAL_NOT_ACTIONABLE",
-      "NO_ELIGIBLE_SPREAD",
-      "CANDIDATE_CHANGED",
-      "EXACT_RISK_INPUTS_UNAVAILABLE",
-      "CONTRACT_UNREPRESENTABLE",
-    ]) {
+  it("provides every canonical no-action code without exposing source files", () => {
+    for (const reasonCode of NO_ACTION_REASON_CODES) {
       expect(systemPrompt).toContain(`\`${reasonCode}\``)
+      expect(researchSkill).toContain(`\`${reasonCode}\``)
     }
   })
 
-  it("runs policy and MCP diagnostics with the isolated configuration", () => {
+  it("runs policy, MCP, and behavior diagnostics through reviewed entrypoints", () => {
     expect(manifest.scripts?.["agent:config"]).toContain(
       "scripts/run-isolated-opencode.mjs",
     )
     expect(manifest.scripts?.["agent:mcp"]).toContain(
       "scripts/run-isolated-opencode.mjs",
+    )
+    expect(manifest.scripts?.["research:eval"]).toBe(
+      "vitest run tests/research-behavior-evaluation.test.ts",
+    )
+    expect(manifest.scripts?.["research:eval:live"]).toBe(
+      "tsx src/evaluation/research-behavior-evaluate-cli.ts",
     )
   })
 
@@ -150,6 +168,22 @@ describe("research agent policy", () => {
     expect(mcpLauncher).not.toContain(
       "mcp?apikey=${readRequiredSetting",
     )
+  })
+
+  it("keeps live behavior evaluation isolated from production credentials", () => {
+    for (const setting of [
+      "ALPACA_API_KEY",
+      "ALPACA_SECRET_KEY",
+      "FMP_API_KEY",
+      "EXA_API_KEY",
+    ]) {
+      expect(evalMcp).not.toContain(setting)
+      expect(evalCli).not.toContain(`process.env.${setting}`)
+    }
+    expect(evalCli).toContain("greeks-research-eval-")
+    expect(evalCli).toContain("workspace/research-evals")
+    expect(evalMcp).toContain("McpServer")
+    expect(evalMcp).toContain("StdioServerTransport")
   })
 
   it("enables only the three research MCP servers through the credential launcher", () => {

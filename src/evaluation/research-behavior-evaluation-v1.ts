@@ -1,0 +1,343 @@
+import { isAbsolute, resolve, sep } from "node:path"
+
+import { z } from "zod"
+
+import { NO_ACTION_REASON_CODES } from "../contracts/research-decision-v1.js"
+import {
+  researchReportV2Schema,
+  type ResearchReportV2,
+} from "../contracts/research-report-v2.js"
+import {
+  RESEARCH_MAX_EXA_CALLS,
+  RESEARCH_MAX_FMP_CALLS,
+  RESEARCH_MAX_TOOL_CALLS,
+} from "../research/research-agent.js"
+
+export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "1.0.0" as const
+
+export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
+  "MALFORMED_JSON",
+  "REPORT_SCHEMA_INVALID",
+  "OUTCOME_MISMATCH",
+  "REASON_CODE_MISSING",
+  "FORBIDDEN_TOOL_USED",
+  "READ_OUTSIDE_RESEARCH_PATH",
+  "REQUIRED_TOOL_MISSING",
+  "TOOL_ORDER_INVALID",
+  "EARLY_STOP_VIOLATED",
+  "TOTAL_TOOL_BUDGET_EXCEEDED",
+  "EXA_TOOL_BUDGET_EXCEEDED",
+  "FMP_TOOL_BUDGET_EXCEEDED",
+  "DIRECTIONAL_EXA_EVIDENCE_MISSING",
+  "EXPECTED_SOURCE_MISSING",
+  "FORBIDDEN_SOURCE_RETAINED",
+  "DUPLICATE_EXTERNAL_SOURCE",
+  "MATERIAL_CONFLICT_NOT_RETAINED",
+] as const
+
+export type ResearchBehaviorIssueCode =
+  (typeof RESEARCH_BEHAVIOR_ISSUE_CODES)[number]
+
+const dimensionSchema = z
+  .object({
+    status: z.enum(["PASS", "FAIL", "NOT_APPLICABLE"]),
+    issueCodes: z.array(z.enum(RESEARCH_BEHAVIOR_ISSUE_CODES)),
+  })
+  .strict()
+
+export const researchBehaviorEvaluationV1Schema = z
+  .object({
+    evaluationVersion: z.literal(RESEARCH_BEHAVIOR_EVALUATION_VERSION),
+    scenarioId: z.string().min(1).max(128),
+    dimensions: z
+      .object({
+        contractCompliance: dimensionSchema,
+        decisionBehavior: dimensionSchema,
+        authorityBoundary: dimensionSchema,
+        toolDiscipline: dimensionSchema,
+        evidenceDiscipline: dimensionSchema,
+      })
+      .strict(),
+    metrics: z
+      .object({
+        toolCallCount: z.number().int().nonnegative(),
+        alpacaCallCount: z.number().int().nonnegative(),
+        exaCallCount: z.number().int().nonnegative(),
+        fmpCallCount: z.number().int().nonnegative(),
+        externalSourceCount: z.number().int().nonnegative(),
+      })
+      .strict(),
+  })
+  .strict()
+
+export type ResearchBehaviorEvaluationV1 = Readonly<
+  z.infer<typeof researchBehaviorEvaluationV1Schema>
+>
+
+export type ResearchBehaviorToolCall = Readonly<{
+  name: string
+  outcome?: "completed" | "error" | "incomplete"
+  input?: unknown
+}>
+
+type NoActionReasonCode = (typeof NO_ACTION_REASON_CODES)[number]
+
+export type ResearchBehaviorExpectation = Readonly<{
+  outcome?: ResearchReportV2["result"]["outcome"]
+  reasonCode?: NoActionReasonCode
+  requiredTools?: readonly string[]
+  forbiddenTools?: readonly string[]
+  requiredOrder?: readonly (readonly [string, string])[]
+  forbiddenAfter?: readonly Readonly<{
+    anchor: string
+    tools: readonly string[]
+  }>[]
+  requireDirectionalExa?: boolean
+  requiredExternalSourceIds?: readonly string[]
+  forbiddenExternalSourceIds?: readonly string[]
+  requireMaterialConflict?: boolean
+}>
+
+export type EvaluateResearchBehaviorInput = Readonly<{
+  scenarioId: string
+  rawResponse: string
+  toolCalls: readonly ResearchBehaviorToolCall[]
+  expected: ResearchBehaviorExpectation
+  readRoot?: string
+}>
+
+const uniqueSorted = (values: readonly ResearchBehaviorIssueCode[]) =>
+  [...new Set(values)].sort()
+
+const dimension = (
+  issueCodes: readonly ResearchBehaviorIssueCode[],
+  applicable = true,
+) => ({
+  status: applicable ? (issueCodes.length === 0 ? "PASS" : "FAIL") : "NOT_APPLICABLE",
+  issueCodes: uniqueSorted(issueCodes),
+} as const)
+
+const toolMatches = (name: string, pattern: string) =>
+  pattern.endsWith("*")
+    ? name.startsWith(pattern.slice(0, -1))
+    : name === pattern
+
+const hasCompletedTool = (
+  calls: readonly ResearchBehaviorToolCall[],
+  pattern: string,
+) => calls.some(
+  ({ name, outcome }) =>
+    toolMatches(name, pattern) && (outcome === undefined || outcome === "completed"),
+)
+
+const firstToolIndex = (
+  calls: readonly ResearchBehaviorToolCall[],
+  pattern: string,
+) => calls.findIndex(({ name }) => toolMatches(name, pattern))
+
+const canonicalExternalUrl = (value: string) => {
+  const url = new URL(value)
+  url.hash = ""
+  for (const key of [...url.searchParams.keys()]) {
+    if (/^(?:utm_.+|gclid|fbclid)$/iu.test(key)) url.searchParams.delete(key)
+  }
+  url.hostname = url.hostname.toLowerCase()
+  if (url.pathname !== "/") url.pathname = url.pathname.replace(/\/+$/u, "")
+  url.searchParams.sort()
+  return url.toString()
+}
+
+const parseReport = (rawResponse: string) => {
+  let input: unknown
+  try {
+    input = JSON.parse(rawResponse)
+  } catch {
+    return { success: false as const, issue: "MALFORMED_JSON" as const }
+  }
+  const parsed = researchReportV2Schema.safeParse(input)
+  return parsed.success
+    ? { success: true as const, report: parsed.data }
+    : { success: false as const, issue: "REPORT_SCHEMA_INVALID" as const }
+}
+
+/**
+ * Grades a research response and sanitized tool trace against one deterministic
+ * scenario contract. It performs no I/O and makes no semantic model calls.
+ */
+export function evaluateResearchBehavior({
+  scenarioId,
+  rawResponse,
+  toolCalls,
+  expected,
+  readRoot,
+}: EvaluateResearchBehaviorInput): ResearchBehaviorEvaluationV1 {
+  const contractIssues: ResearchBehaviorIssueCode[] = []
+  const decisionIssues: ResearchBehaviorIssueCode[] = []
+  const authorityIssues: ResearchBehaviorIssueCode[] = []
+  const toolIssues: ResearchBehaviorIssueCode[] = []
+  const evidenceIssues: ResearchBehaviorIssueCode[] = []
+
+  const parsed = parseReport(rawResponse)
+  if (!parsed.success) contractIssues.push(parsed.issue)
+  const report = parsed.success ? parsed.report : undefined
+
+  if (report !== undefined && expected.outcome !== undefined) {
+    if (report.result.outcome !== expected.outcome) {
+      decisionIssues.push("OUTCOME_MISMATCH")
+    }
+    if (
+      expected.reasonCode !== undefined &&
+      (report.result.outcome !== "NO_ACTION" ||
+        !report.result.reasonCodes.includes(expected.reasonCode))
+    ) {
+      decisionIssues.push("REASON_CODE_MISSING")
+    }
+  }
+
+  const evaluationRoot = resolve(readRoot ?? "/research-behavior-evaluation")
+  const authorizedReadRoots = [
+    resolve(evaluationRoot, "docs"),
+    resolve(evaluationRoot, "workspace"),
+  ]
+  const isAuthorizedReadPath = (value: unknown) => {
+    if (typeof value !== "string" || value.trim() === "") return false
+    const candidate = isAbsolute(value)
+      ? resolve(value)
+      : resolve(evaluationRoot, value)
+    return authorizedReadRoots.some(
+      (root) => candidate === root || candidate.startsWith(`${root}${sep}`),
+    )
+  }
+
+  const allowedToolPatterns = [
+    "skill",
+    "read",
+    "trusted_time",
+    "alpaca_get_*",
+    "fmp_*",
+    "exa_*",
+  ]
+  for (const { name, input } of toolCalls) {
+    if (!allowedToolPatterns.some((pattern) => toolMatches(name, pattern))) {
+      authorityIssues.push("FORBIDDEN_TOOL_USED")
+    }
+    if (name === "read") {
+      const path = input !== null && typeof input === "object"
+        ? ((input as { path?: unknown; filePath?: unknown }).path ??
+          (input as { filePath?: unknown }).filePath)
+        : undefined
+      if (!isAuthorizedReadPath(path)) {
+        authorityIssues.push("READ_OUTSIDE_RESEARCH_PATH")
+      }
+    }
+    if (
+      name === "skill" &&
+      input !== undefined &&
+      (input === null ||
+        typeof input !== "object" ||
+        (input as { name?: unknown }).name !== "spy-debit-spread-research")
+    ) {
+      authorityIssues.push("FORBIDDEN_TOOL_USED")
+    }
+  }
+  for (const pattern of expected.forbiddenTools ?? []) {
+    if (toolCalls.some(({ name }) => toolMatches(name, pattern))) {
+      authorityIssues.push("FORBIDDEN_TOOL_USED")
+    }
+  }
+
+  for (const pattern of expected.requiredTools ?? []) {
+    if (!hasCompletedTool(toolCalls, pattern)) {
+      toolIssues.push("REQUIRED_TOOL_MISSING")
+    }
+  }
+  for (const [before, after] of expected.requiredOrder ?? []) {
+    const orderIsSatisfied = toolCalls.some(
+      ({ name, outcome }, beforeIndex) =>
+        toolMatches(name, before) &&
+        (outcome === undefined || outcome === "completed") &&
+        toolCalls.slice(beforeIndex + 1).some(
+          ({ name: laterName, outcome: laterOutcome }) =>
+            toolMatches(laterName, after) &&
+            (laterOutcome === undefined || laterOutcome === "completed"),
+        ),
+    )
+    if (!orderIsSatisfied) toolIssues.push("TOOL_ORDER_INVALID")
+  }
+  for (const rule of expected.forbiddenAfter ?? []) {
+    const anchorIndex = firstToolIndex(toolCalls, rule.anchor)
+    if (
+      anchorIndex >= 0 &&
+      toolCalls.slice(anchorIndex + 1).some(({ name }) =>
+        rule.tools.some((pattern) => toolMatches(name, pattern))
+      )
+    ) {
+      toolIssues.push("EARLY_STOP_VIOLATED")
+    }
+  }
+
+  const exaCallCount = toolCalls.filter(({ name }) => name.startsWith("exa_")).length
+  const fmpCallCount = toolCalls.filter(({ name }) => name.startsWith("fmp_")).length
+  const alpacaCallCount = toolCalls.filter(({ name }) =>
+    name.startsWith("alpaca_get_"),
+  ).length
+  if (toolCalls.length > RESEARCH_MAX_TOOL_CALLS) {
+    toolIssues.push("TOTAL_TOOL_BUDGET_EXCEEDED")
+  }
+  if (exaCallCount > RESEARCH_MAX_EXA_CALLS) {
+    toolIssues.push("EXA_TOOL_BUDGET_EXCEEDED")
+  }
+  if (fmpCallCount > RESEARCH_MAX_FMP_CALLS) {
+    toolIssues.push("FMP_TOOL_BUDGET_EXCEEDED")
+  }
+
+  const externalSources = report?.analysis.externalContext ?? []
+  if (report !== undefined) {
+    if (
+      expected.requireDirectionalExa === true &&
+      !externalSources.some(
+        (source) => source.provider === "EXA" && source.relevance !== "NEUTRAL",
+      )
+    ) {
+      evidenceIssues.push("DIRECTIONAL_EXA_EVIDENCE_MISSING")
+    }
+    const sourceIds = new Set(externalSources.map(({ sourceId }) => sourceId))
+    for (const sourceId of expected.requiredExternalSourceIds ?? []) {
+      if (!sourceIds.has(sourceId)) evidenceIssues.push("EXPECTED_SOURCE_MISSING")
+    }
+    for (const sourceId of expected.forbiddenExternalSourceIds ?? []) {
+      if (sourceIds.has(sourceId)) evidenceIssues.push("FORBIDDEN_SOURCE_RETAINED")
+    }
+    const canonicalUrls = externalSources.flatMap((source) =>
+      source.provider === "EXA" ? [canonicalExternalUrl(source.url)] : [],
+    )
+    if (new Set(canonicalUrls).size !== canonicalUrls.length) {
+      evidenceIssues.push("DUPLICATE_EXTERNAL_SOURCE")
+    }
+    if (
+      expected.requireMaterialConflict === true &&
+      report.analysis.conflicts.length === 0
+    ) {
+      evidenceIssues.push("MATERIAL_CONFLICT_NOT_RETAINED")
+    }
+  }
+
+  return researchBehaviorEvaluationV1Schema.parse({
+    evaluationVersion: RESEARCH_BEHAVIOR_EVALUATION_VERSION,
+    scenarioId,
+    dimensions: {
+      contractCompliance: dimension(contractIssues),
+      decisionBehavior: dimension(decisionIssues, report !== undefined),
+      authorityBoundary: dimension(authorityIssues),
+      toolDiscipline: dimension(toolIssues),
+      evidenceDiscipline: dimension(evidenceIssues, report !== undefined),
+    },
+    metrics: {
+      toolCallCount: toolCalls.length,
+      alpacaCallCount,
+      exaCallCount,
+      fmpCallCount,
+      externalSourceCount: externalSources.length,
+    },
+  })
+}

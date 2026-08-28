@@ -28,6 +28,10 @@ export type OpencodeRuntime = {
 
 /** Options used to start a managed OpenCode server. */
 type StartOpencodeOptions = {
+  /** Working directory used for project configuration and SDK requests. */
+  cwd?: string
+  /** Parent environment to sanitize before starting OpenCode. */
+  environment?: NodeJS.ProcessEnv
   /** Interface on which the server listens. */
   hostname?: string
   /** TCP port on which the server listens. */
@@ -92,6 +96,24 @@ const killProcessTree = (process: ChildProcess, signal: NodeJS.Signals) => {
  * @param environment Parent process environment.
  * @returns Environment inherited by the managed OpenCode process.
  */
+export const RESEARCH_PROVIDER_CREDENTIAL_ENVIRONMENT_NAMES = [
+  "ALPACA_API_KEY",
+  "ALPACA_SECRET_KEY",
+  "FMP_API_KEY",
+  "EXA_API_KEY",
+] as const
+
+/** Removes research-provider credentials while preserving model authentication. */
+export function removeResearchProviderCredentials(
+  environment: NodeJS.ProcessEnv,
+) {
+  const sanitized = { ...environment }
+  for (const name of RESEARCH_PROVIDER_CREDENTIAL_ENVIRONMENT_NAMES) {
+    delete sanitized[name]
+  }
+  return sanitized
+}
+
 export function createOpencodeEnvironment(
   environment: NodeJS.ProcessEnv,
   configHome: string,
@@ -132,6 +154,8 @@ export function createOpencodeEnvironment(
  * @throws If OpenCode cannot start or does not report a valid server URL.
  */
 export async function startOpencode({
+  cwd = globalThis.process.cwd(),
+  environment = globalThis.process.env,
   hostname = "127.0.0.1",
   port,
   signal,
@@ -139,14 +163,12 @@ export async function startOpencode({
 }: StartOpencodeOptions): Promise<OpencodeRuntime> {
   signal.throwIfAborted()
   const configHome = mkdtempSync(join(tmpdir(), "greeks-opencode-"))
-  const childEnvironment = createOpencodeEnvironment(
-    globalThis.process.env,
-    configHome,
-  )
+  const childEnvironment = createOpencodeEnvironment(environment, configHome)
   const process = spawn(
     globalThis.process.env.OPENCODE_BIN ?? "opencode",
     ["--pure", "serve", `--hostname=${hostname}`, `--port=${port}`],
     {
+      cwd,
       detached: globalThis.process.platform !== "win32",
       env: childEnvironment,
       stdio: ["ignore", "pipe", "pipe"],
@@ -207,7 +229,7 @@ export async function startOpencode({
     if (signal.aborted) onAbort()
   })
 
-  const client = createOpencodeClient({ baseUrl: url, directory: globalThis.process.cwd() })
+  const client = createOpencodeClient({ baseUrl: url, directory: cwd })
   let closing: Promise<void> | undefined
 
   /**

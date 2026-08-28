@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   createOpencodeEnvironment,
+  removeResearchProviderCredentials,
   startOpencode,
 } from "../src/opencode-runtime.js"
 
@@ -35,6 +36,22 @@ describe("createOpencodeEnvironment", () => {
       OTEL_SDK_DISABLED: "true",
       PATH: "/usr/bin",
       XDG_CONFIG_HOME: "/tmp/runtime-config",
+    })
+  })
+})
+
+describe("removeResearchProviderCredentials", () => {
+  it("removes broker and research-vendor secrets but preserves model auth", () => {
+    expect(removeResearchProviderCredentials({
+      ALPACA_API_KEY: "alpaca-key",
+      ALPACA_SECRET_KEY: "alpaca-secret",
+      FMP_API_KEY: "fmp-key",
+      EXA_API_KEY: "exa-key",
+      OPENAI_API_KEY: "model-key",
+      PATH: "/usr/bin",
+    })).toEqual({
+      OPENAI_API_KEY: "model-key",
+      PATH: "/usr/bin",
     })
   })
 })

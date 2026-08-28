@@ -51,6 +51,7 @@ const INVOCATION_VERSION_BY_RUN_VERSION = {
   "1.0.0": undefined,
   "1.1.0": undefined,
   "1.2.0": "1.0.0",
+  "1.3.0": "1.1.0",
 } as const satisfies Record<
   (typeof SUPPORTED_RESEARCH_RUN_VERSIONS)[number],
   keyof typeof RESEARCH_INVOCATION_PROVENANCE_BY_VERSION | undefined

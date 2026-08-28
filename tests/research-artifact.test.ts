@@ -239,6 +239,25 @@ describe("research cycle artifact", () => {
       runVersion: "1.2.0",
       researchInvocation,
     })
+
+    const latestInvocation = {
+      ...researchInvocation,
+      invocationVersion: "1.1.0" as const,
+      promptVersion: "1.4.0",
+      skillVersion: "1.2.0",
+    }
+    const latestEvents = events.map((event) =>
+      event.eventType === "RESEARCH_CYCLE_COMPLETED"
+        ? {
+            ...event,
+            payload: { ...event.payload, researchInvocation: latestInvocation },
+          }
+        : event,
+    ) as StoredLedgerEventV1[]
+    expect(projectResearchRunV1(latestEvents)).toMatchObject({
+      runVersion: "1.3.0",
+      researchInvocation: latestInvocation,
+    })
   })
 
   it("writes the full validated outcome to a unique inspection-only JSON file", async () => {

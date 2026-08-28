@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest"
 import {
   buildResearchCyclePrompt,
   RESEARCH_AGENT_NAME,
+  RESEARCH_MAX_AGENT_STEPS,
+  RESEARCH_MAX_EXA_CALLS,
+  RESEARCH_MAX_FMP_CALLS,
+  RESEARCH_MAX_SNAPSHOT_REBUILDS,
+  RESEARCH_MAX_TOOL_CALLS,
   RESEARCH_PROMPT_VERSION,
   RESEARCH_SKILL_NAME,
   RESEARCH_SKILL_VERSION,
@@ -12,9 +17,17 @@ import { projectResearchContextV1 } from "../src/research/research-context-v1.js
 describe("research agent request construction", () => {
   it("uses the fixed checked-in agent identity", () => {
     expect(RESEARCH_AGENT_NAME).toBe("research")
-    expect(RESEARCH_PROMPT_VERSION).toBe("1.3.0")
+    expect(RESEARCH_PROMPT_VERSION).toBe("1.4.0")
     expect(RESEARCH_SKILL_NAME).toBe("spy-debit-spread-research")
-    expect(RESEARCH_SKILL_VERSION).toBe("1.1.0")
+    expect(RESEARCH_SKILL_VERSION).toBe("1.2.0")
+  })
+
+  it("publishes bounded research budgets", () => {
+    expect(RESEARCH_MAX_AGENT_STEPS).toBe(24)
+    expect(RESEARCH_MAX_TOOL_CALLS).toBe(32)
+    expect(RESEARCH_MAX_EXA_CALLS).toBe(4)
+    expect(RESEARCH_MAX_FMP_CALLS).toBe(3)
+    expect(RESEARCH_MAX_SNAPSHOT_REBUILDS).toBe(1)
   })
 
   it("builds a bounded cycle request with an optional operator objective", () => {

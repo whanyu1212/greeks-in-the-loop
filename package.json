@@ -22,6 +22,8 @@
     "agent:shadow-anytime": "tsx src/index.ts --once --shadow-anytime",
     "agent:skills": "node scripts/run-isolated-opencode.mjs debug skill",
     "research:evaluate": "tsx src/evaluation/research-evaluate-cli.ts",
+    "research:eval": "vitest run tests/research-behavior-evaluation.test.ts",
+    "research:eval:live": "tsx src/evaluation/research-behavior-evaluate-cli.ts",
     "research:run": "tsx src/research/research-run-cli.ts",
     "risk:report": "tsx src/risk/risk-report-cli.ts",
     "backtest:data": "tsx src/backtest/backtest-data-cli.ts",
@@ -46,6 +48,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "22.20.1",
     "tsx": "4.23.12",
