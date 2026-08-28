@@ -70,8 +70,8 @@ If any snapshot-forming input is stale and a read-only refresh is available, dis
 ## Research checklist
 
 1. **Inspect observable account state**
-   - Inspect the paper account, account configuration, open positions, and open orders.
-   - Require the paper account status to be active and the approved options level to support submitting the complete multileg spread. If either fact is absent, ambiguous, or ineligible, return `NO_ACTION` with `ACCOUNT_STATE_INELIGIBLE`.
+   - Inspect the paper account first and require the account status to be active. If its status is absent, ambiguous, or not active, return `NO_ACTION` with `ACCOUNT_STATE_INELIGIBLE` immediately and call no additional tools.
+   - Only for an active account, inspect account configuration, open positions, and open orders. Require the approved options level to support submitting the complete multileg spread; otherwise return `NO_ACTION` with `ACCOUNT_STATE_INELIGIBLE`.
    - Do not claim reconciliation or risk approval: the event ledger, circuit-breaker state, daily-entry history, and deterministic risk engine are not available to this agent.
    - If observable Alpaca state is restricted or already contains conflicting strategy exposure, return the matching `NO_ACTION` reason. Leave unobservable risk limits to downstream code.
 
