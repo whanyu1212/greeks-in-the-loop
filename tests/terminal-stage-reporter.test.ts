@@ -85,6 +85,80 @@ describe("terminal stage reporter", () => {
     })
   })
 
+  it("summarizes offline audit failures in pretty mode", () => {
+    const write = vi.fn()
+    const reporter = createTerminalStageReporter({
+      cycleId: "cycle-1",
+      cycleNumber: 3,
+      startedAt: "2026-08-27T14:00:00.000Z",
+      now: () => new Date("2026-08-27T14:00:02.000Z"),
+      write,
+      format: "pretty",
+    })
+
+    reporter.report("research.evaluate", "REJECTED", {
+      passCount: 3,
+      failCount: 1,
+      notApplicableCount: 1,
+      actionability: "NO_ACTION",
+      issues: ["REPORT_CONTRACT_INVALID"],
+    })
+
+    const line = write.mock.calls[0]![0] as string
+    expect(line).toContain("Offline audit")
+    expect(line).toContain("3 pass | 1 fail | 1 n/a | NO_ACTION")
+    expect(line).toContain("REPORT_CONTRACT_INVALID")
+  })
+
+  it("retains both artifact paths in structured output", () => {
+    const write = vi.fn()
+    const reporter = createTerminalStageReporter({
+      cycleId: "cycle-1",
+      cycleNumber: 3,
+      startedAt: "2026-08-27T14:00:00.000Z",
+      now: () => new Date("2026-08-27T14:00:02.000Z"),
+      write,
+      format: "json",
+    })
+
+    reporter.report("artifact.write", "COMPLETED", {
+      path: "workspace/research/cycle.md",
+      markdownPath: "workspace/research/cycle.md",
+      jsonPath: "workspace/research/cycle.json",
+    })
+
+    expect(JSON.parse(write.mock.calls[0]![0] as string)).toMatchObject({
+      stage: "artifact.write",
+      status: "COMPLETED",
+      path: "workspace/research/cycle.md",
+      markdownPath: "workspace/research/cycle.md",
+      jsonPath: "workspace/research/cycle.json",
+    })
+  })
+
+  it("shows the readable artifact path in pretty mode", () => {
+    const write = vi.fn()
+    const reporter = createTerminalStageReporter({
+      cycleId: "cycle-1",
+      cycleNumber: 3,
+      startedAt: "2026-08-27T14:00:00.000Z",
+      now: () => new Date("2026-08-27T14:00:02.000Z"),
+      write,
+      format: "pretty",
+    })
+
+    reporter.report("artifact.write", "COMPLETED", {
+      path: "workspace/research/cycle.md",
+      markdownPath: "workspace/research/cycle.md",
+      jsonPath: "workspace/research/cycle.json",
+    })
+
+    const line = write.mock.calls[0]![0] as string
+    expect(line).toContain("Artifact")
+    expect(line).toContain("workspace/research/cycle.md")
+    expect(line).not.toContain("workspace/research/cycle.json")
+  })
+
   it("selects format from an explicit value or TTY detection", () => {
     expect(resolveTerminalLogFormat(undefined, true)).toBe("pretty")
     expect(resolveTerminalLogFormat(undefined, false)).toBe("json")

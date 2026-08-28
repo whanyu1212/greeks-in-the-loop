@@ -89,7 +89,9 @@ node dist/index.js --once
 Interactive terminals show colored, aligned pipeline rows for eligibility,
 agent and tool summary, report and decision validation, quote confirmation,
 intent economics, risk-state capture and evaluation, ledger commit, and
-artifact output. Redirected output automatically uses JSONL. Set
+artifact output. The final rows include deterministic offline-audit counts,
+non-executing actionability, and both artifact paths without printing the full
+Markdown brief. Redirected output automatically uses JSONL. Set
 `AGENT_LOG_FORMAT=pretty` or `AGENT_LOG_FORMAT=json` to override detection.
 Logs intentionally exclude model prose, tool inputs and responses, account
 balances, positions, credentials, and raw provider payloads.
@@ -115,7 +117,7 @@ The anytime command intentionally ignores `RESEARCH_LEDGER_PATH` unless it is
 needed to detect an unsafe collision. Its default ledger is isolated so dry-run
 research cannot enter the normal worker's durable prompt context.
 
-Every completed eligible cycle is projected into a versioned `ResearchRunV1` after the worker rereads its committed events. The projection consolidates cycle identity and timing, initial eligibility, evidence snapshot references, the validated outcome and intermediate records, the full bounded [`ResearchReportV2`](docs/research-report-v2.md), any shadow-risk decision and breaker transitions, and ledger sequence metadata. A byte-for-byte regenerable inspection-only JSON export is then written under `workspace/research/<session-date>/cycle-<number>-<cycle-id>.json`. SQLite is the sole source of truth: the worker never builds the export from a separate in-memory result, and an export failure does not undo the committed ledger outcome.
+Every completed eligible cycle is projected into a versioned `ResearchRunV1` after the worker rereads its committed events. The projection consolidates cycle identity and timing, initial eligibility, evidence snapshot references, the validated outcome and intermediate records, the full bounded [`ResearchReportV2`](docs/research-report-v2.md), any shadow-risk decision and breaker transitions, and ledger sequence metadata. A byte-for-byte regenerable inspection-only JSON export and a deterministic Markdown operator brief are then written under `workspace/research/<session-date>/cycle-<number>-<cycle-id>.{json,md}`. SQLite is the sole source of truth: the worker never builds either export from a separate in-memory result, and an export failure does not undo the committed ledger outcome.
 
 ## Inspect a run
 
@@ -124,12 +126,14 @@ Show the latest completed run directly from an isolated ledger, or select a cycl
 ```bash
 pnpm research:run -- --ledger .state/research-anytime.sqlite
 pnpm research:run -- --ledger .state/research-anytime.sqlite --cycle <cycle-id>
+pnpm research:run -- --ledger .state/research-anytime.sqlite --format markdown
 ```
 
-Regenerate its canonical portable JSON export from SQLite (`--force` replaces an existing export):
+Regenerate its canonical portable JSON and Markdown brief from SQLite (`--force` replaces both files). The default command prints the JSON path; select the Markdown path with `--format markdown`:
 
 ```bash
 pnpm research:run -- --ledger .state/research-anytime.sqlite --export --force
+pnpm research:run -- --ledger .state/research-anytime.sqlite --export --force --format markdown
 ```
 
 Inspect the event timeline or the validated JSON payloads in a ledger:
@@ -163,7 +167,7 @@ SQLite stores an append-only event stream in `ledger_events`. Each row contains 
 | Rejections | Yes | Yes, inside the outcome | Stores bounded reason codes or validation issue codes/paths, not rejected raw content. |
 | Invocation provenance | On new completed cycles | Yes, in `researchInvocation` | Stores prompt/skill/strategy/contract versions, cycle mode, provider/model labels, token counts, and bounded tool names/outcomes/durations. Prompts, responses, tool arguments/results, provider metadata, and error text are excluded. |
 
-The JSON artifact is a deterministic canonical `ResearchRunV1` view for portable downstream inspection. It can be deleted and regenerated from SQLite. New files are private to the owner (`0600`). The SQLite ledger is the authoritative restart/audit record; artifact-write failure does not roll back a committed ledger outcome.
+The JSON artifact is a deterministic canonical `ResearchRunV1` view for portable downstream inspection. The Markdown file is a human-readable operator view derived from the same run and its deterministic offline evaluation; it has no independent authority and never implies that an order was submitted. Both files can be deleted and regenerated from SQLite, and new files are private to the owner (`0600`). The SQLite ledger is the authoritative restart/audit record; artifact-write failure does not roll back a committed ledger outcome.
 
 The project intentionally does **not** retain raw model responses, hidden reasoning, full OpenCode transcripts, raw Alpaca/FMP/Exa responses, credentials, or secret-bearing URLs. The bounded report is the retained analysis record, and all its observations remain labeled `AGENT_REPORTED`; only application-confirmed quotes and deterministic intent calculations cross that trust boundary.
 
