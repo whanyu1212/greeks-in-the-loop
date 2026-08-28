@@ -130,7 +130,7 @@ If any snapshot-forming input is stale and a read-only refresh is available, dis
    - After the snapshot is frozen at `observed_at`, make a final read-only Alpaca clock request. Immediately after that response completes, call `trusted_time` and use its result as `approval_evaluated_at`; do not use the clock payload's timestamp as a substitute for response-completion time.
    - Recheck quote and latest-bar age, the application-supplied trade-intent deadline (`slot + 10 minutes` in standard mode), the entry cutoff, and the returned open-market state against `approval_evaluated_at`. A shadow-anytime dry run has no production slot deadline. If a trustworthy local completion timestamp is unavailable, or data became stale or late while researching, return `NO_ACTION`.
    - Prefer `NO_ACTION` when evidence is weak, contradictory, stale, or incomplete.
-   - If refreshed facts change direction, legs, or eligibility, return `CANDIDATE_CHANGED`.
+   - If the candidate-refresh response changes direction, legs, or eligibility, return `CANDIDATE_CHANGED` immediately. That response is a terminal hard gate: do not call `trusted_time`, Exa, FMP, or any other tool afterward.
 
 8. **Emit the contract**
    - Return exactly one bare `ResearchReportV2` JSON object and nothing else.

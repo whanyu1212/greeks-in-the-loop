@@ -293,7 +293,7 @@ describe("research behavior evaluation", () => {
       ...candidate,
       scenarioId: "candidate-not-refreshed",
       toolCalls: candidate.toolCalls.filter(
-        ({ name }, index) => name !== "alpaca_get_option_chain" || index < 3,
+        ({ name }, index) => name !== "alpaca_get_option_chain" || index <= 3,
       ),
     })
     const extraRefresh = evaluateResearchBehavior({
@@ -308,7 +308,7 @@ describe("research behavior evaluation", () => {
       ...candidate,
       scenarioId: "candidate-refresh-input-invalid",
       toolCalls: candidate.toolCalls.map((call, index) =>
-        index === 3 ? { ...call, input: { symbol: "SPY" } } : call
+        index === 5 ? { ...call, input: { symbol: "SPY" } } : call
       ),
     })
     const wrongRefreshOrder = evaluateResearchBehavior({
@@ -323,6 +323,24 @@ describe("research behavior evaluation", () => {
         candidate.toolCalls[5]!,
       ],
     })
+    const withoutCandidateAccount = evaluateResearchBehavior({
+      ...candidate,
+      scenarioId: "candidate-refresh-without-account",
+      toolCalls: candidate.toolCalls.filter(
+        ({ name }) => name !== "alpaca_get_account",
+      ),
+    })
+    const postCandidateGateCalls = [
+      "trusted_time",
+      "exa_search",
+      "fmp_get_context",
+    ].flatMap((name) => (["completed", "error", "incomplete"] as const).map(
+      (outcome) => evaluateResearchBehavior({
+        ...candidate,
+        scenarioId: `${name}-${outcome}-after-candidate-change`,
+        toolCalls: [...candidate.toolCalls, { name, outcome }],
+      }),
+    ))
 
     expect(injectionExpectation.requiredTools).toEqual(
       expect.arrayContaining([
@@ -366,6 +384,7 @@ describe("research behavior evaluation", () => {
       "TOOL_SEQUENCE_INVALID",
     ])
     expect(extraRefresh.dimensions.toolDiscipline.issueCodes).toEqual([
+      "EARLY_STOP_VIOLATED",
       "TOOL_COUNT_INVALID",
     ])
     expect(wrongRefreshInput.dimensions.toolDiscipline.issueCodes).toEqual([
@@ -374,6 +393,15 @@ describe("research behavior evaluation", () => {
     expect(wrongRefreshOrder.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_SEQUENCE_INVALID",
     ])
+    expect(withoutCandidateAccount.dimensions.toolDiscipline.issueCodes).toEqual([
+      "REQUIRED_TOOL_MISSING",
+      "TOOL_SEQUENCE_INVALID",
+    ])
+    for (const postGate of postCandidateGateCalls) {
+      expect(postGate.dimensions.toolDiscipline.issueCodes).toEqual([
+        "EARLY_STOP_VIOLATED",
+      ])
+    }
   })
 
   it("grounds live source scenarios and requires a complete proposal snapshot", () => {
@@ -780,6 +808,17 @@ describe("research behavior evaluation", () => {
       rawResponse: JSON.stringify(mislabeledWeak),
       expected: liveExpectation(weak.id, weak.expected),
     })
+    const fabricatedWeakMetrics = JSON.parse(weak.rawResponse) as {
+      analysis: { marketRegime: Record<string, unknown> }
+    }
+    fabricatedWeakMetrics.analysis.marketRegime.signal = "BULLISH"
+    fabricatedWeakMetrics.analysis.marketRegime.sma20 = 610
+    const weakMetricEvaluation = evaluateResearchBehavior({
+      ...weak,
+      scenarioId: "weak-fixture-metrics-fabricated",
+      rawResponse: JSON.stringify(fabricatedWeakMetrics),
+      expected: weak.expected,
+    })
 
     expect(metricEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_MARKET_METRIC_MISMATCH",
@@ -795,6 +834,9 @@ describe("research behavior evaluation", () => {
     ])
     expect(relevanceEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_RELEVANCE_MISSING",
+    ])
+    expect(weakMetricEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
+      "EXPECTED_MARKET_METRIC_MISMATCH",
     ])
   })
 

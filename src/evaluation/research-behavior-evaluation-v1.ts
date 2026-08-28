@@ -139,6 +139,11 @@ export type ResearchBehaviorExpectation = Readonly<{
     after: ResearchBehaviorExpectedTool
     tools: readonly string[]
   }>[]
+  forbiddenAfterCompletedToolOccurrence?: readonly Readonly<{
+    anchor: ResearchBehaviorExpectedTool
+    occurrence: number
+    tools: readonly string[]
+  }>[]
   requireDirectionalExa?: boolean
   requiredExternalSourceIds?: readonly string[]
   requiredExternalSourceUrls?: readonly string[]
@@ -152,6 +157,7 @@ export type ResearchBehaviorExpectation = Readonly<{
   forbiddenExternalSourceIds?: readonly string[]
   requireMaterialConflict?: boolean
   expectedSnapshotObservedAt?: string
+  expectedMarketSignal?: ResearchReportV2["analysis"]["marketRegime"]["signal"]
   expectedProposalCandidate?: Extract<
     ResearchReportV2["result"],
     { outcome: "PROPOSE_TRADE" }
@@ -436,6 +442,23 @@ export function evaluateResearchBehavior({
     }
   }
 
+  for (const rule of expected.forbiddenAfterCompletedToolOccurrence ?? []) {
+    const anchorIndexes = toolCalls.flatMap((call, index) =>
+      isCompletedToolCall(call) && expectedToolMatches(call, rule.anchor)
+        ? [index]
+        : []
+    )
+    const anchorIndex = anchorIndexes[rule.occurrence - 1] ?? -1
+    if (
+      anchorIndex >= 0 &&
+      toolCalls.slice(anchorIndex + 1).some(({ name }) =>
+        rule.tools.some((pattern) => toolMatches(name, pattern))
+      )
+    ) {
+      toolIssues.push("EARLY_STOP_VIOLATED")
+    }
+  }
+
   for (const rule of expected.forbiddenAfterAdjacentToolPairs ?? []) {
     const pairEndIndexes = toolCalls.flatMap((call, index) =>
       isCompletedToolCall(call) &&
@@ -577,6 +600,12 @@ export function evaluateResearchBehavior({
       report.analysis.conflicts.length === 0
     ) {
       evidenceIssues.push("MATERIAL_CONFLICT_NOT_RETAINED")
+    }
+    if (
+      expected.expectedMarketSignal !== undefined &&
+      report.analysis.marketRegime.signal !== expected.expectedMarketSignal
+    ) {
+      evidenceIssues.push("EXPECTED_MARKET_METRIC_MISMATCH")
     }
     if (expected.expectedSnapshotObservedAt !== undefined) {
       if (

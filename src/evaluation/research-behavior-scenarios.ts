@@ -62,6 +62,18 @@ const noActionReport = (
     externalContext?: ReturnType<typeof exaSource>[]
     conflicts?: string[]
     accountStatus?: "ACTIVE" | "INACTIVE" | "UNKNOWN"
+    marketRegime?: Readonly<{
+      temporalClass: "LIVE" | "DELAYED" | "PRIOR_CLOSE"
+      observedAt: string
+      signal: "BULLISH" | "BEARISH" | "MIXED" | "UNAVAILABLE"
+      dailyClose?: number
+      sma20?: number
+      sma50?: number
+      sessionVwap?: number
+      spotMidpoint?: number
+      dailySessionCount: number
+      intradayBarCount: number
+    }>
   }> = {},
 ) => {
   const analysis = baseAnalysis()
@@ -87,6 +99,12 @@ const noActionReport = (
           ? false
           : analysis.accountChecks.optionsTradingApproved,
       },
+      marketRegime: options.marketRegime === undefined
+        ? analysis.marketRegime
+        : {
+            verification: "AGENT_REPORTED",
+            ...options.marketRegime,
+          },
       externalContext: options.externalContext ?? analysis.externalContext,
       conflicts: options.conflicts ?? analysis.conflicts,
     },
@@ -659,6 +677,8 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     })),
     toolCalls: [
       completed("skill"),
+      completed("alpaca_get_account"),
+      completed("exa_search"),
       completed("alpaca_get_option_chain", {
         symbol: "SPY",
         feed: "indicative",
@@ -668,12 +688,12 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         symbols: ["SPY260916C00600000", "SPY260916C00605000"],
         feed: "indicative",
       }),
-      completed("trusted_time"),
-      completed("exa_search"),
     ],
     expected: {
       outcome: "NO_ACTION",
       reasonCode: "CANDIDATE_CHANGED",
+      requiredTools: ["alpaca_get_account", "exa_*"],
+      requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
       completedToolCounts: [
         { pattern: "alpaca_get_option_chain", minimum: 2, maximum: 2 },
       ],
@@ -687,6 +707,8 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       ],
       requiredCompletedToolSequence: [
         "skill",
+        "alpaca_get_account",
+        "exa_*",
         {
           pattern: "alpaca_get_option_chain",
           input: { symbol: "SPY", feed: "indicative" },
@@ -708,6 +730,11 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
           ],
         },
       ],
+      forbiddenAfterCompletedToolOccurrence: [{
+        anchor: "alpaca_get_option_chain",
+        occurrence: 2,
+        tools: ["*"],
+      }],
     },
   },
   {
@@ -728,6 +755,18 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     description: "A weak mixed setup returns no action without forcing a proposal.",
     rawResponse: json(noActionReport("SIGNAL_NOT_ACTIONABLE", {
       externalContext: [exaSource("weak-context", "CONTRADICTS")],
+      marketRegime: {
+        temporalClass: "LIVE",
+        observedAt: "2026-08-26T14:30:00.000Z",
+        signal: "MIXED",
+        dailyClose: 604,
+        sma20: 602,
+        sma50: 602,
+        sessionVwap: 603.999514,
+        spotMidpoint: 606,
+        dailySessionCount: 50,
+        intradayBarCount: 60,
+      },
     })),
     toolCalls: [
       completed("skill"),
@@ -808,6 +847,16 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         "exa_*",
       ],
       requireDirectionalExa: true,
+      expectedMarketSignal: "MIXED",
+      expectedMarketRegime: {
+        dailyClose: 604,
+        sma20: 602,
+        sma50: 602,
+        sessionVwap: 603.999514,
+        spotMidpoint: 606,
+        dailySessionCount: 50,
+        intradayBarCount: 60,
+      },
     },
   },
 ] as const
