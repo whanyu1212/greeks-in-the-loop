@@ -54,6 +54,12 @@
       "command": ["node", "scripts/run-research-mcp.mjs", "exa"],
       "enabled": true,
       "timeout": 60000
+    },
+    "trusted": {
+      "type": "local",
+      "command": ["node", "scripts/run-research-mcp.mjs", "trusted"],
+      "enabled": true,
+      "timeout": 60000
     }
   },
   "permission": {

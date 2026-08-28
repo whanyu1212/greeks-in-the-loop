@@ -435,6 +435,11 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       reasonCode: "ACCOUNT_STATE_INELIGIBLE",
       requiredTools: ["skill", "alpaca_get_account"],
       requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
+      expectedAccountChecks: {
+        accountStatus: "INACTIVE",
+        optionsTradingApproved: false,
+        conflictingStrategyExposure: false,
+      },
       forbiddenAfter: [{
         anchor: "alpaca_get_account",
         tools: ["*"],

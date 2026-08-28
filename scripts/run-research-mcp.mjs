@@ -93,6 +93,11 @@ const createServers = {
     args: ["-y", "exa-mcp-server@3.4.1"],
     environment: { EXA_API_KEY: readRequiredSetting("EXA_API_KEY") },
   }),
+  trusted: () => ({
+    command: process.execPath,
+    args: [fileURLToPath(new URL("./trusted-time-mcp.mjs", import.meta.url))],
+    environment: {},
+  }),
 }
 
 const name = process.argv[2]

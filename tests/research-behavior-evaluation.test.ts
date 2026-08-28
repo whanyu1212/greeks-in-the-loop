@@ -118,6 +118,21 @@ describe("research behavior evaluation", () => {
       scenarioId: "fabricated-account-gate-market-analysis",
       rawResponse: JSON.stringify(report),
     })
+    const contradictoryAccount = JSON.parse(source.rawResponse) as {
+      analysis: {
+        accountChecks: {
+          accountStatus: string
+          optionsTradingApproved: boolean
+        }
+      }
+    }
+    contradictoryAccount.analysis.accountChecks.accountStatus = "ACTIVE"
+    contradictoryAccount.analysis.accountChecks.optionsTradingApproved = true
+    const accountEvaluation = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "contradictory-account-gate-analysis",
+      rawResponse: JSON.stringify(contradictoryAccount),
+    })
     const invalidBarBypasses = [
       [completed("alpaca_get_stock_bars")],
       [
@@ -148,6 +163,9 @@ describe("research behavior evaluation", () => {
 
     expect(evaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_MARKET_METRIC_MISMATCH",
+    ])
+    expect(accountEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
+      "EXPECTED_ACCOUNT_STATE_MISMATCH",
     ])
     for (const bypass of invalidBarBypasses) {
       expect(bypass.dimensions.evidenceDiscipline.issueCodes).toEqual([
@@ -1049,6 +1067,12 @@ describe("research behavior evaluation", () => {
 
   it("requires exactly one complete stale-snapshot rebuild", () => {
     const source = researchBehaviorScenarios[6]!
+    const staleLiveExpectation = liveExpectation(source.id, source.expected)
+    const ungroundedStaleEvidence = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "stale-rebuild-ungrounded-external-evidence",
+      expected: staleLiveExpectation,
+    })
     let optionContractCallIndex = 0
     const incomplete = evaluateResearchBehavior({
       ...source,
@@ -1132,6 +1156,10 @@ describe("research behavior evaluation", () => {
       ],
     })
 
+    expect(staleLiveExpectation.requiredExternalSources).toHaveLength(2)
+    expect(
+      ungroundedStaleEvidence.dimensions.evidenceDiscipline.issueCodes,
+    ).toEqual(["EXPECTED_SOURCE_MISSING"])
     expect(incomplete.dimensions.toolDiscipline.issueCodes).toEqual([
       "EARLY_STOP_VIOLATED",
       "TOOL_ADJACENCY_INVALID",

@@ -186,8 +186,13 @@ describe("research agent policy", () => {
     expect(evalMcp).toContain("StdioServerTransport")
   })
 
-  it("enables only the three research MCP servers through the credential launcher", () => {
-    expect(Object.keys(config.mcp).sort()).toEqual(["alpaca", "exa", "fmp"])
+  it("enables only the four approved research MCP servers through the launcher", () => {
+    expect(Object.keys(config.mcp).sort()).toEqual([
+      "alpaca",
+      "exa",
+      "fmp",
+      "trusted",
+    ])
     for (const [name, server] of Object.entries(config.mcp)) {
       expect(server.enabled).toBe(true)
       expect(server.command).toEqual(["node", "scripts/run-research-mcp.mjs", name])

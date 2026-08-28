@@ -277,6 +277,27 @@ export const liveExpectation = (
       ],
     }
   }
+  if (scenarioId === "stale-snapshot-single-rebuild") {
+    return {
+      ...live,
+      requiredExternalSources: [
+        {
+          url: "https://example.com/stale-snapshot-single-rebuild/1",
+          relevance: "SUPPORTS",
+          publishedAt: "2026-08-26T13:00:00.000Z",
+          retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+          retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
+        },
+        {
+          url: "https://example.com/stale-snapshot-single-rebuild/2",
+          relevance: "CONTRADICTS",
+          publishedAt: "2026-08-26T13:00:00.000Z",
+          retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+          retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
+        },
+      ],
+    }
+  }
   if (scenarioId === "weak-evidence-no-action") {
     return {
       ...live,

@@ -43,6 +43,7 @@ export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "EXPECTED_CANDIDATE_MISMATCH",
   "EXPECTED_SNAPSHOT_TIME_MISMATCH",
   "EXPECTED_SOURCE_TIMESTAMP_MISMATCH",
+  "EXPECTED_ACCOUNT_STATE_MISMATCH",
 ] as const
 
 export type ResearchBehaviorIssueCode =
@@ -162,6 +163,12 @@ export type ResearchBehaviorExpectation = Readonly<{
   requireMaterialConflict?: boolean
   expectedSnapshotObservedAt?: string
   expectedAccountObservedAt?: string
+  expectedAccountChecks?: Readonly<Partial<Pick<
+    ResearchReportV2["analysis"]["accountChecks"],
+    | "accountStatus"
+    | "optionsTradingApproved"
+    | "conflictingStrategyExposure"
+  >>>
   expectedMarketSignal?: ResearchReportV2["analysis"]["marketRegime"]["signal"]
   expectedProposalCandidate?: Extract<
     ResearchReportV2["result"],
@@ -619,6 +626,20 @@ export function evaluateResearchBehavior({
       report.analysis.conflicts.length === 0
     ) {
       evidenceIssues.push("MATERIAL_CONFLICT_NOT_RETAINED")
+    }
+    for (const [field, expectedValue] of Object.entries(
+      expected.expectedAccountChecks ?? {},
+    )) {
+      if (
+        !isDeepStrictEqual(
+          report.analysis.accountChecks[
+            field as keyof typeof report.analysis.accountChecks
+          ],
+          expectedValue,
+        )
+      ) {
+        evidenceIssues.push("EXPECTED_ACCOUNT_STATE_MISMATCH")
+      }
     }
     if (
       expected.expectedAccountObservedAt !== undefined &&
