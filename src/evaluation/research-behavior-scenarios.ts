@@ -43,10 +43,10 @@ const baseAnalysis = () => ({
   marketRegime: {
     verification: "AGENT_REPORTED" as const,
     temporalClass: "LIVE" as const,
-    observedAt: "2026-08-26T14:29:00.000Z",
-    signal: "MIXED" as const,
-    dailySessionCount: 50,
-    intradayBarCount: 60,
+    observedAt: "2026-08-26T14:20:00.000Z",
+    signal: "UNAVAILABLE" as const,
+    dailySessionCount: 0,
+    intradayBarCount: 0,
   },
   externalContext: [exaSource("exa-neutral", "NEUTRAL")],
   supportingFactors: [] as string[],
@@ -65,6 +65,7 @@ const noActionReport = (
   }> = {},
 ) => {
   const analysis = baseAnalysis()
+  const inactiveAccount = options.accountStatus === "INACTIVE"
   return {
     reportVersion: "2.0.0",
     result: {
@@ -75,9 +76,16 @@ const noActionReport = (
     },
     analysis: {
       ...analysis,
+      ...(inactiveAccount ? { asOf: "2026-08-26T14:20:00.000Z" } : {}),
       accountChecks: {
         ...analysis.accountChecks,
+        ...(inactiveAccount
+          ? { observedAt: "2026-08-26T14:20:00.000Z" }
+          : {}),
         accountStatus: options.accountStatus ?? analysis.accountChecks.accountStatus,
+        optionsTradingApproved: inactiveAccount
+          ? false
+          : analysis.accountChecks.optionsTradingApproved,
       },
       externalContext: options.externalContext ?? analysis.externalContext,
       conflicts: options.conflicts ?? analysis.conflicts,
@@ -272,6 +280,7 @@ const completeProposalToolExpectation = {
       maximum: 1,
     },
   ],
+  requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
   requiredCompletedToolSequence: [
     "skill",
     "alpaca_get_account",
@@ -489,37 +498,37 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     })),
     toolCalls: [
       completed("skill"),
-      completed("alpaca_get_stock_bars", {
-        symbol: "SPY",
-        timeframe: "1Day",
-        adjustment: "all",
-        feed: "iex",
-      }),
-      completed("alpaca_get_stock_bars", {
-        symbol: "SPY",
-        timeframe: "1Min",
-        feed: "iex",
-      }),
-      completed("alpaca_get_stock_latest_quote", { symbol: "SPY", feed: "iex" }),
-      completed("alpaca_get_option_chain", { symbol: "SPY", feed: "indicative" }),
-      completed("alpaca_get_option_contracts", { symbol: "SPY" }),
-      completed("trusted_time"),
-      completed("alpaca_get_stock_bars", {
-        symbol: "SPY",
-        timeframe: "1Day",
-        adjustment: "all",
-        feed: "iex",
-      }),
-      completed("alpaca_get_stock_bars", {
-        symbol: "SPY",
-        timeframe: "1Min",
-        feed: "iex",
-      }),
-      completed("alpaca_get_stock_latest_quote", { symbol: "SPY", feed: "iex" }),
-      completed("alpaca_get_option_chain", { symbol: "SPY", feed: "indicative" }),
-      completed("alpaca_get_option_contracts", { symbol: "SPY" }),
-      completed("trusted_time"),
       completed("exa_search"),
+      completed("alpaca_get_stock_bars", {
+        symbol: "SPY",
+        timeframe: "1Day",
+        adjustment: "all",
+        feed: "iex",
+      }),
+      completed("alpaca_get_stock_bars", {
+        symbol: "SPY",
+        timeframe: "1Min",
+        feed: "iex",
+      }),
+      completed("alpaca_get_stock_latest_quote", { symbol: "SPY", feed: "iex" }),
+      completed("alpaca_get_option_chain", { symbol: "SPY", feed: "indicative" }),
+      completed("alpaca_get_option_contracts", { symbol: "SPY" }),
+      completed("trusted_time"),
+      completed("alpaca_get_stock_bars", {
+        symbol: "SPY",
+        timeframe: "1Day",
+        adjustment: "all",
+        feed: "iex",
+      }),
+      completed("alpaca_get_stock_bars", {
+        symbol: "SPY",
+        timeframe: "1Min",
+        feed: "iex",
+      }),
+      completed("alpaca_get_stock_latest_quote", { symbol: "SPY", feed: "iex" }),
+      completed("alpaca_get_option_chain", { symbol: "SPY", feed: "indicative" }),
+      completed("alpaca_get_option_contracts", { symbol: "SPY" }),
+      completed("trusted_time"),
     ],
     expected: {
       outcome: "NO_ACTION",
@@ -631,6 +640,14 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         after: "trusted_time",
         minimum: 2,
         maximum: 2,
+      }],
+      forbiddenAfterAdjacentToolPairs: [{
+        before: {
+          pattern: "alpaca_get_option_contracts",
+          input: { symbol: "SPY" },
+        },
+        after: "trusted_time",
+        tools: ["*"],
       }],
     },
   },

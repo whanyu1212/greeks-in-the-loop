@@ -134,6 +134,11 @@ export type ResearchBehaviorExpectation = Readonly<{
     anchor: string
     tools: readonly string[]
   }>[]
+  forbiddenAfterAdjacentToolPairs?: readonly Readonly<{
+    before: ResearchBehaviorExpectedTool
+    after: ResearchBehaviorExpectedTool
+    tools: readonly string[]
+  }>[]
   requireDirectionalExa?: boolean
   requiredExternalSourceIds?: readonly string[]
   requiredExternalSourceUrls?: readonly string[]
@@ -431,6 +436,27 @@ export function evaluateResearchBehavior({
     }
   }
 
+  for (const rule of expected.forbiddenAfterAdjacentToolPairs ?? []) {
+    const pairEndIndexes = toolCalls.flatMap((call, index) =>
+      isCompletedToolCall(call) &&
+        expectedToolMatches(call, rule.before) &&
+        toolCalls[index + 1] !== undefined &&
+        isCompletedToolCall(toolCalls[index + 1]!) &&
+        expectedToolMatches(toolCalls[index + 1]!, rule.after)
+        ? [index + 1]
+        : []
+    )
+    const finalPairEndIndex = pairEndIndexes.at(-1) ?? -1
+    if (
+      finalPairEndIndex >= 0 &&
+      toolCalls.slice(finalPairEndIndex + 1).some(({ name }) =>
+        rule.tools.some((pattern) => toolMatches(name, pattern))
+      )
+    ) {
+      toolIssues.push("EARLY_STOP_VIOLATED")
+    }
+  }
+
   for (const rule of expected.forbiddenAfter ?? []) {
     const anchorIndex = firstToolIndex(toolCalls, rule.anchor)
     if (
@@ -460,6 +486,35 @@ export function evaluateResearchBehavior({
 
   const externalSources = report?.analysis.externalContext ?? []
   if (report !== undefined) {
+    const hasCompletedBars = (input: Readonly<Record<string, unknown>>) =>
+      completedToolCalls.some((call) =>
+        call.name === "alpaca_get_stock_bars" &&
+        toolInputMatches(call.input, input)
+      )
+    const completedUnderlyingSnapshot =
+      hasCompletedBars({
+        symbol: "SPY",
+        timeframe: "1Day",
+        adjustment: "all",
+        feed: "iex",
+      }) &&
+      hasCompletedBars({ symbol: "SPY", timeframe: "1Min", feed: "iex" })
+    const marketRegime = report.analysis.marketRegime
+    if (
+      !completedUnderlyingSnapshot &&
+      (marketRegime.signal !== "UNAVAILABLE" ||
+        marketRegime.dailySessionCount !== 0 ||
+        marketRegime.intradayBarCount !== 0 ||
+        [
+          marketRegime.dailyClose,
+          marketRegime.sma20,
+          marketRegime.sma50,
+          marketRegime.sessionVwap,
+          marketRegime.spotMidpoint,
+        ].some((value) => value !== undefined))
+    ) {
+      evidenceIssues.push("EXPECTED_MARKET_METRIC_MISMATCH")
+    }
     if (
       expected.requireDirectionalExa === true &&
       !externalSources.some(

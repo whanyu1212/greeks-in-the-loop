@@ -101,6 +101,61 @@ describe("research behavior evaluation", () => {
     ])
   })
 
+  it("rejects unsupported market analysis after an early account stop", () => {
+    const source = researchBehaviorScenarios[0]!
+    const report = JSON.parse(source.rawResponse) as {
+      analysis: { marketRegime: Record<string, unknown> }
+    }
+    report.analysis.marketRegime = {
+      ...report.analysis.marketRegime,
+      signal: "MIXED",
+      dailySessionCount: 50,
+      intradayBarCount: 60,
+      dailyClose: 605,
+    }
+    const evaluation = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "fabricated-account-gate-market-analysis",
+      rawResponse: JSON.stringify(report),
+    })
+    const invalidBarBypasses = [
+      [completed("alpaca_get_stock_bars")],
+      [
+        {
+          ...completed("alpaca_get_stock_bars"),
+          input: { symbol: "QQQ", timeframe: "1Day", adjustment: "all", feed: "iex" },
+        },
+        {
+          ...completed("alpaca_get_stock_bars"),
+          input: { symbol: "QQQ", timeframe: "1Min", feed: "iex" },
+        },
+      ],
+      [{
+        ...completed("alpaca_get_stock_bars"),
+        input: {
+          symbol: "SPY",
+          timeframe: "1Day",
+          adjustment: "all",
+          feed: "iex",
+        },
+      }],
+    ].map((toolCalls, index) => evaluateResearchBehavior({
+      scenarioId: `invalid-market-bar-bypass-${index}`,
+      rawResponse: JSON.stringify(report),
+      toolCalls,
+      expected: {},
+    }))
+
+    expect(evaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
+      "EXPECTED_MARKET_METRIC_MISMATCH",
+    ])
+    for (const bypass of invalidBarBypasses) {
+      expect(bypass.dimensions.evidenceDiscipline.issueCodes).toEqual([
+        "EXPECTED_MARKET_METRIC_MISMATCH",
+      ])
+    }
+  })
+
   it("forbids every tool after an ineligible account hard gate", () => {
     const source = researchBehaviorScenarios[0]!
     const evaluation = evaluateResearchBehavior({
@@ -328,6 +383,24 @@ describe("research behavior evaluation", () => {
     const valid = researchBehaviorScenarios[8]!
     const weak = researchBehaviorScenarios[9]!
     const validExpectation = liveExpectation(valid.id, valid.expected)
+    const proposalPreflightBypasses = [valid, researchBehaviorScenarios[4]!].map(
+      (scenario) => {
+        const firstExaIndex = scenario.toolCalls.findIndex(
+          ({ name }) => name === "exa_search",
+        )
+        return evaluateResearchBehavior({
+          ...scenario,
+          scenarioId: `${scenario.id}-research-before-preflight`,
+          toolCalls: [
+            scenario.toolCalls[firstExaIndex]!,
+            ...scenario.toolCalls.filter((_call, index) =>
+              index !== firstExaIndex
+            ),
+          ],
+          expected: liveExpectation(scenario.id, scenario.expected),
+        })
+      },
+    )
     const mislabeledMaterialReport = JSON.parse(materialConflict.rawResponse) as {
       analysis: { externalContext: Array<Record<string, unknown>> }
     }
@@ -545,6 +618,11 @@ describe("research behavior evaluation", () => {
         },
       ],
     })
+    for (const bypass of proposalPreflightBypasses) {
+      expect(bypass.dimensions.toolDiscipline.issueCodes).toEqual([
+        "TOOL_SEQUENCE_INVALID",
+      ])
+    }
     expect(validExpectation.requiredExternalSources).toEqual([
       {
         url: "https://example.com/valid-adversarial-proposal/1",
@@ -786,6 +864,11 @@ describe("research behavior evaluation", () => {
         }
       }),
     })
+    const researchAfterFailedRebuild = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "research-after-failed-rebuild",
+      toolCalls: [...source.toolCalls, completed("exa_search")],
+    })
     const extra = evaluateResearchBehavior({
       ...source,
       scenarioId: "extra-snapshot-rebuild",
@@ -801,6 +884,7 @@ describe("research behavior evaluation", () => {
     })
 
     expect(incomplete.dimensions.toolDiscipline.issueCodes).toEqual([
+      "EARLY_STOP_VIOLATED",
       "TOOL_ADJACENCY_INVALID",
       "TOOL_COUNT_INVALID",
       "TOOL_INPUT_COUNT_INVALID",
@@ -813,7 +897,11 @@ describe("research behavior evaluation", () => {
     expect(splitBarTimeframes.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_SEQUENCE_INVALID",
     ])
+    expect(researchAfterFailedRebuild.dimensions.toolDiscipline.issueCodes).toEqual([
+      "EARLY_STOP_VIOLATED",
+    ])
     expect(extra.dimensions.toolDiscipline.issueCodes).toEqual([
+      "EARLY_STOP_VIOLATED",
       "TOOL_COUNT_INVALID",
     ])
   })
