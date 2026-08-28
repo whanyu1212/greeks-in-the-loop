@@ -88,12 +88,8 @@ const noActionReport = (
     },
     analysis: {
       ...analysis,
-      ...(inactiveAccount ? { asOf: "2026-08-26T14:20:00.000Z" } : {}),
       accountChecks: {
         ...analysis.accountChecks,
-        ...(inactiveAccount
-          ? { observedAt: "2026-08-26T14:20:00.000Z" }
-          : {}),
         accountStatus: options.accountStatus ?? analysis.accountChecks.accountStatus,
         optionsTradingApproved: inactiveAccount
           ? false
@@ -440,19 +436,32 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       externalContext: [],
       accountStatus: "INACTIVE",
     })),
-    toolCalls: [completed("skill"), completed("alpaca_get_account")],
+    toolCalls: [
+      completed("skill"),
+      completed("alpaca_get_account"),
+      completed("trusted_time"),
+    ],
     expected: {
       outcome: "NO_ACTION",
       reasonCode: "ACCOUNT_STATE_INELIGIBLE",
-      requiredTools: ["skill", "alpaca_get_account"],
-      requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
+      requiredTools: ["skill", "alpaca_get_account", "trusted_time"],
+      requiredCompletedToolPrefix: [
+        "skill",
+        "alpaca_get_account",
+        "trusted_time",
+      ],
+      requiredAdjacentToolPairs: [["alpaca_get_account", "trusted_time"]],
+      completedToolCounts: [
+        { pattern: "trusted_time", minimum: 1, maximum: 1 },
+      ],
+      expectedAccountObservedAt: "2026-08-26T14:30:00.000Z",
       expectedAccountChecks: {
         accountStatus: "INACTIVE",
         optionsTradingApproved: false,
         conflictingStrategyExposure: false,
       },
       forbiddenAfter: [{
-        anchor: "alpaca_get_account",
+        anchor: "trusted_time",
         tools: ["*"],
       }],
     },
@@ -801,6 +810,10 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         },
         after: "trusted_time",
         tools: ["*"],
+      }],
+      forbiddenAfter: [{
+        anchor: "alpaca_get_stock_bars",
+        tools: ["exa_*", "fmp_*"],
       }],
     },
   },

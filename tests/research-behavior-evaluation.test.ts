@@ -86,6 +86,7 @@ describe("research behavior evaluation", () => {
       scenarioId: "tool-policy-failures",
       toolCalls: [
         completed("alpaca_get_account"),
+        completed("trusted_time"),
         completed("exa_search"),
         completed("alpaca_place_order"),
         {
@@ -121,6 +122,7 @@ describe("research behavior evaluation", () => {
         completed("skill"),
         completed("exa_search"),
         completed("alpaca_get_account"),
+        completed("trusted_time"),
       ],
     })
 
@@ -210,10 +212,10 @@ describe("research behavior evaluation", () => {
       toolCalls: [
         completed("skill"),
         completed("alpaca_get_account"),
+        completed("trusted_time"),
         completed("alpaca_get_account_configurations"),
         completed("alpaca_get_stock_bars"),
         completed("alpaca_get_clock"),
-        completed("trusted_time"),
       ],
     })
 
@@ -1273,6 +1275,18 @@ describe("research behavior evaluation", () => {
         }
       }),
     })
+    const firstStaleBarIndex = source.toolCalls.findIndex(
+      ({ name }) => name === "alpaca_get_stock_bars",
+    )
+    const externalResearchInsideStaleSnapshot = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "external-research-inside-stale-snapshot",
+      toolCalls: [
+        ...source.toolCalls.slice(0, firstStaleBarIndex + 1),
+        completed("exa_search"),
+        ...source.toolCalls.slice(firstStaleBarIndex + 1),
+      ],
+    })
     const researchAfterFailedRebuild = evaluateResearchBehavior({
       ...source,
       scenarioId: "research-after-failed-rebuild",
@@ -1319,6 +1333,9 @@ describe("research behavior evaluation", () => {
     expect(splitBarTimeframes.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_SEQUENCE_INVALID",
     ])
+    expect(
+      externalResearchInsideStaleSnapshot.dimensions.toolDiscipline.issueCodes,
+    ).toEqual(["EARLY_STOP_VIOLATED"])
     expect(researchAfterFailedRebuild.dimensions.toolDiscipline.issueCodes).toEqual([
       "EARLY_STOP_VIOLATED",
     ])

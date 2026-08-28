@@ -51,7 +51,7 @@ Canonicalize external URLs conceptually by ignoring fragments and tracking param
 
 Use three distinct response-completion captures and never substitute the cycle-start timestamp for one:
 
-1. Immediately after an active paper-account response completes, with no intervening tool call, call `trusted_time` and use its returned UTC timestamp as `analysis.accountChecks.observedAt`. If the account is inactive or ambiguous, stop after the account response without calling `trusted_time`.
+1. Immediately after every paper-account response completes, with no intervening tool call, call `trusted_time` and use its returned UTC timestamp as `analysis.accountChecks.observedAt`. If the account is inactive or ambiguous, stop immediately after this time capture without calling any other tool.
 2. Immediately after every required underlying and option snapshot-forming response has completed, with no intervening tool call, call `trusted_time` and use its returned UTC timestamp as `observed_at`. Freeze the expected daily sessions and intraday intervals at this instant.
 3. Immediately after the final Alpaca clock response completes, with no intervening tool call, call `trusted_time` again and use its returned UTC timestamp as `approval_evaluated_at`. Do not use the timestamp contained in the clock payload.
 
@@ -71,8 +71,8 @@ If any snapshot-forming input is stale and a read-only refresh is available, dis
 ## Research checklist
 
 1. **Inspect observable account state**
-   - Inspect the paper account first and require the account status to be active. If its status is absent, ambiguous, or not active, return `NO_ACTION` with `ACCOUNT_STATE_INELIGIBLE` immediately and call no additional tools.
-   - Immediately after an active account response, call `trusted_time` before account configuration, positions, orders, market data, or external research, and retain that UTC value as `analysis.accountChecks.observedAt`.
+   - Inspect the paper account first and require the account status to be active. Immediately after its response, call `trusted_time` before any other tool and retain that UTC value as `analysis.accountChecks.observedAt`. If status is absent, ambiguous, or not active, return `NO_ACTION` with `ACCOUNT_STATE_INELIGIBLE` immediately after the time capture and call no additional tools.
+   - For an active account, continue to account configuration, positions, and orders only after that time capture.
    - Only for an active account, inspect account configuration, open positions, and open orders. Require the approved options level to support submitting the complete multileg spread; otherwise return `NO_ACTION` with `ACCOUNT_STATE_INELIGIBLE`.
    - Do not claim reconciliation or risk approval: the event ledger, circuit-breaker state, daily-entry history, and deterministic risk engine are not available to this agent.
    - If observable Alpaca state is restricted or already contains conflicting strategy exposure, return the matching `NO_ACTION` reason. Leave unobservable risk limits to downstream code.
