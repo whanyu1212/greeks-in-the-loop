@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { abortableSleep, runAgentLoop } from "../src/agent-loop.js"
+import {
+  abortableSleep,
+  MAX_AGENT_LOOP_DELAY_MS,
+  runAgentLoop,
+} from "../src/agent-loop.js"
 
 describe("abortableSleep", () => {
   it("resolves immediately when cancellation happened before listener registration", async () => {
@@ -55,6 +59,21 @@ describe("runAgentLoop", () => {
         runCycle,
       }),
     ).rejects.toThrow("maxBackoffMs must be at least twice intervalMs")
+    expect(runCycle).not.toHaveBeenCalled()
+  })
+
+  it("rejects a backoff cap beyond the timer range", async () => {
+    const runCycle = vi.fn(async () => "unused")
+
+    await expect(
+      runAgentLoop({
+        intervalMs: 100,
+        maxBackoffMs: MAX_AGENT_LOOP_DELAY_MS + 1,
+        maxCycles: 1,
+        signal: new AbortController().signal,
+        runCycle,
+      }),
+    ).rejects.toThrow(`maxBackoffMs must not exceed ${MAX_AGENT_LOOP_DELAY_MS}`)
     expect(runCycle).not.toHaveBeenCalled()
   })
 

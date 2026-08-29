@@ -14,6 +14,7 @@
  */
 
 export const DEFAULT_AGENT_MAX_BACKOFF_MS = 30 * 60 * 1000
+export const MAX_AGENT_LOOP_DELAY_MS = 2 ** 31 - 1
 
 /** Configuration and callbacks for a sequential agent loop. */
 export type AgentLoopOptions = {
@@ -85,6 +86,9 @@ export async function runAgentLoop({
 }: AgentLoopOptions): Promise<number> {
   if (maxBackoffMs / 2 < intervalMs) {
     throw new Error("maxBackoffMs must be at least twice intervalMs")
+  }
+  if (maxBackoffMs > MAX_AGENT_LOOP_DELAY_MS) {
+    throw new Error(`maxBackoffMs must not exceed ${MAX_AGENT_LOOP_DELAY_MS}`)
   }
 
   let cycle = 0

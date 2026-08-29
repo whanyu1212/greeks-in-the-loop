@@ -15,6 +15,7 @@ import { parse as parseEnv } from "dotenv"
 
 import {
   DEFAULT_AGENT_MAX_BACKOFF_MS,
+  MAX_AGENT_LOOP_DELAY_MS,
   runAgentLoop,
 } from "./agent-loop.js"
 import { parseAgentOptions } from "./agent-options.js"
@@ -184,6 +185,9 @@ const maxBackoffMs = readPositiveInteger(
 )
 if (maxBackoffMs / 2 < intervalMs) {
   throw new Error("AGENT_MAX_BACKOFF_MS must be at least twice AGENT_INTERVAL_MS")
+}
+if (maxBackoffMs > MAX_AGENT_LOOP_DELAY_MS) {
+  throw new Error(`AGENT_MAX_BACKOFF_MS must not exceed ${MAX_AGENT_LOOP_DELAY_MS}`)
 }
 const cycleTimeoutMs = readPositiveInteger("AGENT_CYCLE_TIMEOUT_MS", 5 * 60 * 1000)
 const cycleAbortTimeoutMs = readPositiveInteger("AGENT_CYCLE_ABORT_TIMEOUT_MS", 5_000)
