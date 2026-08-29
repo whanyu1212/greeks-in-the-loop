@@ -17,6 +17,7 @@
         "read": {
           "*": "deny",
           "docs/**": "allow",
+          "docs/.vitepress/**": "deny",
           "workspace/**": "allow"
         },
         "edit": {

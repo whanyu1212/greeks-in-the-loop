@@ -10,6 +10,7 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "better-sqlite3",
+      "esbuild",
       "opencode-ai"
     ]
   },
@@ -31,7 +32,10 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "dependencies": {
     "@arizeai/openinference-semantic-conventions": "2.8.0",
@@ -51,8 +55,11 @@
   "devDependencies": {
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "22.20.1",
+    "mermaid": "11.17.2",
     "tsx": "4.23.12",
     "typescript": "7.0.2",
+    "vitepress": "1.6.4",
+    "vitepress-plugin-mermaid": "2.0.17",
     "vitest": "4.1.11"
   }
 }

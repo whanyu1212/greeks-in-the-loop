@@ -1,0 +1,15 @@
+/* Mermaid clips the last line of multi-line node labels; give them room. */
+.mermaid svg {
+  max-width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.mermaid .nodeLabel,
+.mermaid .edgeLabel {
+  line-height: 1.4;
+}
+
+.mermaid foreignObject {
+  overflow: visible;
+}
