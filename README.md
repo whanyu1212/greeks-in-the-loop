@@ -313,8 +313,14 @@ reaches a live decision — the risk gate is a pure function of one intent plus
 currently captured state. Its value is entirely offline, and it answers three
 questions nothing else in the system can.
 
-**Do the signal and exit rules work?** These hold the free parameters, and the
-acquired dataset supports them directly. The signal (`evaluateBacktestSignalV1`)
+**Do the signal and exit rules work?** These hold the free parameters. Note what
+replay does and does not read: `evaluateBacktestSignalV1` consumes the
+hand-authored `scenario.signal`, and the dataset is used only to check that its
+preceding session dates line up with the replay calendar — the bar values
+themselves are never cross-checked against acquired records, and
+`HISTORICAL_BAR_PROXY` skips signal evaluation entirely. Replay therefore
+re-executes the rules over supplied snapshots; it is not a historical signal
+backtest recomputed from market data. The signal (`evaluateBacktestSignalV1`)
 requires three conditions to agree — close above SMA-20, SMA-20 above SMA-50,
 spot above session VWAP — inverted for `BEARISH`, otherwise `NO_ACTION`; the
 **20 lookback** is the tunable knob; the 50 is pinned by
