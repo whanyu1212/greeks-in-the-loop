@@ -190,6 +190,11 @@ contains the clock and calendar used to establish the slot, underlying bars and
 quote, option chain, and contract metadata used by the decision. Reconciled
 account state and final clock responses are separate timestamped gate evidence.
 
+The versioned normalized identity for future application-owned screening is
+defined in [`research-market-snapshots-v1.md`](research-market-snapshots-v1.md).
+That contract defines data and canonical identity only; provider capture and
+strategy calculation remain separate implementation stages.
+
 Approval reruns every market-data eligibility gate, calculation, and ranking rule
 against only that snapshot. It may not combine market fields from different
 snapshots. Account eligibility and time gates use their separate, timestamped
