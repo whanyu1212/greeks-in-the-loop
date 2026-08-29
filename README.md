@@ -397,10 +397,9 @@ shadow mode  ┄┄►  exact snapshots  ──►  replay  ──►  reason co
 
 Backtest statistics are never consulted at runtime. Doing so would make a
 versioned, auditable, pure gate depend on whichever dataset happened to be
-present at evaluation time — and the current sample (at most one approved
-entry per day, enforced by `DAILY_ENTRY_LIMIT_ACTIVE`; `approvedQuantity`
-pinned at 1; no live fills yet) could not support a threshold
-change regardless. `HISTORICAL_BAR_PROXY` scenarios contribute nothing to the
+present at evaluation time — and the current sample (`approvedQuantity` pinned
+at 1, no live fills, and no realized outcome attached to any approval) could not
+support a threshold change regardless. `HISTORICAL_BAR_PROXY` scenarios contribute nothing to the
 rule evidence above: they skip the signal, report a `NOT_EVALUABLE` risk status
 because the gate never runs, and test exit mechanics only.
 

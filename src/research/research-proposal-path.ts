@@ -58,6 +58,20 @@ const observationIsFresh = (
   )
 }
 
+/**
+ * A report whose result is already narrowed to `PROPOSE_TRADE`.
+ *
+ * Carrying the narrowed report — rather than a report plus a separate result —
+ * keeps `researchReportV2Schema`'s result/analysis cross-checks intact: the
+ * decision that is validated and the analysis that is freshness-checked cannot
+ * come from different proposals.
+ */
+export type ProposedTradeReportV2 = Readonly<
+  Omit<ResearchReportV2, "result"> & {
+    result: Extract<ResearchReportV2["result"], { outcome: "PROPOSE_TRADE" }>
+  }
+>
+
 export const proposalMarketRegimeIsFresh = (
   report: ResearchReportV2,
   evaluatedAt: string,
@@ -79,7 +93,7 @@ export const proposalAccountChecksAreFresh = (
   )
 
 export const proposalHistoryIssuePath = (
-  report: ResearchReportV2,
+  report: ProposedTradeReportV2,
   eligibility: ResearchEligibilityV1,
 ): readonly (string | number)[] | undefined => {
   const sessionDate = eligibility.sessionDate
@@ -100,9 +114,9 @@ export const proposalHistoryIssuePath = (
     return ["analysis", "candidateEvaluation"]
   }
   const sessionDay = Date.parse(`${sessionDate}T00:00:00.000Z`)
-  const expirationDay = Date.parse(`${report.result.outcome === "PROPOSE_TRADE"
-    ? report.result.candidate.expiration
-    : sessionDate}T00:00:00.000Z`)
+  const expirationDay = Date.parse(
+    `${report.result.candidate.expiration}T00:00:00.000Z`,
+  )
   const expectedDte = (expirationDay - sessionDay) / 86_400_000
   if (
     !Number.isInteger(expectedDte) ||
@@ -140,8 +154,7 @@ export type ProposalIntentDeriver = (
 ) => TradeIntentDerivationResult
 
 export type ProcessResearchProposalPathOptions = Readonly<{
-  report: ResearchReportV2
-  result: ProposedTradeDecisionV1
+  report: ProposedTradeReportV2
   signal: AbortSignal
   quoteProvider: OptionQuoteProvider
   shadowRiskEvaluator: ShadowRiskEvaluator
@@ -159,7 +172,6 @@ export type ProcessResearchProposalPathOptions = Readonly<{
  */
 export async function processResearchProposalPath({
   report,
-  result,
   signal,
   quoteProvider,
   shadowRiskEvaluator,
@@ -169,6 +181,7 @@ export async function processResearchProposalPath({
   stages,
   stageReporter,
 }: ProcessResearchProposalPathOptions): Promise<ResearchCycleTerminalResolution> {
+  const result = report.result
   const evidencePreflight = await trace.run(
     "research.decision.validate",
     () => validateResearchDecisionV1(result, PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT),

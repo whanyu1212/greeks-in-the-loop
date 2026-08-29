@@ -647,6 +647,7 @@ export function evaluateResearchRunV1(
       proposalPreflightValidation?.success !== true ||
       !hasRetainedEligibleTradeWindow ||
       validReport === undefined ||
+      validReport.result.outcome !== "PROPOSE_TRADE" ||
       run.initialEligibility === undefined ||
       retainedProposalEvaluationLowerBound === undefined
     ) {
@@ -678,8 +679,10 @@ export function evaluateResearchRunV1(
         },
       ]
     }
+    // Rebuild so the narrowed result is carried on the report itself: the
+    // guard above narrows validReport.result, not validReport.
     const historyIssuePath = proposalHistoryIssuePath(
-      validReport,
+      { ...validReport, result: validReport.result },
       run.initialEligibility,
     )
     return historyIssuePath === undefined
