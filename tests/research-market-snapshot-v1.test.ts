@@ -210,6 +210,25 @@ describe("research market snapshot V1", () => {
     )
   })
 
+  it("retains a zero-bid option for downstream eligibility screening", () => {
+    const underlying = buildUnderlying()
+    const input = createOptionUniverseSnapshotInputV1()
+    input.contracts[0]!.quote.bidCentsPerShare = 0
+    const result = buildOptionUniverseSnapshotV1(underlying, input)
+
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(
+      result.snapshot.contracts.find(
+        ({ contractSymbol }) => contractSymbol === "SPY260925P00550000",
+      )?.quote,
+    ).toEqual({
+      providerTimestamp: "2026-08-28T14:00:44.000Z",
+      bidCentsPerShare: 0,
+      askCentsPerShare: 230,
+    })
+  })
+
   it("requires complete option coverage and matching identities", () => {
     const underlying = buildUnderlying()
     const completeInput = createOptionUniverseSnapshotInputV1()

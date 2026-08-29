@@ -91,9 +91,10 @@ scaled Greeks and implied volatility, current-session volume, and dated open
 interest. Compact-symbol parsing, SPY authorization, expiration, option type,
 and cent-denominated strike consistency are validated independently.
 
-A complete snapshot may retain a non-tradable contract, an unsupported exercise
-style or multiplier, or metrics below strategy eligibility thresholds. Those
-are valid observations for #55 to reject. Snapshot construction rejects missing,
+A complete snapshot may retain a non-tradable contract, a zero-bid quote with a
+positive ask, an unsupported exercise style or multiplier, or metrics below
+strategy eligibility thresholds. Those are valid observations for #55 to
+reject. Snapshot construction rejects missing,
 malformed, duplicate, cross-symbol, out-of-scope, stale, future-dated, or
 incompletely covered records; it does not apply delta bands, liquidity
 thresholds, quote-width limits, spread construction, or ranking.

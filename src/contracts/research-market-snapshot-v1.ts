@@ -497,7 +497,7 @@ export const optionUniverseContractV1Schema = z
     quote: z
       .object({
         providerTimestamp: researchSnapshotUtcTimestampV1Schema,
-        bidCentsPerShare: positiveSafeInteger,
+        bidCentsPerShare: safeCount,
         askCentsPerShare: positiveSafeInteger,
       })
       .strict(),
