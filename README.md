@@ -26,10 +26,11 @@ flowchart TD
     subgraph backtest["Backtest replay (offline)"]
         R1[Immutable checksummed<br/>Alpaca dataset] --> R2[EXACT_SNAPSHOT scenarios]
         R1 --> R3[HISTORICAL_BAR_PROXY scenarios]
+        R2 --> RD["evaluateTradeIntentRiskV1<br/>same pure function as D"]
         R3 --> R4[Exit mechanics only<br/>riskStatus: NOT_EVALUABLE]
+        RD --> R5[Report file<br/>never read by runtime code]
+        R4 --> R5
     end
-
-    R2 -->|same gate, no agent| D
 
     E -.->|not built| F[Order construction<br/>deterministic, no agent authority]
     F -.->|not built| G[Broker submit + fill tracking]
