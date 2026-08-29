@@ -110,9 +110,10 @@ change requires holding that file fixed as well.
 ## Agent boundary
 
 `opencode.json` is deny-by-default. The `research` agent may call
-`alpaca_get_*`, `fmp_*`, `exa_*`, and `trusted_time`; read `docs/**` and
-`workspace/**`; write only `workspace/**`. Bash, task/subagents, webfetch,
-websearch, and external directories are denied. Only the
+`alpaca_get_*`, `fmp_*`, `exa_*`, and `trusted_time`; read `docs/**` (except
+`docs/.vitepress/**`, the docs-site build config) and `workspace/**`; write only
+`workspace/**`. Bash, task/subagents, webfetch, websearch, and external
+directories are denied. Only the
 `spy-debit-spread-research` skill is allowed.
 
 Prompt instructions describe desired behavior but are **not** an authorization

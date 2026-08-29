@@ -110,6 +110,7 @@ describe("research agent policy", () => {
     expect(permission.read).toEqual({
       "*": "deny",
       "docs/**": "allow",
+      "docs/.vitepress/**": "deny",
       "workspace/**": "allow",
     })
     expect(permission.edit).toEqual({
