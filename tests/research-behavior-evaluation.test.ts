@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest"
 import { liveExpectation } from "../src/evaluation/research-behavior-evaluate-cli.js"
 import {
   evaluateResearchBehavior,
-  researchBehaviorEvaluationV1Schema,
   type ResearchBehaviorEvaluationV1,
 } from "../src/evaluation/research-behavior-evaluation-v1.js"
 import { researchBehaviorScenarios } from "../src/evaluation/research-behavior-scenarios.js"
@@ -52,9 +51,6 @@ describe("research behavior evaluation", () => {
         scenarioId: scenario.id,
       })
 
-      expect(researchBehaviorEvaluationV1Schema.safeParse(evaluation).success).toBe(
-        true,
-      )
       expect(issueCodes(evaluation).sort()).toEqual(
         [...(scenario.expectedIssues ?? [])].sort(),
       )

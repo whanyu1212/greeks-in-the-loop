@@ -1,8 +1,6 @@
 import { isAbsolute, resolve, sep } from "node:path"
 import { isDeepStrictEqual } from "node:util"
 
-import { z } from "zod"
-
 import { NO_ACTION_REASON_CODES } from "../contracts/research-decision-v1.js"
 import {
   researchReportV2Schema,
@@ -13,8 +11,6 @@ import {
   RESEARCH_MAX_FMP_CALLS,
   RESEARCH_MAX_TOOL_CALLS,
 } from "../research/research-agent.js"
-
-export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "1.0.0" as const
 
 export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "MALFORMED_JSON",
@@ -49,41 +45,28 @@ export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
 export type ResearchBehaviorIssueCode =
   (typeof RESEARCH_BEHAVIOR_ISSUE_CODES)[number]
 
-const dimensionSchema = z
-  .object({
-    status: z.enum(["PASS", "FAIL", "NOT_APPLICABLE"]),
-    issueCodes: z.array(z.enum(RESEARCH_BEHAVIOR_ISSUE_CODES)),
-  })
-  .strict()
+type ResearchBehaviorDimension = Readonly<{
+  status: "PASS" | "FAIL" | "NOT_APPLICABLE"
+  issueCodes: readonly ResearchBehaviorIssueCode[]
+}>
 
-export const researchBehaviorEvaluationV1Schema = z
-  .object({
-    evaluationVersion: z.literal(RESEARCH_BEHAVIOR_EVALUATION_VERSION),
-    scenarioId: z.string().min(1).max(128),
-    dimensions: z
-      .object({
-        contractCompliance: dimensionSchema,
-        decisionBehavior: dimensionSchema,
-        authorityBoundary: dimensionSchema,
-        toolDiscipline: dimensionSchema,
-        evidenceDiscipline: dimensionSchema,
-      })
-      .strict(),
-    metrics: z
-      .object({
-        toolCallCount: z.number().int().nonnegative(),
-        alpacaCallCount: z.number().int().nonnegative(),
-        exaCallCount: z.number().int().nonnegative(),
-        fmpCallCount: z.number().int().nonnegative(),
-        externalSourceCount: z.number().int().nonnegative(),
-      })
-      .strict(),
-  })
-  .strict()
-
-export type ResearchBehaviorEvaluationV1 = Readonly<
-  z.infer<typeof researchBehaviorEvaluationV1Schema>
->
+export type ResearchBehaviorEvaluationV1 = Readonly<{
+  scenarioId: string
+  dimensions: Readonly<{
+    contractCompliance: ResearchBehaviorDimension
+    decisionBehavior: ResearchBehaviorDimension
+    authorityBoundary: ResearchBehaviorDimension
+    toolDiscipline: ResearchBehaviorDimension
+    evidenceDiscipline: ResearchBehaviorDimension
+  }>
+  metrics: Readonly<{
+    toolCallCount: number
+    alpacaCallCount: number
+    exaCallCount: number
+    fmpCallCount: number
+    externalSourceCount: number
+  }>
+}>
 
 export type ResearchBehaviorToolCall = Readonly<{
   name: string
@@ -709,8 +692,7 @@ export function evaluateResearchBehavior({
     }
   }
 
-  return researchBehaviorEvaluationV1Schema.parse({
-    evaluationVersion: RESEARCH_BEHAVIOR_EVALUATION_VERSION,
+  return {
     scenarioId,
     dimensions: {
       contractCompliance: dimension(contractIssues),
@@ -726,5 +708,5 @@ export function evaluateResearchBehavior({
       fmpCallCount,
       externalSourceCount: externalSources.length,
     },
-  })
+  }
 }

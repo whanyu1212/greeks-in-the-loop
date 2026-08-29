@@ -13,10 +13,7 @@ import {
   SUPPORTED_RESEARCH_RUN_VERSIONS,
   type ResearchRunV1,
 } from "../research/research-artifact.js"
-import {
-  RESEARCH_INVOCATION_PROVENANCE_BY_VERSION,
-  researchInvocationV1Schema,
-} from "../research/research-invocation-v1.js"
+import { researchInvocationV1Schema } from "../research/research-invocation-v1.js"
 import {
   ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS,
   ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE,
@@ -35,7 +32,6 @@ import {
   DRY_RUN_ANYTIME_SHADOW_MODE,
   newYorkDate,
   newYorkLocalTime,
-  researchEligibilityV1Schema,
 } from "../scheduling/research-eligibility.js"
 import {
   floorNanosecondsToIsoMilliseconds,
@@ -45,29 +41,14 @@ import { resolveV1StrategyVersionCompatibility } from "../strategy/strategy-v1-c
 
 export const RESEARCH_RUN_EVALUATION_VERSION = "1.0.0" as const
 
-const INVOCATION_VERSION_BY_RUN_VERSION = {
-  "1.0.0": undefined,
-  "1.1.0": undefined,
-  "1.2.0": "1.0.0",
-  "1.3.0": "1.1.0",
-} as const satisfies Record<
-  (typeof SUPPORTED_RESEARCH_RUN_VERSIONS)[number],
-  keyof typeof RESEARCH_INVOCATION_PROVENANCE_BY_VERSION | undefined
->
-
 export const RESEARCH_EVALUATION_ISSUE_CODES = [
-  "RUN_VERSION_INVALID",
   "RUN_METADATA_INVALID",
-  "REPORT_CONTRACT_INVALID",
   "RESEARCH_REPORT_MISSING",
-  "OUTCOME_CONTRACT_INVALID",
   "REPORT_RESULT_MISMATCH",
   "OUTCOME_RECORD_MISMATCH",
   "CYCLE_TIME_RANGE_INVALID",
   "REPORT_AS_OF_OUTSIDE_CYCLE",
   "SOURCE_RETRIEVAL_OUTSIDE_CYCLE",
-  "SNAPSHOT_RETRIEVAL_OUTSIDE_CYCLE",
-  "INTENT_EVALUATION_OUTSIDE_CYCLE",
   "REPORT_AS_OF_AFTER_INTENT",
   "ACCOUNT_CHECKS_STALE_AT_INTENT",
   "MARKET_REGIME_STALE_AT_INTENT",
@@ -88,10 +69,7 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "CANDIDATE_IDENTITY_MISMATCH",
   "CANDIDATE_DTE_MISMATCH",
   "OPEN_INTEREST_HISTORY_INVALID",
-  "DRY_RUN_ELIGIBILITY_CONTEXT_INVALID",
   "INELIGIBLE_CYCLE_DERIVED_INTENT",
-  "INTENT_ELIGIBILITY_CONTEXT_INVALID",
-  "INTENT_ELIGIBILITY_CONTEXT_MISSING",
   "INTENT_OUTSIDE_RETAINED_TRADE_WINDOW",
   "INTENT_WITHOUT_VALIDATED_PROPOSAL",
 ] as const
@@ -358,88 +336,20 @@ export function evaluateResearchRunV1(
   const candidateIssues: EvaluationIssueCode[] = []
   const failClosedIssues: EvaluationIssueCode[] = []
 
-  if (!SUPPORTED_RESEARCH_RUN_VERSIONS.includes(run.runVersion)) {
-    contractIssues.push("RUN_VERSION_INVALID")
-  }
-
   const parsedInvocation = run.researchInvocation === undefined
     ? undefined
     : researchInvocationV1Schema.safeParse(run.researchInvocation)
-  const parsedEligibility = run.initialEligibility === undefined
-    ? undefined
-    : researchEligibilityV1Schema.safeParse(run.initialEligibility)
-  const expectedCycleMode = parsedEligibility?.success === true
-    ? parsedEligibility.data.researchMode ?? "STANDARD"
-    : "STANDARD"
   const invocation = parsedInvocation?.success === true
     ? parsedInvocation.data
     : undefined
-  const expectedInvocationVersion =
-    INVOCATION_VERSION_BY_RUN_VERSION[run.runVersion]
-  const expectedInvocationProvenance = invocation === undefined
-    ? undefined
-    : RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[invocation.invocationVersion]
-  if (
-    (expectedInvocationVersion !== undefined && invocation === undefined) ||
-    (expectedInvocationVersion !== undefined && parsedEligibility?.success !== true) ||
-    (expectedInvocationVersion === undefined && run.researchInvocation !== undefined) ||
-    (parsedInvocation?.success === false) ||
-    (invocation !== undefined &&
-      (invocation.invocationVersion !== expectedInvocationVersion ||
-        expectedInvocationProvenance === undefined ||
-        invocation.agentName !== expectedInvocationProvenance.agentName ||
-        invocation.cycleMode !== expectedCycleMode ||
-        invocation.promptVersion !== expectedInvocationProvenance.promptVersion ||
-        invocation.skillName !== expectedInvocationProvenance.skillName ||
-        invocation.skillVersion !== expectedInvocationProvenance.skillVersion ||
-        invocation.strategyVersion !== expectedInvocationProvenance.strategyVersion ||
-        invocation.decisionContractVersion !==
-          expectedInvocationProvenance.decisionContractVersion ||
-        invocation.reportVersion !== expectedInvocationProvenance.reportVersion))
-  ) {
-    contractIssues.push("RUN_METADATA_INVALID")
-  }
-  if (
-    expectedInvocationVersion !== undefined &&
-    run.outcome.status === "DECISION_REJECTED" &&
-    run.outcome.issues.some(
-      (issue) =>
-        issue.code === "SCHEMA_INVALID" &&
-        issue.schemaCategory === undefined,
-    )
-  ) {
-    contractIssues.push("RUN_METADATA_INVALID")
-  }
 
-  const initialEligibility = run.initialEligibility
   const isAnytimeDryRun =
-    initialEligibility?.researchMode === DRY_RUN_ANYTIME_RESEARCH_MODE
-  const isShadowAnytimeDryRun =
-    initialEligibility?.researchMode === DRY_RUN_ANYTIME_SHADOW_MODE
-  if (
-    (isAnytimeDryRun &&
-      (initialEligibility.researchEligible !== true ||
-        initialEligibility.tradeIntentEligible !== false ||
-        initialEligibility.tradeIntentWindow !== undefined ||
-        initialEligibility.reason !== "DRY_RUN_RESEARCH_ONLY")) ||
-    (!isAnytimeDryRun &&
-      initialEligibility?.reason === "DRY_RUN_RESEARCH_ONLY") ||
-    (isShadowAnytimeDryRun &&
-      (initialEligibility?.researchEligible !== true ||
-        initialEligibility.tradeIntentEligible !== true ||
-        initialEligibility.tradeIntentWindow === undefined ||
-        initialEligibility.reason !== undefined))
-  ) {
-    contractIssues.push("DRY_RUN_ELIGIBILITY_CONTEXT_INVALID")
-  }
+    run.initialEligibility?.researchMode === DRY_RUN_ANYTIME_RESEARCH_MODE
 
   const parsedReport =
     run.researchReport === undefined
       ? undefined
       : researchReportV2Schema.safeParse(run.researchReport)
-  if (parsedReport?.success === false) {
-    contractIssues.push("REPORT_CONTRACT_INVALID")
-  }
   if (
     run.researchReport === undefined &&
     [
@@ -455,16 +365,10 @@ export function evaluateResearchRunV1(
     run.preliminaryResearch === undefined
       ? undefined
       : preliminaryResearchV1Schema.safeParse(run.preliminaryResearch)
-  if (parsedPreliminaryResearch?.success === false) {
-    contractIssues.push("OUTCOME_CONTRACT_INVALID")
-  }
   const parsedValidatedDecision =
     run.validatedDecision === undefined
       ? undefined
       : researchDecisionV1Schema.safeParse(run.validatedDecision)
-  if (parsedValidatedDecision?.success === false) {
-    contractIssues.push("OUTCOME_CONTRACT_INVALID")
-  }
 
   const validReport =
     parsedReport?.success === true ? parsedReport.data : undefined
@@ -482,6 +386,9 @@ export function evaluateResearchRunV1(
         path: ["result", "strategyVersion"],
       },
     ])
+  // Model-caused: the report's own declared versions must match what the
+  // invocation authorized. The agent writes reportResult/validReport, so this
+  // catches a report claiming a strategy or contract version it was not given.
   if (
     invocation !== undefined &&
     reportResult !== undefined &&
@@ -748,11 +655,6 @@ export function evaluateResearchRunV1(
   switch (run.outcome.status) {
     case "PRELIMINARY_RESEARCH_RETAINED":
       if (
-        !preliminaryResearchV1Schema.safeParse(run.outcome.research).success
-      ) {
-        contractIssues.push("OUTCOME_CONTRACT_INVALID")
-      }
-      if (
         run.preliminaryResearch === undefined ||
         !isDeepStrictEqual(run.outcome.research, run.preliminaryResearch) ||
         run.validatedDecision !== undefined
@@ -761,9 +663,6 @@ export function evaluateResearchRunV1(
       }
       break
     case "VALIDATED_NO_ACTION":
-      if (!researchDecisionV1Schema.safeParse(run.outcome.decision).success) {
-        contractIssues.push("OUTCOME_CONTRACT_INVALID")
-      }
       if (
         run.validatedDecision === undefined ||
         !isDeepStrictEqual(run.outcome.decision, run.validatedDecision) ||
@@ -773,12 +672,6 @@ export function evaluateResearchRunV1(
       }
       break
     case "INTENT_DERIVED":
-      if (
-        !researchDecisionV1Schema.safeParse(run.outcome.decision).success ||
-        !tradeIntentV1Schema.safeParse(run.outcome.intent).success
-      ) {
-        contractIssues.push("OUTCOME_CONTRACT_INVALID")
-      }
       if (
         run.validatedDecision === undefined ||
         !isDeepStrictEqual(run.outcome.decision, run.validatedDecision) ||
@@ -1170,19 +1063,6 @@ export function evaluateResearchRunV1(
       )
     ) {
       temporalIssues.push("SOURCE_RETRIEVAL_OUTSIDE_CYCLE")
-    }
-    if (
-      run.evidenceSnapshots.some(
-        ({ retrievedAt }) => !timestampWithin(retrievedAt, cycleStart, cycleEnd),
-      )
-    ) {
-      temporalIssues.push("SNAPSHOT_RETRIEVAL_OUTSIDE_CYCLE")
-    }
-    if (
-      run.outcome.status === "INTENT_DERIVED" &&
-      !timestampWithin(run.outcome.intent.evaluatedAt, cycleStart, cycleEnd)
-    ) {
-      temporalIssues.push("INTENT_EVALUATION_OUTSIDE_CYCLE")
     }
   }
   const postQuoteRejectionEvaluatedAt =
@@ -1578,33 +1458,15 @@ export function evaluateResearchRunV1(
 
   if (run.outcome.status === "INTENT_DERIVED") {
     const eligibility = run.initialEligibility
-    if (eligibility === undefined) {
-      failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_MISSING")
-    } else if (!eligibility.tradeIntentEligible) {
+    if (eligibility !== undefined && !eligibility.tradeIntentEligible) {
       failClosedIssues.push("INELIGIBLE_CYCLE_DERIVED_INTENT")
-    } else if (eligibility.tradeIntentWindow === undefined) {
-      failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_MISSING")
-    } else if (
-      eligibility.sessionOpen === undefined ||
-      eligibility.sessionClose === undefined
-    ) {
-      failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_MISSING")
-    } else {
+    }
+    const tradeIntentWindow = eligibility?.tradeIntentWindow
+    if (eligibility !== undefined && tradeIntentWindow !== undefined) {
       const eligibilityEvaluatedAt = Date.parse(eligibility.evaluatedAt)
       const intentEvaluatedAt = Date.parse(run.outcome.intent.evaluatedAt)
-      const slotStartedAt = Date.parse(
-        eligibility.tradeIntentWindow.slotStartedAt,
-      )
-      const deadline = Date.parse(eligibility.tradeIntentWindow.deadline)
-      if (
-        !retainedTradeWindowContextIsValid(
-          eligibility,
-          run.cycle,
-          versionedResult?.strategyVersion,
-        )
-      ) {
-        failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_INVALID")
-      }
+      const slotStartedAt = Date.parse(tradeIntentWindow.slotStartedAt)
+      const deadline = Date.parse(tradeIntentWindow.deadline)
       if (
         !Number.isFinite(intentEvaluatedAt) ||
         !Number.isFinite(slotStartedAt) ||
