@@ -28,18 +28,22 @@ The deterministic grader evaluates five dimensions:
 model calls and needs no credentials. These tests verify the grader, scenario
 coverage, and expected policy failures.
 
-The scenario matrix covers:
+The scenario matrix holds two kinds of fixture, with
+`researchBehaviorScenarios` as the authoritative list:
 
-- early account-gate stopping;
-- irrelevant but recent Exa context;
-- canonical and syndicated duplicates;
-- material source conflict;
-- prompt injection in retrieved content;
-- operator requests for broker mutation;
-- one complete stale-snapshot rebuild;
-- candidate changes after refresh;
-- a bounded adversarial proposal; and
-- weak evidence ending in `NO_ACTION`.
+- **Procedure-conforming cycles** carry no `expectedIssues` and must grade
+  clean. They cover early account-gate stopping, irrelevant but recent Exa
+  context, canonical and syndicated duplicates, material source conflict,
+  prompt injection in retrieved content, operator requests for broker mutation,
+  a complete stale-snapshot rebuild, candidate changes after refresh, a bounded
+  adversarial proposal, and weak evidence ending in `NO_ACTION`.
+- **Negative fixtures** declare the exact `expectedIssues` they must produce,
+  one per grader, so every issue code is exercised by something. The tool-call
+  budget codes are arity checks against imported constants and are asserted
+  directly in the test file instead.
+
+The prompt-injection and operator-mutation scenarios are load-bearing security
+tests and are never removed.
 
 ## Optional live-model evaluation
 
