@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import {
   chmodSync,
   mkdtempSync,
@@ -357,6 +358,9 @@ describe("research cycle artifact", () => {
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
       ...run,
     })
+    expect(
+      createHash("sha256").update(readFileSync(path)).digest("hex"),
+    ).toBe("7561d64543b2e229174db726c19183a0fb21be5939b7788dc74b48dd426f3686")
     expect(statSync(path).mode & 0o777).toBe(0o600)
 
     chmodSync(path, 0o644)

@@ -11,11 +11,8 @@ import {
   type TerminalStageReporter,
 } from "../observability/terminal-stage-reporter.js"
 import type { RiskStateProvider } from "./alpaca-risk-state-provider.js"
-import {
-  evaluateTradeIntentRiskV1,
-  RISK_EVALUATION_VERSION,
-  RISK_RULE_VERSION,
-} from "./risk-evaluation-v1.js"
+import { CURRENT_STRATEGY_MANIFEST } from "../strategy/strategy-registry.js"
+import { evaluateTradeIntentRiskV1 } from "./risk-evaluation-v1.js"
 import {
   DURABLE_RISK_CONTROL_STATE_VERSION,
   type DurableRiskControlStateV1,
@@ -30,6 +27,8 @@ import {
 
 export const SHADOW_RISK_QUOTE_SNAPSHOT_REF =
   "alpaca-shadow-risk-quotes-v1" as const
+
+const currentRiskIdentity = CURRENT_STRATEGY_MANIFEST.components.riskRule
 
 export type DurableRiskControlStateLoader = Readonly<{
   load(tradingDate: string, signal: AbortSignal): Promise<DurableRiskControlStateV1>
@@ -199,8 +198,8 @@ export function createShadowRiskEvaluator(options: Readonly<{
           decision: shadowRiskDecisionV1Schema.parse({
             decisionVersion: SHADOW_RISK_DECISION_VERSION,
             mode: "SHADOW",
-            evaluationVersion: RISK_EVALUATION_VERSION,
-            ruleVersion: RISK_RULE_VERSION,
+            evaluationVersion: currentRiskIdentity.evaluationVersion,
+            ruleVersion: currentRiskIdentity.componentVersion,
             stage: "STATE_CAPTURE_FAILED",
             outcome: "REJECTED",
             evaluatedAt: null,
@@ -238,8 +237,8 @@ export function createShadowRiskEvaluator(options: Readonly<{
           decision: shadowRiskDecisionV1Schema.parse({
             decisionVersion: SHADOW_RISK_DECISION_VERSION,
             mode: "SHADOW",
-            evaluationVersion: RISK_EVALUATION_VERSION,
-            ruleVersion: RISK_RULE_VERSION,
+            evaluationVersion: currentRiskIdentity.evaluationVersion,
+            ruleVersion: currentRiskIdentity.componentVersion,
             stage: "INTENT_REFRESH_FAILED",
             outcome: "REJECTED",
             evaluatedAt: capture.snapshot.evaluatedAt,

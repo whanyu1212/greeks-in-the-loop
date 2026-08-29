@@ -9,15 +9,16 @@ import {
   safeSchemaDiagnostics,
   type SchemaViolationCategory,
 } from "../shared/schema-diagnostics.js"
+import { strategyVersionSchema } from "../strategy/strategy-identity.js"
 
-export const RESEARCH_DECISION_CONTRACT_VERSION = "1.0.0" as const
-export const LEGACY_STRATEGY_VERSION = "1.0.0" as const
-export const STRATEGY_VERSION = "1.1.0" as const
-export const SUPPORTED_STRATEGY_VERSIONS = [
+export {
   LEGACY_STRATEGY_VERSION,
   STRATEGY_VERSION,
-] as const
-export const strategyVersionSchema = z.enum(SUPPORTED_STRATEGY_VERSIONS)
+  SUPPORTED_STRATEGY_VERSIONS,
+  strategyVersionSchema,
+} from "../strategy/strategy-identity.js"
+
+export const RESEARCH_DECISION_CONTRACT_VERSION = "1.0.0" as const
 
 export const NO_ACTION_REASON_CODES = [
   "MARKET_WINDOW_INELIGIBLE",

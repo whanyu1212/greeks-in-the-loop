@@ -16,11 +16,6 @@ import { parse as parseEnv } from "dotenv"
 import { runAgentLoop } from "./agent-loop.js"
 import { parseAgentOptions } from "./agent-options.js"
 import { acquireWorkerInstanceLock } from "./worker-instance-lock.js"
-import {
-  RESEARCH_DECISION_CONTRACT_VERSION,
-  STRATEGY_VERSION,
-} from "./contracts/research-decision-v1.js"
-import { RESEARCH_REPORT_VERSION } from "./contracts/research-report-v2.js"
 import { runWithCycleDeadline } from "./cycle-deadline.js"
 import {
   createResearchLifecycleRecorder,
@@ -37,13 +32,7 @@ import {
 } from "./observability/terminal-stage-reporter.js"
 import { createResearchInvocationV1 } from "./research/research-invocation-v1.js"
 import { startOpencode } from "./opencode-runtime.js"
-import {
-  buildResearchCyclePrompt,
-  RESEARCH_AGENT_NAME,
-  RESEARCH_PROMPT_VERSION,
-  RESEARCH_SKILL_NAME,
-  RESEARCH_SKILL_VERSION,
-} from "./research/research-agent.js"
+import { buildResearchCyclePrompt } from "./research/research-agent.js"
 import { loadResearchRunV1 } from "./research/research-artifact.js"
 import {
   buildResearchRunPresentation,
@@ -59,6 +48,7 @@ import {
   createLedgerDurableRiskControlStateLoader,
   createShadowRiskEvaluator,
 } from "./risk/shadow-risk-service.js"
+import { CURRENT_STRATEGY_MANIFEST } from "./strategy/strategy-registry.js"
 import {
   DEFAULT_PREMARKET_RESEARCH_START_ET,
   DRY_RUN_ANYTIME_RESEARCH_MODE,
@@ -236,15 +226,17 @@ evaluateResearchEligibility({
   evaluatedAt: new Date(),
   premarketStartEt,
 })
+const researchCompatibility =
+  CURRENT_STRATEGY_MANIFEST.researchPlanCompatibility
 const traceVersions = {
-  agentName: RESEARCH_AGENT_NAME,
+  agentName: researchCompatibility.agentName,
   cycleMode: researchMode ?? "STANDARD",
-  promptVersion: RESEARCH_PROMPT_VERSION,
-  skillName: RESEARCH_SKILL_NAME,
-  skillVersion: RESEARCH_SKILL_VERSION,
-  strategyVersion: STRATEGY_VERSION,
-  decisionContractVersion: RESEARCH_DECISION_CONTRACT_VERSION,
-  reportVersion: RESEARCH_REPORT_VERSION,
+  promptVersion: researchCompatibility.promptVersion,
+  skillName: researchCompatibility.skillName,
+  skillVersion: researchCompatibility.skillVersion,
+  strategyVersion: CURRENT_STRATEGY_MANIFEST.strategyVersion,
+  decisionContractVersion: researchCompatibility.decisionContractVersion,
+  reportVersion: researchCompatibility.reportVersion,
 } as const
 mkdirSync(dirname(ledgerPath), { recursive: true })
 const workerInstanceLock = acquireWorkerInstanceLock({ ledgerPath })
@@ -417,10 +409,10 @@ try {
           deadline: initialEligibility.tradeIntentWindow?.deadline ?? null,
         })
         stageReporter.report("research.agent", "STARTED", {
-          agent: RESEARCH_AGENT_NAME,
-          promptVersion: RESEARCH_PROMPT_VERSION,
-          skillVersion: RESEARCH_SKILL_VERSION,
-          strategyVersion: STRATEGY_VERSION,
+          agent: researchCompatibility.agentName,
+          promptVersion: researchCompatibility.promptVersion,
+          skillVersion: researchCompatibility.skillVersion,
+          strategyVersion: CURRENT_STRATEGY_MANIFEST.strategyVersion,
         })
         cycleTrace.identify({
           cycleId: cycle.cycleId,
@@ -458,7 +450,7 @@ try {
                     path: { id: sessionId },
                     signal,
                     body: {
-                      agent: RESEARCH_AGENT_NAME,
+                      agent: researchCompatibility.agentName,
                       tools,
                       parts: [
                         {

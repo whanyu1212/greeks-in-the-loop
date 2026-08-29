@@ -409,6 +409,7 @@ describe("backtest replay v1", () => {
     })
     const { checksum, ...reportWithoutChecksum } = report
     expect(checksum).toBe(canonicalJsonSha256(reportWithoutChecksum))
+    expect(checksum).toBe("37249c41f99be7be5fa8823f9519be3468909c86fd26f6cc439546ce47f07bc4")
   })
 
   it("labels retained-intent runs as proxy and preserves exit priority", () => {
@@ -437,6 +438,26 @@ describe("backtest replay v1", () => {
       signalDirection: "NOT_EVALUABLE",
       riskStatus: "NOT_EVALUABLE",
       exitReason: "LATE_FILL",
+    })
+  })
+
+  it("decodes a retained legacy V1 intent without current manifest fields", () => {
+    const report = runReplay(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [
+        {
+          scenarioId: "legacy-proxy",
+          fidelity: "HISTORICAL_BAR_PROXY",
+          retainedIntent: { ...intent, strategyVersion: "1.0.0" },
+          monitorCycles: [monitorCycle],
+        },
+      ],
+    })
+
+    expect(report.results[0]).toMatchObject({
+      outcome: "CLOSED",
+      intent: { strategyVersion: "1.0.0" },
     })
   })
 

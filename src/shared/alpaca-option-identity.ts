@@ -10,6 +10,7 @@ export const ALPACA_OPTION_SYMBOL_PARSE_FAILURE_CODES = [
 export type AlpacaOptionSymbolParseFailureCode =
   (typeof ALPACA_OPTION_SYMBOL_PARSE_FAILURE_CODES)[number]
 
+export const SPY_OPTION_UNIVERSE_POLICY_VERSION = "1.0.0" as const
 export const SPY_OPTION_UNIVERSE_V1_FAILURE_CODES = [
   "UNDERLYING_NOT_SUPPORTED",
 ] as const

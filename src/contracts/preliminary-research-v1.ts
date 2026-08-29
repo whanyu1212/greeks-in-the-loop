@@ -1,9 +1,7 @@
 import { z } from "zod"
 
-import {
-  researchCandidateV1Schema,
-  strategyVersionSchema,
-} from "./research-decision-v1.js"
+import { strategyVersionSchema } from "../strategy/strategy-identity.js"
+import { researchCandidateV1Schema } from "./research-decision-v1.js"
 
 export const PRELIMINARY_RESEARCH_CONTRACT_VERSION = "1.0.0" as const
 export const MARKET_OBSERVATION_TEMPORAL_CLASSES = [

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 
 import { describe, expect, it } from "vitest"
 
+import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 import {
   evaluateTradeIntentRiskV1,
   riskContractLegV1Schema,
@@ -180,7 +181,8 @@ describe("evaluateTradeIntentRiskV1", () => {
     const input = makeInput()
     expect(riskEvaluationInputV1Schema.safeParse(input).success).toBe(true)
 
-    expect(evaluateTradeIntentRiskV1(input)).toEqual({
+    const evaluation = evaluateTradeIntentRiskV1(input)
+    expect(evaluation).toEqual({
       evaluationVersion: "1.0.0",
       ruleVersion: "1.0.0",
       outcome: "APPROVED",
@@ -189,6 +191,7 @@ describe("evaluateTradeIntentRiskV1", () => {
       maxLossCents: 20_000,
       projectedBuyingPowerCents: 19_980_000,
     })
+    expect(canonicalJsonSha256(evaluation)).toBe("c3c5509885c7d7da2282e4ab5a3afe22b63c34b03e93b963bf98bc716f823d9c")
   })
 
   const untrustedInput = makeInput()

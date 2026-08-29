@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 
+import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 import {
   ledgerEventV1Schema,
   LEDGER_EVENT_TYPES,
@@ -22,6 +23,12 @@ const baseEvent = {
 describe("LedgerEventV1", () => {
   it("accepts a versioned research-cycle event", () => {
     expect(ledgerEventV1Schema.parse(baseEvent)).toEqual(baseEvent)
+  })
+
+  it("preserves the canonical V1 ledger-event bytes", () => {
+    expect(canonicalJsonSha256(ledgerEventV1Schema.parse(baseEvent))).toBe(
+      "7d6d9bdbe39251ab6fdae116c27f79c17a2939877a1268cb26f4f358044f3b1c",
+    )
   })
 
   it("defines only current research and shadow-risk event types", () => {

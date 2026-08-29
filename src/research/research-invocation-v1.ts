@@ -1,30 +1,17 @@
 import { z } from "zod"
 
 import {
-  RESEARCH_DECISION_CONTRACT_VERSION,
-  STRATEGY_VERSION,
-} from "../contracts/research-decision-v1.js"
-import { RESEARCH_REPORT_VERSION } from "../contracts/research-report-v2.js"
-import {
   configuredToolName,
   type OpenCodeInvocationSummary,
 } from "../observability/opencode-telemetry-summary.js"
 import type { ResearchTraceVersions } from "../observability/research-telemetry.js"
-import {
-  RESEARCH_AGENT_NAME,
-  RESEARCH_MAX_TOOL_CALLS,
-  RESEARCH_PROMPT_VERSION,
-  RESEARCH_SKILL_NAME,
-  RESEARCH_SKILL_VERSION,
-} from "./research-agent.js"
-
 export const RESEARCH_INVOCATION_VERSION = "1.1.0" as const
-export const SUPPORTED_RESEARCH_INVOCATION_VERSIONS = [
+export const SUPPORTED_RESEARCH_INVOCATION_VERSIONS = Object.freeze([
   "1.0.0",
   RESEARCH_INVOCATION_VERSION,
-] as const
-export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = {
-  "1.0.0": {
+] as const)
+export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = Object.freeze({
+  "1.0.0": Object.freeze({
     agentName: "research",
     promptVersion: "1.3.0",
     skillName: "spy-debit-spread-research",
@@ -32,16 +19,16 @@ export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = {
     strategyVersion: "1.1.0",
     decisionContractVersion: "1.0.0",
     reportVersion: "2.0.0",
-  },
-  "1.1.0": {
-    agentName: RESEARCH_AGENT_NAME,
-    promptVersion: RESEARCH_PROMPT_VERSION,
-    skillName: RESEARCH_SKILL_NAME,
-    skillVersion: RESEARCH_SKILL_VERSION,
-    strategyVersion: STRATEGY_VERSION,
-    decisionContractVersion: RESEARCH_DECISION_CONTRACT_VERSION,
-    reportVersion: RESEARCH_REPORT_VERSION,
-  },
+  }),
+  "1.1.0": Object.freeze({
+    agentName: "research",
+    promptVersion: "1.4.0",
+    skillName: "spy-debit-spread-research",
+    skillVersion: "1.2.0",
+    strategyVersion: "1.1.0",
+    decisionContractVersion: "1.0.0",
+    reportVersion: "2.0.0",
+  }),
 } as const satisfies Record<
   (typeof SUPPORTED_RESEARCH_INVOCATION_VERSIONS)[number],
   Readonly<{
@@ -53,8 +40,8 @@ export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = {
     decisionContractVersion: string
     reportVersion: string
   }>
->
-export const MAX_RESEARCH_INVOCATION_TOOL_CALLS = RESEARCH_MAX_TOOL_CALLS
+>)
+export const MAX_RESEARCH_INVOCATION_TOOL_CALLS = 32
 
 const boundedText = z.string().trim().min(1).max(128)
 const safeCount = z.number().int().nonnegative().safe()

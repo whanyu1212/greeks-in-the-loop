@@ -7,11 +7,13 @@ import {
   validateSpyOptionUniverseV1,
 } from "../shared/alpaca-option-identity.js"
 import { parseRfc3339Nanoseconds } from "../shared/value-normalization.js"
+import {
+  STRATEGY_VERSION,
+  strategyVersionSchema,
+} from "../strategy/strategy-identity.js"
 import { calculateDebitSpreadEconomicsV1 } from "./debit-spread-economics-v1.js"
 import {
   RESEARCH_DECISION_CONTRACT_VERSION,
-  STRATEGY_VERSION,
-  strategyVersionSchema,
   type ProposedTradeDecisionV1,
 } from "./research-decision-v1.js"
 

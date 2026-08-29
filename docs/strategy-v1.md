@@ -641,6 +641,22 @@ runtime threshold change.
   version.
 - The strategy version must be stored with every future decision and risk result.
 
+### Static strategy identity
+
+The compile-time registry identifies this strategy as
+`spy-directional-debit-vertical`. Version `1.1.0` is the only version permitted
+to produce new runtime decisions; version `1.0.0` remains decode-only for
+historical V1 artifacts. Registry entries are deeply immutable data and contain
+no callbacks, environment-selected implementations, or model-selected plugins.
+
+The current manifest identifies the checked-in research skill as the authority
+for feature calculation and candidate generation/ranking until those operations
+move into application code. It identifies exits as replay-only and research-plan
+compatibility as the existing versioned research invocation, not as the future
+`ResearchPlanV1`. V1 ledger, research-run, dataset, intent, risk, and replay
+schemas retain their existing serialized shapes and decode from their embedded
+version fields without consulting the current runtime manifest.
+
 This PR freezes behavior only. Decision contracts are tracked by issue
 [#6](https://github.com/whanyu1212/greeks-in-the-loop/issues/6), risk-engine
 implementation by [#10](https://github.com/whanyu1212/greeks-in-the-loop/issues/10),

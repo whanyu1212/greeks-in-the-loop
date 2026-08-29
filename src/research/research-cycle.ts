@@ -1,8 +1,5 @@
 import { deriveTradeIntentV1 } from "../contracts/trade-intent-v1.js"
-import {
-  STRATEGY_VERSION,
-  validateResearchDecisionV1,
-} from "../contracts/research-decision-v1.js"
+import { validateResearchDecisionV1 } from "../contracts/research-decision-v1.js"
 import { researchReportV2Schema } from "../contracts/research-report-v2.js"
 import { MAX_LEDGER_EVENT_PAYLOAD_BYTES } from "../event-ledger/ledger-event-v1.js"
 import type {
@@ -19,6 +16,8 @@ import {
 import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
 import type { ShadowRiskEvaluator } from "../risk/shadow-risk-service.js"
 import { safeSchemaDiagnostics } from "../shared/schema-diagnostics.js"
+import { SPY_DIRECTIONAL_DEBIT_VERTICAL_STRATEGY_ID } from "../strategy/strategy-identity.js"
+import { resolveStrategyManifest } from "../strategy/strategy-registry.js"
 import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
   type ResearchCycleOutcomeSink,
@@ -158,7 +157,11 @@ export async function processResearchCycle({
       stages,
     })
   stages.researchReportCompleted(researchReport)
-  if (result.strategyVersion !== STRATEGY_VERSION) {
+  const strategy = resolveStrategyManifest({
+    strategyId: SPY_DIRECTIONAL_DEBIT_VERTICAL_STRATEGY_ID,
+    strategyVersion: result.strategyVersion,
+  })
+  if (!strategy.success) {
     return recordReportResolution({
       outcome: {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
