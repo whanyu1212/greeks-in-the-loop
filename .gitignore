@@ -1,8 +1,11 @@
+.claude/
+.codegraph/
 .env
 .state/
+*.worker-lock.sqlite
+*.worker-lock.sqlite-journal
+CLAUDE.md
 dev_notes/
 dist/
 node_modules/
 workspace/
-*.worker-lock.sqlite
-*.worker-lock.sqlite-journal

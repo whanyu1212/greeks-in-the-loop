@@ -19,9 +19,6 @@ type CommonTerminalMetadata = Readonly<{
   preliminaryResearch?: PreliminaryResearchV1
 }>
 
-export type ResearchCycleTerminalMetadata = CommonTerminalMetadata &
-  Readonly<{ shadowRisk?: ShadowRiskResultV1 }>
-
 export type ResearchCycleTerminalResolution =
   | Readonly<{
       outcome: Extract<ResearchCycleOutcomeV1, { status: "INTENT_DERIVED" }>

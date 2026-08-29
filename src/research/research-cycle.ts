@@ -298,6 +298,7 @@ export async function processResearchCycle({
 
   const proposalResolution = await processResearchProposalPath({
     report: researchReport,
+    result,
     signal,
     quoteProvider,
     shadowRiskEvaluator,
