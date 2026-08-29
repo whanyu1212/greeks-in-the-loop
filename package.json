@@ -18,6 +18,7 @@
     "agent:config": "node scripts/run-isolated-opencode.mjs debug agent research",
     "agent:mcp": "node scripts/run-isolated-opencode.mjs mcp list",
     "agent:once": "tsx src/index.ts --once",
+    "agent:reset-breaker": "tsx src/event-ledger/research-loop-breaker-reset-cli.ts",
     "agent:research-anytime": "tsx src/index.ts --once --research-anytime",
     "agent:shadow-anytime": "tsx src/index.ts --once --shadow-anytime",
     "agent:skills": "node scripts/run-isolated-opencode.mjs debug skill",

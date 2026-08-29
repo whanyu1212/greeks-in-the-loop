@@ -10,6 +10,7 @@ import {
 } from "../scheduling/research-eligibility.js"
 import {
   LEDGER_EVENT_VERSION,
+  RESEARCH_LOOP_BREAKER_STATE_VERSION,
   type LedgerEventV1,
 } from "./ledger-event-v1.js"
 import type { LedgerStore } from "./ledger-store.js"
@@ -42,7 +43,23 @@ export type ActiveResearchCycle = ResearchCycleIdentity &
     ): Promise<void>
   }>
 
+export type ResearchLoopBreakerState =
+  | Readonly<{ latched: false }>
+  | Readonly<{
+      latched: true
+      consecutiveFailures: number
+      threshold: number
+      lastAttempt: number
+    }>
+
 export type ResearchLifecycleRecorder = Readonly<{
+  loadResearchLoopBreakerState(): Promise<ResearchLoopBreakerState>
+  recordResearchLoopBreakerLatched(state: Readonly<{
+    consecutiveFailures: number
+    threshold: number
+    lastAttempt: number
+  }>): Promise<void>
+  recordResearchLoopBreakerReset(): Promise<void>
   recordOpenCodeSessionStarted(
     sessionId: string,
     signal?: AbortSignal,
@@ -243,6 +260,63 @@ export function createResearchLifecycleRecorder({
   now = () => new Date(),
 }: CreateResearchLifecycleRecorderOptions): ResearchLifecycleRecorder {
   return {
+    async loadResearchLoopBreakerState() {
+      const [latest] = await persist("research-loop breaker query", () =>
+        store.list({
+          direction: "DESC",
+          eventTypes: [
+            "RESEARCH_LOOP_BREAKER_LATCHED",
+            "RESEARCH_LOOP_BREAKER_RESET",
+          ],
+          limit: 1,
+        }),
+      )
+      if (latest?.eventType !== "RESEARCH_LOOP_BREAKER_LATCHED") {
+        return { latched: false }
+      }
+      return {
+        latched: true,
+        consecutiveFailures: latest.payload.consecutiveFailures,
+        threshold: latest.payload.threshold,
+        lastAttempt: latest.payload.lastAttempt,
+      }
+    },
+
+    async recordResearchLoopBreakerLatched(state) {
+      await persist("research-loop breaker latch append", () =>
+        store.append({
+          eventId: idFactory(),
+          eventVersion: LEDGER_EVENT_VERSION,
+          eventType: "RESEARCH_LOOP_BREAKER_LATCHED",
+          occurredAt: now().toISOString(),
+          correlationId: idFactory(),
+          payload: {
+            stateVersion: RESEARCH_LOOP_BREAKER_STATE_VERSION,
+            reason: "CONSECUTIVE_FAILURE_LIMIT",
+            consecutiveFailures: state.consecutiveFailures,
+            threshold: state.threshold,
+            lastAttempt: state.lastAttempt,
+          },
+        }),
+      )
+    },
+
+    async recordResearchLoopBreakerReset() {
+      await persist("research-loop breaker reset append", () =>
+        store.append({
+          eventId: idFactory(),
+          eventVersion: LEDGER_EVENT_VERSION,
+          eventType: "RESEARCH_LOOP_BREAKER_RESET",
+          occurredAt: now().toISOString(),
+          correlationId: idFactory(),
+          payload: {
+            stateVersion: RESEARCH_LOOP_BREAKER_STATE_VERSION,
+            reason: "OPERATOR_REQUESTED",
+          },
+        }),
+      )
+    },
+
     async recordOpenCodeSessionStarted(sessionId, signal) {
       signal?.throwIfAborted()
       await persist("session-start append", () =>

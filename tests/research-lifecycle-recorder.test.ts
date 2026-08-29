@@ -389,6 +389,48 @@ describe("createResearchLifecycleRecorder", () => {
     ])
   })
 
+  it("records cycleless research-loop breaker transitions", async () => {
+    const state = setup()
+
+    expect(await state.recorder.loadResearchLoopBreakerState()).toEqual({
+      latched: false,
+    })
+    await state.recorder.recordResearchLoopBreakerLatched({
+      consecutiveFailures: 5,
+      threshold: 5,
+      lastAttempt: 9,
+    })
+    await state.recorder.recordResearchLoopBreakerReset()
+
+    expect(state.events).toEqual([
+      {
+        eventId: "id-1",
+        eventVersion: "1.0.0",
+        eventType: "RESEARCH_LOOP_BREAKER_LATCHED",
+        occurredAt: TIMESTAMP,
+        correlationId: "id-2",
+        payload: {
+          stateVersion: "1.0.0",
+          reason: "CONSECUTIVE_FAILURE_LIMIT",
+          consecutiveFailures: 5,
+          threshold: 5,
+          lastAttempt: 9,
+        },
+      },
+      {
+        eventId: "id-3",
+        eventVersion: "1.0.0",
+        eventType: "RESEARCH_LOOP_BREAKER_RESET",
+        occurredAt: TIMESTAMP,
+        correlationId: "id-4",
+        payload: {
+          stateVersion: "1.0.0",
+          reason: "OPERATOR_REQUESTED",
+        },
+      },
+    ])
+  })
+
   it("starts a cycle once and returns its stable public identity and sink", async () => {
     const state = setup()
 
@@ -720,6 +762,56 @@ describe("createResearchLifecycleRecorder", () => {
     expect(state.events.map(({ eventType }) => eventType)).toEqual([
       "RESEARCH_CYCLE_STARTED",
     ])
+  })
+
+  it("reconstructs durable research-loop breaker state through SQLite", async () => {
+    const store = createSqliteLedgerStore({
+      path: ":memory:",
+      knownCredentialValues: [],
+      now: () => new Date(TIMESTAMP),
+    })
+    await store.migrate()
+    let nextId = 0
+    const createRecorder = () =>
+      createResearchLifecycleRecorder({
+        store,
+        idFactory: () => `breaker-id-${++nextId}`,
+        now: () => new Date(TIMESTAMP),
+      })
+
+    expect(await createRecorder().loadResearchLoopBreakerState()).toEqual({
+      latched: false,
+    })
+    await createRecorder().recordResearchLoopBreakerLatched({
+      consecutiveFailures: 5,
+      threshold: 5,
+      lastAttempt: 9,
+    })
+    expect(await createRecorder().loadResearchLoopBreakerState()).toEqual({
+      latched: true,
+      consecutiveFailures: 5,
+      threshold: 5,
+      lastAttempt: 9,
+    })
+    await createRecorder().recordResearchLoopBreakerReset()
+    expect(await createRecorder().loadResearchLoopBreakerState()).toEqual({
+      latched: false,
+    })
+    expect(
+      (
+        await store.list({
+          eventTypes: [
+            "RESEARCH_LOOP_BREAKER_LATCHED",
+            "RESEARCH_LOOP_BREAKER_RESET",
+          ],
+          limit: 10,
+        })
+      ).map(({ eventType }) => eventType),
+    ).toEqual([
+      "RESEARCH_LOOP_BREAKER_LATCHED",
+      "RESEARCH_LOOP_BREAKER_RESET",
+    ])
+    await store.close()
   })
 
   it("persists a complete chain through the SQLite store and migration constraints", async () => {

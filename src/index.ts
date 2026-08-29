@@ -14,7 +14,9 @@ import { dirname } from "node:path"
 import { parse as parseEnv } from "dotenv"
 
 import {
+  AgentLoopBreakerLatchedError,
   DEFAULT_AGENT_MAX_BACKOFF_MS,
+  DEFAULT_AGENT_MAX_CONSECUTIVE_FAILURES,
   MAX_AGENT_LOOP_DELAY_MS,
   runAgentLoop,
 } from "./agent-loop.js"
@@ -173,6 +175,8 @@ const agentOptions = parseAgentOptions(
   readSetting("RESEARCH_LEDGER_PATH"),
 )
 const { once, researchAnytime, shadowAnytime, ledgerPath } = agentOptions
+const breakerResetInstruction =
+  `run pnpm agent:reset-breaker -- --ledger <ledger-path> for ${JSON.stringify(ledgerPath)}`
 const researchMode = researchAnytime
   ? DRY_RUN_ANYTIME_RESEARCH_MODE
   : shadowAnytime
@@ -182,6 +186,10 @@ const intervalMs = readPositiveInteger("AGENT_INTERVAL_MS", 5 * 60 * 1000)
 const maxBackoffMs = readPositiveInteger(
   "AGENT_MAX_BACKOFF_MS",
   DEFAULT_AGENT_MAX_BACKOFF_MS,
+)
+const maxConsecutiveFailures = readPositiveInteger(
+  "AGENT_MAX_CONSECUTIVE_FAILURES",
+  DEFAULT_AGENT_MAX_CONSECUTIVE_FAILURES,
 )
 if (maxBackoffMs / 2 < intervalMs) {
   throw new Error("AGENT_MAX_BACKOFF_MS must be at least twice AGENT_INTERVAL_MS")
@@ -274,13 +282,19 @@ try {
   telemetry = activeTelemetry
 
   await activeLedgerStore.migrate(abortController.signal)
+  const lifecycleRecorder = createResearchLifecycleRecorder({
+    store: activeLedgerStore,
+  })
+  const breakerState = await lifecycleRecorder.loadResearchLoopBreakerState()
+  if (breakerState.latched) {
+    throw new WorkerFatalError(
+      `Research loop breaker is latched after ${breakerState.consecutiveFailures} consecutive failures; ${breakerResetInstruction}`,
+    )
+  }
   let researchContext = await reconstructResearchContextV1(activeLedgerStore)
   const shadowRiskEvaluator = createShadowRiskEvaluator({
     provider: riskStateProvider,
     durableControl: createLedgerDurableRiskControlStateLoader(activeLedgerStore),
-  })
-  const lifecycleRecorder = createResearchLifecycleRecorder({
-    store: activeLedgerStore,
   })
   const runtime = await startOpencode({
     port,
@@ -293,6 +307,7 @@ try {
     await runAgentLoop({
       intervalMs,
       maxBackoffMs,
+      maxConsecutiveFailures,
       maxCycles,
       signal: abortController.signal,
       runCycle: async (attempt) => activeTelemetry.runCycle(
@@ -634,7 +649,21 @@ try {
       isFatalError: (error) =>
         error instanceof LedgerPersistenceError ||
         error instanceof WorkerFatalError,
+      onBreakerLatched: ({ attempt, consecutiveFailures, threshold }) =>
+        lifecycleRecorder.recordResearchLoopBreakerLatched({
+          lastAttempt: attempt,
+          consecutiveFailures,
+          threshold,
+        }),
     })
+  } catch (error) {
+    if (error instanceof AgentLoopBreakerLatchedError) {
+      throw new WorkerFatalError(
+        `${error.message}; ${breakerResetInstruction}`,
+        error,
+      )
+    }
+    throw error
   } finally {
     await runtime.close()
   }
