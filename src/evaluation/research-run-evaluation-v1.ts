@@ -39,7 +39,10 @@ import {
 } from "../shared/value-normalization.js"
 import { resolveV1StrategyVersionCompatibility } from "../strategy/strategy-v1-compatibility.js"
 
-export const RESEARCH_RUN_EVALUATION_VERSION = "1.0.0" as const
+// 1.1.0 narrowed the graded checks to failures the model can cause; checks only
+// application code could fail were removed. Bump when grader semantics change,
+// so two results are only comparable when they share this version.
+export const RESEARCH_RUN_EVALUATION_VERSION = "1.1.0" as const
 
 export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "RUN_METADATA_INVALID",
