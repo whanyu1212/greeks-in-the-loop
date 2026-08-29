@@ -375,8 +375,13 @@ Shadow mode cannot substitute. It never observes an outcome, and it cannot
 re-answer a question after a rule change — each cycle is evaluated once against
 the state captured at that moment and is never revisited. Replay reruns a whole
 window against a frozen, checksummed dataset, and because every stage is
-deterministic, a difference in results is attributable solely to the change
-under test.
+deterministic, the same inputs always produce the same report.
+
+Attributing a difference to the rule change requires holding the scenarios file
+fixed as well. Only the dataset is checksummed into the report
+(`datasetChecksum`); the hand-authored scenarios carrying the signal,
+candidates, and monitor cycles are not, so two runs over one dataset can still
+differ if that file changed. Version it alongside the rule change.
 
 Replay evaluates the deterministic rules, not the agent: `pnpm backtest` reads a
 pre-authored scenarios file and never invokes a model or prompt. Agent behavior

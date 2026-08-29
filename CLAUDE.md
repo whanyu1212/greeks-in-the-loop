@@ -90,17 +90,21 @@ Failures return **bounded reason codes**, never raw model input. See
 ### Backtest replay
 
 `pnpm backtest` is a separate offline entry point, not a pipeline stage. It
-feeds scenarios into the *same* `evaluateTradeIntentRiskV1` with no agent in the
-loop. Its report file is never read back by runtime code — no backtest result
+feeds `EXACT_SNAPSHOT` scenarios into the *same* `evaluateTradeIntentRiskV1`
+with no agent in the loop; it never invokes a model or prompt. Its report file is never read back by runtime code — no backtest result
 influences a live decision, by design.
 
-Two fidelities: `EXACT_SNAPSHOT` (forward-captured, reruns signal + risk) and
+Two fidelities: `EXACT_SNAPSHOT` (reruns signal + risk) and
 `HISTORICAL_BAR_PROXY` (`riskStatus: "NOT_EVALUABLE"`, exit mechanics only —
 cannot claim historical risk approval). The acquired dataset holds sessions,
 underlying bars, option bars, trades, and contracts; Alpaca's free tier serves
 no historical greeks or open interest, so contract-quality thresholds are only
 testable against `EXACT_SNAPSHOT` scenarios. These are hand-authored today — no
 runtime code forward-captures them.
+
+Only the dataset is checksummed into the report (`datasetChecksum`); the
+scenarios file is not. Comparing two runs to attribute a difference to a rule
+change requires holding that file fixed as well.
 
 ## Agent boundary
 
