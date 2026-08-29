@@ -13,7 +13,11 @@ import { dirname } from "node:path"
 
 import { parse as parseEnv } from "dotenv"
 
-import { runAgentLoop } from "./agent-loop.js"
+import {
+  DEFAULT_AGENT_MAX_BACKOFF_MS,
+  MAX_AGENT_LOOP_DELAY_MS,
+  runAgentLoop,
+} from "./agent-loop.js"
 import { parseAgentOptions } from "./agent-options.js"
 import { acquireWorkerInstanceLock } from "./worker-instance-lock.js"
 import { runWithCycleDeadline } from "./cycle-deadline.js"
@@ -175,6 +179,16 @@ const researchMode = researchAnytime
     ? DRY_RUN_ANYTIME_SHADOW_MODE
     : undefined
 const intervalMs = readPositiveInteger("AGENT_INTERVAL_MS", 5 * 60 * 1000)
+const maxBackoffMs = readPositiveInteger(
+  "AGENT_MAX_BACKOFF_MS",
+  DEFAULT_AGENT_MAX_BACKOFF_MS,
+)
+if (maxBackoffMs / 2 < intervalMs) {
+  throw new Error("AGENT_MAX_BACKOFF_MS must be at least twice AGENT_INTERVAL_MS")
+}
+if (maxBackoffMs > MAX_AGENT_LOOP_DELAY_MS) {
+  throw new Error(`AGENT_MAX_BACKOFF_MS must not exceed ${MAX_AGENT_LOOP_DELAY_MS}`)
+}
 const cycleTimeoutMs = readPositiveInteger("AGENT_CYCLE_TIMEOUT_MS", 5 * 60 * 1000)
 const cycleAbortTimeoutMs = readPositiveInteger("AGENT_CYCLE_ABORT_TIMEOUT_MS", 5_000)
 const maxCycles = once
@@ -278,6 +292,7 @@ try {
     const cycleNumbers = new Map<number, number>()
     await runAgentLoop({
       intervalMs,
+      maxBackoffMs,
       maxCycles,
       signal: abortController.signal,
       runCycle: async (attempt) => activeTelemetry.runCycle(
