@@ -5,6 +5,10 @@ import type {
   ResearchCycleTerminalRecordV1,
 } from "../research/research-cycle-outcome-v1.js"
 import {
+  RESEARCH_INVOCATION_VERSION,
+  type ResearchModelDriftCode,
+} from "../research/research-invocation-v1.js"
+import {
   researchEligibilityV1Schema,
   type ResearchEligibilityV1,
 } from "../scheduling/research-eligibility.js"
@@ -37,6 +41,18 @@ export type ResearchCycleIdentity = Readonly<{
 export type ActiveResearchCycle = ResearchCycleIdentity &
   Readonly<{
     outcomeSink: ResearchCycleOutcomeSink
+    /**
+     * Records that the observed model identity failed the pinned assertion.
+     * The cycle is then failed by its caller, so this only preserves why.
+     */
+    recordInvocationIdentityRejected(
+      drift: Readonly<{
+        reason: ResearchModelDriftCode
+        expected: string
+        observed: string
+      }>,
+      signal?: AbortSignal,
+    ): Promise<void>
     interrupt(
       reason: ResearchCycleInterruptionReason,
       signal?: AbortSignal,
@@ -427,6 +443,32 @@ export function createResearchLifecycleRecorder({
       return {
         ...identity,
         outcomeSink,
+        // Not terminalized: the caller throws after this, and the resulting
+        // cycle interruption is what closes the cycle out.
+        recordInvocationIdentityRejected: async (drift, driftSignal) => {
+          driftSignal?.throwIfAborted()
+          await persist("invocation-identity rejection append", () =>
+            store.append(
+              {
+                eventId: idFactory(),
+                eventVersion: LEDGER_EVENT_VERSION,
+                eventType: "RESEARCH_INVOCATION_IDENTITY_REJECTED",
+                occurredAt: now().toISOString(),
+                correlationId: identity.correlationId,
+                causationEventId: startEventId,
+                cycleId: identity.cycleId,
+                sessionId: identity.sessionId,
+                payload: {
+                  invocationVersion: RESEARCH_INVOCATION_VERSION,
+                  reason: drift.reason,
+                  expected: drift.expected,
+                  observed: drift.observed,
+                },
+              },
+              driftSignal,
+            ),
+          )
+        },
         interrupt: (reason, interruptSignal) =>
           terminalize(async () => {
             interruptSignal?.throwIfAborted()

@@ -44,6 +44,7 @@ describe("LedgerEventV1", () => {
       "TRADE_INTENT_DERIVATION_REJECTED",
       "RESEARCH_CYCLE_COMPLETED",
       "RESEARCH_CYCLE_INTERRUPTED",
+      "RESEARCH_INVOCATION_IDENTITY_REJECTED",
       "RESEARCH_LOOP_BREAKER_LATCHED",
       "RESEARCH_LOOP_BREAKER_RESET",
       "RISK_SHADOW_DECISION_RECORDED",
@@ -82,6 +83,52 @@ describe("LedgerEventV1", () => {
         },
       }),
     ).toMatchObject({ eventType: "RESEARCH_LOOP_BREAKER_RESET" })
+  })
+
+  it("requires cycle identity on invocation-identity rejections", () => {
+    const cycleScoped = {
+      eventId: "identity-event-1",
+      eventVersion: "1.0.0",
+      eventType: "RESEARCH_INVOCATION_IDENTITY_REJECTED",
+      occurredAt: "2026-08-25T14:30:00.000Z",
+      correlationId: "identity-correlation-1",
+      causationEventId: "cycle-start-1",
+      cycleId: "cycle-1",
+      sessionId: "session-1",
+      payload: {
+        invocationVersion: "1.2.0",
+        reason: "MODEL_DRIFT",
+        expected: "gpt-5.6-sol",
+        observed: "gpt-5.6-sol-fast",
+      },
+    } as const
+    expect(ledgerEventV1Schema.parse(cycleScoped)).toMatchObject({
+      eventType: "RESEARCH_INVOCATION_IDENTITY_REJECTED",
+    })
+
+    // Unlike the breaker events, drift happens inside a live cycle.
+    const { cycleId, sessionId, ...cycleless } = cycleScoped
+    expect(() => ledgerEventV1Schema.parse(cycleless)).toThrow()
+
+    // Bounded payload only: no raw provider prose, no extra fields.
+    expect(() =>
+      ledgerEventV1Schema.parse({
+        ...cycleScoped,
+        payload: { ...cycleScoped.payload, providerResponse: "..." },
+      }),
+    ).toThrow()
+    expect(() =>
+      ledgerEventV1Schema.parse({
+        ...cycleScoped,
+        payload: { ...cycleScoped.payload, reason: "SOMETHING_ELSE" },
+      }),
+    ).toThrow()
+    expect(() =>
+      ledgerEventV1Schema.parse({
+        ...cycleScoped,
+        payload: { ...cycleScoped.payload, observed: "a b c" },
+      }),
+    ).toThrow()
   })
 
   it("rejects malformed or cycle-scoped research-loop breaker events", () => {

@@ -127,6 +127,67 @@ describe("runAgentLoop", () => {
     })
   })
 
+  it("latches the breaker on sustained model-identity drift", async () => {
+    // A drifted cycle throws a plain Error, which index.ts's isFatalError
+    // treats as non-fatal. A provider that silently swaps the default model
+    // must therefore halt the worker rather than loop forever.
+    const onBreakerLatched = vi.fn(async () => undefined)
+    const drift = new Error(
+      "Research model identity rejected: MODEL_DRIFT (expected gpt-5.6-sol, observed gpt-5.6-sol-fast)",
+    )
+
+    await expect(
+      runAgentLoop({
+        intervalMs: 100,
+        maxBackoffMs: 1_600,
+        maxConsecutiveFailures: 5,
+        maxCycles: 20,
+        signal: new AbortController().signal,
+        runCycle: vi.fn().mockRejectedValue(drift),
+        onError: vi.fn(),
+        onBreakerLatched,
+        // Mirrors the composition root: only ledger/worker failures are fatal.
+        isFatalError: () => false,
+        sleep: async () => undefined,
+        random: () => 0.5,
+      }),
+    ).rejects.toBeInstanceOf(AgentLoopBreakerLatchedError)
+
+    expect(onBreakerLatched).toHaveBeenCalledWith({
+      attempt: 5,
+      consecutiveFailures: 5,
+      threshold: 5,
+    })
+  })
+
+  it("clears drift failures when a matching cycle succeeds", async () => {
+    const onBreakerLatched = vi.fn(async () => undefined)
+    const drift = new Error("Research model identity rejected: PROVIDER_DRIFT")
+    const runCycle = vi
+      .fn()
+      .mockRejectedValueOnce(drift)
+      .mockRejectedValueOnce(drift)
+      .mockResolvedValueOnce("recovered")
+      .mockRejectedValueOnce(drift)
+
+    const cycles = await runAgentLoop({
+      intervalMs: 100,
+      maxBackoffMs: 1_600,
+      maxConsecutiveFailures: 3,
+      maxCycles: 4,
+      signal: new AbortController().signal,
+      runCycle,
+      onError: vi.fn(),
+      onBreakerLatched,
+      isFatalError: () => false,
+      sleep: async () => undefined,
+      random: () => 0.5,
+    })
+
+    expect(cycles).toBe(4)
+    expect(onBreakerLatched).not.toHaveBeenCalled()
+  })
+
   it("increases jittered delays after consecutive transient failures", async () => {
     const delays: number[] = []
     const onError = vi.fn()

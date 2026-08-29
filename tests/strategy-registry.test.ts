@@ -80,6 +80,8 @@ describe("static strategy registry", () => {
       strategyVersion: STRATEGY_VERSION,
       decisionContractVersion: "1.0.0",
       reportVersion: "2.0.0",
+      providerId: "openai",
+      modelId: "gpt-5.6-sol",
     })
     expect(LEGACY_STRATEGY_VERSION).toBe("1.0.0")
     expect(STRATEGY_VERSION).toBe("1.1.0")
@@ -123,7 +125,7 @@ describe("static strategy registry", () => {
       },
       researchPlanCompatibility: {
         kind: "LEGACY_RESEARCH_INVOCATION_V1",
-        invocationVersion: "1.1.0",
+        invocationVersion: "1.2.0",
         agentName: "research",
         promptVersion: "1.4.0",
         skillName: "spy-debit-spread-research",

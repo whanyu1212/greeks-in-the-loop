@@ -36,7 +36,10 @@ import {
   createTerminalStageReporter,
   resolveTerminalLogFormat,
 } from "./observability/terminal-stage-reporter.js"
-import { createResearchInvocationV1 } from "./research/research-invocation-v1.js"
+import {
+  assertResearchModelIdentityV1,
+  createResearchInvocationV1,
+} from "./research/research-invocation-v1.js"
 import { startOpencode } from "./opencode-runtime.js"
 import { buildResearchCyclePrompt } from "./research/research-agent.js"
 import { loadResearchRunV1 } from "./research/research-artifact.js"
@@ -507,6 +510,31 @@ try {
                     response.data.parts,
                   )
                   cycleTrace.recordOpenCodeResult(invocation)
+                  // Assert the pinned model before any of this response is
+                  // parsed. Compares the raw summary, not the durable
+                  // projection, which rewrites unsafe labels to "unknown".
+                  const identity = assertResearchModelIdentityV1(invocation)
+                  if (!identity.ok) {
+                    stageReporter.report("research.agent", "REJECTED", {
+                      reason: identity.reason,
+                      expected: identity.expected,
+                      observed: identity.observed,
+                    })
+                    await cycle.recordInvocationIdentityRejected(
+                      {
+                        reason: identity.reason,
+                        expected: identity.expected,
+                        observed: identity.observed,
+                      },
+                      signal,
+                    )
+                    // Non-fatal: this counts toward the consecutive-failure
+                    // breaker, so a sustained provider swap halts the worker
+                    // rather than looping.
+                    throw new Error(
+                      `Research model identity rejected: ${identity.reason} (expected ${identity.expected}, observed ${identity.observed})`,
+                    )
+                  }
                   stageReporter.report("research.agent", "COMPLETED", {
                     providerId: invocation.providerId,
                     modelId: invocation.modelId,

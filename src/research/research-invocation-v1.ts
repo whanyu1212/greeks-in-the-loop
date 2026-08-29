@@ -5,9 +5,10 @@ import {
   type OpenCodeInvocationSummary,
 } from "../observability/opencode-telemetry-summary.js"
 import type { ResearchTraceVersions } from "../observability/research-telemetry.js"
-export const RESEARCH_INVOCATION_VERSION = "1.1.0" as const
+export const RESEARCH_INVOCATION_VERSION = "1.2.0" as const
 export const SUPPORTED_RESEARCH_INVOCATION_VERSIONS = Object.freeze([
   "1.0.0",
+  "1.1.0",
   RESEARCH_INVOCATION_VERSION,
 ] as const)
 export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = Object.freeze({
@@ -29,6 +30,22 @@ export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = Object.freeze({
     decisionContractVersion: "1.0.0",
     reportVersion: "2.0.0",
   }),
+  /**
+   * Adds the pinned model identity. Earlier versions deliberately omit it:
+   * they ran against whatever OpenCode resolved, and back-filling a pin would
+   * claim an assertion those runs never made.
+   */
+  "1.2.0": Object.freeze({
+    agentName: "research",
+    promptVersion: "1.4.0",
+    skillName: "spy-debit-spread-research",
+    skillVersion: "1.2.0",
+    strategyVersion: "1.1.0",
+    decisionContractVersion: "1.0.0",
+    reportVersion: "2.0.0",
+    providerId: "openai",
+    modelId: "gpt-5.6-sol",
+  }),
 } as const satisfies Record<
   (typeof SUPPORTED_RESEARCH_INVOCATION_VERSIONS)[number],
   Readonly<{
@@ -39,8 +56,91 @@ export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = Object.freeze({
     strategyVersion: string
     decisionContractVersion: string
     reportVersion: string
+    providerId?: string
+    modelId?: string
   }>
 >)
+
+/**
+ * The provider and model the research agent must run against.
+ *
+ * `opencode.json` selects the model; this constant is what the application
+ * asserts the observed invocation against. Changing the model therefore
+ * requires editing both and bumping `RESEARCH_INVOCATION_VERSION`, matching how
+ * prompt and skill versions are already pinned. Reasoning effort is configured
+ * alongside the model but is deliberately not asserted — it is a tuning knob,
+ * not part of model identity.
+ */
+export const RESEARCH_MODEL_IDENTITY = Object.freeze({
+  providerId:
+    RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[RESEARCH_INVOCATION_VERSION]
+      .providerId satisfies string,
+  modelId:
+    RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[RESEARCH_INVOCATION_VERSION]
+      .modelId satisfies string,
+})
+
+/**
+ * Bounds an observed label for the drift record.
+ *
+ * The observed value reaches the ledger, so it is length-capped and reduced to
+ * the safe label alphabet. Unlike `durableLabel` this preserves the sanitized
+ * remainder instead of collapsing to "unknown", because the whole point of the
+ * record is to say what was actually returned.
+ */
+const boundedObservedLabel = (value: string) =>
+  value
+    .trim()
+    .slice(0, 128)
+    .replace(/[^A-Za-z0-9._:/-]/gu, ".")
+    .replaceAll("://", ".//") || "unknown"
+
+export const RESEARCH_MODEL_DRIFT_CODES = Object.freeze([
+  "PROVIDER_DRIFT",
+  "MODEL_DRIFT",
+] as const)
+export type ResearchModelDriftCode =
+  (typeof RESEARCH_MODEL_DRIFT_CODES)[number]
+
+export type ResearchModelIdentityResult =
+  | { ok: true }
+  | {
+      ok: false
+      reason: ResearchModelDriftCode
+      expected: string
+      observed: string
+    }
+
+/**
+ * Compares an observed invocation against the pinned identity.
+ *
+ * Takes the raw `OpenCodeInvocationSummary` values rather than the durable
+ * projection: `durableLabel` rewrites an unsafe label to "unknown", so
+ * asserting after it would report drift against "unknown" instead of what the
+ * provider actually returned, and would hide an injection-shaped label as
+ * ordinary drift.
+ */
+export function assertResearchModelIdentityV1(
+  observed: Readonly<{ providerId: string; modelId: string }>,
+): ResearchModelIdentityResult {
+  if (observed.providerId !== RESEARCH_MODEL_IDENTITY.providerId) {
+    return {
+      ok: false,
+      reason: "PROVIDER_DRIFT",
+      expected: RESEARCH_MODEL_IDENTITY.providerId,
+      observed: boundedObservedLabel(observed.providerId),
+    }
+  }
+  if (observed.modelId !== RESEARCH_MODEL_IDENTITY.modelId) {
+    return {
+      ok: false,
+      reason: "MODEL_DRIFT",
+      expected: RESEARCH_MODEL_IDENTITY.modelId,
+      observed: boundedObservedLabel(observed.modelId),
+    }
+  }
+  return { ok: true }
+}
 export const MAX_RESEARCH_INVOCATION_TOOL_CALLS = 32
 
 const boundedText = z.string().trim().min(1).max(128)
