@@ -137,6 +137,7 @@ export type CreateSqliteLedgerStoreOptions = Readonly<{
   now?: () => Date
   timeoutMs?: number
   readonly?: boolean
+  fileMustExist?: boolean
 }>
 
 /**
@@ -151,6 +152,7 @@ export function createSqliteLedgerStore({
   now = () => new Date(),
   timeoutMs = 5_000,
   readonly = false,
+  fileMustExist = false,
 }: CreateSqliteLedgerStoreOptions): LedgerStore {
   if (
     !Array.isArray(knownCredentialValues) ||
@@ -168,7 +170,7 @@ export function createSqliteLedgerStore({
   const database = new Database(path, {
     timeout: timeoutMs,
     readonly,
-    fileMustExist: readonly,
+    fileMustExist: readonly || fileMustExist,
   })
   database.pragma("foreign_keys = ON")
   if (!readonly) {

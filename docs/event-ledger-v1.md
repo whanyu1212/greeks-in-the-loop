@@ -32,7 +32,7 @@ SQLite assigns:
 - `sequence`: total append order;
 - `recordedAt`: ledger commit timestamp.
 
-The event vocabulary is intentionally limited to domains already implemented. Future risk, execution, fill, position, reconciliation, and breaker events belong to their owning issues.
+The event vocabulary is intentionally limited to domains already implemented. Future execution, fill, position, and reconciliation events belong to their owning issues.
 
 ## Ordering and atomicity
 
@@ -132,6 +132,10 @@ Domain code must depend only on `LedgerStore`, so event schemas and reconstructi
 The worker creates a fresh OpenCode session for every cycle, then generates one stable `cycleId` and `correlationId` before the prompt. It appends `OPENCODE_SESSION_STARTED` and `RESEARCH_CYCLE_STARTED` before model work begins. Valid research reports, preliminary findings, evidence references, validated or rejected decisions, derived or rejected intents, and `RESEARCH_CYCLE_COMPLETED` are then appended as one causally ordered atomic batch. A derived intent must be followed in that same batch by exactly one `RISK_SHADOW_DECISION_RECORDED` event and any newly activated `RISK_BREAKER_LATCHED` events before completion. `PRELIMINARY_RESEARCH_RECORDED` stores only the bounded `PreliminaryResearchV1` result and reconstructs a mandatory refresh marker; it never represents or causes a trade intent.
 
 Timeout, explicit cancellation, unexpected runtime failure, process shutdown, and startup recovery produce `RESEARCH_CYCLE_INTERRUPTED`. A cycle-scoped recorder arbitrates completion and interruption in memory, while database constraints provide the durable exactly-one-terminal backstop. Ledger persistence failures are fatal and are never relabeled as ordinary cycle interruptions.
+
+Consecutive non-fatal cycle failures are counted in memory and reset by success. At the configured threshold the worker appends a cycleless `RESEARCH_LOOP_BREAKER_LATCHED` event containing only the state version, bounded count, threshold, last attempt, and `CONSECUTIVE_FAILURE_LIMIT` reason, then exits without another delay or attempt. Fatal errors and cancellation never count toward the threshold. The latest latch/reset transition is authoritative across restarts.
+
+An operator resets the latch with `pnpm agent:reset-breaker -- --ledger <path>`. The command acquires exclusive worker ownership and appends a cycleless `RESEARCH_LOOP_BREAKER_RESET` event with the bounded `OPERATOR_REQUESTED` reason. It is an idempotent no-op when the latest transition is already a reset. Neither event stores raw errors, model content, or provider payloads.
 
 On startup, the worker scans lifecycle events in bounded pages. Every start without a completion or interruption receives a `PROCESS_RESTART` interruption using its original cycle, correlation, session, and start-event causation identity. Recovery is idempotent.
 

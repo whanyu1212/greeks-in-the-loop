@@ -174,6 +174,8 @@ Useful environment controls are documented in [`.env.example`](.env.example):
 | `AGENT_CYCLE_TIMEOUT_MS` | Limits one model/research cycle (five minutes by default). |
 | `AGENT_LOG_FORMAT` | Selects `pretty` or `json` pipeline logs; defaults from TTY detection. |
 | `AGENT_INTERVAL_MS` | Controls continuous-run spacing. |
+| `AGENT_MAX_BACKOFF_MS` | Caps jittered delays after consecutive non-fatal failures. |
+| `AGENT_MAX_CONSECUTIVE_FAILURES` | Latches the durable research-loop breaker after this many consecutive failures (default 5). |
 | `AGENT_MAX_CYCLES` | Stops a continuous run after a bounded number of attempts. |
 | `AGENT_TASK` | Adds an operator objective to the structured research prompt. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Optionally enables fail-open OTLP HTTP/protobuf tracing. See [Research tracing](docs/observability.md). |
@@ -205,6 +207,22 @@ This is a single-host lock scoped to the canonical ledger, not a distributed
 lease. Deploy one production ledger per Alpaca account, complete shutdown before
 a rolling replacement starts, and do not run active-active workers for the same
 account from different hosts or ledger paths.
+
+### Research-loop failure breaker
+
+Consecutive non-fatal cycle failures back off with jitter. At
+`AGENT_MAX_CONSECUTIVE_FAILURES` (five by default), the worker durably records a
+breaker latch and exits nonzero without another delay or attempt. Success resets
+the in-memory count; fatal persistence/runtime failures and shutdown cancellation
+are never counted. The latch survives restarts and must be reset while no worker
+owns the ledger:
+
+```bash
+pnpm agent:reset-breaker -- --ledger .state/research-ledger.sqlite
+```
+
+The reset command is idempotent, refuses a missing ledger, and acquires the same
+single-worker lock before appending the reset transition.
 
 The append-only SQLite event ledger defaults to `.state/research-ledger.sqlite`; override it with `RESEARCH_LEDGER_PATH` only when the worker retains exclusive write ownership. On startup, incomplete cycles are marked `PROCESS_RESTART`, cycle numbering resumes from durable history, and a bounded context projection is rebuilt for the next prompt. Prior evidence is planning context only and must be refreshed. OpenCode session memory is never authoritative durable state.
 
@@ -258,7 +276,8 @@ SQLite stores an append-only event stream in `ledger_events`. Each row contains 
 | Confirmed exact-leg option quotes | Only after successful intent derivation, inside `TRADE_INTENT_DERIVED` | Yes, inside the derived outcome | Stores each OCC symbol, indicative feed label, bid and ask in integer cents per share, and provider timestamp. If quote confirmation or intent derivation fails, exact bid/ask values are not retained. |
 | Derived spread economics | Only after successful intent derivation | Yes, inside the derived outcome | Includes evaluated time, entry limit, width, maximum loss/profit, and deterministic stop/target marks. It is still non-executable. |
 | Shadow-risk decision | For every live derived intent, as `RISK_SHADOW_DECISION_RECORDED` | Yes, in the `shadowRisk` section | Stores exact decision/evaluation/rule versions, outcome or bounded failure reasons, refreshed intent, observation timestamps, and reconciliation codes. Account balances, positions, orders, and raw responses are omitted. |
-| Breaker transitions | When newly activated, as `RISK_BREAKER_LATCHED` | Yes, in the `shadowRisk` section | Daily latches apply to their trading date; competition latches carry forward. Shadow approval never counts as an order submission. |
+| Risk breaker transitions | When newly activated, as `RISK_BREAKER_LATCHED` | Yes, in the `shadowRisk` section | Daily latches apply to their trading date; competition latches carry forward. Shadow approval never counts as an order submission. |
+| Research-loop breaker transitions | On latch and explicit reset | No | Stores bounded counts and versions as cycleless `RESEARCH_LOOP_BREAKER_*` events; never stores raw errors. |
 | Rejections | Yes | Yes, inside the outcome | Stores bounded reason codes or validation issue codes/paths, not rejected raw content. |
 | Invocation provenance | On new completed cycles | Yes, in `researchInvocation` | Stores prompt/skill/strategy/contract versions, cycle mode, provider/model labels, token counts, and bounded tool names/outcomes/durations. Prompts, responses, tool arguments/results, provider metadata, and error text are excluded. |
 

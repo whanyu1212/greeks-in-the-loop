@@ -13,6 +13,7 @@ import {
 } from "../risk/shadow-risk-v1.js"
 
 export const LEDGER_EVENT_VERSION = "1.0.0" as const
+export const RESEARCH_LOOP_BREAKER_STATE_VERSION = "1.0.0" as const
 export const MAX_LEDGER_EVENT_PAYLOAD_BYTES = 64 * 1024
 
 export const LEDGER_EVENT_TYPES = [
@@ -27,6 +28,8 @@ export const LEDGER_EVENT_TYPES = [
   "TRADE_INTENT_DERIVATION_REJECTED",
   "RESEARCH_CYCLE_COMPLETED",
   "RESEARCH_CYCLE_INTERRUPTED",
+  "RESEARCH_LOOP_BREAKER_LATCHED",
+  "RESEARCH_LOOP_BREAKER_RESET",
   "RISK_SHADOW_DECISION_RECORDED",
   "RISK_BREAKER_LATCHED",
 ] as const
@@ -43,6 +46,7 @@ const boundedCode = z
   .max(128)
   .regex(/^[A-Z][A-Z0-9_]*$/u)
 const issuePath = z.array(z.union([z.string().max(128), z.number().int().nonnegative()])).max(32)
+const positiveSafeInteger = z.number().int().positive().safe()
 
 const payloadSchemas = {
   OPENCODE_SESSION_STARTED: z
@@ -162,6 +166,28 @@ const payloadSchemas = {
       ]),
     })
     .strict(),
+  RESEARCH_LOOP_BREAKER_LATCHED: z
+    .object({
+      stateVersion: z.literal(RESEARCH_LOOP_BREAKER_STATE_VERSION),
+      reason: z.literal("CONSECUTIVE_FAILURE_LIMIT"),
+      consecutiveFailures: positiveSafeInteger,
+      threshold: positiveSafeInteger,
+      lastAttempt: positiveSafeInteger,
+    })
+    .strict()
+    .refine(
+      ({ consecutiveFailures, threshold }) => consecutiveFailures >= threshold,
+      {
+        path: ["consecutiveFailures"],
+        message: "Latched failure count must reach its threshold",
+      },
+    ),
+  RESEARCH_LOOP_BREAKER_RESET: z
+    .object({
+      stateVersion: z.literal(RESEARCH_LOOP_BREAKER_STATE_VERSION),
+      reason: z.literal("OPERATOR_REQUESTED"),
+    })
+    .strict(),
   RISK_SHADOW_DECISION_RECORDED: z
     .object({
       decision: shadowRiskDecisionV1Schema,
@@ -221,6 +247,24 @@ const eventSchemas = Object.entries(payloadSchemas).map(([eventType, payload]) =
             code: "custom",
             path: ["sessionId"],
             message: "Session-start identity must match its payload",
+          })
+        }
+        return
+      }
+
+      if (
+        eventType === "RESEARCH_LOOP_BREAKER_LATCHED" ||
+        eventType === "RESEARCH_LOOP_BREAKER_RESET"
+      ) {
+        if (
+          event.cycleId !== undefined ||
+          event.sessionId !== undefined ||
+          event.causationEventId !== undefined
+        ) {
+          refinement.addIssue({
+            code: "custom",
+            path: ["cycleId"],
+            message: "Research-loop breaker events are cycleless",
           })
         }
         return

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -69,6 +69,15 @@ afterEach(() => {
 })
 
 describe("createSqliteLedgerStore", () => {
+  it("can refuse to create a missing writable ledger", () => {
+    const path = createTemporaryPath()
+
+    expect(() =>
+      createSqliteLedgerStore({ path, fileMustExist: true }),
+    ).toThrow()
+    expect(existsSync(path)).toBe(false)
+  })
+
   it("supports query-only access without changing the ledger", async () => {
     const path = createTemporaryPath()
     const writer = createSqliteLedgerStore({ path })

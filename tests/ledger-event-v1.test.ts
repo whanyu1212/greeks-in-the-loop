@@ -44,9 +44,72 @@ describe("LedgerEventV1", () => {
       "TRADE_INTENT_DERIVATION_REJECTED",
       "RESEARCH_CYCLE_COMPLETED",
       "RESEARCH_CYCLE_INTERRUPTED",
+      "RESEARCH_LOOP_BREAKER_LATCHED",
+      "RESEARCH_LOOP_BREAKER_RESET",
       "RISK_SHADOW_DECISION_RECORDED",
       "RISK_BREAKER_LATCHED",
     ])
+  })
+
+  it("accepts strict cycleless research-loop breaker transitions", () => {
+    const envelope = {
+      eventId: "breaker-event-1",
+      eventVersion: "1.0.0",
+      occurredAt: "2026-08-25T14:30:00.000Z",
+      correlationId: "breaker-correlation-1",
+    } as const
+    expect(
+      ledgerEventV1Schema.parse({
+        ...envelope,
+        eventType: "RESEARCH_LOOP_BREAKER_LATCHED",
+        payload: {
+          stateVersion: "1.0.0",
+          reason: "CONSECUTIVE_FAILURE_LIMIT",
+          consecutiveFailures: 5,
+          threshold: 5,
+          lastAttempt: 9,
+        },
+      }),
+    ).toMatchObject({ eventType: "RESEARCH_LOOP_BREAKER_LATCHED" })
+    expect(
+      ledgerEventV1Schema.parse({
+        ...envelope,
+        eventId: "breaker-event-2",
+        eventType: "RESEARCH_LOOP_BREAKER_RESET",
+        payload: {
+          stateVersion: "1.0.0",
+          reason: "OPERATOR_REQUESTED",
+        },
+      }),
+    ).toMatchObject({ eventType: "RESEARCH_LOOP_BREAKER_RESET" })
+  })
+
+  it("rejects malformed or cycle-scoped research-loop breaker events", () => {
+    const latch = {
+      eventId: "breaker-event-1",
+      eventVersion: "1.0.0",
+      eventType: "RESEARCH_LOOP_BREAKER_LATCHED",
+      occurredAt: "2026-08-25T14:30:00.000Z",
+      correlationId: "breaker-correlation-1",
+      payload: {
+        stateVersion: "1.0.0",
+        reason: "CONSECUTIVE_FAILURE_LIMIT",
+        consecutiveFailures: 5,
+        threshold: 5,
+        lastAttempt: 9,
+      },
+    } as const
+
+    for (const invalid of [
+      { ...latch, cycleId: "cycle-1" },
+      { ...latch, sessionId: "session-1" },
+      { ...latch, causationEventId: "event-0" },
+      { ...latch, payload: { ...latch.payload, consecutiveFailures: 4 } },
+      { ...latch, payload: { ...latch.payload, rawError: "secret" } },
+      { ...latch, payload: { ...latch.payload, stateVersion: "2.0.0" } },
+    ]) {
+      expect(ledgerEventV1Schema.safeParse(invalid).success).toBe(false)
+    }
   })
 
   it("rejects a payload that does not match its event type", () => {
