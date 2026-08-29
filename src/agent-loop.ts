@@ -4,19 +4,23 @@
  * Cycle attempts never overlap: the loop waits for `runCycle` to settle before
  * invoking the corresponding result or error callback and starting its delay.
  * Callback return values are not awaited, so callers must coordinate any
- * asynchronous callback work that must finish before the next cycle. Failed
- * attempts use the same interval as successful attempts; this module does not
- * apply retry backoff.
+ * asynchronous callback work that must finish before the next cycle. Consecutive
+ * non-fatal failures use bounded exponential backoff with equal jitter; the
+ * normal interval resumes after success.
  *
  * Cancellation prevents new cycles and interrupts the inter-cycle delay. The
  * supplied `runCycle` implementation remains responsible for cancelling any
  * work already in progress.
  */
 
+export const DEFAULT_AGENT_MAX_BACKOFF_MS = 30 * 60 * 1000
+
 /** Configuration and callbacks for a sequential agent loop. */
 export type AgentLoopOptions = {
-  /** Delay between completed cycle attempts, in milliseconds. */
+  /** Delay between completed successful cycles, in milliseconds. */
   intervalMs: number
+  /** Maximum failure delay; must be at least twice the normal interval. */
+  maxBackoffMs?: number
   /** Maximum number of cycles to attempt. */
   maxCycles: number
   /** Signal used to stop the loop and interrupt its delay. */
@@ -31,6 +35,8 @@ export type AgentLoopOptions = {
   isFatalError?: (error: unknown) => boolean
   /** Overrides the delay implementation, primarily for tests. */
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>
+  /** Supplies jitter, primarily for deterministic tests. */
+  random?: () => number
 }
 
 /**
@@ -67,6 +73,7 @@ export const abortableSleep = (milliseconds: number, signal: AbortSignal) =>
  */
 export async function runAgentLoop({
   intervalMs,
+  maxBackoffMs = DEFAULT_AGENT_MAX_BACKOFF_MS,
   maxCycles,
   signal,
   runCycle,
@@ -74,22 +81,37 @@ export async function runAgentLoop({
   onError = (error, cycle) => console.error(`[cycle ${cycle}] failed`, error),
   isFatalError = () => false,
   sleep = abortableSleep,
+  random = Math.random,
 }: AgentLoopOptions): Promise<number> {
+  if (maxBackoffMs / 2 < intervalMs) {
+    throw new Error("maxBackoffMs must be at least twice intervalMs")
+  }
+
   let cycle = 0
+  let backoffCeilingMs = intervalMs
 
   while (!signal.aborted && cycle < maxCycles) {
     cycle += 1
 
+    let delayMs = intervalMs
     try {
       onResult(await runCycle(cycle), cycle)
+      backoffCeilingMs = intervalMs
     } catch (error) {
       if (isFatalError(error)) throw error
       if (signal.aborted) break
       onError(error, cycle)
+      backoffCeilingMs =
+        backoffCeilingMs >= maxBackoffMs / 2
+          ? maxBackoffMs
+          : backoffCeilingMs * 2
+      delayMs = Math.floor(
+        backoffCeilingMs / 2 + random() * (backoffCeilingMs / 2),
+      )
     }
 
     if (signal.aborted || cycle >= maxCycles) break
-    await sleep(intervalMs, signal)
+    await sleep(delayMs, signal)
   }
 
   return cycle

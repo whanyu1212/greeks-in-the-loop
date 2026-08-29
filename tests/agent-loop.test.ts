@@ -43,24 +43,108 @@ describe("runAgentLoop", () => {
     ])
   })
 
-  it("reports a transient failure and continues", async () => {
+  it("rejects a backoff cap below the first failure ceiling", async () => {
+    const runCycle = vi.fn(async () => "unused")
+
+    await expect(
+      runAgentLoop({
+        intervalMs: 100,
+        maxBackoffMs: 199,
+        maxCycles: 1,
+        signal: new AbortController().signal,
+        runCycle,
+      }),
+    ).rejects.toThrow("maxBackoffMs must be at least twice intervalMs")
+    expect(runCycle).not.toHaveBeenCalled()
+  })
+
+  it("increases jittered delays after consecutive transient failures", async () => {
+    const delays: number[] = []
     const onError = vi.fn()
 
     const cycles = await runAgentLoop({
-      intervalMs: 1,
-      maxCycles: 2,
+      intervalMs: 100,
+      maxBackoffMs: 1_600,
+      maxCycles: 4,
+      signal: new AbortController().signal,
+      runCycle: vi.fn().mockRejectedValue(new Error("temporary")),
+      onError,
+      sleep: async (milliseconds) => {
+        delays.push(milliseconds)
+      },
+      random: () => 0.5,
+    })
+
+    expect(cycles).toBe(4)
+    expect(delays).toEqual([150, 300, 600])
+    expect(onError).toHaveBeenCalledTimes(4)
+  })
+
+  it("resets backoff after a successful cycle", async () => {
+    const delays: number[] = []
+
+    await runAgentLoop({
+      intervalMs: 100,
+      maxBackoffMs: 1_600,
+      maxCycles: 4,
       signal: new AbortController().signal,
       runCycle: vi
         .fn<(cycle: number) => Promise<string>>()
         .mockRejectedValueOnce(new Error("temporary"))
-        .mockResolvedValueOnce("recovered"),
+        .mockResolvedValueOnce("recovered")
+        .mockRejectedValueOnce(new Error("temporary again"))
+        .mockResolvedValueOnce("recovered again"),
       onResult: vi.fn(),
-      onError,
-      sleep: async () => undefined,
+      onError: vi.fn(),
+      sleep: async (milliseconds) => {
+        delays.push(milliseconds)
+      },
+      random: () => 0.5,
     })
 
-    expect(cycles).toBe(2)
-    expect(onError).toHaveBeenCalledOnce()
+    expect(delays).toEqual([150, 100, 150])
+  })
+
+  it("caps backoff after repeated failures", async () => {
+    const delays: number[] = []
+
+    await runAgentLoop({
+      intervalMs: 100,
+      maxBackoffMs: 400,
+      maxCycles: 4,
+      signal: new AbortController().signal,
+      runCycle: vi.fn().mockRejectedValue(new Error("temporary")),
+      onError: vi.fn(),
+      sleep: async (milliseconds) => {
+        delays.push(milliseconds)
+      },
+      random: () => 0.5,
+    })
+
+    expect(delays).toEqual([150, 300, 300])
+  })
+
+  it("stops when shutdown interrupts a backoff delay", async () => {
+    const controller = new AbortController()
+    const runCycle = vi.fn().mockRejectedValue(new Error("temporary"))
+
+    const cycles = await runAgentLoop({
+      intervalMs: 100,
+      maxBackoffMs: 400,
+      maxCycles: 10,
+      signal: controller.signal,
+      runCycle,
+      onError: vi.fn(),
+      sleep: async (milliseconds, signal) => {
+        const sleeping = abortableSleep(milliseconds, signal)
+        controller.abort()
+        await sleeping
+      },
+      random: () => 0.5,
+    })
+
+    expect(cycles).toBe(1)
+    expect(runCycle).toHaveBeenCalledOnce()
   })
 
   it("does not begin another cycle after shutdown", async () => {
@@ -88,6 +172,7 @@ describe("runAgentLoop", () => {
       throw fatal
     })
     const onError = vi.fn()
+    const sleep = vi.fn(async () => undefined)
 
     await expect(
       runAgentLoop({
@@ -97,9 +182,11 @@ describe("runAgentLoop", () => {
         runCycle,
         onError,
         isFatalError: (error) => error === fatal,
+        sleep,
       }),
     ).rejects.toBe(fatal)
     expect(runCycle).toHaveBeenCalledOnce()
     expect(onError).not.toHaveBeenCalled()
+    expect(sleep).not.toHaveBeenCalled()
   })
 })
