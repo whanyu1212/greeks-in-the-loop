@@ -98,7 +98,8 @@ Two fidelities: `EXACT_SNAPSHOT` (reruns signal + risk) and
 `HISTORICAL_BAR_PROXY` (`riskStatus: "NOT_EVALUABLE"`, exit mechanics only —
 cannot claim historical risk approval). The acquired dataset holds sessions,
 underlying bars, option bars, trades, and contracts; Alpaca's free tier serves
-no historical greeks or open interest, so contract-quality thresholds are only
+no historical greeks or IV (open interest is retained on contracts but dated
+independently of the decision instant), so contract-quality thresholds are only
 testable against `EXACT_SNAPSHOT` scenarios. These are hand-authored today — no
 runtime code forward-captures them.
 

@@ -345,14 +345,18 @@ differs is whether a scenario author *could* ground a value in acquired records:
 | Thresholds | Can an author ground these in the dataset? |
 |---|---|
 | DTE 14–30, width 100–1000¢, entry ≤ 60% of width, max loss $500 | Yes — computable from OCC symbols and option bars, though replay never checks that they were |
-| Long delta 0.45–0.6, short delta 0.2–0.35, IV > 0, volume ≥ 100, open interest ≥ 500 | No — absent from the dataset entirely; the values are authored |
+| Long delta 0.45–0.6, short delta 0.2–0.35, IV > 0 | No — greeks and IV are absent from the dataset; the values are authored |
+| Volume ≥ 100 | Partly — `OPTION_BAR` retains per-bar `volume`, but replay never populates candidate snapshots from it |
+| Open interest ≥ 500 | Partly — `OPTION_CONTRACT` may retain `openInterest` with its `openInterestDate`, which need not be the decision instant |
 | Quote/account staleness, breakers, buying-power reserve | No meaningful historical variation |
 
 Replay scores pre-built candidates; it does not generate them from the dataset.
 The gate reads greeks, IV, open interest, account, and portfolio state from each
 scenario's own snapshot, and the dataset holds only sessions, underlying bars,
-option bars, trades, and contracts — Alpaca's free tier serves no historical
-option greeks or open interest. Contract-quality thresholds therefore require
+option bars, trades, and contracts. Alpaca's free tier serves no historical
+option greeks or IV; open interest is retained on contracts, but dated
+independently of any decision instant. Contract-quality thresholds therefore
+require
 `EXACT_SNAPSHOT` scenarios, which are hand-authored today: no runtime code
 captures them, and a shadow decision persists the evaluated intent and
 provenance rather than the session and candidate inputs `exactScenarioSchema`
