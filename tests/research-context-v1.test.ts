@@ -363,7 +363,7 @@ describe("ResearchContextV1", () => {
             occurredAt: "2026-08-26T13:02:00.000Z",
             correlationId: `correlation-${cycleId}`,
             cycleId,
-            payload: { reason: "PROCESS_EXIT" },
+            payload: { reason: "PROCESS_RESTART" },
           },
           sequence,
         ),
@@ -378,9 +378,13 @@ describe("ResearchContextV1", () => {
     expect(
       Buffer.byteLength(JSON.stringify(context), "utf8"),
     ).toBeLessThanOrEqual(MAX_RESEARCH_CONTEXT_SERIALIZED_BYTES)
-    expect(Object.keys(context.evidenceReferences).length).toBe(59)
-    expect(context.recentInterruptions.length).toBe(12)
-    expect(context.requiredRefreshes.length).toBe(59)
+    // Largest-first trimming balances the collections instead of starving the
+    // small ones: plain round-robin leaves interruption history at its floor
+    // of 1 here, because it drops one item per collection per pass regardless
+    // of how many each holds.
+    expect(Object.keys(context.evidenceReferences).length).toBe(51)
+    expect(context.recentInterruptions.length).toBe(52)
+    expect(context.requiredRefreshes.length).toBe(52)
 
     // Newest memory is the memory that survives.
     expect(context.recentInterruptions[0]?.cycleId).toBe("cycle-60")
@@ -408,14 +412,10 @@ describe("ResearchContextV1", () => {
     })
     const serializedBytes = Buffer.byteLength(JSON.stringify(context), "utf8")
 
-    expect(context.window.eventCount).toBe(MAX_RESEARCH_CONTEXT_EVENTS)
-    expect(context.window.truncatedBefore).toBe(true)
-    expect(context.recentTerminalOutcomes.length).toBeLessThanOrEqual(24)
+    expect(context.truncatedBefore).toBe(true)
     expect(serializedBytes).toBeLessThanOrEqual(
       MAX_RESEARCH_CONTEXT_SERIALIZED_BYTES,
     )
-    expect(context.serializedUtf8Bytes).toBe(serializedBytes)
-    expect(context.truncation.evidenceReferencesOmitted).toBeGreaterThan(0)
 
     expect(
       projectResearchContextV1([...events].reverse(), {

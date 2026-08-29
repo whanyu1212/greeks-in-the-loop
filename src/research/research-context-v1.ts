@@ -7,13 +7,9 @@ import type {
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import type { PreliminaryResearchV1 } from "../contracts/preliminary-research-v1.js"
 
-export const RESEARCH_CONTEXT_VERSION = "1.0.0" as const
+/** Ledger query window: how much history is read, not how much survives. */
 export const MAX_RESEARCH_CONTEXT_EVENTS = 500
-export const MAX_RESEARCH_CONTEXT_TERMINAL_OUTCOMES = 24
-export const MAX_RESEARCH_CONTEXT_REJECTION_COUNTS = 32
-export const MAX_RESEARCH_CONTEXT_EVIDENCE_REFERENCES = 64
-export const MAX_RESEARCH_CONTEXT_INTERRUPTION_EVENTS = 16
-export const MAX_RESEARCH_CONTEXT_REFRESH_MARKERS = 64
+/** The only budget on the projection itself. Every field below is prompt text. */
 export const MAX_RESEARCH_CONTEXT_SERIALIZED_BYTES = 32 * 1024
 
 const RECONSTRUCTION_PAGE_SIZE = 500
@@ -98,7 +94,6 @@ export type ResearchContextPreliminaryResearchV1 = Readonly<{
 }>
 
 export type ResearchContextV1 = Readonly<{
-  contextVersion: typeof RESEARCH_CONTEXT_VERSION
   generatedAt: string
   nextCycleNumber: number
   latestValidatedProposal?: ResearchContextProposalV1
@@ -110,23 +105,8 @@ export type ResearchContextV1 = Readonly<{
   >
   recentInterruptions: readonly ResearchContextInterruptionV1[]
   requiredRefreshes: readonly ResearchContextRefreshMarkerV1[]
-  window: Readonly<{
-    maxEvents: number
-    eventCount: number
-    oldestSequence: number | null
-    newestSequence: number | null
-    truncatedBefore: boolean
-  }>
-  truncation: Readonly<{
-    terminalOutcomesOmitted: number
-    rejectionCountsOmitted: number
-    evidenceReferencesOmitted: number
-    interruptionsOmitted: number
-    refreshMarkersOmitted: number
-    serializedToFit: boolean
-  }>
-  serializedUtf8Bytes: number
-  maxSerializedUtf8Bytes: number
+  /** Older memory was dropped; treat retained history as incomplete. */
+  truncatedBefore: boolean
 }>
 
 export type ProjectResearchContextV1Options = Readonly<{
@@ -160,17 +140,6 @@ export const researchContextEvidenceKey = (
   cycleId: string,
   snapshotRef: string,
 ) => `${encodeURIComponent(cycleId)}+${encodeURIComponent(snapshotRef)}`
-
-const withStableSerializedSize = <T extends { serializedUtf8Bytes: number }>(
-  value: T,
-) => {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const size = utf8Bytes(value)
-    if (size === value.serializedUtf8Bytes) return value
-    value.serializedUtf8Bytes = size
-  }
-  return value
-}
 
 /**
  * Projects compact, non-prose research memory from a bounded ledger window.
@@ -335,18 +304,9 @@ export function projectResearchContextV1(
 
   const newestFirst = <T extends { sequence: number }>(values: readonly T[]) =>
     [...values].sort((left, right) => right.sequence - left.sequence)
-  let retainedOutcomes = newestFirst(terminalOutcomes).slice(
-    0,
-    MAX_RESEARCH_CONTEXT_TERMINAL_OUTCOMES,
-  )
-  let retainedInterruptions = newestFirst(interruptions).slice(
-    0,
-    MAX_RESEARCH_CONTEXT_INTERRUPTION_EVENTS,
-  )
-  let retainedEvidence = newestFirst([...evidenceReferences.values()]).slice(
-    0,
-    MAX_RESEARCH_CONTEXT_EVIDENCE_REFERENCES,
-  )
+  let retainedOutcomes = newestFirst(terminalOutcomes)
+  let retainedInterruptions = newestFirst(interruptions)
+  let retainedEvidence = newestFirst([...evidenceReferences.values()])
   let retainedRejections: ResearchContextRejectionCountV1[] = [
     ...rejectionCounts.entries(),
   ]
@@ -356,7 +316,6 @@ export function projectResearchContextV1(
       sources: [...count.sources].sort(),
     }))
     .sort((left, right) => right.count - left.count || left.code.localeCompare(right.code))
-    .slice(0, MAX_RESEARCH_CONTEXT_REJECTION_COUNTS)
   let retainedRefreshes: SequencedRefreshMarker[] = [
     ...(pendingPreliminaryResearch === undefined
       ? []
@@ -387,26 +346,6 @@ export function projectResearchContextV1(
         left.cycleId.localeCompare(right.cycleId) ||
         left.reason.localeCompare(right.reason),
     )
-    .slice(0, MAX_RESEARCH_CONTEXT_REFRESH_MARKERS)
-  const refreshMarkerCount =
-    [...evidenceReferences.values()].filter(
-      ({ freshUntil }) => Date.parse(freshUntil) < generatedAt,
-    ).length + interruptions.length + (pendingPreliminaryResearch === undefined ? 0 : 1)
-
-  const omitted = {
-    terminalOutcomes: Math.max(0, terminalOutcomes.length - retainedOutcomes.length),
-    rejectionCounts: Math.max(0, rejectionCounts.size - retainedRejections.length),
-    evidenceReferences: Math.max(
-      0,
-      evidenceReferences.size - retainedEvidence.length,
-    ),
-    interruptions: Math.max(0, interruptions.length - retainedInterruptions.length),
-    refreshMarkers: Math.max(
-      0,
-      refreshMarkerCount - retainedRefreshes.length,
-    ),
-  }
-  let serializedToFit = false
 
   const assemble = () => {
     const references = Object.fromEntries(
@@ -416,7 +355,6 @@ export function projectResearchContextV1(
       ]),
     )
     const value = {
-      contextVersion: RESEARCH_CONTEXT_VERSION,
       generatedAt: options.generatedAt,
       nextCycleNumber: latestCycleNumber + 1,
       ...(latestValidatedProposal === undefined
@@ -459,84 +397,67 @@ export function projectResearchContextV1(
       requiredRefreshes: retainedRefreshes.map(
         ({ sequence: _sequence, ...refresh }) => refresh,
       ),
-      window: {
-        maxEvents: MAX_RESEARCH_CONTEXT_EVENTS,
-        eventCount: events.length,
-        oldestSequence: events[0]?.sequence ?? null,
-        newestSequence: events.at(-1)?.sequence ?? null,
-        truncatedBefore,
-      },
-      truncation: {
-        terminalOutcomesOmitted: omitted.terminalOutcomes,
-        rejectionCountsOmitted: omitted.rejectionCounts,
-        evidenceReferencesOmitted: omitted.evidenceReferences,
-        interruptionsOmitted: omitted.interruptions,
-        refreshMarkersOmitted: omitted.refreshMarkers,
-        serializedToFit,
-      },
-      serializedUtf8Bytes: 0,
-      maxSerializedUtf8Bytes: MAX_RESEARCH_CONTEXT_SERIALIZED_BYTES,
+      truncatedBefore,
     }
-    return withStableSerializedSize(value)
+    return value
   }
 
   let context = assemble()
+  // Trim the largest collection first rather than round-robin: taking one item
+  // per collection per pass starves small collections (interruption history)
+  // to their floor while a large one keeps most of its entries. Each closure
+  // drops its oldest item and keeps at least one, so every kind of memory
+  // survives in some form.
   const trimCollections = [
-    () => {
-      if (retainedEvidence.length <= 1) return false
-      const removed = retainedEvidence.at(-1)
-      retainedEvidence = retainedEvidence.slice(0, -1)
-      omitted.evidenceReferences += 1
-      if (removed !== undefined) {
-        const refreshCount = retainedRefreshes.length
-        retainedRefreshes = retainedRefreshes.filter(
-          (refresh) =>
-            refresh.reason !== "STALE_EVIDENCE" ||
-            refresh.cycleId !== removed.cycleId ||
-            refresh.snapshotRef !== removed.snapshotRef,
-        )
-        omitted.refreshMarkers += refreshCount - retainedRefreshes.length
-      }
-      return true
+    {
+      size: () => retainedEvidence.length,
+      trim: () => {
+        const removed = retainedEvidence.at(-1)
+        retainedEvidence = retainedEvidence.slice(0, -1)
+        if (removed !== undefined) {
+          retainedRefreshes = retainedRefreshes.filter(
+            (refresh) =>
+              refresh.reason !== "STALE_EVIDENCE" ||
+              refresh.cycleId !== removed.cycleId ||
+              refresh.snapshotRef !== removed.snapshotRef,
+          )
+        }
+      },
     },
-    () => {
-      if (retainedRefreshes.length <= 1) return false
-      retainedRefreshes = retainedRefreshes.slice(0, -1)
-      omitted.refreshMarkers += 1
-      return true
+    {
+      size: () => retainedRefreshes.length,
+      trim: () => {
+        retainedRefreshes = retainedRefreshes.slice(0, -1)
+      },
     },
-    () => {
-      if (retainedOutcomes.length <= 1) return false
-      retainedOutcomes = retainedOutcomes.slice(0, -1)
-      omitted.terminalOutcomes += 1
-      return true
+    {
+      size: () => retainedOutcomes.length,
+      trim: () => {
+        retainedOutcomes = retainedOutcomes.slice(0, -1)
+      },
     },
-    () => {
-      if (retainedInterruptions.length <= 1) return false
-      retainedInterruptions = retainedInterruptions.slice(0, -1)
-      omitted.interruptions += 1
-      return true
+    {
+      size: () => retainedInterruptions.length,
+      trim: () => {
+        retainedInterruptions = retainedInterruptions.slice(0, -1)
+      },
     },
-    () => {
-      if (retainedRejections.length <= 1) return false
-      retainedRejections = retainedRejections.slice(0, -1)
-      omitted.rejectionCounts += 1
-      return true
+    {
+      size: () => retainedRejections.length,
+      trim: () => {
+        retainedRejections = retainedRejections.slice(0, -1)
+      },
     },
   ]
-  let trimIndex = 0
-  let unsuccessfulTrims = 0
-  while (context.serializedUtf8Bytes > MAX_RESEARCH_CONTEXT_SERIALIZED_BYTES) {
-    const trimmed = trimCollections[trimIndex]?.() ?? false
-    trimIndex = (trimIndex + 1) % trimCollections.length
-    unsuccessfulTrims = trimmed ? 0 : unsuccessfulTrims + 1
-    if (unsuccessfulTrims >= trimCollections.length) {
+  while (utf8Bytes(context) > MAX_RESEARCH_CONTEXT_SERIALIZED_BYTES) {
+    const largest = trimCollections.reduce((left, right) =>
+      right.size() > left.size() ? right : left,
+    )
+    if (largest.size() <= 1) {
       throw new Error("Research context cannot fit its serialized byte bound")
     }
-    if (trimmed) {
-      serializedToFit = true
-      context = assemble()
-    }
+    largest.trim()
+    context = assemble()
   }
 
   return context
