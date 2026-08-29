@@ -23,6 +23,7 @@ import {
   type ResearchCycleOutcomeSink,
 } from "./research-cycle-outcome-v1.js"
 import {
+  isProposedTradeReport,
   processResearchProposalPath,
   type ProposalIntentDeriver,
 } from "./research-proposal-path.js"
@@ -296,8 +297,12 @@ export async function processResearchCycle({
     })
   }
 
+  if (!isProposedTradeReport(researchReport)) {
+    throw new Error("Proposal path requires a proposed trade report")
+  }
+
   const proposalResolution = await processResearchProposalPath({
-    report: { ...researchReport, result },
+    report: researchReport,
     signal,
     quoteProvider,
     shadowRiskEvaluator,

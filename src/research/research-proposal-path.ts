@@ -59,18 +59,25 @@ const observationIsFresh = (
 }
 
 /**
- * A report whose result is already narrowed to `PROPOSE_TRADE`.
+ * A schema-validated report whose result is a proposed trade.
  *
- * Carrying the narrowed report — rather than a report plus a separate result —
- * keeps `researchReportV2Schema`'s result/analysis cross-checks intact: the
- * decision that is validated and the analysis that is freshness-checked cannot
- * come from different proposals.
+ * Obtain one only by narrowing a parsed `ResearchReportV2` through
+ * {@link isProposedTradeReport}. Never assemble one by spreading a report over
+ * a different result: the decision that gets validated and the analysis that
+ * gets freshness-checked would then come from different proposals, silently
+ * bypassing the result/analysis cross-checks `researchReportV2Schema` enforces
+ * in its `superRefine`.
  */
 export type ProposedTradeReportV2 = Readonly<
   Omit<ResearchReportV2, "result"> & {
     result: Extract<ResearchReportV2["result"], { outcome: "PROPOSE_TRADE" }>
   }
 >
+
+/** Narrows a parsed report in place, preserving its validated result/analysis pairing. */
+export const isProposedTradeReport = (
+  report: ResearchReportV2,
+): report is ProposedTradeReportV2 => report.result.outcome === "PROPOSE_TRADE"
 
 export const proposalMarketRegimeIsFresh = (
   report: ResearchReportV2,
