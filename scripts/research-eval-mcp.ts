@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 
 import { researchEvalBarRequestMatchesFixture } from "../src/evaluation/research-eval-bar-window.js"
+import { spyAlpacaOptionSymbolV1Schema } from "../src/shared/alpaca-option-identity.js"
 
 const scenarioId = process.argv[2]?.trim()
 const serverKind = process.argv[3]?.trim()
@@ -29,7 +30,7 @@ const result = (value: unknown) => ({
 
 const commonInput = {
   symbol: z.literal("SPY").optional(),
-  symbols: z.array(z.string().startsWith("SPY")).optional(),
+  symbols: z.array(spyAlpacaOptionSymbolV1Schema).optional(),
   query: z.string().optional(),
   start: z.string().optional(),
   end: z.string().optional(),
@@ -69,9 +70,7 @@ const inputSchemaFor = (name: string) => {
     return z.object({
       ...commonInput,
       symbol: z.literal("SPY").optional(),
-      symbols: z.array(
-        z.string().regex(/^SPY\d{6}[CP]\d{8}$/u),
-      ).min(1).optional(),
+      symbols: z.array(spyAlpacaOptionSymbolV1Schema).min(1).optional(),
       feed: z.literal("indicative"),
     }).refine(
       (input) => input.symbol === "SPY" || input.symbols !== undefined,

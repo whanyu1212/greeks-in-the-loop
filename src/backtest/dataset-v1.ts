@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { spyAlpacaOptionSymbolV1Schema } from "../shared/alpaca-option-identity.js"
 import { canonicalJsonSha256 } from "../shared/canonical-json.js"
 
 export const BACKTEST_DATASET_VERSION = "1.0.0" as const
@@ -14,7 +15,7 @@ const identifier = z
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u)
 const safeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
 const positiveSafeInteger = safeInteger.positive()
-const optionSymbol = z.string().regex(/^SPY\d{6}[CP]\d{8}$/u)
+const optionSymbol = spyAlpacaOptionSymbolV1Schema
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/u)
 
 export const backtestDatasetDefinitionV1Schema = z

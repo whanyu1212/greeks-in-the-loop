@@ -99,6 +99,38 @@ describe("risk-state reconciliation v1", () => {
     })
   })
 
+  it("compares syntactically valid sub-cent strikes in exact thousandths", () => {
+    const positions = [
+      position("SPY260918C00600001", 1),
+      position("SPY260918C00600011", -1),
+    ]
+    const result = reconcile({
+      initialBrokerState: { positions, openOrders: [] },
+      finalBrokerState: { positions, openOrders: [] },
+    })
+
+    expect(result.success && result.portfolio).toMatchObject({
+      consistent: true,
+      openStrategyPositionCount: 1,
+    })
+  })
+
+  it.each([
+    ["unsupported", "QQQ260918C00600000", "QQQ260918C00605000"],
+    ["impossible-date", "SPY260431C00600000", "SPY260431C00605000"],
+  ])("fails closed for a %s option position", (_case, long, short) => {
+    const positions = [position(long, 1), position(short, -1)]
+    const result = reconcile({
+      initialBrokerState: { positions, openOrders: [] },
+      finalBrokerState: { positions, openOrders: [] },
+    })
+
+    expect(result.success && result.portfolio.consistent).toBe(false)
+    expect(result.success && result.reasonCodes).toEqual([
+      "UNMATCHED_OPTION_POSITION",
+    ])
+  })
+
   it("recognizes a pending entry and consumes terminal same-day attempts", () => {
     const pending = order()
     const result = reconcile({
@@ -111,6 +143,33 @@ describe("risk-state reconciliation v1", () => {
       pendingEntryCount: 1,
       entriesSubmittedToday: 1,
     })
+  })
+
+  it("maps a non-SPY opening order to existing bounded reasons", () => {
+    const pending = order({
+      legs: [
+        {
+          symbol: "QQQ260918C00600000",
+          ratioQuantity: 1,
+          positionIntent: "BUY_TO_OPEN",
+        },
+        {
+          symbol: "QQQ260918C00605000",
+          ratioQuantity: 1,
+          positionIntent: "SELL_TO_OPEN",
+        },
+      ],
+    })
+    const result = reconcile({
+      initialBrokerState: { positions: [], openOrders: [pending] },
+      finalBrokerState: { positions: [], openOrders: [pending] },
+    })
+
+    expect(result.success && result.portfolio.consistent).toBe(false)
+    expect(result.success && result.reasonCodes).toEqual([
+      "UNKNOWN_OPEN_ORDER",
+      "UNMATCHED_PENDING_ENTRY",
+    ])
   })
 
   it("fails closed when broker activity changes during capture", () => {

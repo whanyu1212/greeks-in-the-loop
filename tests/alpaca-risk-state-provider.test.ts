@@ -699,6 +699,27 @@ describe("Alpaca risk-state provider", () => {
     expect(fetchImplementation).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ["malformed", "not-a-symbol"],
+    ["unsupported", "QQQ260918C00600000"],
+    ["impossible-date", "SPY260431C00600000"],
+  ])(
+    "maps a %s capture symbol to the existing input failure",
+    async (_case, longContractSymbol) => {
+      const fetchImplementation = router()
+      const result = await provider(fetchImplementation).capture({
+        ...input,
+        longContractSymbol,
+      })
+
+      expect(result).toEqual({
+        success: false,
+        reasons: ["CAPTURE_INPUT_INVALID"],
+      })
+      expect(fetchImplementation).not.toHaveBeenCalled()
+    },
+  )
+
   it("propagates cancellation without converting it into a provider failure", async () => {
     const controller = new AbortController()
     const reason = new Error("cancelled")

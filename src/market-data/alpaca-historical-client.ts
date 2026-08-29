@@ -9,6 +9,10 @@ import type {
   UnderlyingBarRecordV1,
 } from "../backtest/dataset-v1.js"
 import { newYorkLocalTime } from "../scheduling/research-eligibility.js"
+import {
+  parseAlpacaOptionSymbol,
+  validateSpyOptionUniverseV1,
+} from "../shared/alpaca-option-identity.js"
 
 const DEFAULT_DATA_URL = "https://data.alpaca.markets"
 const DEFAULT_TRADING_URL = "https://paper-api.alpaca.markets"
@@ -188,10 +192,15 @@ const sessionTimestamp = (date: string, value: string, label: string) =>
     : timestamp(value, label)
 
 const optionSymbols = (values: readonly string[]) => {
+  const identities = values.map(parseAlpacaOptionSymbol)
   if (
     values.length === 0 ||
     values.length > 100 ||
-    values.some((value) => !/^SPY\d{6}[CP]\d{8}$/u.test(value))
+    identities.some(
+      (parsed) =>
+        !parsed.success ||
+        !validateSpyOptionUniverseV1(parsed.identity).success,
+    )
   ) {
     throw new Error("Alpaca option symbols are invalid")
   }

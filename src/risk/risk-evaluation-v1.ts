@@ -54,6 +54,8 @@ const nonnegativeSafeInteger = z
   .max(Number.MAX_SAFE_INTEGER)
 const positiveSafeInteger = nonnegativeSafeInteger.positive()
 const count = z.number().int().nonnegative().max(1_000_000)
+// Deliberately provider-neutral: pure risk state treats broker symbols as
+// bounded identities. The strategy intent and exact leg comparison own admission.
 const contractSymbol = z
   .string()
   .min(1)

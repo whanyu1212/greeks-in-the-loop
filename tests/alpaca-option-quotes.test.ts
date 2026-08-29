@@ -157,6 +157,30 @@ describe("Alpaca option quote provider", () => {
     expect(requestInit).not.toHaveProperty("body")
   })
 
+  it.each([
+    ["malformed", "not-a-symbol"],
+    ["unsupported", "QQQ260918C00650000"],
+    ["impossible-date", "SPY260431C00650000"],
+  ])(
+    "rejects a %s requested symbol before provider I/O",
+    async (_case, invalidSymbol) => {
+      const fetchMock = vi.fn<typeof fetch>()
+      const provider = createProvider(fetchMock)
+
+      await expect(
+        provider.confirmQuotes({
+          longContractSymbol: invalidSymbol,
+          shortContractSymbol: shortSymbol,
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toEqual({
+        success: false,
+        reasons: ["QUOTE_SYMBOL_MISSING"],
+      })
+      expect(fetchMock).not.toHaveBeenCalled()
+    },
+  )
+
   it("matches quotes by symbol rather than response order", async () => {
     const provider = createProvider(
       vi.fn<typeof fetch>().mockResolvedValue(response(quoteResponse())),

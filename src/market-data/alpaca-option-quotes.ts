@@ -7,13 +7,16 @@ import type {
   EvidenceSnapshotMetadata,
 } from "../contracts/research-decision-v1.js"
 import {
+  parseAlpacaOptionSymbol,
+  validateSpyOptionUniverseV1,
+} from "../shared/alpaca-option-identity.js"
+import {
   floorNanosecondsToIsoMilliseconds,
   parseExactCents,
   parseRfc3339Nanoseconds,
 } from "../shared/value-normalization.js"
 
 export const ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS = 60_000_000_000n
-const SPY_OPTION_SYMBOL_PATTERN = /^SPY\d{6}[CP]\d{8}$/u
 export const ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE =
   "options-snapshots-indicative" as const
 
@@ -208,9 +211,13 @@ export function createAlpacaOptionQuoteProvider(
       shortContractSymbol,
       signal,
     }): Promise<OptionQuoteConfirmationResult> {
+      const longIdentity = parseAlpacaOptionSymbol(longContractSymbol)
+      const shortIdentity = parseAlpacaOptionSymbol(shortContractSymbol)
       if (
-        !SPY_OPTION_SYMBOL_PATTERN.test(longContractSymbol) ||
-        !SPY_OPTION_SYMBOL_PATTERN.test(shortContractSymbol)
+        !longIdentity.success ||
+        !shortIdentity.success ||
+        !validateSpyOptionUniverseV1(longIdentity.identity).success ||
+        !validateSpyOptionUniverseV1(shortIdentity.identity).success
       ) {
         return failure("QUOTE_SYMBOL_MISSING")
       }

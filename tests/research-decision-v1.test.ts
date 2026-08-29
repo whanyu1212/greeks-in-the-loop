@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   NO_ACTION_REASON_CODES,
+  researchCandidateV1Schema,
   validateResearchDecisionV1,
   type ResearchDecisionValidationContext,
 } from "../src/contracts/research-decision-v1.js"
@@ -191,6 +192,27 @@ describe("ResearchDecision v1 proposal contract", () => {
       success: true,
       data: bearishProposal,
     })
+  })
+
+  it.each([
+    ["unsupported root", "QQQ260918C00650000"],
+    ["impossible expiration", "SPY260431C00650000"],
+  ])("rejects a candidate leg with an %s", (_case, contractSymbol) => {
+    const result = researchCandidateV1Schema.safeParse({
+      ...bullishProposal.candidate,
+      longLeg: {
+        ...bullishProposal.candidate.longLeg,
+        contractSymbol,
+      },
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error("Expected candidate rejection")
+    expect(result.error.issues).toContainEqual(
+      expect.objectContaining({
+        path: ["longLeg", "contractSymbol"],
+      }),
+    )
   })
 
   it("accepts sourced optional context and inference based on sourced facts", () => {

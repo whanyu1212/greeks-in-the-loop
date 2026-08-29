@@ -1,6 +1,11 @@
 import { z } from "zod"
 
 import {
+  parseAlpacaOptionSymbol,
+  spyAlpacaOptionSymbolV1Schema,
+  validateSpyOptionUniverseV1,
+} from "../shared/alpaca-option-identity.js"
+import {
   safeSchemaDiagnostics,
   type SchemaViolationCategory,
 } from "../shared/schema-diagnostics.js"
@@ -34,9 +39,7 @@ const boundedIdentifier = z
   .min(1)
   .max(128)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u)
-const SPY_OPTION_SYMBOL_PATTERN = /^SPY(\d{6})([CP])(\d{8})$/u
-const OCC_EXPIRATION_CENTURY_PREFIX = "20"
-const contractSymbol = z.string().regex(SPY_OPTION_SYMBOL_PATTERN)
+const contractSymbol = spyAlpacaOptionSymbolV1Schema
 // OCC symbols encode a two-digit year. This contract only accepts 2000–2099
 // so a full ISO date maps to exactly one symbol expiration.
 const expirationDate = z.iso.date().refine((value) => {
@@ -78,28 +81,6 @@ const optionLegSchema = z
   })
   .strict()
 
-/**
- * Parses the expiration, option type, and strike encoded in a SPY OCC symbol.
- *
- * @param symbol - SPY option contract symbol in OCC format.
- * @returns Parsed contract fields, or `undefined` when the symbol is malformed.
- */
-const parseOptionContractSymbol = (symbol: string) => {
-  const match = SPY_OPTION_SYMBOL_PATTERN.exec(symbol)
-  if (match === null) return undefined
-
-  const [, expiration, optionType, strike] = match
-  if (expiration === undefined || optionType === undefined || strike === undefined) {
-    return undefined
-  }
-
-  return {
-    expiration: `${OCC_EXPIRATION_CENTURY_PREFIX}${expiration.slice(0, 2)}-${expiration.slice(2, 4)}-${expiration.slice(4, 6)}`,
-    optionType,
-    strike: Number(strike) / 1_000,
-  }
-}
-
 export const researchCandidateV1Schema = z
   .object({
     underlying: z.literal("SPY"),
@@ -137,12 +118,14 @@ export const researchCandidateV1Schema = z
       ["longLeg", candidate.longLeg],
       ["shortLeg", candidate.shortLeg],
     ] as const) {
-      const parsedSymbol = parseOptionContractSymbol(leg.contractSymbol)
+      const parsedSymbol = parseAlpacaOptionSymbol(leg.contractSymbol)
       if (
-        parsedSymbol === undefined ||
-        parsedSymbol.expiration !== candidate.expiration ||
-        parsedSymbol.optionType !== expectedOptionType ||
-        parsedSymbol.strike !== leg.strike
+        !parsedSymbol.success ||
+        !validateSpyOptionUniverseV1(parsedSymbol.identity).success ||
+        parsedSymbol.identity.root !== candidate.underlying ||
+        parsedSymbol.identity.expiration !== candidate.expiration ||
+        parsedSymbol.identity.optionType !== expectedOptionType ||
+        parsedSymbol.identity.strikeThousandthsPerShare / 1_000 !== leg.strike
       ) {
         refinement.addIssue({
           code: "custom",

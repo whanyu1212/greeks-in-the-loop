@@ -6,6 +6,7 @@ import {
   normalizeAlpacaOptionQuote,
 } from "../market-data/alpaca-option-quotes.js"
 import { newYorkLocalTime } from "../scheduling/research-eligibility.js"
+import { spyAlpacaOptionSymbolV1Schema } from "../shared/alpaca-option-identity.js"
 import {
   floorNanosecondsToIsoMilliseconds,
   parseExactCents,
@@ -29,7 +30,6 @@ import {
   type NormalizedBrokerPositionV1,
 } from "./risk-state-v1.js"
 
-const SPY_OPTION_SYMBOL_PATTERN = /^SPY\d{6}[CP]\d{8}$/u
 const MAX_ORDER_PAGES = 20
 const ORDER_PAGE_SIZE = 500
 
@@ -37,8 +37,8 @@ const captureInputSchema = z
   .object({
     sessionDate: z.iso.date(),
     slotStartedAt: z.iso.datetime({ offset: true, precision: 3 }),
-    longContractSymbol: z.string().regex(SPY_OPTION_SYMBOL_PATTERN),
-    shortContractSymbol: z.string().regex(SPY_OPTION_SYMBOL_PATTERN),
+    longContractSymbol: spyAlpacaOptionSymbolV1Schema,
+    shortContractSymbol: spyAlpacaOptionSymbolV1Schema,
     durableControl: durableRiskControlStateV1Schema,
   })
   .strict()

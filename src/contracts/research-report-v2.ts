@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { spyAlpacaOptionSymbolV1Schema } from "../shared/alpaca-option-identity.js"
 import {
   researchDecisionV1Schema,
   type ResearchDecisionV1,
@@ -56,7 +57,7 @@ const marketRegimeSchema = z
 const candidateLegAnalysisSchema = z
   .object({
     role: z.enum(["LONG", "SHORT"]),
-    contractSymbol: z.string().regex(/^SPY\d{6}[CP]\d{8}$/u),
+    contractSymbol: spyAlpacaOptionSymbolV1Schema,
     delta: z.number().finite().min(-1).max(1),
     impliedVolatility: positiveMetric,
     gamma: z.number().finite(),
