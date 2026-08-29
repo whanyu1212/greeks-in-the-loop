@@ -169,7 +169,6 @@ describe("ResearchContextV1", () => {
       direction: "UNDETERMINED",
       sourcedObservations: [
         {
-          claimId: "prior-close",
           provider: "ALPACA",
           temporalClass: "PRIOR_CLOSE",
           observedAt: "2026-08-25T20:00:00.000Z",
@@ -178,6 +177,9 @@ describe("ResearchContextV1", () => {
       requiresRefresh: true,
     })
     expect(JSON.stringify(context)).not.toContain("Refresh the prior-close setup")
+    // The model authors claimId and this projection re-enters a later prompt,
+    // so the identifier string must not be carried across.
+    expect(JSON.stringify(context)).not.toContain("prior-close")
     expect(JSON.stringify(context)).not.toContain("latest completed daily bar")
     expect(context.requiredRefreshes).toContainEqual({
       cycleId: "cycle-1",

@@ -84,8 +84,13 @@ export type ResearchContextPreliminaryResearchV1 = Readonly<{
   targetSessionDate: string
   direction: PreliminaryResearchV1["direction"]
   candidate?: PreliminaryResearchV1["candidate"]
+  /**
+   * Counts and provenance only. The model authors `claimId`, and this payload
+   * re-enters a later prompt, so the identifier string is deliberately not
+   * carried: nothing downstream reads it, and it is the one field here that
+   * could smuggle model-authored text back in.
+   */
   sourcedObservations: readonly Readonly<{
-    claimId: string
     provider: "ALPACA" | "FMP" | "EXA"
     temporalClass: "LIVE" | "DELAYED" | "PRIOR_CLOSE"
     observedAt: string
@@ -251,8 +256,7 @@ export function projectResearchContextV1(
           : { candidate: event.payload.research.candidate }),
         sourcedObservations: event.payload.research.evidence
           .filter((claim) => claim.kind === "SOURCED_FACT")
-          .map(({ claimId, provider, temporalClass, observedAt }) => ({
-            claimId,
+          .map(({ provider, temporalClass, observedAt }) => ({
             provider,
             temporalClass,
             observedAt,
