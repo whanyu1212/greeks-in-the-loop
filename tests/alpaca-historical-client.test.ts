@@ -209,6 +209,56 @@ describe("Alpaca historical client", () => {
     })
   })
 
+  it.each([
+    ["empty", []],
+    ["over-limit", Array(101).fill("SPY240216C00500000")],
+    ["malformed", ["not-a-symbol"]],
+    ["unsupported", ["QQQ240216C00500000"]],
+    ["impossible-date", ["SPY240231C00500000"]],
+  ])(
+    "rejects a %s option-symbol request before provider I/O",
+    async (_case, contractSymbols) => {
+      const fetchMock = vi.fn<typeof fetch>()
+      const client = createClient(fetchMock)
+
+      await expect(
+        client.getOptionBarsPage({
+          contractSymbols,
+          timeframe: "1MINUTE",
+          fromDate: "2024-02-01",
+          toDate: "2024-02-01",
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toThrow("Alpaca option symbols are invalid")
+      expect(fetchMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it("deduplicates and sorts exact option symbols in historical requests", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ bars: {} }))
+    const client = createClient(fetchMock)
+
+    await client.getOptionBarsPage({
+      contractSymbols: [
+        "SPY240216C00505000",
+        "SPY240216C00500000",
+        "SPY240216C00505000",
+      ],
+      timeframe: "1MINUTE",
+      fromDate: "2024-02-01",
+      toDate: "2024-02-01",
+      signal: new AbortController().signal,
+    })
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const url = new URL(String(fetchMock.mock.calls[0]![0]))
+    expect(url.searchParams.get("symbols")).toBe(
+      "SPY240216C00500000,SPY240216C00505000",
+    )
+  })
+
   it("retries a rate limit using bounded Retry-After handling", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
