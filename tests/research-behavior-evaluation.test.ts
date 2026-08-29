@@ -7,6 +7,11 @@ import {
 } from "../src/evaluation/research-behavior-evaluation-v1.js"
 import { researchBehaviorScenarios } from "../src/evaluation/research-behavior-scenarios.js"
 import { researchEvalBarRequestMatchesFixture } from "../src/evaluation/research-eval-bar-window.js"
+import {
+  RESEARCH_MAX_EXA_CALLS,
+  RESEARCH_MAX_FMP_CALLS,
+  RESEARCH_MAX_TOOL_CALLS,
+} from "../src/research/research-agent.js"
 
 const issueCodes = (evaluation: ResearchBehaviorEvaluationV1) =>
   Object.values(evaluation.dimensions).flatMap(({ issueCodes }) => issueCodes)
@@ -56,6 +61,52 @@ describe("research behavior evaluation", () => {
       )
     })
   }
+
+  it("keeps every live-gradeable scenario in the default live suite", () => {
+    // `--scenario all` excludes grader-only fixtures. Scenarios whose
+    // expectations liveExpectation rewrites into valid live checks must stay
+    // in, so a broadened filter cannot silently drop live coverage.
+    const live = researchBehaviorScenarios.filter(
+      ({ graderOnly }) => graderOnly !== true,
+    )
+    for (const id of [
+      "irrelevant-exa-does-not-qualify",
+      "syndicated-source-deduplication",
+      "prompt-injection-ignored",
+      "operator-mutation-request-rejected",
+    ]) {
+      expect(live.map(({ id: liveId }) => liveId)).toContain(id)
+    }
+    expect(live.every(({ graderOnly }) => graderOnly !== true)).toBe(true)
+  })
+
+  it("enforces the tool-call budgets", () => {
+    // Arity checks against imported constants: a scenario fixture large enough
+    // to trip these would be noise, so they are asserted directly.
+    const budgeted = (toolCalls: readonly { name: string }[]) =>
+      issueCodes(
+        evaluateResearchBehavior({
+          scenarioId: "budget",
+          rawResponse: "not json",
+          toolCalls: toolCalls.map(({ name }) => completed(name)),
+          expected: {},
+        }),
+      )
+    const repeat = (name: string, count: number) =>
+      Array.from({ length: count }, () => ({ name }))
+
+    expect(budgeted(repeat("alpaca_get_account", RESEARCH_MAX_TOOL_CALLS + 1)))
+      .toContain("TOTAL_TOOL_BUDGET_EXCEEDED")
+    expect(budgeted(repeat("exa_search", RESEARCH_MAX_EXA_CALLS + 1)))
+      .toContain("EXA_TOOL_BUDGET_EXCEEDED")
+    expect(budgeted(repeat("fmp_quote", RESEARCH_MAX_FMP_CALLS + 1)))
+      .toContain("FMP_TOOL_BUDGET_EXCEEDED")
+
+    expect(budgeted(repeat("exa_search", RESEARCH_MAX_EXA_CALLS)))
+      .not.toContain("EXA_TOOL_BUDGET_EXCEEDED")
+    expect(budgeted(repeat("fmp_quote", RESEARCH_MAX_FMP_CALLS)))
+      .not.toContain("FMP_TOOL_BUDGET_EXCEEDED")
+  })
 
   it("rejects prose-wrapped or malformed model output", () => {
     const evaluation = evaluateResearchBehavior({

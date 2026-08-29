@@ -137,7 +137,7 @@ On startup, the worker scans lifecycle events in bounded pages. Every start with
 
 ## Bounded agent context
 
-The worker projects at most 500 recent ledger events into a maximum 32 KiB context containing recent outcomes, the latest validated candidate and direction, recurring bounded rejection codes, normalized evidence references, recent interruptions, and required refresh markers. Projection metadata identifies truncation and the next durable cycle number.
+The worker projects at most 500 recent ledger events into a maximum 32 KiB context containing recent outcomes, the latest validated candidate and direction, recurring bounded rejection codes, normalized evidence references, recent interruptions, and required refresh markers. A single `truncatedBefore` flag identifies that older memory was dropped, alongside the next durable cycle number. When the projection exceeds its byte bound it trims the largest collection first, so no one kind of memory is starved.
 
 The projection excludes thesis and evidence prose, invalidation prose, raw model responses, complete provider payloads, transcripts, credentials, and hidden reasoning. Every prompt labels projected state as historical planning context and requires current account, market, quote, and freshness facts to be refreshed. OpenCode session memory is not authoritative.
 

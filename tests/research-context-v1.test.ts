@@ -169,7 +169,6 @@ describe("ResearchContextV1", () => {
       direction: "UNDETERMINED",
       sourcedObservations: [
         {
-          claimId: "prior-close",
           provider: "ALPACA",
           temporalClass: "PRIOR_CLOSE",
           observedAt: "2026-08-25T20:00:00.000Z",
@@ -178,6 +177,9 @@ describe("ResearchContextV1", () => {
       requiresRefresh: true,
     })
     expect(JSON.stringify(context)).not.toContain("Refresh the prior-close setup")
+    // The model authors claimId and this projection re-enters a later prompt,
+    // so the identifier string must not be carried across.
+    expect(JSON.stringify(context)).not.toContain("prior-close")
     expect(JSON.stringify(context)).not.toContain("latest completed daily bar")
     expect(context.requiredRefreshes).toContainEqual({
       cycleId: "cycle-1",
@@ -330,6 +332,79 @@ describe("ResearchContextV1", () => {
     expect(serialized).not.toContain('"path"')
   })
 
+  it("distributes retained memory across collections at the byte boundary", () => {
+    // Characterization test: pins which memory survives when the projection is
+    // over its serialized budget. The byte cap alone does not say *which*
+    // collection loses items, so these counts are the contract a reshape of the
+    // trim policy has to justify changing.
+    const events: StoredLedgerEventV1[] = []
+    let sequence = 1
+    for (let cycle = 1; cycle <= 60; cycle += 1) {
+      const cycleId = `cycle-${cycle}`
+      events.push(stored(cycleStarted(cycle, cycleId), sequence))
+      sequence += 1
+      for (let index = 0; index < 3; index += 1) {
+        events.push(
+          stored(
+            evidenceReferenced(
+              `snapshot-${cycle}-${index}-${"s".repeat(50)}`,
+              cycleId,
+              "o".repeat(120),
+            ),
+            sequence,
+          ),
+        )
+        sequence += 1
+      }
+      events.push(
+        stored(
+          {
+            eventId: `interrupted-${cycleId}`,
+            eventVersion: "1.0.0",
+            eventType: "RESEARCH_CYCLE_INTERRUPTED",
+            occurredAt: "2026-08-26T13:02:00.000Z",
+            correlationId: `correlation-${cycleId}`,
+            cycleId,
+            payload: { reason: "PROCESS_RESTART" },
+          },
+          sequence,
+        ),
+      )
+      sequence += 1
+    }
+
+    const context = projectResearchContextV1(events, {
+      generatedAt: "2026-08-26T14:00:00.000Z",
+    })
+
+    expect(
+      Buffer.byteLength(JSON.stringify(context), "utf8"),
+    ).toBeLessThanOrEqual(MAX_RESEARCH_CONTEXT_SERIALIZED_BYTES)
+    // Largest-first trimming balances the collections instead of starving the
+    // small ones: plain round-robin leaves interruption history at its floor
+    // of 1 here, because it drops one item per collection per pass regardless
+    // of how many each holds.
+    expect(Object.keys(context.evidenceReferences).length).toBe(51)
+    expect(context.recentInterruptions.length).toBe(52)
+    expect(context.requiredRefreshes.length).toBe(52)
+
+    // Newest memory is the memory that survives.
+    expect(context.recentInterruptions[0]?.cycleId).toBe("cycle-60")
+    expect(context.requiredRefreshes[0]?.cycleId).toBe("cycle-60")
+
+    // Byte-bound trimming dropped history even though the 300 input events fit
+    // inside the event window, so the agent must still be told.
+    expect(events.length).toBeLessThan(MAX_RESEARCH_CONTEXT_EVENTS)
+    expect(context.truncatedBefore).toBe(true)
+
+    // A context that fits keeps reporting complete history.
+    expect(
+      projectResearchContextV1(events.slice(0, 5), {
+        generatedAt: "2026-08-26T14:00:00.000Z",
+      }).truncatedBefore,
+    ).toBe(false)
+  })
+
   it("enforces event, collection, and final UTF-8 bounds deterministically", () => {
     const events: StoredLedgerEventV1[] = []
     for (let index = 1; index <= 700; index += 1) {
@@ -351,14 +426,10 @@ describe("ResearchContextV1", () => {
     })
     const serializedBytes = Buffer.byteLength(JSON.stringify(context), "utf8")
 
-    expect(context.window.eventCount).toBe(MAX_RESEARCH_CONTEXT_EVENTS)
-    expect(context.window.truncatedBefore).toBe(true)
-    expect(context.recentTerminalOutcomes.length).toBeLessThanOrEqual(24)
+    expect(context.truncatedBefore).toBe(true)
     expect(serializedBytes).toBeLessThanOrEqual(
       MAX_RESEARCH_CONTEXT_SERIALIZED_BYTES,
     )
-    expect(context.serializedUtf8Bytes).toBe(serializedBytes)
-    expect(context.truncation.evidenceReferencesOmitted).toBeGreaterThan(0)
 
     expect(
       projectResearchContextV1([...events].reverse(), {
