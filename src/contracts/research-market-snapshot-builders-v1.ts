@@ -265,7 +265,13 @@ export function buildUnderlyingSessionSnapshotV1(
     value.underlyingQuote.providerTimestamp,
     value.times.observedAt,
   )
-  if (quoteStatus.future) reasons.add("OBSERVATION_FROM_FUTURE")
+  if (
+    quoteStatus.future ||
+    Date.parse(value.underlyingQuote.providerTimestamp) >
+      Date.parse(value.sources.quote.retrievedAt)
+  ) {
+    reasons.add("OBSERVATION_FROM_FUTURE")
+  }
   if (quoteStatus.stale) reasons.add("OBSERVATION_STALE")
 
   if (reasons.size > 0 || !manifest.success) {
@@ -397,6 +403,10 @@ export function buildOptionUniverseSnapshotV1(
     ) ||
     value.contracts.some(
       (contract) =>
+        Date.parse(contract.quote.providerTimestamp) >
+          Date.parse(value.sources.marketSnapshots.retrievedAt) ||
+        Date.parse(contract.currentSessionVolume.providerTimestamp) >
+          Date.parse(value.sources.marketSnapshots.retrievedAt) ||
         Date.parse(contract.quote.providerTimestamp) > observed ||
         Date.parse(contract.currentSessionVolume.providerTimestamp) > observed,
     )

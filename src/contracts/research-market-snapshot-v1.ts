@@ -448,6 +448,7 @@ export const underlyingSessionSnapshotV1Schema =
         snapshot.underlyingQuote.askMicrosPerShare <
           snapshot.underlyingQuote.bidMicrosPerShare ||
         newYorkDate(new Date(quoteTime)) !== session.date ||
+        quoteTime > Date.parse(snapshot.sources.quote.retrievedAt) ||
         quoteTime > observed ||
         observed - quoteTime > RESEARCH_SNAPSHOT_QUOTE_FRESHNESS_MS
       ) {
@@ -651,7 +652,15 @@ export const optionUniverseSnapshotV1Schema = optionUniverseSnapshotContentV1Sch
           "Option contract identity or normalized values are invalid",
         )
       }
-      if (quoteTime > observed || volumeTime > observed) {
+      const marketSnapshotsRetrievedAt = Date.parse(
+        snapshot.sources.marketSnapshots.retrievedAt,
+      )
+      if (
+        quoteTime > marketSnapshotsRetrievedAt ||
+        volumeTime > marketSnapshotsRetrievedAt ||
+        quoteTime > observed ||
+        volumeTime > observed
+      ) {
         addIssue(
           refinement,
           ["contracts", index],

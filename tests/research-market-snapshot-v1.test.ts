@@ -175,6 +175,14 @@ describe("research market snapshot V1", () => {
       success: false,
       reasons: ["OBSERVATION_FROM_FUTURE"],
     })
+
+    const afterRetrieval = createUnderlyingSnapshotInputV1()
+    afterRetrieval.underlyingQuote.providerTimestamp =
+      "2026-08-28T14:00:55.001Z"
+    expect(buildUnderlyingSessionSnapshotV1(afterRetrieval)).toEqual({
+      success: false,
+      reasons: ["OBSERVATION_FROM_FUTURE"],
+    })
   })
 
   it("rejects malformed topology, cross-symbol data, and unknown fields", () => {
@@ -305,6 +313,29 @@ describe("research market snapshot V1", () => {
     expect(validateResearchSnapshotPairV1(underlying, recomputed)).toEqual({
       success: false,
       reason: "OPTION_UNIVERSE_SNAPSHOT_INVALID",
+    })
+  })
+
+  it("rejects option observations timestamped after their source response", () => {
+    const underlying = buildUnderlying()
+    const quoteAfterRetrieval = createOptionUniverseSnapshotInputV1()
+    quoteAfterRetrieval.contracts[0]!.quote.providerTimestamp =
+      "2026-08-28T14:00:58.001Z"
+    expect(
+      buildOptionUniverseSnapshotV1(underlying, quoteAfterRetrieval),
+    ).toEqual({
+      success: false,
+      reasons: ["OBSERVATION_FROM_FUTURE"],
+    })
+
+    const volumeAfterRetrieval = createOptionUniverseSnapshotInputV1()
+    volumeAfterRetrieval.contracts[0]!.currentSessionVolume.providerTimestamp =
+      "2026-08-28T14:00:58.001Z"
+    expect(
+      buildOptionUniverseSnapshotV1(underlying, volumeAfterRetrieval),
+    ).toEqual({
+      success: false,
+      reasons: ["OBSERVATION_FROM_FUTURE"],
     })
   })
 

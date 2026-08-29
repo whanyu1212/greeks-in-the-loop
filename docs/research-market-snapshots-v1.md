@@ -65,7 +65,9 @@ The snapshot contains:
 The contract validates weekday calendar ordering, exact bar topology, unique
 records, daily-bar timestamps bound to their declared sessions, positive
 OHLC/VWAP/volume, OHLC relationships, source times inside the capture window,
-and quote freshness. The contract cannot derive exchange holidays by itself;
+and quote freshness. Provider observation timestamps may not follow the
+application retrieval time of the response that supplied them. The contract
+cannot derive exchange holidays by itself;
 #65 must obtain the complete ordered session list from the Alpaca calendar and
 must fail capture when that provider evidence is incomplete. Initial freshness
 is measured against `observedAt`,
