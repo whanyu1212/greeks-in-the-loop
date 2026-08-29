@@ -75,6 +75,7 @@ The frozen MVP strategy is documented in [SPY Directional Debit Spreads](docs/st
 | [Pre-Market Research V1](docs/pre-market-research-v1.md) | Research vs. trade-intent eligibility windows |
 | [Research Source Policy](docs/research-source-policy.md) | Source precedence and freshness rules |
 | [Research Behavior Evaluation](docs/research-behavior-evaluation.md) | Prompt-behavior evaluation record |
+| [Offline Research Evaluation](docs/research-evaluation.md) | Deterministic run-scoring dimensions and privacy boundary |
 | [Observability](docs/observability.md) | Tracing configuration and span layout |
 
 ## Requirements
@@ -316,7 +317,9 @@ questions nothing else in the system can.
 acquired dataset supports them directly. The signal (`evaluateBacktestSignalV1`)
 requires three conditions to agree — close above SMA-20, SMA-20 above SMA-50,
 spot above session VWAP — inverted for `BEARISH`, otherwise `NO_ACTION`; the
-**20 and 50 lookbacks** are the tunable knobs. Exits are priority-ordered:
+**20 lookback** is the tunable knob; the 50 is pinned by
+`exactScenarioSchema` at exactly 50 preceding sessions, so retuning it is a
+scenario-contract change rather than a parameter sweep. Exits are priority-ordered:
 `LATE_FILL`, `EXPIRATION` (DTE < 3, or 3 with ≤ 60 min to close), `STALE_DATA`
 (≥ 5 min), `STOP_LOSS`, `PROFIT_TARGET`, `TREND_INVALIDATION` (close crosses
 SMA-20 against the position), `MAX_HOLDING_PERIOD` (after session 5, or session 5 with
@@ -355,14 +358,18 @@ permissive, not that the approvals were sound. Replay is the only path that
 reaches profit and loss:
 
 ```
+entryMark = entryLimitCentsPerShare × 2
+exitMark  = max(0, mark − exitSlippageHalfCentsPerShare)
+
 pnl = (exitMark − entryMark) × 50
       − entrySlippageHalfCentsPerShare × 50
       − commissionCentsPerContract × 4
 ```
 
-Entry is taken at `entryLimitCentsPerShare × 2`. Slippage and commission are
-per-run scenario inputs — assumptions to be calibrated once real fills exist,
-not measured results.
+Note the asymmetry: entry slippage is subtracted explicitly, while exit slippage
+is folded into `exitMark` beforehand and floored at zero, so it can never drive
+the mark negative. Slippage and commission are per-run scenario inputs —
+assumptions to be calibrated once real fills exist, not measured results.
 
 Shadow mode cannot substitute. It runs about one cycle per day, never observes
 an outcome, and cannot re-answer a question after a rule change. Replay reruns
