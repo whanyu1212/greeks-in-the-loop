@@ -6,9 +6,74 @@ The worker is intentionally non-executing. Its dedicated `research` agent can in
 
 The research agent is deny-by-default: broker mutations, generic shell execution, source edits, external-directory access, subagents, and unreviewed tools are unavailable. The managed runtime ignores user-global OpenCode plugins and MCP configuration, and each project MCP process receives only its own credentials. Risk and execution authority remain outside OpenCode.
 
+## Research to risk flow
+
+```mermaid
+flowchart TD
+    S[Universe selection<br/>deterministic ranking, no agent] -.->|not built| A
+
+    subgraph research["Research"]
+        A[Research agent] -->|ProposedTradeDecisionV1| B[Confirm quotes + deriveTradeIntentV1]
+    end
+
+    subgraph risk["Shadow risk"]
+        C[Re-fetch broker + market state from Alpaca] --> D[evaluateTradeIntentRiskV1<br/>deterministic gate rules]
+    end
+
+    B -->|TradeIntentV1| C
+    D -->|APPROVED / REJECTED| E[Record decision to ledger<br/>no order submitted]
+
+    subgraph backtest["Backtest replay (offline)"]
+        R1[Immutable checksummed<br/>Alpaca dataset] --> R2[Scenarios<br/>EXACT_SNAPSHOT / HISTORICAL_BAR_PROXY]
+    end
+
+    R2 -->|same gate, no agent| D
+
+    E -.->|not built| F[Order construction<br/>deterministic, no agent authority]
+    F -.->|not built| G[Broker submit + fill tracking]
+    G -.->|not built| H[Position + exit management<br/>stop loss / profit target marks]
+    H -.-> E
+
+    classDef unbuilt stroke-dasharray:5 5,fill:#f8f8f8,color:#666,stroke:#999
+    class S,F,G,H unbuilt
+```
+
+Backtest replay is a separate offline entry point (`pnpm backtest`), not a stage in the live cycle. It feeds scenarios into the **same** `evaluateTradeIntentRiskV1` the live path uses, with no agent in the loop. Its output is a report file — no runtime code reads it back, and no backtest result influences a live decision. See [Why backtest replay exists](#why-backtest-replay-exists).
+
+Solid edges are implemented today. Dotted nodes are deferred: universe selection upstream, and the execution path downstream where the shadow decision is recorded but never acted on.
+
+**Universe selection** (deferred, tracked in #34) would replace the hard-coded SPY underlying with a small allowlist of liquid ETFs and pick one symbol per cycle. Three properties matter:
+
+- **Deterministic, no agent.** Selection ranks candidates by regime-signal strength and liquidity using pure functions — same persisted snapshot, same chosen symbol. Putting a model here would make cycle inputs irreproducible and break replay.
+- **Upstream of research, invisible to risk.** Selection decides *what* to research; the gate evaluates the resulting intent identically regardless of which symbol was chosen. `evaluateTradeIntentRiskV1` should never learn a universe exists.
+- **Selection precedes snapshot capture.** Only the chosen symbol's chain is fetched, so cost and quote freshness stay bounded as the universe grows.
+
+The staged approach is parameterize first, expand later: replace the `SPY` literals with an allowlist holding only `{SPY}` — zero behavior change, all tests unchanged — then add the ranking layer, then admit two or three more ETFs once ranking is proven. Changing the underlying is a major strategy version bump, so it is worth doing once. The shared prerequisites are now in place: OCC symbol parsing is consolidated behind `src/shared/alpaca-option-identity.ts`, and strategy identity resolves through `src/strategy/strategy-registry.ts` rather than scattered literals. One open design question remains: `entriesSubmittedToday` is portfolio-wide today, so per-symbol versus portfolio entry limits needs an explicit decision rather than an inherited one. `TradeIntentV1` already carries `stopLossMarkHalfCentsPerShare` and `profitTargetMarkHalfCentsPerShare` for that future exit layer, and `evaluateTradeIntentRiskV1` pins `approvedQuantity: 1`. The agent has no order-construction or submission interface in any of these stages, built or planned.
+
+**What crosses the research to risk boundary:** only the proposed spread's *identity* (direction, structure, expiration, the two OCC leg symbols) carries through. Every financial input the gate uses — equity, buying power, positions, live quotes, greeks, volume/open interest, market clock — is re-fetched by the risk engine itself; research's numbers are never trusted for the decision.
+
+**What comes back:** a `ShadowRiskDecisionV1` (`STATE_CAPTURE_FAILED` \| `INTENT_REFRESH_FAILED` \| `EVALUATED` with `APPROVED`/`REJECTED` + reason codes) plus any newly latched breaker transitions. Nothing is executed — the decision is only recorded to the event ledger.
+
 ## Strategy
 
 The frozen MVP strategy is documented in [SPY Directional Debit Spreads](docs/strategy-v1.md). It assumes the project will remain on the free Alpaca Basic data tier. The specification defines future execution behavior; the current worker remains non-executing and evaluates every live intent in shadow mode.
+
+`docs/` holds the authoritative specifications. Consult these before changing contract or rule behavior:
+
+| Spec | Covers |
+| --- | --- |
+| [Strategy V1](docs/strategy-v1.md) | Frozen MVP strategy and versioning policy |
+| [Risk Engine V1](docs/risk-engine-v1.md) | Gate rules, thresholds, and rejection codes |
+| [Trade Intent V1](docs/trade-intent-v1.md) | Derived spread economics and integer-cent units |
+| [Research Decision V1](docs/research-decision-v1.md) | The agent-output trust boundary |
+| [Research Report V2](docs/research-report-v2.md) | Bounded report retained per cycle |
+| [Event Ledger V1](docs/event-ledger-v1.md) | Append-only audit record and SQL invariants |
+| [Backtest Replay V1](docs/backtest-replay-v1.md) | Offline scenario contracts and fidelities |
+| [Research Market Snapshots V1](docs/research-market-snapshots-v1.md) | Application-owned market-data identity (data only; capture and use are unbuilt) |
+| [Pre-Market Research V1](docs/pre-market-research-v1.md) | Research vs. trade-intent eligibility windows |
+| [Research Source Policy](docs/research-source-policy.md) | Source precedence and freshness rules |
+| [Research Behavior Evaluation](docs/research-behavior-evaluation.md) | Prompt-behavior evaluation record |
+| [Observability](docs/observability.md) | Tracing configuration and span layout |
 
 ## Requirements
 
@@ -237,6 +302,87 @@ rules, and candidate ranking. Historical option-bar runs are explicitly labeled
 proxy fidelity and cannot claim historical signal or risk approval. See
 [Backtest Replay V1](docs/backtest-replay-v1.md) for scenario contracts,
 execution assumptions, output metrics, and Alpaca data limitations.
+
+### Why backtest replay exists
+
+Replay writes a report file. Nothing reads it back, and no backtest result
+reaches a live decision — the risk gate is a pure function of one intent plus
+currently captured state. Its value is entirely offline, and it answers three
+questions nothing else in the system can.
+
+**Do the signal and exit rules work?** These hold the free parameters, and the
+acquired dataset supports them directly. The signal (`evaluateBacktestSignalV1`)
+requires three conditions to agree — close above SMA-20, SMA-20 above SMA-50,
+spot above session VWAP — inverted for `BEARISH`, otherwise `NO_ACTION`; the
+**20 and 50 lookbacks** are the tunable knobs. Exits are priority-ordered:
+`LATE_FILL`, `EXPIRATION` (DTE < 3, or 3 with ≤ 60 min to close), `STALE_DATA`
+(≥ 5 min), `STOP_LOSS`, `PROFIT_TARGET`, `TREND_INVALIDATION` (close crosses
+SMA-20 against the position), `MAX_HOLDING_PERIOD` (session 5, or 5 with ≤ 30
+min to close). Order matters: stop loss precedes profit target, so a cycle
+hitting both books a loss. `TradeIntentV1` carries
+`stopLossMarkHalfCentsPerShare` and `profitTargetMarkHalfCentsPerShare` on every
+intent and position management is unbuilt, so replay's exit simulation is the
+only code that ever exercises them.
+
+**Which risk-gate threshold is binding?** `evaluateTradeIntentRiskV1` hardcodes
+about twenty bounds. Replay returns a `RiskEvaluationV1` for *every* candidate,
+not only the selected one, so a run yields a reason-code histogram. Coverage is
+uneven:
+
+| Thresholds | From acquired data? |
+|---|---|
+| DTE 14–30, width 100–1000¢, entry ≤ 60% of width, max loss $500 | Yes — derivable from symbols and bars |
+| Long delta 0.45–0.6, short delta 0.2–0.35, IV > 0, volume ≥ 100, open interest ≥ 500 | **No** — needs `EXACT_SNAPSHOT` |
+| Quote/account staleness, breakers, buying-power reserve | No meaningful historical variation |
+
+Replay scores pre-built candidates; it does not generate them from the dataset.
+The gate reads greeks, IV, open interest, account, and portfolio state from each
+scenario's own snapshot, and the dataset holds only sessions, underlying bars,
+option bars, trades, and contracts — Alpaca's free tier serves no historical
+option greeks or open interest. Contract-quality thresholds therefore require
+`EXACT_SNAPSHOT` scenarios forward-captured by live shadow cycles, roughly one
+candidate set per trading day. Replay does not remove that accumulation cost; it
+lets you re-answer instantly, and again after every rule change, once the corpus
+exists.
+
+**Would the strategy have lost money?** Shadow mode records APPROVED or REJECTED
+and stops; it never learns the outcome. Approval rate shows the gate is
+permissive, not that the approvals were sound. Replay is the only path that
+reaches profit and loss:
+
+```
+pnl = (exitMark − entryMark) × 50
+      − entrySlippageHalfCentsPerShare × 50
+      − commissionCentsPerContract × 4
+```
+
+Entry is taken at `entryLimitCentsPerShare × 2`. Slippage and commission are
+per-run scenario inputs — assumptions to be calibrated once real fills exist,
+not measured results.
+
+Shadow mode cannot substitute. It runs about one cycle per day, never observes
+an outcome, and cannot re-answer a question after a rule change. Replay reruns
+a whole window against a frozen, checksummed dataset, and because every stage is
+deterministic, a difference in results is attributable solely to the change
+under test. The same property makes it the harness for evaluating the *agent*:
+hold dataset and rules constant, vary model or prompt, and compare. The agent is
+the only genuinely uncertain component in the system.
+
+The feedback loop is deliberately human and versioned:
+
+```
+shadow mode  ──►  exact snapshots  ──►  replay  ──►  reason codes + P&L
+                                                            │
+                                          human review ──►  new RISK_RULE_VERSION
+```
+
+Backtest statistics are never consulted at runtime. Doing so would make a
+versioned, auditable, pure gate depend on whichever dataset happened to be
+present at evaluation time — and the current sample (one entry per day,
+`approvedQuantity` pinned at 1, no live fills yet) could not support a threshold
+change regardless. `HISTORICAL_BAR_PROXY` scenarios contribute nothing to the
+rule evidence above: they skip the signal, report a `NOT_EVALUABLE` risk status
+because the gate never runs, and test exit mechanics only.
 
 ## Observability
 
