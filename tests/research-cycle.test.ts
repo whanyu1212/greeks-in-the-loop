@@ -1174,6 +1174,37 @@ describe("processResearchCycle", () => {
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
   })
 
+  it("propagates cancellation while quote confirmation is in flight", async () => {
+    const dependencies = setup()
+    const controller = new AbortController()
+    const abortReason = new DOMException("Timed out", "TimeoutError")
+    let markQuoteStarted!: () => void
+    const quoteStarted = new Promise<void>((resolve) => {
+      markQuoteStarted = resolve
+    })
+    dependencies.confirmQuotes.mockImplementation(({ signal }) =>
+      new Promise<never>((_resolve, reject) => {
+        markQuoteStarted()
+        signal.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        })
+      }),
+    )
+
+    const processing = processResearchCycle({
+      rawResponse: serializeReport(proposal),
+      signal: controller.signal,
+      ...dependencies,
+    })
+    await quoteStarted
+    controller.abort(abortReason)
+
+    await expect(processing).rejects.toBe(abortReason)
+    expect(dependencies.confirmQuotes).toHaveBeenCalledOnce()
+    expect(dependencies.record).not.toHaveBeenCalled()
+    expect(dependencies.deriveIntent).not.toHaveBeenCalled()
+  })
+
   it("records quote failures as derivation rejection without a decision", async () => {
     const dependencies = setup()
     dependencies.confirmQuotes.mockResolvedValue({
