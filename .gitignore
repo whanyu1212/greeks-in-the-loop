@@ -8,3 +8,5 @@ dev_notes/
 dist/
 node_modules/
 workspace/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
