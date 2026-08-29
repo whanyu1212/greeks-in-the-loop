@@ -371,26 +371,30 @@ is folded into `exitMark` beforehand and floored at zero, so it can never drive
 the mark negative. Slippage and commission are per-run scenario inputs —
 assumptions to be calibrated once real fills exist, not measured results.
 
-Shadow mode cannot substitute. It runs about one cycle per day, never observes
-an outcome, and cannot re-answer a question after a rule change. Replay reruns
-a whole window against a frozen, checksummed dataset, and because every stage is
+Shadow mode cannot substitute. It never observes an outcome, and it cannot
+re-answer a question after a rule change — each cycle is evaluated once against
+the state captured at that moment and is never revisited. Replay reruns a whole
+window against a frozen, checksummed dataset, and because every stage is
 deterministic, a difference in results is attributable solely to the change
-under test. The same property makes it the harness for evaluating the *agent*:
-hold dataset and rules constant, vary model or prompt, and compare. The agent is
-the only genuinely uncertain component in the system.
+under test.
+
+Replay evaluates the deterministic rules, not the agent: `pnpm backtest` reads a
+pre-authored scenarios file and never invokes a model or prompt. Agent behavior
+is evaluated separately by `pnpm research:eval:live`.
 
 The feedback loop is deliberately human and versioned:
 
 ```
-shadow mode  ──►  exact snapshots  ──►  replay  ──►  reason codes + P&L
-                                                            │
-                                          human review ──►  new RISK_RULE_VERSION
+shadow mode  ┄┄►  exact snapshots  ──►  replay  ──►  reason codes + P&L
+             (capture unbuilt)                              │
+                      new RISK_RULE_VERSION  ◄──  human review
 ```
 
 Backtest statistics are never consulted at runtime. Doing so would make a
 versioned, auditable, pure gate depend on whichever dataset happened to be
-present at evaluation time — and the current sample (one entry per day,
-`approvedQuantity` pinned at 1, no live fills yet) could not support a threshold
+present at evaluation time — and the current sample (at most one approved
+entry per day, enforced by `DAILY_ENTRY_LIMIT_ACTIVE`; `approvedQuantity`
+pinned at 1; no live fills yet) could not support a threshold
 change regardless. `HISTORICAL_BAR_PROXY` scenarios contribute nothing to the
 rule evidence above: they skip the signal, report a `NOT_EVALUABLE` risk status
 because the gate never runs, and test exit mechanics only.
