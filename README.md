@@ -24,7 +24,9 @@ flowchart TD
     D -->|APPROVED / REJECTED| E[Record decision to ledger<br/>no order submitted]
 
     subgraph backtest["Backtest replay (offline)"]
-        R1[Immutable checksummed<br/>Alpaca dataset] --> R2[Scenarios<br/>EXACT_SNAPSHOT / HISTORICAL_BAR_PROXY]
+        R1[Immutable checksummed<br/>Alpaca dataset] --> R2[EXACT_SNAPSHOT scenarios]
+        R1 --> R3[HISTORICAL_BAR_PROXY scenarios]
+        R3 --> R4[Exit mechanics only<br/>riskStatus: NOT_EVALUABLE]
     end
 
     R2 -->|same gate, no agent| D
@@ -38,7 +40,7 @@ flowchart TD
     class S,F,G,H unbuilt
 ```
 
-Backtest replay is a separate offline entry point (`pnpm backtest`), not a stage in the live cycle. It feeds scenarios into the **same** `evaluateTradeIntentRiskV1` the live path uses, with no agent in the loop. Its output is a report file — no runtime code reads it back, and no backtest result influences a live decision. See [Why backtest replay exists](#why-backtest-replay-exists).
+Backtest replay is a separate offline entry point (`pnpm backtest`), not a stage in the live cycle. It feeds `EXACT_SNAPSHOT` scenarios into the **same** `evaluateTradeIntentRiskV1` the live path uses, with no agent in the loop; `HISTORICAL_BAR_PROXY` scenarios never reach the gate and exercise exit mechanics only. Its output is a report file — no runtime code reads it back, and no backtest result influences a live decision. See [Why backtest replay exists](#why-backtest-replay-exists).
 
 Solid edges are implemented today. Dotted nodes are deferred: universe selection upstream, and the execution path downstream where the shadow decision is recorded but never acted on.
 
@@ -317,8 +319,8 @@ spot above session VWAP — inverted for `BEARISH`, otherwise `NO_ACTION`; the
 **20 and 50 lookbacks** are the tunable knobs. Exits are priority-ordered:
 `LATE_FILL`, `EXPIRATION` (DTE < 3, or 3 with ≤ 60 min to close), `STALE_DATA`
 (≥ 5 min), `STOP_LOSS`, `PROFIT_TARGET`, `TREND_INVALIDATION` (close crosses
-SMA-20 against the position), `MAX_HOLDING_PERIOD` (session 5, or 5 with ≤ 30
-min to close). Order matters: stop loss precedes profit target, so a cycle
+SMA-20 against the position), `MAX_HOLDING_PERIOD` (after session 5, or session 5 with
+≤ 30 min to close). Order matters: stop loss precedes profit target, so a cycle
 hitting both books a loss. `TradeIntentV1` carries
 `stopLossMarkHalfCentsPerShare` and `profitTargetMarkHalfCentsPerShare` on every
 intent and position management is unbuilt, so replay's exit simulation is the
@@ -340,10 +342,12 @@ The gate reads greeks, IV, open interest, account, and portfolio state from each
 scenario's own snapshot, and the dataset holds only sessions, underlying bars,
 option bars, trades, and contracts — Alpaca's free tier serves no historical
 option greeks or open interest. Contract-quality thresholds therefore require
-`EXACT_SNAPSHOT` scenarios forward-captured by live shadow cycles, roughly one
-candidate set per trading day. Replay does not remove that accumulation cost; it
-lets you re-answer instantly, and again after every rule change, once the corpus
-exists.
+`EXACT_SNAPSHOT` scenarios, which are hand-authored today: no runtime code
+captures them, and a shadow decision persists the evaluated intent and
+provenance rather than the session and candidate inputs `exactScenarioSchema`
+needs. Forward-capture from live cycles is unbuilt, so no corpus is currently
+accumulating. Once it exists, replay lets you re-answer these questions
+instantly, and again after every rule change.
 
 **Would the strategy have lost money?** Shadow mode records APPROVED or REJECTED
 and stops; it never learns the outcome. Approval rate shows the gate is
