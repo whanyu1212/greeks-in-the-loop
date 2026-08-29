@@ -47,9 +47,71 @@ const noAction = {
   },
 } as const
 
+const candidateEvaluation = (
+  longContractSymbol = "SPY260918C00650000",
+  shortContractSymbol = "SPY260918C00655000",
+) => ({
+  verification: "AGENT_REPORTED" as const,
+  observedAt: "2026-08-26T14:29:00.000Z",
+  dte: 23,
+  legs: [
+    {
+      role: "LONG" as const,
+      contractSymbol: longContractSymbol,
+      delta: 0.55,
+      impliedVolatility: 0.2,
+      gamma: 0.01,
+      theta: -0.1,
+      vega: 0.15,
+      volume: 1_000,
+      openInterest: 2_000,
+      openInterestDate: "2026-08-25",
+    },
+    {
+      role: "SHORT" as const,
+      contractSymbol: shortContractSymbol,
+      delta: 0.45,
+      impliedVolatility: 0.21,
+      gamma: 0.01,
+      theta: -0.08,
+      vega: 0.14,
+      volume: 900,
+      openInterest: 1_800,
+      openInterestDate: "2026-08-25",
+    },
+  ],
+})
+
 describe("ResearchReportV2", () => {
   it("retains a bounded normalized dossier with timestamped Exa context", () => {
     expect(researchReportV2Schema.parse(noAction)).toMatchObject(noAction)
+  })
+
+  it("accepts SPY candidate diagnostic symbols", () => {
+    expect(
+      researchReportV2Schema.safeParse({
+        ...noAction,
+        analysis: {
+          ...noAction.analysis,
+          candidateEvaluation: candidateEvaluation(),
+        },
+      }).success,
+    ).toBe(true)
+  })
+
+  it.each([
+    ["unsupported", "QQQ260918C00650000"],
+    ["impossible-date", "SPY260431C00650000"],
+  ])("rejects %s candidate diagnostic symbols", (_case, contractSymbol) => {
+    expect(
+      researchReportV2Schema.safeParse({
+        ...noAction,
+        analysis: {
+          ...noAction.analysis,
+          candidateEvaluation: candidateEvaluation(contractSymbol),
+        },
+      }).success,
+    ).toBe(false)
   })
 
   it("requires Exa for substantive research", () => {

@@ -82,17 +82,26 @@ describe("deriveTradeIntentV1", () => {
 
     expect(result).toEqual({
       success: true,
-      intent: expect.objectContaining({
+      intent: {
         contractVersion: "1.0.0",
         decisionContractVersion: "1.0.0",
         strategyVersion: "1.1.0",
+        direction: "BULLISH",
+        structure: "BULL_CALL_SPREAD",
+        expiration: "2026-09-18",
+        longContractSymbol: "SPY260918C00650000",
+        shortContractSymbol: "SPY260918C00655000",
+        quoteSnapshotRef: "alpaca-proposal-quotes-v1",
+        evaluatedAt: "2026-08-25T14:31:00.000Z",
+        longQuote: context.longQuote,
+        shortQuote: context.shortQuote,
         entryLimitCentsPerShare: 101,
         widthCentsPerShare: 500,
         maxLossCentsPerContract: 10_100,
         maxProfitCentsPerContract: 39_900,
         stopLossMarkHalfCentsPerShare: 101,
         profitTargetMarkHalfCentsPerShare: 601,
-      }),
+      },
     })
   })
 
@@ -207,6 +216,40 @@ describe("deriveTradeIntentV1", () => {
       reasons: ["STRIKE_PRECISION_UNSUPPORTED"],
     })
   })
+
+  it.each([
+    ["unsupported root", "QQQ260918C00650000", "QQQ260918C00655000"],
+    ["impossible expiration", "SPY260431C00650000", "SPY260431C00655000"],
+  ])(
+    "maps an %s to the existing derivation-input failure",
+    (_case, longContractSymbol, shortContractSymbol) => {
+      const decision = {
+        ...bullishDecision,
+        candidate: {
+          ...bullishDecision.candidate,
+          longLeg: {
+            ...bullishDecision.candidate.longLeg,
+            contractSymbol: longContractSymbol,
+          },
+          shortLeg: {
+            ...bullishDecision.candidate.shortLeg,
+            contractSymbol: shortContractSymbol,
+          },
+        },
+      } as ProposedTradeDecisionV1
+
+      expect(
+        deriveTradeIntentV1(decision, {
+          ...context,
+          longQuote: quote(longContractSymbol, 220, 223),
+          shortQuote: quote(shortContractSymbol, 120, 121),
+        }),
+      ).toEqual({
+        success: false,
+        reasons: ["DERIVATION_INPUT_INVALID"],
+      })
+    },
+  )
 
   it("rejects an extreme debit at the spread-width boundary before conversion", () => {
     expect(

@@ -1,5 +1,11 @@
 import { z } from "zod"
 
+import {
+  alpacaOptionStrikeCents,
+  parseAlpacaOptionSymbol,
+  spyAlpacaOptionSymbolV1Schema,
+  validateSpyOptionUniverseV1,
+} from "../shared/alpaca-option-identity.js"
 import { parseRfc3339Nanoseconds } from "../shared/value-normalization.js"
 import { calculateDebitSpreadEconomicsV1 } from "./debit-spread-economics-v1.js"
 import {
@@ -11,7 +17,6 @@ import {
 
 export const TRADE_INTENT_CONTRACT_VERSION = "1.0.0" as const
 
-const SPY_OPTION_SYMBOL_PATTERN = /^SPY(\d{6})([CP])(\d{8})$/u
 const MAX_QUOTE_AGE_NANOSECONDS = 60_000_000_000n
 const timestamp = z.iso.datetime({ offset: true })
 const evaluatedAtTimestamp = z.iso.datetime({ offset: true, precision: 3 })
@@ -25,50 +30,9 @@ const positiveSafeInteger = z
   .positive()
   .max(Number.MAX_SAFE_INTEGER)
 
-type ParsedOptionSymbol = Readonly<{
-  expiration: string
-  optionType: "C" | "P"
-  strikeCentsPerShare: number
-}>
-
-/**
- * Parses identity and an exact cent-denominated strike from an OCC symbol.
- *
- * @param symbol SPY OCC option symbol.
- * @returns Parsed identity, or `undefined` when the strike has sub-cent
- *     precision or the symbol is malformed.
- */
-const parseOptionSymbol = (symbol: string): ParsedOptionSymbol | undefined => {
-  const match = SPY_OPTION_SYMBOL_PATTERN.exec(symbol)
-  const expiration = match?.[1]
-  const optionType = match?.[2]
-  const encodedStrike = match?.[3]
-  if (
-    expiration === undefined ||
-    (optionType !== "C" && optionType !== "P") ||
-    encodedStrike === undefined
-  ) {
-    return undefined
-  }
-
-  const strikeThousandths = Number(encodedStrike)
-  if (
-    !Number.isSafeInteger(strikeThousandths) ||
-    strikeThousandths % 10 !== 0
-  ) {
-    return undefined
-  }
-
-  return {
-    expiration: `20${expiration.slice(0, 2)}-${expiration.slice(2, 4)}-${expiration.slice(4, 6)}`,
-    optionType,
-    strikeCentsPerShare: strikeThousandths / 10,
-  }
-}
-
 export const confirmedOptionQuoteV1Schema = z
   .object({
-    contractSymbol: z.string().regex(SPY_OPTION_SYMBOL_PATTERN),
+    contractSymbol: spyAlpacaOptionSymbolV1Schema,
     feed: z.literal("INDICATIVE"),
     bidCentsPerShare: positiveSafeInteger,
     askCentsPerShare: positiveSafeInteger,
@@ -97,8 +61,8 @@ export const tradeIntentV1Schema = z
     direction: z.enum(["BULLISH", "BEARISH"]),
     structure: z.enum(["BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"]),
     expiration: expirationDate,
-    longContractSymbol: z.string().regex(SPY_OPTION_SYMBOL_PATTERN),
-    shortContractSymbol: z.string().regex(SPY_OPTION_SYMBOL_PATTERN),
+    longContractSymbol: spyAlpacaOptionSymbolV1Schema,
+    shortContractSymbol: spyAlpacaOptionSymbolV1Schema,
     quoteSnapshotRef: z.string().min(1).max(128),
     evaluatedAt: evaluatedAtTimestamp,
     longQuote: confirmedOptionQuoteV1Schema,
@@ -133,17 +97,30 @@ export const tradeIntentV1Schema = z
       })
     }
 
-    const longSymbol = parseOptionSymbol(intent.longContractSymbol)
-    const shortSymbol = parseOptionSymbol(intent.shortContractSymbol)
+    const longSymbol = parseAlpacaOptionSymbol(intent.longContractSymbol)
+    const shortSymbol = parseAlpacaOptionSymbol(intent.shortContractSymbol)
     const expectedOptionType = intent.structure === "BULL_CALL_SPREAD" ? "C" : "P"
     if (
-      longSymbol === undefined ||
-      shortSymbol === undefined ||
-      longSymbol.expiration !== intent.expiration ||
-      shortSymbol.expiration !== intent.expiration ||
-      longSymbol.optionType !== expectedOptionType ||
-      shortSymbol.optionType !== expectedOptionType
+      !longSymbol.success ||
+      !shortSymbol.success ||
+      !validateSpyOptionUniverseV1(longSymbol.identity).success ||
+      !validateSpyOptionUniverseV1(shortSymbol.identity).success ||
+      longSymbol.identity.expiration !== intent.expiration ||
+      shortSymbol.identity.expiration !== intent.expiration ||
+      longSymbol.identity.optionType !== expectedOptionType ||
+      shortSymbol.identity.optionType !== expectedOptionType
     ) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["longContractSymbol"],
+        message: "The option symbols do not match the intent identity",
+      })
+      return
+    }
+
+    const longStrike = alpacaOptionStrikeCents(longSymbol.identity)
+    const shortStrike = alpacaOptionStrikeCents(shortSymbol.identity)
+    if (!longStrike.success || !shortStrike.success) {
       refinement.addIssue({
         code: "custom",
         path: ["longContractSymbol"],
@@ -154,8 +131,8 @@ export const tradeIntentV1Schema = z
 
     const strikesAreOrdered =
       intent.structure === "BULL_CALL_SPREAD"
-        ? longSymbol.strikeCentsPerShare < shortSymbol.strikeCentsPerShare
-        : longSymbol.strikeCentsPerShare > shortSymbol.strikeCentsPerShare
+        ? longStrike.strikeCentsPerShare < shortStrike.strikeCentsPerShare
+        : longStrike.strikeCentsPerShare > shortStrike.strikeCentsPerShare
     if (!strikesAreOrdered) {
       refinement.addIssue({
         code: "custom",
@@ -189,8 +166,8 @@ export const tradeIntentV1Schema = z
     const calculation = calculateDebitSpreadEconomicsV1(
       intent.longQuote,
       intent.shortQuote,
-      longSymbol.strikeCentsPerShare,
-      shortSymbol.strikeCentsPerShare,
+      longStrike.strikeCentsPerShare,
+      shortStrike.strikeCentsPerShare,
     )
     if (!calculation.success) {
       refinement.addIssue({
@@ -288,21 +265,32 @@ export function deriveTradeIntentV1(
     return { success: false, reasons: ["QUOTE_SYMBOL_MISMATCH"] }
   }
 
-  const longSymbol = parseOptionSymbol(
+  const longSymbol = parseAlpacaOptionSymbol(
     decision.candidate.longLeg.contractSymbol,
   )
-  const shortSymbol = parseOptionSymbol(
+  const shortSymbol = parseAlpacaOptionSymbol(
     decision.candidate.shortLeg.contractSymbol,
   )
-  if (longSymbol === undefined || shortSymbol === undefined) {
+  if (
+    !longSymbol.success ||
+    !shortSymbol.success ||
+    !validateSpyOptionUniverseV1(longSymbol.identity).success ||
+    !validateSpyOptionUniverseV1(shortSymbol.identity).success
+  ) {
+    return { success: false, reasons: ["DERIVATION_INPUT_INVALID"] }
+  }
+
+  const longStrike = alpacaOptionStrikeCents(longSymbol.identity)
+  const shortStrike = alpacaOptionStrikeCents(shortSymbol.identity)
+  if (!longStrike.success || !shortStrike.success) {
     return { success: false, reasons: ["STRIKE_PRECISION_UNSUPPORTED"] }
   }
 
   const calculation = calculateDebitSpreadEconomicsV1(
     parsedContext.data.longQuote,
     parsedContext.data.shortQuote,
-    longSymbol.strikeCentsPerShare,
-    shortSymbol.strikeCentsPerShare,
+    longStrike.strikeCentsPerShare,
+    shortStrike.strikeCentsPerShare,
   )
   if (!calculation.success) {
     return { success: false, reasons: [calculation.reason] }
