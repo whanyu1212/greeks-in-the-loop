@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 
+import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 import {
   NO_ACTION_REASON_CODES,
   researchCandidateV1Schema,
@@ -185,6 +186,13 @@ describe("ResearchDecision v1 proposal contract", () => {
       success: true,
       data: bullishProposal,
     })
+  })
+
+  it("preserves the canonical SPY V1 proposal bytes", () => {
+    const validated = validateResearchDecisionV1(bullishProposal, context)
+    if (!validated.success) throw new Error("Expected proposal validation")
+
+    expect(canonicalJsonSha256(validated.data)).toBe("741ffccbf540f611c88f9382f76e125772e8d024e7b9041c76f79dadeba0adf0")
   })
 
   it("accepts a bearish put-spread proposal", () => {

@@ -6,6 +6,7 @@ import {
   type ConfirmedOptionQuoteV1,
 } from "../src/contracts/trade-intent-v1.js"
 import type { ProposedTradeDecisionV1 } from "../src/contracts/research-decision-v1.js"
+import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 
 const bullishDecision: ProposedTradeDecisionV1 = {
   contractVersion: "1.0.0",
@@ -154,6 +155,13 @@ describe("deriveTradeIntentV1", () => {
     expect(deriveTradeIntentV1(bullishDecision, context)).toEqual(
       deriveTradeIntentV1(bullishDecision, context),
     )
+  })
+
+  it("preserves the canonical SPY V1 trade intent bytes", () => {
+    const derived = deriveTradeIntentV1(bullishDecision, context)
+    if (!derived.success) throw new Error("Expected intent derivation")
+
+    expect(canonicalJsonSha256(derived.intent)).toBe("8ef7756988c0ebde5a7d35855f21a1566198b18ab96a4ecfad2ec0558bfde9b4")
   })
 
   it("rejects quote symbols that do not match the proposed legs", () => {

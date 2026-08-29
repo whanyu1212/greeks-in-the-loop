@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { researchReportV2Schema } from "../src/contracts/research-report-v2.js"
+import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 
 const noAction = {
   reportVersion: "2.0.0",
@@ -85,6 +86,12 @@ const candidateEvaluation = (
 describe("ResearchReportV2", () => {
   it("retains a bounded normalized dossier with timestamped Exa context", () => {
     expect(researchReportV2Schema.parse(noAction)).toMatchObject(noAction)
+  })
+
+  it("preserves the canonical SPY V1 research report bytes", () => {
+    expect(canonicalJsonSha256(researchReportV2Schema.parse(noAction))).toBe(
+      "06ca88b95c0d397b775c9442b0a2fd02cbf8cd44724c6b2aee9f25edcde7e4a2",
+    )
   })
 
   it("accepts SPY candidate diagnostic symbols", () => {

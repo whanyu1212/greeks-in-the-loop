@@ -409,6 +409,7 @@ describe("backtest replay v1", () => {
     })
     const { checksum, ...reportWithoutChecksum } = report
     expect(checksum).toBe(canonicalJsonSha256(reportWithoutChecksum))
+    expect(checksum).toBe("37249c41f99be7be5fa8823f9519be3468909c86fd26f6cc439546ce47f07bc4")
   })
 
   it("labels retained-intent runs as proxy and preserves exit priority", () => {
