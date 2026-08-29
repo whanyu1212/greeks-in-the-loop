@@ -24,6 +24,7 @@ import {
 import {
   proposalAccountChecksAreFresh,
   PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
+  isProposedTradeReport,
   proposalHistoryIssuePath,
   proposalMarketRegimeIsFresh,
   PROPOSAL_QUOTE_SNAPSHOT_REF,
@@ -647,6 +648,7 @@ export function evaluateResearchRunV1(
       proposalPreflightValidation?.success !== true ||
       !hasRetainedEligibleTradeWindow ||
       validReport === undefined ||
+      !isProposedTradeReport(validReport) ||
       run.initialEligibility === undefined ||
       retainedProposalEvaluationLowerBound === undefined
     ) {

@@ -58,6 +58,27 @@ const observationIsFresh = (
   )
 }
 
+/**
+ * A schema-validated report whose result is a proposed trade.
+ *
+ * Obtain one only by narrowing a parsed `ResearchReportV2` through
+ * {@link isProposedTradeReport}. Never assemble one by spreading a report over
+ * a different result: the decision that gets validated and the analysis that
+ * gets freshness-checked would then come from different proposals, silently
+ * bypassing the result/analysis cross-checks `researchReportV2Schema` enforces
+ * in its `superRefine`.
+ */
+export type ProposedTradeReportV2 = Readonly<
+  Omit<ResearchReportV2, "result"> & {
+    result: Extract<ResearchReportV2["result"], { outcome: "PROPOSE_TRADE" }>
+  }
+>
+
+/** Narrows a parsed report in place, preserving its validated result/analysis pairing. */
+export const isProposedTradeReport = (
+  report: ResearchReportV2,
+): report is ProposedTradeReportV2 => report.result.outcome === "PROPOSE_TRADE"
+
 export const proposalMarketRegimeIsFresh = (
   report: ResearchReportV2,
   evaluatedAt: string,
@@ -79,7 +100,7 @@ export const proposalAccountChecksAreFresh = (
   )
 
 export const proposalHistoryIssuePath = (
-  report: ResearchReportV2,
+  report: ProposedTradeReportV2,
   eligibility: ResearchEligibilityV1,
 ): readonly (string | number)[] | undefined => {
   const sessionDate = eligibility.sessionDate
@@ -100,9 +121,9 @@ export const proposalHistoryIssuePath = (
     return ["analysis", "candidateEvaluation"]
   }
   const sessionDay = Date.parse(`${sessionDate}T00:00:00.000Z`)
-  const expirationDay = Date.parse(`${report.result.outcome === "PROPOSE_TRADE"
-    ? report.result.candidate.expiration
-    : sessionDate}T00:00:00.000Z`)
+  const expirationDay = Date.parse(
+    `${report.result.candidate.expiration}T00:00:00.000Z`,
+  )
   const expectedDte = (expirationDay - sessionDay) / 86_400_000
   if (
     !Number.isInteger(expectedDte) ||
@@ -140,7 +161,7 @@ export type ProposalIntentDeriver = (
 ) => TradeIntentDerivationResult
 
 export type ProcessResearchProposalPathOptions = Readonly<{
-  report: ResearchReportV2
+  report: ProposedTradeReportV2
   signal: AbortSignal
   quoteProvider: OptionQuoteProvider
   shadowRiskEvaluator: ShadowRiskEvaluator
@@ -168,9 +189,6 @@ export async function processResearchProposalPath({
   stageReporter,
 }: ProcessResearchProposalPathOptions): Promise<ResearchCycleTerminalResolution> {
   const result = report.result
-  if (result.outcome !== "PROPOSE_TRADE") {
-    throw new Error("Proposal path requires a proposed trade report")
-  }
   const evidencePreflight = await trace.run(
     "research.decision.validate",
     () => validateResearchDecisionV1(result, PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT),
