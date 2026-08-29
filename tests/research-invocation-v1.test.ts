@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  assertResearchModelIdentityV1,
   createResearchInvocationV1,
   MAX_RESEARCH_INVOCATION_TOOL_CALLS,
+  RESEARCH_MODEL_IDENTITY,
   RESEARCH_INVOCATION_PROVENANCE_BY_VERSION,
   RESEARCH_INVOCATION_VERSION,
   researchInvocationV1Schema,
@@ -14,8 +16,9 @@ describe("ResearchInvocationV1", () => {
     expect(SUPPORTED_RESEARCH_INVOCATION_VERSIONS).toEqual([
       "1.0.0",
       "1.1.0",
+      "1.2.0",
     ])
-    expect(RESEARCH_INVOCATION_VERSION).toBe("1.1.0")
+    expect(RESEARCH_INVOCATION_VERSION).toBe("1.2.0")
     expect(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION["1.0.0"]).toMatchObject({
       promptVersion: "1.3.0",
       skillVersion: "1.1.0",
@@ -26,6 +29,93 @@ describe("ResearchInvocationV1", () => {
       strategyVersion: "1.1.0",
       decisionContractVersion: "1.0.0",
       reportVersion: "2.0.0",
+    })
+    expect(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION["1.2.0"]).toMatchObject({
+      promptVersion: "1.4.0",
+      skillVersion: "1.2.0",
+      strategyVersion: "1.1.0",
+      decisionContractVersion: "1.0.0",
+      reportVersion: "2.0.0",
+      providerId: "openai",
+      modelId: "gpt-5.6-sol",
+    })
+  })
+
+  it("pins the model only from the current version", () => {
+    // Earlier runs happened against an unpinned default; back-filling a pin
+    // would claim an assertion they never made.
+    expect(
+      RESEARCH_INVOCATION_PROVENANCE_BY_VERSION["1.0.0"],
+    ).not.toHaveProperty("providerId")
+    expect(
+      RESEARCH_INVOCATION_PROVENANCE_BY_VERSION["1.1.0"],
+    ).not.toHaveProperty("modelId")
+    expect(RESEARCH_MODEL_IDENTITY).toEqual({
+      providerId: "openai",
+      modelId: "gpt-5.6-sol",
+    })
+  })
+
+  describe("model identity assertion", () => {
+    const pinned = { providerId: "openai", modelId: "gpt-5.6-sol" }
+
+    it("accepts the pinned identity", () => {
+      expect(assertResearchModelIdentityV1(pinned)).toEqual({ ok: true })
+    })
+
+    it("reports provider drift before model drift", () => {
+      expect(
+        assertResearchModelIdentityV1({
+          providerId: "anthropic",
+          modelId: "claude-opus-5",
+        }),
+      ).toEqual({
+        ok: false,
+        reason: "PROVIDER_DRIFT",
+        expected: "openai",
+        observed: "anthropic",
+      })
+    })
+
+    it("reports model drift within the pinned provider", () => {
+      expect(
+        assertResearchModelIdentityV1({
+          ...pinned,
+          modelId: "gpt-5.6-sol-fast",
+        }),
+      ).toEqual({
+        ok: false,
+        reason: "MODEL_DRIFT",
+        expected: "gpt-5.6-sol",
+        observed: "gpt-5.6-sol-fast",
+      })
+    })
+
+    it("reports what was observed rather than coercing it to unknown", () => {
+      // durableLabel rewrites an unsafe label to "unknown"; the drift record
+      // must instead say what the provider actually returned.
+      const result = assertResearchModelIdentityV1({
+        providerId: "https://evil.example/path?x=1",
+        modelId: "gpt-5.6-sol",
+      })
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error("expected drift")
+      expect(result.reason).toBe("PROVIDER_DRIFT")
+      expect(result.observed).not.toBe("unknown")
+      expect(result.observed).toContain("evil.example")
+      // Still safe for the ledger: bounded, no scheme, no query characters.
+      expect(result.observed.length).toBeLessThanOrEqual(128)
+      expect(result.observed).not.toContain("://")
+      expect(result.observed).not.toMatch(/[?#@]/u)
+    })
+
+    it("bounds an overlong observed label", () => {
+      const result = assertResearchModelIdentityV1({
+        providerId: "o".repeat(500),
+        modelId: "gpt-5.6-sol",
+      })
+      if (result.ok) throw new Error("expected drift")
+      expect(result.observed).toHaveLength(128)
     })
   })
 

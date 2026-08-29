@@ -459,6 +459,57 @@ describe("createResearchLifecycleRecorder", () => {
     ])
   })
 
+  it("records an invocation-identity rejection against the live cycle", async () => {
+    const state = setup()
+    const cycle = await startCycle(state)
+    state.events.length = 0
+
+    await cycle.recordInvocationIdentityRejected({
+      reason: "MODEL_DRIFT",
+      expected: "gpt-5.6-sol",
+      observed: "gpt-5.6-sol-fast",
+    })
+
+    expect(state.events).toEqual([
+      {
+        eventId: "id-4",
+        eventVersion: "1.0.0",
+        eventType: "RESEARCH_INVOCATION_IDENTITY_REJECTED",
+        occurredAt: TIMESTAMP,
+        correlationId: "id-2",
+        causationEventId: "id-3",
+        cycleId: "id-1",
+        sessionId: "session-1",
+        payload: {
+          invocationVersion: "1.2.0",
+          reason: "MODEL_DRIFT",
+          expected: "gpt-5.6-sol",
+          observed: "gpt-5.6-sol-fast",
+        },
+      },
+    ])
+  })
+
+  it("leaves the cycle terminalizable after an identity rejection", async () => {
+    // The rejection is evidence, not a terminal state: the caller throws and
+    // the resulting interruption is what closes the cycle.
+    const state = setup()
+    const cycle = await startCycle(state)
+
+    await cycle.recordInvocationIdentityRejected({
+      reason: "PROVIDER_DRIFT",
+      expected: "openai",
+      observed: "anthropic",
+    })
+    await cycle.interrupt("FAILED")
+
+    expect(state.events.map(({ eventType }) => eventType)).toEqual([
+      "RESEARCH_CYCLE_STARTED",
+      "RESEARCH_INVOCATION_IDENTITY_REJECTED",
+      "RESEARCH_CYCLE_INTERRUPTED",
+    ])
+  })
+
   it("records the session date and initial eligibility with a new cycle", async () => {
     const state = setup()
     await state.recorder.startCycle({

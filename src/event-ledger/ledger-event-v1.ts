@@ -5,7 +5,11 @@ import { preliminaryResearchV1Schema } from "../contracts/preliminary-research-v
 import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
 import { researchReportV2Schema } from "../contracts/research-report-v2.js"
 import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
-import { researchInvocationV1Schema } from "../research/research-invocation-v1.js"
+import {
+  RESEARCH_INVOCATION_VERSION,
+  RESEARCH_MODEL_DRIFT_CODES,
+  researchInvocationV1Schema,
+} from "../research/research-invocation-v1.js"
 import { SCHEMA_VIOLATION_CATEGORIES } from "../shared/schema-diagnostics.js"
 import {
   riskBreakerTransitionV1Schema,
@@ -28,6 +32,7 @@ export const LEDGER_EVENT_TYPES = [
   "TRADE_INTENT_DERIVATION_REJECTED",
   "RESEARCH_CYCLE_COMPLETED",
   "RESEARCH_CYCLE_INTERRUPTED",
+  "RESEARCH_INVOCATION_IDENTITY_REJECTED",
   "RESEARCH_LOOP_BREAKER_LATCHED",
   "RESEARCH_LOOP_BREAKER_RESET",
   "RISK_SHADOW_DECISION_RECORDED",
@@ -164,6 +169,14 @@ const payloadSchemas = {
         "PROCESS_RESTART",
         "FAILED",
       ]),
+    })
+    .strict(),
+  RESEARCH_INVOCATION_IDENTITY_REJECTED: z
+    .object({
+      invocationVersion: z.literal(RESEARCH_INVOCATION_VERSION),
+      reason: z.enum(RESEARCH_MODEL_DRIFT_CODES),
+      expected: identifier,
+      observed: identifier,
     })
     .strict(),
   RESEARCH_LOOP_BREAKER_LATCHED: z

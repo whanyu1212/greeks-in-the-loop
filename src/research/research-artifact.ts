@@ -234,9 +234,9 @@ export function projectResearchRunV1(
   if (cycleId === undefined || sessionId === undefined) throw new Error("Research cycle identity is incomplete")
   return {
     runVersion: completed.payload.researchInvocation !== undefined
-      ? completed.payload.researchInvocation.invocationVersion === "1.1.0"
-        ? RESEARCH_RUN_VERSION
-        : INVOCATION_RESEARCH_RUN_VERSION
+      ? completed.payload.researchInvocation.invocationVersion === "1.0.0"
+        ? INVOCATION_RESEARCH_RUN_VERSION
+        : RESEARCH_RUN_VERSION
       : riskEvent === undefined
         ? LEGACY_RESEARCH_RUN_VERSION
         : SHADOW_RESEARCH_RUN_VERSION,
