@@ -337,13 +337,15 @@ only code that ever exercises them.
 
 **Which risk-gate threshold is binding?** `evaluateTradeIntentRiskV1` hardcodes
 about twenty bounds. Replay returns a `RiskEvaluationV1` for *every* candidate,
-not only the selected one, so a run yields a reason-code histogram. Coverage is
-uneven:
+not only the selected one, so a run yields a reason-code histogram.
 
-| Thresholds | From acquired data? |
+Every value the gate reads comes from the scenario, never from the dataset. What
+differs is whether a scenario author *could* ground a value in acquired records:
+
+| Thresholds | Can an author ground these in the dataset? |
 |---|---|
-| DTE 14–30, width 100–1000¢, entry ≤ 60% of width, max loss $500 | Yes — derivable from symbols and bars |
-| Long delta 0.45–0.6, short delta 0.2–0.35, IV > 0, volume ≥ 100, open interest ≥ 500 | **No** — needs `EXACT_SNAPSHOT` |
+| DTE 14–30, width 100–1000¢, entry ≤ 60% of width, max loss $500 | Yes — computable from OCC symbols and option bars, though replay never checks that they were |
+| Long delta 0.45–0.6, short delta 0.2–0.35, IV > 0, volume ≥ 100, open interest ≥ 500 | No — absent from the dataset entirely; the values are authored |
 | Quote/account staleness, breakers, buying-power reserve | No meaningful historical variation |
 
 Replay scores pre-built candidates; it does not generate them from the dataset.
