@@ -17,7 +17,6 @@ import {
   RESEARCH_SKILL_NAME,
   RESEARCH_SKILL_VERSION,
 } from "../research/research-agent.js"
-import { RESEARCH_INVOCATION_VERSION } from "../research/research-invocation-v1.js"
 import {
   RISK_EVALUATION_VERSION,
   RISK_RULE_VERSION,
@@ -86,7 +85,7 @@ export const strategyComponentManifestV1Schema = z
     researchPlanCompatibility: z
       .object({
         kind: z.literal("LEGACY_RESEARCH_INVOCATION_V1"),
-        invocationVersion: z.literal(RESEARCH_INVOCATION_VERSION),
+        invocationVersion: z.literal("1.1.0"),
         agentName: z.literal(RESEARCH_AGENT_NAME),
         promptVersion: z.literal(RESEARCH_PROMPT_VERSION),
         skillName: z.literal(RESEARCH_SKILL_NAME),
@@ -172,7 +171,7 @@ const currentManifest = deepFreeze(
     },
     researchPlanCompatibility: {
       kind: "LEGACY_RESEARCH_INVOCATION_V1",
-      invocationVersion: RESEARCH_INVOCATION_VERSION,
+      invocationVersion: "1.1.0",
       agentName: RESEARCH_AGENT_NAME,
       promptVersion: RESEARCH_PROMPT_VERSION,
       skillName: RESEARCH_SKILL_NAME,

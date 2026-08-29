@@ -1,24 +1,17 @@
 import { z } from "zod"
 
 import {
-  RESEARCH_DECISION_CONTRACT_VERSION,
-  STRATEGY_VERSION,
-} from "../contracts/research-decision-v1.js"
-import { RESEARCH_REPORT_VERSION } from "../contracts/research-report-v2.js"
-import {
   configuredToolName,
   type OpenCodeInvocationSummary,
 } from "../observability/opencode-telemetry-summary.js"
 import type { ResearchTraceVersions } from "../observability/research-telemetry.js"
-import {
-  RESEARCH_AGENT_NAME,
-  RESEARCH_MAX_TOOL_CALLS,
-  RESEARCH_PROMPT_VERSION,
-  RESEARCH_SKILL_NAME,
-  RESEARCH_SKILL_VERSION,
-} from "./research-agent.js"
+import { CURRENT_STRATEGY_MANIFEST } from "../strategy/strategy-registry.js"
+import { RESEARCH_MAX_TOOL_CALLS } from "./research-agent.js"
 
-export const RESEARCH_INVOCATION_VERSION = "1.1.0" as const
+const currentResearchCompatibility =
+  CURRENT_STRATEGY_MANIFEST.researchPlanCompatibility
+export const RESEARCH_INVOCATION_VERSION =
+  currentResearchCompatibility.invocationVersion
 export const SUPPORTED_RESEARCH_INVOCATION_VERSIONS = [
   "1.0.0",
   RESEARCH_INVOCATION_VERSION,
@@ -34,13 +27,14 @@ export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = {
     reportVersion: "2.0.0",
   },
   "1.1.0": {
-    agentName: RESEARCH_AGENT_NAME,
-    promptVersion: RESEARCH_PROMPT_VERSION,
-    skillName: RESEARCH_SKILL_NAME,
-    skillVersion: RESEARCH_SKILL_VERSION,
-    strategyVersion: STRATEGY_VERSION,
-    decisionContractVersion: RESEARCH_DECISION_CONTRACT_VERSION,
-    reportVersion: RESEARCH_REPORT_VERSION,
+    agentName: currentResearchCompatibility.agentName,
+    promptVersion: currentResearchCompatibility.promptVersion,
+    skillName: currentResearchCompatibility.skillName,
+    skillVersion: currentResearchCompatibility.skillVersion,
+    strategyVersion: CURRENT_STRATEGY_MANIFEST.strategyVersion,
+    decisionContractVersion:
+      currentResearchCompatibility.decisionContractVersion,
+    reportVersion: currentResearchCompatibility.reportVersion,
   },
 } as const satisfies Record<
   (typeof SUPPORTED_RESEARCH_INVOCATION_VERSIONS)[number],
