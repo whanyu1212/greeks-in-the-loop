@@ -157,7 +157,7 @@ export function projectResearchContextV1(
     (left, right) => left.sequence - right.sequence,
   )
   const events = orderedInput.slice(-MAX_RESEARCH_CONTEXT_EVENTS)
-  const truncatedBefore =
+  let truncatedBefore =
     options.truncatedBefore === true ||
     orderedInput.length > MAX_RESEARCH_CONTEXT_EVENTS
   const cycleNumbers = new Map<string, number>()
@@ -457,6 +457,9 @@ export function projectResearchContextV1(
       throw new Error("Research context cannot fit its serialized byte bound")
     }
     largest.trim()
+    // Byte-bound trimming drops history just as the event window does, so the
+    // agent must be told either way.
+    truncatedBefore = true
     context = assemble()
   }
 

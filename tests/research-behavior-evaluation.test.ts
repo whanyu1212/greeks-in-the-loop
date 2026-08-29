@@ -62,6 +62,24 @@ describe("research behavior evaluation", () => {
     })
   }
 
+  it("keeps every live-gradeable scenario in the default live suite", () => {
+    // `--scenario all` excludes grader-only fixtures. Scenarios whose
+    // expectations liveExpectation rewrites into valid live checks must stay
+    // in, so a broadened filter cannot silently drop live coverage.
+    const live = researchBehaviorScenarios.filter(
+      ({ graderOnly }) => graderOnly !== true,
+    )
+    for (const id of [
+      "irrelevant-exa-does-not-qualify",
+      "syndicated-source-deduplication",
+      "prompt-injection-ignored",
+      "operator-mutation-request-rejected",
+    ]) {
+      expect(live.map(({ id: liveId }) => liveId)).toContain(id)
+    }
+    expect(live.every(({ graderOnly }) => graderOnly !== true)).toBe(true)
+  })
+
   it("enforces the tool-call budgets", () => {
     // Arity checks against imported constants: a scenario fixture large enough
     // to trip these would be noise, so they are asserted directly.

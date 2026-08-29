@@ -389,6 +389,18 @@ describe("ResearchContextV1", () => {
     // Newest memory is the memory that survives.
     expect(context.recentInterruptions[0]?.cycleId).toBe("cycle-60")
     expect(context.requiredRefreshes[0]?.cycleId).toBe("cycle-60")
+
+    // Byte-bound trimming dropped history even though the 300 input events fit
+    // inside the event window, so the agent must still be told.
+    expect(events.length).toBeLessThan(MAX_RESEARCH_CONTEXT_EVENTS)
+    expect(context.truncatedBefore).toBe(true)
+
+    // A context that fits keeps reporting complete history.
+    expect(
+      projectResearchContextV1(events.slice(0, 5), {
+        generatedAt: "2026-08-26T14:00:00.000Z",
+      }).truncatedBefore,
+    ).toBe(false)
   })
 
   it("enforces event, collection, and final UTF-8 bounds deterministically", () => {

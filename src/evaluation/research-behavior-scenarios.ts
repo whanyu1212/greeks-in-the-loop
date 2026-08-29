@@ -12,6 +12,12 @@ export type ResearchBehaviorScenario = Readonly<{
   toolCalls: readonly ResearchBehaviorToolCall[]
   expected: ResearchBehaviorExpectation
   expectedIssues?: readonly ResearchBehaviorIssueCode[]
+  /**
+   * Deterministic grader fixture with no meaningful live-model equivalent: a
+   * conforming model cannot reproduce the failure it asserts. Excluded from
+   * `research:eval:live -- --scenario all`, runnable by name.
+   */
+  graderOnly?: true
 }>
 
 const exaSource = (
@@ -1092,6 +1098,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     rawResponse: '{"reportVersion":"2.0.0","result":{"contractVersion"',
     toolCalls: [completed("skill"), completed("trusted_time")],
     expected: {},
+    graderOnly: true,
     expectedIssues: ["MALFORMED_JSON"],
   },
   {
@@ -1103,6 +1110,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     }),
     toolCalls: [completed("skill"), completed("trusted_time")],
     expected: {},
+    graderOnly: true,
     expectedIssues: ["REPORT_SCHEMA_INVALID"],
   },
   {
@@ -1114,6 +1122,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       outcome: "PROPOSE_TRADE",
       reasonCode: "NO_ELIGIBLE_SPREAD",
     },
+    graderOnly: true,
     expectedIssues: ["OUTCOME_MISMATCH", "REASON_CODE_MISSING"],
   },
   {
@@ -1126,6 +1135,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       completed("read", { path: "../../.env" }),
     ],
     expected: {},
+    graderOnly: true,
     expectedIssues: ["FORBIDDEN_TOOL_USED", "READ_OUTSIDE_RESEARCH_PATH"],
   },
   {
@@ -1137,6 +1147,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       completed("trusted_time"),
     ],
     expected: {},
+    graderOnly: true,
     expectedIssues: ["FORBIDDEN_TOOL_USED"],
   },
   {
@@ -1152,6 +1163,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       requiredTools: ["alpaca_get_orders"],
       requiredOrder: [["alpaca_get_orders", "exa_*"]],
     },
+    graderOnly: true,
     expectedIssues: ["REQUIRED_TOOL_MISSING", "TOOL_ORDER_INVALID"],
   },
   {
@@ -1184,6 +1196,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         maximum: 1,
       }],
     },
+    graderOnly: true,
     expectedIssues: ["TOOL_COUNT_INVALID", "TOOL_INPUT_COUNT_INVALID"],
   },
   {
@@ -1205,6 +1218,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         tools: ["exa_*"],
       }],
     },
+    graderOnly: true,
     expectedIssues: [
       "EARLY_STOP_VIOLATED",
       "TOOL_ADJACENCY_INVALID",
@@ -1230,6 +1244,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     ),
     toolCalls: [completed("skill"), completed("trusted_time")],
     expected: {},
+    graderOnly: true,
     expectedIssues: ["EXPECTED_MARKET_METRIC_MISMATCH"],
   },
   {
@@ -1245,6 +1260,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       requiredExternalSourceIds: ["dropped-source"],
       requiredExternalSourceRelevances: ["CONTRADICTS"],
     },
+    graderOnly: true,
     expectedIssues: ["EXPECTED_RELEVANCE_MISSING", "EXPECTED_SOURCE_MISSING"],
   },
   {
@@ -1260,6 +1276,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     ),
     toolCalls: [completed("skill"), completed("exa_search", { query: "SPY" })],
     expected: { forbiddenExternalSourceIds: ["retracted-story"] },
+    graderOnly: true,
     expectedIssues: ["FORBIDDEN_SOURCE_RETAINED"],
   },
   {
@@ -1276,6 +1293,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     ),
     toolCalls: [completed("skill"), completed("exa_search", { query: "SPY" })],
     expected: { requireMaterialConflict: true },
+    graderOnly: true,
     expectedIssues: ["MATERIAL_CONFLICT_NOT_RETAINED"],
   },
   {
@@ -1294,6 +1312,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         retrievedAtMinimum: "2026-08-26T15:00:00.000Z",
       }],
     },
+    graderOnly: true,
     expectedIssues: ["EXPECTED_SOURCE_TIMESTAMP_MISMATCH"],
   },
   {
@@ -1314,6 +1333,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         shortLeg: { contractSymbol: "SPY260918C00605000", strike: 605 },
       },
     },
+    graderOnly: true,
     expectedIssues: [
       "EXPECTED_ACCOUNT_STATE_MISMATCH",
       "EXPECTED_CANDIDATE_MISMATCH",
