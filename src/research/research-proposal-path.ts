@@ -134,11 +134,6 @@ export const proposalHistoryIssuePath = (
   return undefined
 }
 
-type ProposedResearchResult = Extract<
-  ResearchReportV2["result"],
-  { outcome: "PROPOSE_TRADE" }
->
-
 export type ProposalIntentDeriver = (
   decision: ProposedTradeDecisionV1,
   context: TradeIntentDerivationContext,
@@ -146,7 +141,6 @@ export type ProposalIntentDeriver = (
 
 export type ProcessResearchProposalPathOptions = Readonly<{
   report: ResearchReportV2
-  result: ProposedResearchResult
   signal: AbortSignal
   quoteProvider: OptionQuoteProvider
   shadowRiskEvaluator: ShadowRiskEvaluator
@@ -164,7 +158,6 @@ export type ProcessResearchProposalPathOptions = Readonly<{
  */
 export async function processResearchProposalPath({
   report,
-  result,
   signal,
   quoteProvider,
   shadowRiskEvaluator,
@@ -174,6 +167,10 @@ export async function processResearchProposalPath({
   stages,
   stageReporter,
 }: ProcessResearchProposalPathOptions): Promise<ResearchCycleTerminalResolution> {
+  const result = report.result
+  if (result.outcome !== "PROPOSE_TRADE") {
+    throw new Error("Proposal path requires a proposed trade report")
+  }
   const evidencePreflight = await trace.run(
     "research.decision.validate",
     () => validateResearchDecisionV1(result, PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT),

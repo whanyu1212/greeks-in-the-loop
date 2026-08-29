@@ -22,7 +22,6 @@ import { safeSchemaDiagnostics } from "../shared/schema-diagnostics.js"
 import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
   type ResearchCycleOutcomeSink,
-  type ResearchCycleOutcomeV1,
 } from "./research-cycle-outcome-v1.js"
 import {
   processResearchProposalPath,
@@ -32,7 +31,6 @@ import { createResearchCycleStageReports } from "./research-cycle-stage-reportin
 import {
   recordResearchCycleOutcome,
   type ProcessedResearchCycle,
-  type ResearchCycleTerminalMetadata,
   type ResearchCycleTerminalResolution,
 } from "./research-cycle-terminal.js"
 import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
@@ -148,31 +146,29 @@ export async function processResearchCycle({
 
   const researchReport = parsed.report
   const result = researchReport.result
-  const recordReportOutcome = (
-    outcome: ResearchCycleOutcomeV1,
-    metadata: ResearchCycleTerminalMetadata = {},
+  const recordReportResolution = (
+    resolution: ResearchCycleTerminalResolution,
   ) =>
-    recordResearchCycleOutcome(
-      { outcome, metadata } as ResearchCycleTerminalResolution,
-      {
-        sink: outcomeSink,
-        signal,
-        researchInvocation,
-        researchReport,
-        trace,
-        stages,
-      },
-    )
+    recordResearchCycleOutcome(resolution, {
+      sink: outcomeSink,
+      signal,
+      researchInvocation,
+      researchReport,
+      trace,
+      stages,
+    })
   stages.researchReportCompleted(researchReport)
   if (result.strategyVersion !== STRATEGY_VERSION) {
-    return recordReportOutcome({
-      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-      status: "DECISION_REJECTED",
-      issues: [{
-        code: "SCHEMA_INVALID",
-        schemaCategory: "VALUE_NOT_ALLOWED",
-        path: ["result", "strategyVersion"],
-      }],
+    return recordReportResolution({
+      outcome: {
+        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+        status: "DECISION_REJECTED",
+        issues: [{
+          code: "SCHEMA_INVALID",
+          schemaCategory: "VALUE_NOT_ALLOWED",
+          path: ["result", "strategyVersion"],
+        }],
+      },
     })
   }
   const processingEvaluatedAt = now()
@@ -183,10 +179,12 @@ export async function processResearchCycle({
     cycleStartTime > processingEvaluatedAt.getTime() ||
     Date.parse(researchReport.analysis.asOf) > processingEvaluatedAt.getTime()
   ) {
-    return recordReportOutcome({
-      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-      status: "DECISION_REJECTED",
-      issues: [{ code: "CONTEXT_INVALID", path: ["analysis", "asOf"] }],
+    return recordReportResolution({
+      outcome: {
+        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+        status: "DECISION_REJECTED",
+        issues: [{ code: "CONTEXT_INVALID", path: ["analysis", "asOf"] }],
+      },
     })
   }
   const exaSources = researchReport.analysis.externalContext.filter(
@@ -202,15 +200,17 @@ export async function processResearchCycle({
       )
     })
   ) {
-    return recordReportOutcome({
-      outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-      status: "DECISION_REJECTED",
-      issues: [
-        {
-          code: "CONTEXT_INVALID",
-          path: ["analysis", "externalContext"],
-        },
-      ],
+    return recordReportResolution({
+      outcome: {
+        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+        status: "DECISION_REJECTED",
+        issues: [
+          {
+            code: "CONTEXT_INVALID",
+            path: ["analysis", "externalContext"],
+          },
+        ],
+      },
     })
   }
 
@@ -240,8 +240,8 @@ export async function processResearchCycle({
       },
     )
     if (preliminaryIssuePath !== undefined) {
-      return recordReportOutcome(
-        {
+      return recordReportResolution({
+        outcome: {
           outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
           status: "DECISION_REJECTED",
           issues: [
@@ -251,17 +251,17 @@ export async function processResearchCycle({
             },
           ],
         },
-      )
+      })
     }
     stages.preliminaryValidated(result)
-    return recordReportOutcome(
-      {
+    return recordReportResolution({
+      outcome: {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
         status: "PRELIMINARY_RESEARCH_RETAINED",
         research: result,
       },
-      { preliminaryResearch: result },
-    )
+      metadata: { preliminaryResearch: result },
+    })
   }
 
   if (result.outcome === "NO_ACTION") {
@@ -272,30 +272,29 @@ export async function processResearchCycle({
       }),
     )
     if (!validation.success) {
-      return recordReportOutcome(
-        {
+      return recordReportResolution({
+        outcome: {
           outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
           status: "DECISION_REJECTED",
           issues: validation.issues,
         },
-      )
+      })
     }
 
     stages.decisionValidated(validation.data)
 
-    return recordReportOutcome(
-      {
+    return recordReportResolution({
+      outcome: {
         outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
         status: "VALIDATED_NO_ACTION",
         decision: result,
       },
-      { validatedDecision: validation.data },
-    )
+      metadata: { validatedDecision: validation.data },
+    })
   }
 
   const proposalResolution = await processResearchProposalPath({
     report: researchReport,
-    result,
     signal,
     quoteProvider,
     shadowRiskEvaluator,
@@ -305,12 +304,5 @@ export async function processResearchCycle({
     stages,
     stageReporter,
   })
-  return recordResearchCycleOutcome(proposalResolution, {
-    sink: outcomeSink,
-    signal,
-    researchInvocation,
-    researchReport,
-    trace,
-    stages,
-  })
+  return recordReportResolution(proposalResolution)
 }
