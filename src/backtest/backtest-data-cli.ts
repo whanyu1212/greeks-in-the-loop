@@ -3,14 +3,11 @@ import { existsSync, readFileSync } from "node:fs"
 import { parse as parseEnv } from "dotenv"
 import { z } from "zod"
 
-import {
-  BACKTEST_DATASET_VERSION,
-  BACKTEST_NORMALIZATION_VERSION,
-  type BacktestDatasetDefinitionV1,
-} from "./dataset-v1.js"
+import type { BacktestDatasetDefinitionV1 } from "./dataset-v1.js"
 import { ingestAlpacaBacktestDataset } from "./ingest-alpaca.js"
 import { createBacktestDatasetStore } from "./sqlite-dataset-store.js"
 import { createAlpacaHistoricalClient } from "../market-data/alpaca-historical-client.js"
+import { CURRENT_STRATEGY_MANIFEST } from "../strategy/strategy-registry.js"
 
 const usage = `Usage: pnpm backtest:data -- --from YYYY-MM-DD --to YYYY-MM-DD [options]
 
@@ -73,7 +70,8 @@ const parseOptions = (args: readonly string[]) => {
   }
   if (fromDate > toDate) throw new Error("--to cannot precede --from")
   const normalizedOptionSymbols = [...new Set(optionSymbols)].sort()
-  const resolvedId = datasetId ?? `SPY-${fromDate}-${toDate}`
+  const resolvedId =
+    datasetId ?? `${CURRENT_STRATEGY_MANIFEST.underlying}-${fromDate}-${toDate}`
   return {
     fromDate,
     toDate,
@@ -90,11 +88,12 @@ const dataBaseUrl = setting("ALPACA_MARKET_DATA_BASE_URL")
 const tradingBaseUrl = setting("ALPACA_TRADING_BASE_URL")
 if (!apiKey || !secretKey) throw new Error("Alpaca credentials are required")
 
+const replayCompatibility = CURRENT_STRATEGY_MANIFEST.replayCompatibility
 const definition: BacktestDatasetDefinitionV1 = {
-  datasetVersion: BACKTEST_DATASET_VERSION,
-  normalizationVersion: BACKTEST_NORMALIZATION_VERSION,
+  datasetVersion: replayCompatibility.datasetVersion,
+  normalizationVersion: replayCompatibility.normalizationVersion,
   datasetId: options.datasetId,
-  symbol: "SPY",
+  symbol: CURRENT_STRATEGY_MANIFEST.underlying,
   fromDate: options.fromDate,
   toDate: options.toDate,
   optionHistoricalFeed: "ALPACA_ACCOUNT_DEFAULT",

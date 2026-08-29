@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+
 import { describe, expect, it } from "vitest"
 
 import {
@@ -184,6 +186,19 @@ describe("static strategy registry", () => {
         researchProvenance: "VERSIONED_INVOCATION",
       },
     })
+  })
+
+  it("keeps historical decoders independent of current registry state", () => {
+    for (const path of [
+      "src/event-ledger/ledger-event-v1.ts",
+      "src/research/research-artifact.ts",
+      "src/backtest/dataset-v1.ts",
+      "src/backtest/replay-v1.ts",
+      "src/risk/risk-evaluation-v1.ts",
+      "src/risk/shadow-risk-v1.ts",
+    ]) {
+      expect(readFileSync(path, "utf8")).not.toContain("strategy-registry")
+    }
   })
 
   it("rejects component-manifest drift with a bounded reason", () => {
