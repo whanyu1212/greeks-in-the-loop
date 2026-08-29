@@ -8,34 +8,33 @@ import {
   BACKTEST_EXECUTION_MODEL_VERSION,
   BACKTEST_REPLAY_VERSION,
 } from "../backtest/replay-v1.js"
-import { RESEARCH_DECISION_CONTRACT_VERSION } from "../contracts/research-decision-v1.js"
-import { RESEARCH_REPORT_VERSION } from "../contracts/research-report-v2.js"
 import { TRADE_INTENT_CONTRACT_VERSION } from "../contracts/trade-intent-v1.js"
 import {
-  RESEARCH_AGENT_NAME,
-  RESEARCH_PROMPT_VERSION,
-  RESEARCH_SKILL_NAME,
-  RESEARCH_SKILL_VERSION,
-} from "../research/research-agent.js"
+  RESEARCH_INVOCATION_PROVENANCE_BY_VERSION,
+  RESEARCH_INVOCATION_VERSION,
+} from "../research/research-invocation-v1.js"
 import {
   RISK_EVALUATION_VERSION,
   RISK_RULE_VERSION,
 } from "../risk/risk-evaluation-v1.js"
-import {
-  TRADE_INTENT_START_GRACE_MS,
-  TRADE_INTENT_WINDOW_DURATION_MS,
-} from "../scheduling/research-eligibility.js"
 import { SPY_OPTION_UNIVERSE_POLICY_VERSION } from "../shared/alpaca-option-identity.js"
 import {
-  LEGACY_STRATEGY_VERSION,
   RUNTIME_STRATEGY_VERSIONS,
   SPY_DIRECTIONAL_DEBIT_VERTICAL_STRATEGY_ID,
   STRATEGY_VERSION,
   SUPPORTED_STRATEGY_VERSIONS,
   type StrategyVersion,
 } from "./strategy-identity.js"
+import {
+  V1_STRATEGY_COMPATIBILITY_BY_VERSION,
+  resolveV1StrategyVersionCompatibility as resolveHistoricalV1StrategyVersionCompatibility,
+  type StrategyVersionCompatibility,
+} from "./strategy-v1-compatibility.js"
 
 export const STRATEGY_COMPONENT_MANIFEST_VERSION = "1.0.0" as const
+
+const currentResearchProvenance =
+  RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[RESEARCH_INVOCATION_VERSION]
 
 const componentIdentitySchema = z
   .object({
@@ -57,13 +56,13 @@ export const strategyComponentManifestV1Schema = z
           componentVersion: z.literal(SPY_OPTION_UNIVERSE_POLICY_VERSION),
         }),
         featureCalculation: componentIdentitySchema.extend({
-          componentId: z.literal(RESEARCH_SKILL_NAME),
-          componentVersion: z.literal(RESEARCH_SKILL_VERSION),
+          componentId: z.literal(currentResearchProvenance.skillName),
+          componentVersion: z.literal(currentResearchProvenance.skillVersion),
           authority: z.literal("RESEARCH_SKILL_POLICY"),
         }),
         candidateGenerationRanking: componentIdentitySchema.extend({
-          componentId: z.literal(RESEARCH_SKILL_NAME),
-          componentVersion: z.literal(RESEARCH_SKILL_VERSION),
+          componentId: z.literal(currentResearchProvenance.skillName),
+          componentVersion: z.literal(currentResearchProvenance.skillVersion),
           authority: z.literal("RESEARCH_SKILL_POLICY"),
         }),
         intentDerivation: componentIdentitySchema.extend({
@@ -85,15 +84,15 @@ export const strategyComponentManifestV1Schema = z
     researchPlanCompatibility: z
       .object({
         kind: z.literal("LEGACY_RESEARCH_INVOCATION_V1"),
-        invocationVersion: z.literal("1.1.0"),
-        agentName: z.literal(RESEARCH_AGENT_NAME),
-        promptVersion: z.literal(RESEARCH_PROMPT_VERSION),
-        skillName: z.literal(RESEARCH_SKILL_NAME),
-        skillVersion: z.literal(RESEARCH_SKILL_VERSION),
+        invocationVersion: z.literal(RESEARCH_INVOCATION_VERSION),
+        agentName: z.literal(currentResearchProvenance.agentName),
+        promptVersion: z.literal(currentResearchProvenance.promptVersion),
+        skillName: z.literal(currentResearchProvenance.skillName),
+        skillVersion: z.literal(currentResearchProvenance.skillVersion),
         decisionContractVersion: z.literal(
-          RESEARCH_DECISION_CONTRACT_VERSION,
+          currentResearchProvenance.decisionContractVersion,
         ),
-        reportVersion: z.literal(RESEARCH_REPORT_VERSION),
+        reportVersion: z.literal(currentResearchProvenance.reportVersion),
       })
       .strict(),
     replayCompatibility: z
@@ -111,17 +110,6 @@ export const strategyComponentManifestV1Schema = z
 export type StrategyComponentManifestV1 = Readonly<
   z.infer<typeof strategyComponentManifestV1Schema>
 >
-
-export type StrategyVersionCompatibility = Readonly<{
-  strategyId: typeof SPY_DIRECTIONAL_DEBIT_VERTICAL_STRATEGY_ID
-  strategyVersion: StrategyVersion
-  availability: "DECODE_ONLY" | "RUNTIME_AND_DECODE"
-  tradeIntentTiming: Readonly<{
-    startGraceMs: number
-    windowDurationMs: number
-  }>
-  researchProvenance: "NOT_RECORDED" | "VERSIONED_INVOCATION"
-}>
 
 const deepFreeze = <T>(value: T): T => {
   if (typeof value !== "object" || value === null || Object.isFrozen(value)) {
@@ -145,13 +133,13 @@ const currentManifest = deepFreeze(
         componentVersion: SPY_OPTION_UNIVERSE_POLICY_VERSION,
       },
       featureCalculation: {
-        componentId: RESEARCH_SKILL_NAME,
-        componentVersion: RESEARCH_SKILL_VERSION,
+        componentId: currentResearchProvenance.skillName,
+        componentVersion: currentResearchProvenance.skillVersion,
         authority: "RESEARCH_SKILL_POLICY",
       },
       candidateGenerationRanking: {
-        componentId: RESEARCH_SKILL_NAME,
-        componentVersion: RESEARCH_SKILL_VERSION,
+        componentId: currentResearchProvenance.skillName,
+        componentVersion: currentResearchProvenance.skillVersion,
         authority: "RESEARCH_SKILL_POLICY",
       },
       intentDerivation: {
@@ -171,13 +159,14 @@ const currentManifest = deepFreeze(
     },
     researchPlanCompatibility: {
       kind: "LEGACY_RESEARCH_INVOCATION_V1",
-      invocationVersion: "1.1.0",
-      agentName: RESEARCH_AGENT_NAME,
-      promptVersion: RESEARCH_PROMPT_VERSION,
-      skillName: RESEARCH_SKILL_NAME,
-      skillVersion: RESEARCH_SKILL_VERSION,
-      decisionContractVersion: RESEARCH_DECISION_CONTRACT_VERSION,
-      reportVersion: RESEARCH_REPORT_VERSION,
+      invocationVersion: RESEARCH_INVOCATION_VERSION,
+      agentName: currentResearchProvenance.agentName,
+      promptVersion: currentResearchProvenance.promptVersion,
+      skillName: currentResearchProvenance.skillName,
+      skillVersion: currentResearchProvenance.skillVersion,
+      decisionContractVersion:
+        currentResearchProvenance.decisionContractVersion,
+      reportVersion: currentResearchProvenance.reportVersion,
     },
     replayCompatibility: {
       kind: "BACKTEST_REPLAY_V1",
@@ -189,29 +178,6 @@ const currentManifest = deepFreeze(
   }),
 )
 
-const compatibilityByVersion = deepFreeze({
-  [LEGACY_STRATEGY_VERSION]: {
-    strategyId: SPY_DIRECTIONAL_DEBIT_VERTICAL_STRATEGY_ID,
-    strategyVersion: LEGACY_STRATEGY_VERSION,
-    availability: "DECODE_ONLY",
-    tradeIntentTiming: {
-      startGraceMs: 2 * 60 * 1_000,
-      windowDurationMs: 5 * 60 * 1_000,
-    },
-    researchProvenance: "NOT_RECORDED",
-  },
-  [STRATEGY_VERSION]: {
-    strategyId: SPY_DIRECTIONAL_DEBIT_VERTICAL_STRATEGY_ID,
-    strategyVersion: STRATEGY_VERSION,
-    availability: "RUNTIME_AND_DECODE",
-    tradeIntentTiming: {
-      startGraceMs: TRADE_INTENT_START_GRACE_MS,
-      windowDurationMs: TRADE_INTENT_WINDOW_DURATION_MS,
-    },
-    researchProvenance: "VERSIONED_INVOCATION",
-  },
-} as const satisfies Record<StrategyVersion, StrategyVersionCompatibility>)
-
 /** One compile-time registry. It contains identity data and no executable hooks. */
 export const STATIC_STRATEGY_REGISTRY = deepFreeze({
   [SPY_DIRECTIONAL_DEBIT_VERTICAL_STRATEGY_ID]: {
@@ -221,7 +187,7 @@ export const STATIC_STRATEGY_REGISTRY = deepFreeze({
     manifests: {
       [STRATEGY_VERSION]: currentManifest,
     },
-    compatibilityByVersion,
+    compatibilityByVersion: V1_STRATEGY_COMPATIBILITY_BY_VERSION,
   },
 } as const)
 
@@ -320,18 +286,15 @@ export function resolveStrategyVersionCompatibility(
   const version = reference.data.strategyVersion as StrategyVersion
   return {
     success: true,
-    compatibility: compatibilityByVersion[version],
+    compatibility: V1_STRATEGY_COMPATIBILITY_BY_VERSION[version],
   }
 }
 
-/** Resolves the implicit sole strategy carried by historical V1 artifacts. */
+/** Compatibility export for callers already composed through this registry. */
 export function resolveV1StrategyVersionCompatibility(
   strategyVersion: unknown,
 ): StrategyCompatibilityResult {
-  return resolveStrategyVersionCompatibility({
-    strategyId: SPY_DIRECTIONAL_DEBIT_VERTICAL_STRATEGY_ID,
-    strategyVersion,
-  })
+  return resolveHistoricalV1StrategyVersionCompatibility(strategyVersion)
 }
 
 export function checkStrategyManifestCompatibility(

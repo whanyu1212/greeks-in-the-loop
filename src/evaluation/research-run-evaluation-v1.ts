@@ -22,13 +22,13 @@ import {
   ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE,
 } from "../market-data/alpaca-option-quotes.js"
 import {
-  MAX_TERMINAL_REJECTION_DETAILS,
   proposalAccountChecksAreFresh,
   PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
   proposalHistoryIssuePath,
   proposalMarketRegimeIsFresh,
   PROPOSAL_QUOTE_SNAPSHOT_REF,
-} from "../research/research-cycle.js"
+} from "../research/research-proposal-path.js"
+import { MAX_TERMINAL_REJECTION_DETAILS } from "../research/research-cycle-terminal.js"
 import {
   DRY_RUN_ANYTIME_RESEARCH_MODE,
   DRY_RUN_ANYTIME_SHADOW_MODE,
@@ -40,7 +40,7 @@ import {
   floorNanosecondsToIsoMilliseconds,
   parseRfc3339Nanoseconds,
 } from "../shared/value-normalization.js"
-import { resolveV1StrategyVersionCompatibility } from "../strategy/strategy-registry.js"
+import { resolveV1StrategyVersionCompatibility } from "../strategy/strategy-v1-compatibility.js"
 
 export const RESEARCH_RUN_EVALUATION_VERSION = "1.0.0" as const
 

@@ -3,6 +3,23 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
 import {
+  TRADE_INTENT_START_GRACE_MS,
+  TRADE_INTENT_WINDOW_DURATION_MS,
+} from "../src/scheduling/research-eligibility.js"
+import {
+  RESEARCH_AGENT_NAME,
+  RESEARCH_MAX_TOOL_CALLS,
+  RESEARCH_PROMPT_VERSION,
+  RESEARCH_SKILL_NAME,
+  RESEARCH_SKILL_VERSION,
+} from "../src/research/research-agent.js"
+import {
+  MAX_RESEARCH_INVOCATION_TOOL_CALLS,
+  RESEARCH_INVOCATION_PROVENANCE_BY_VERSION,
+  RESEARCH_INVOCATION_VERSION,
+  SUPPORTED_RESEARCH_INVOCATION_VERSIONS,
+} from "../src/research/research-invocation-v1.js"
+import {
   CURRENT_STRATEGY_MANIFEST,
   STATIC_STRATEGY_REGISTRY,
   checkStrategyManifestCompatibility,
@@ -18,6 +35,7 @@ import {
   STRATEGY_VERSION,
   SUPPORTED_STRATEGY_VERSIONS,
 } from "../src/strategy/strategy-identity.js"
+import { V1_STRATEGY_COMPATIBILITY_BY_VERSION } from "../src/strategy/strategy-v1-compatibility.js"
 
 const allObjects = (value: unknown): object[] => {
   if (typeof value !== "object" || value === null) return []
@@ -38,6 +56,31 @@ describe("static strategy registry", () => {
     expect(Object.keys(STATIC_STRATEGY_REGISTRY)).toEqual(STRATEGY_IDS)
     expect(SUPPORTED_STRATEGY_VERSIONS).toEqual(["1.0.0", "1.1.0"])
     expect(RUNTIME_STRATEGY_VERSIONS).toEqual(["1.1.0"])
+    expect(Object.isFrozen(STRATEGY_IDS)).toBe(true)
+    expect(Object.isFrozen(SUPPORTED_STRATEGY_VERSIONS)).toBe(true)
+    expect(Object.isFrozen(RUNTIME_STRATEGY_VERSIONS)).toBe(true)
+    expect(Object.isFrozen(SUPPORTED_RESEARCH_INVOCATION_VERSIONS)).toBe(true)
+    expect(Object.isFrozen(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION)).toBe(
+      true,
+    )
+    expect(
+      Object.values(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION).every(
+        Object.isFrozen,
+      ),
+    ).toBe(true)
+    expect(Object.isFrozen(V1_STRATEGY_COMPATIBILITY_BY_VERSION)).toBe(true)
+    expect(MAX_RESEARCH_INVOCATION_TOOL_CALLS).toBe(RESEARCH_MAX_TOOL_CALLS)
+    expect(
+      RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[RESEARCH_INVOCATION_VERSION],
+    ).toEqual({
+      agentName: RESEARCH_AGENT_NAME,
+      promptVersion: RESEARCH_PROMPT_VERSION,
+      skillName: RESEARCH_SKILL_NAME,
+      skillVersion: RESEARCH_SKILL_VERSION,
+      strategyVersion: STRATEGY_VERSION,
+      decisionContractVersion: "1.0.0",
+      reportVersion: "2.0.0",
+    })
     expect(LEGACY_STRATEGY_VERSION).toBe("1.0.0")
     expect(STRATEGY_VERSION).toBe("1.1.0")
   })
@@ -169,6 +212,13 @@ describe("static strategy registry", () => {
       },
     })
     expect(
+      V1_STRATEGY_COMPATIBILITY_BY_VERSION[STRATEGY_VERSION]
+        .tradeIntentTiming,
+    ).toEqual({
+      startGraceMs: TRADE_INTENT_START_GRACE_MS,
+      windowDurationMs: TRADE_INTENT_WINDOW_DURATION_MS,
+    })
+    expect(
       resolveStrategyVersionCompatibility({
         strategyId: SPY_DIRECTIONAL_DEBIT_VERTICAL_STRATEGY_ID,
         strategyVersion: STRATEGY_VERSION,
@@ -192,6 +242,8 @@ describe("static strategy registry", () => {
     for (const path of [
       "src/event-ledger/ledger-event-v1.ts",
       "src/research/research-artifact.ts",
+      "src/research/research-invocation-v1.ts",
+      "src/evaluation/research-run-evaluation-v1.ts",
       "src/backtest/dataset-v1.ts",
       "src/backtest/replay-v1.ts",
       "src/risk/risk-evaluation-v1.ts",
@@ -199,6 +251,12 @@ describe("static strategy registry", () => {
     ]) {
       expect(readFileSync(path, "utf8")).not.toContain("strategy-registry")
     }
+    expect(
+      readFileSync("src/research/research-invocation-v1.ts", "utf8"),
+    ).not.toContain('from "./research-agent.js"')
+    expect(
+      readFileSync("src/evaluation/research-run-evaluation-v1.ts", "utf8"),
+    ).not.toContain('from "../research/research-cycle.js"')
   })
 
   it("rejects component-manifest drift with a bounded reason", () => {
