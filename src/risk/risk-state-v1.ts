@@ -2,6 +2,11 @@ import { z } from "zod"
 
 import type { ConfirmedOptionQuoteSnapshotV1 } from "../market-data/alpaca-option-quotes.js"
 import {
+  parseAlpacaOptionSymbol,
+  spyAlpacaOptionSymbolV1Schema,
+  validateSpyOptionUniverseV1,
+} from "../shared/alpaca-option-identity.js"
+import {
   applicationVerifiedAccountV1Schema,
   reconciledPortfolioV1Schema,
   type ApplicationVerifiedAccountV1,
@@ -25,7 +30,7 @@ const positiveProviderNumber = z
   .positive()
   .max(Number.MAX_SAFE_INTEGER)
 const brokerIdentifier = z.string().min(1).max(128)
-const optionSymbol = z.string().regex(/^SPY\d{6}[CP]\d{8}$/u)
+const optionSymbol = spyAlpacaOptionSymbolV1Schema
 
 export const durableRiskControlStateV1Schema = z
   .object({
@@ -144,42 +149,25 @@ export type ReconcileBrokerPortfolioV1Result =
       reasons: readonly ["RECONCILIATION_INPUT_INVALID"]
     }>
 
-type ParsedOptionSymbol = Readonly<{
-  expiration: string
-  optionType: "C" | "P"
-  strikeThousandths: number
-}>
-
-const parseOptionSymbol = (value: string): ParsedOptionSymbol | undefined => {
-  const match = /^(SPY)(\d{6})([CP])(\d{8})$/u.exec(value)
-  const expiration = match?.[2]
-  const optionType = match?.[3]
-  const strike = match?.[4]
-  if (
-    expiration === undefined ||
-    (optionType !== "C" && optionType !== "P") ||
-    strike === undefined
-  ) return undefined
-  const strikeThousandths = Number(strike)
-  if (!Number.isSafeInteger(strikeThousandths)) return undefined
-  return { expiration, optionType, strikeThousandths }
-}
-
 const isSupportedSpread = (
   longSymbol: string,
   shortSymbol: string,
 ) => {
-  const long = parseOptionSymbol(longSymbol)
-  const short = parseOptionSymbol(shortSymbol)
+  const long = parseAlpacaOptionSymbol(longSymbol)
+  const short = parseAlpacaOptionSymbol(shortSymbol)
   if (
-    long === undefined ||
-    short === undefined ||
-    long.expiration !== short.expiration ||
-    long.optionType !== short.optionType
+    !long.success ||
+    !short.success ||
+    !validateSpyOptionUniverseV1(long.identity).success ||
+    !validateSpyOptionUniverseV1(short.identity).success ||
+    long.identity.expiration !== short.identity.expiration ||
+    long.identity.optionType !== short.identity.optionType
   ) return false
-  return long.optionType === "C"
-    ? long.strikeThousandths < short.strikeThousandths
-    : long.strikeThousandths > short.strikeThousandths
+  return long.identity.optionType === "C"
+    ? long.identity.strikeThousandthsPerShare <
+        short.identity.strikeThousandthsPerShare
+    : long.identity.strikeThousandthsPerShare >
+        short.identity.strikeThousandthsPerShare
 }
 
 const stableBrokerState = (state: z.infer<typeof brokerStateSchema>) =>

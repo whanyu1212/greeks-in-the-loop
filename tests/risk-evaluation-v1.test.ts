@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   evaluateTradeIntentRiskV1,
+  riskContractLegV1Schema,
   riskEvaluationInputV1Schema,
   riskEvaluationV1Schema,
   type RiskRejectionCode,
@@ -256,6 +257,28 @@ describe("evaluateTradeIntentRiskV1", () => {
     expect(rejectionReasons(priorSlotIntent)).toContain(
       "SNAPSHOT_INTEGRITY_INVALID",
     )
+  })
+
+  it("keeps pure risk contract syntax provider-neutral", () => {
+    const leg = {
+      ...makeInput().context.contracts.legs[0],
+      contractSymbol: "QQQ260911C00610000",
+    }
+
+    expect(riskContractLegV1Schema.safeParse(leg).success).toBe(true)
+    expectRejection((input) => {
+      input.context.contracts.legs[0]!.contractSymbol = leg.contractSymbol
+    }, "CONTRACT_IDENTITY_MISMATCH")
+
+    const malformed = makeInput()
+    malformed.context.contracts.legs[0]!.contractSymbol = "not-a-symbol"
+    expect(evaluateTradeIntentRiskV1(malformed)).toEqual({
+      evaluationVersion: "1.0.0",
+      ruleVersion: "1.0.0",
+      outcome: "REJECTED",
+      evaluatedAt: null,
+      reasonCodes: ["RISK_INPUT_INVALID"],
+    })
   })
 
   it("checks contract identity and eligibility", () => {
