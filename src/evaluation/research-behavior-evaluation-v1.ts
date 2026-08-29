@@ -12,6 +12,11 @@ import {
   RESEARCH_MAX_TOOL_CALLS,
 } from "../research/research-agent.js"
 
+// Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
+// when grader semantics change, so stored artifacts stay attributable to the
+// revision that produced them.
+export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "1.0.0" as const
+
 export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "MALFORMED_JSON",
   "REPORT_SCHEMA_INVALID",
@@ -51,6 +56,7 @@ type ResearchBehaviorDimension = Readonly<{
 }>
 
 export type ResearchBehaviorEvaluationV1 = Readonly<{
+  evaluationVersion: typeof RESEARCH_BEHAVIOR_EVALUATION_VERSION
   scenarioId: string
   dimensions: Readonly<{
     contractCompliance: ResearchBehaviorDimension
@@ -693,6 +699,7 @@ export function evaluateResearchBehavior({
   }
 
   return {
+    evaluationVersion: RESEARCH_BEHAVIOR_EVALUATION_VERSION,
     scenarioId,
     dimensions: {
       contractCompliance: dimension(contractIssues),

@@ -2489,6 +2489,32 @@ describe("research run evaluation", () => {
     }
   })
 
+  it("fails closed when a derived intent retains no eligibility context", () => {
+    const { initialEligibility: _initialEligibility, ...withoutEligibility } =
+      derivedIntentRun()
+
+    const evaluation = evaluateResearchRunV1(withoutEligibility)
+
+    expect(evaluation.dimensions.failClosedBehavior.issueCodes).toContain(
+      "INTENT_ELIGIBILITY_CONTEXT_MISSING",
+    )
+  })
+
+  it("fails closed when a derived intent retains no trade window", () => {
+    const run = derivedIntentRun()
+    const { tradeIntentWindow: _tradeIntentWindow, ...eligibility } =
+      run.initialEligibility!
+
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      initialEligibility: eligibility,
+    })
+
+    expect(evaluation.dimensions.failClosedBehavior.issueCodes).toContain(
+      "INTENT_ELIGIBILITY_CONTEXT_MISSING",
+    )
+  })
+
   it("fails closed when an ineligible cycle claims to derive an intent", () => {
     const run = preliminaryRun()
     const invalidOutcome = {

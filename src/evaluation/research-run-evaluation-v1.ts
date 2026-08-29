@@ -70,6 +70,7 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "CANDIDATE_DTE_MISMATCH",
   "OPEN_INTEREST_HISTORY_INVALID",
   "INELIGIBLE_CYCLE_DERIVED_INTENT",
+  "INTENT_ELIGIBILITY_CONTEXT_MISSING",
   "INTENT_OUTSIDE_RETAINED_TRADE_WINDOW",
   "INTENT_WITHOUT_VALIDATED_PROPOSAL",
 ] as const
@@ -1458,10 +1459,17 @@ export function evaluateResearchRunV1(
 
   if (run.outcome.status === "INTENT_DERIVED") {
     const eligibility = run.initialEligibility
-    if (eligibility !== undefined && !eligibility.tradeIntentEligible) {
-      failClosedIssues.push("INELIGIBLE_CYCLE_DERIVED_INTENT")
-    }
     const tradeIntentWindow = eligibility?.tradeIntentWindow
+    // Absent context cannot establish eligibility, so it fails closed rather
+    // than passing silently. Only the re-derivation of app-computed window
+    // boundaries was removed; the retained window is still checked below.
+    if (eligibility === undefined) {
+      failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_MISSING")
+    } else if (!eligibility.tradeIntentEligible) {
+      failClosedIssues.push("INELIGIBLE_CYCLE_DERIVED_INTENT")
+    } else if (tradeIntentWindow === undefined) {
+      failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_MISSING")
+    }
     if (eligibility !== undefined && tradeIntentWindow !== undefined) {
       const eligibilityEvaluatedAt = Date.parse(eligibility.evaluatedAt)
       const intentEvaluatedAt = Date.parse(run.outcome.intent.evaluatedAt)
