@@ -364,148 +364,6 @@ describe("research run evaluation", () => {
     )
   })
 
-  it("uses versioned invocation requirements for historical runs", () => {
-    const historical = evaluateResearchRunV1({
-      ...noActionRun(),
-      runVersion: "1.1.0",
-    })
-    const historicalWithCurrentInvocation = evaluateResearchRunV1({
-      ...noActionRun(),
-      runVersion: "1.1.0",
-      researchInvocation: currentInvocation,
-    })
-
-    expect(historical.dimensions.contractCompliance.issueCodes).not.toContain(
-      "RUN_METADATA_INVALID",
-    )
-    expect(
-      historicalWithCurrentInvocation.dimensions.contractCompliance.issueCodes,
-    ).toContain("RUN_METADATA_INVALID")
-  })
-
-  it("requires matching invocation metadata for current runs", () => {
-    const prior = evaluateResearchRunV1({
-      ...noActionRun(),
-      runVersion: "1.2.0",
-      researchInvocation: priorInvocation,
-    })
-    const healthy = evaluateResearchRunV1({
-      ...noActionRun(),
-      runVersion: "1.3.0",
-      researchInvocation: currentInvocation,
-    })
-    const missing = evaluateResearchRunV1({
-      ...noActionRun(),
-      runVersion: "1.3.0",
-    })
-    const mismatched = evaluateResearchRunV1({
-      ...noActionRun(),
-      runVersion: "1.3.0",
-      researchInvocation: {
-        ...currentInvocation,
-        strategyVersion: "0.0.0",
-      },
-    })
-    const { initialEligibility: _initialEligibility, ...withoutEligibility } =
-      noActionRun()
-    const missingEligibility = evaluateResearchRunV1({
-      ...withoutEligibility,
-      runVersion: "1.3.0",
-      researchInvocation: currentInvocation,
-    })
-
-    expect(prior.dimensions.contractCompliance.issueCodes).not.toContain(
-      "RUN_METADATA_INVALID",
-    )
-    expect(healthy.dimensions.contractCompliance.issueCodes).not.toContain(
-      "RUN_METADATA_INVALID",
-    )
-    expect(missing.dimensions.contractCompliance.issueCodes).toContain(
-      "RUN_METADATA_INVALID",
-    )
-    expect(mismatched.dimensions.contractCompliance.issueCodes).toContain(
-      "RUN_METADATA_INVALID",
-    )
-    expect(missingEligibility.dimensions.contractCompliance.issueCodes).toContain(
-      "RUN_METADATA_INVALID",
-    )
-  })
-
-  it("requires schema-valid eligibility metadata for current runs", () => {
-    const source = noActionRun()
-    const evaluation = evaluateResearchRunV1({
-      ...source,
-      runVersion: "1.3.0",
-      researchInvocation: currentInvocation,
-      initialEligibility: {
-        ...source.initialEligibility!,
-        evaluatedAt: "not-a-time",
-      },
-    })
-
-    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
-      "RUN_METADATA_INVALID",
-    )
-  })
-
-  it("requires safe schema categories on current rejected runs", () => {
-    const {
-      researchReport: _researchReport,
-      preliminaryResearch: _preliminaryResearch,
-      ...base
-    } = preliminaryRun()
-    const rejected = {
-      ...base,
-      runVersion: "1.3.0" as const,
-      researchInvocation: currentInvocation,
-      outcome: {
-        outcomeVersion: "1.0.0" as const,
-        status: "DECISION_REJECTED" as const,
-        issues: [{ code: "SCHEMA_INVALID", path: ["result"] }],
-      },
-    }
-
-    const missingCategory = evaluateResearchRunV1(rejected)
-    const categorized = evaluateResearchRunV1({
-      ...rejected,
-      outcome: {
-        ...rejected.outcome,
-        issues: [{
-          code: "SCHEMA_INVALID",
-          schemaCategory: "TYPE_MISMATCH",
-          path: ["result"],
-        }],
-      },
-    })
-
-    expect(missingCategory.dimensions.contractCompliance.issueCodes).toContain(
-      "RUN_METADATA_INVALID",
-    )
-    expect(categorized.dimensions.contractCompliance.issueCodes).not.toContain(
-      "RUN_METADATA_INVALID",
-    )
-  })
-
-  it.each([
-    { agentName: "other-agent" },
-    { promptVersion: "0.0.0" },
-    { skillName: "other-skill" },
-    { skillVersion: "0.0.0" },
-  ])("rejects mismatched runtime provenance", (override) => {
-    const evaluation = evaluateResearchRunV1({
-      ...noActionRun(),
-      runVersion: "1.3.0",
-      researchInvocation: {
-        ...currentInvocation,
-        ...override,
-      },
-    })
-
-    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
-      "RUN_METADATA_INVALID",
-    )
-  })
-
   it("accepts the canonical rejection of a legacy strategy version", () => {
     const rejectedRun = (source: ResearchRunV1, useLegacyVersion = true) => {
       const {
@@ -613,23 +471,6 @@ describe("research run evaluation", () => {
       status: "PASS",
       issueCodes: [],
     })
-  })
-
-  it("flags contradictory anytime dry-run eligibility", () => {
-    const run = preliminaryRun()
-    const evaluation = evaluateResearchRunV1({
-      ...run,
-      initialEligibility: {
-        ...run.initialEligibility!,
-        researchMode: "DRY_RUN_ANYTIME",
-        tradeIntentEligible: true,
-        reason: "DRY_RUN_RESEARCH_ONLY",
-      },
-    })
-
-    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
-      "DRY_RUN_ELIGIBILITY_CONTEXT_INVALID",
-    )
   })
 
   it("never copies retained research content into evaluation output", () => {
@@ -773,54 +614,6 @@ describe("research run evaluation", () => {
     })
   })
 
-  it("rejects a legacy run outside its retained two-minute start grace", () => {
-    const run = derivedIntentRun()
-    if (
-      run.researchReport?.result.outcome !== "PROPOSE_TRADE" ||
-      run.validatedDecision?.outcome !== "PROPOSE_TRADE" ||
-      run.outcome.status !== "INTENT_DERIVED" ||
-      run.initialEligibility?.tradeIntentWindow === undefined
-    ) {
-      throw new Error("Expected a derived-intent fixture")
-    }
-    const decision = {
-      ...run.validatedDecision,
-      strategyVersion: "1.0.0" as const,
-    }
-    const evaluation = evaluateResearchRunV1({
-      ...run,
-      cycle: {
-        ...run.cycle,
-        startedAt: "2026-08-26T14:03:01.000Z",
-      },
-      initialEligibility: {
-        ...run.initialEligibility,
-        evaluatedAt: "2026-08-26T14:03:00.000Z",
-        tradeIntentWindow: {
-          ...run.initialEligibility.tradeIntentWindow,
-          deadline: "2026-08-26T14:05:00.000Z",
-        },
-      },
-      researchReport: {
-        ...run.researchReport,
-        result: decision,
-      },
-      validatedDecision: decision,
-      outcome: {
-        ...run.outcome,
-        decision,
-        intent: {
-          ...run.outcome.intent,
-          strategyVersion: "1.0.0",
-        },
-      },
-    })
-
-    expect(evaluation.dimensions.failClosedBehavior.issueCodes).toContain(
-      "INTENT_ELIGIBILITY_CONTEXT_INVALID",
-    )
-  })
-
   it("treats diagnostics without a canonical candidate as not applicable", () => {
     const run = noActionRun()
     const proposal = derivedIntentRun()
@@ -877,7 +670,7 @@ describe("research run evaluation", () => {
     })
   })
 
-  it("returns contract failure instead of throwing for malformed reports", () => {
+  it("evaluates malformed reports without throwing", () => {
     const run = preliminaryRun()
     const evaluation = evaluateResearchRunV1({
       ...run,
@@ -886,10 +679,9 @@ describe("research run evaluation", () => {
       } as unknown as ResearchReportV2,
     })
 
-    expect(evaluation.dimensions.contractCompliance).toEqual({
-      status: "FAIL",
-      issueCodes: ["REPORT_CONTRACT_INVALID"],
-    })
+    expect(researchRunEvaluationV1Schema.safeParse(evaluation).success).toBe(
+      true,
+    )
   })
 
   it("rejects unreachable result and record combinations for rejected outcomes", () => {
@@ -1999,7 +1791,7 @@ describe("research run evaluation", () => {
     )
   })
 
-  it("returns contract failure instead of throwing for malformed retained results", () => {
+  it("evaluates malformed retained results without throwing", () => {
     const {
       researchReport: _researchReport,
       validatedDecision,
@@ -2022,8 +1814,8 @@ describe("research run evaluation", () => {
 
     for (const run of runs) {
       const evaluation = evaluateResearchRunV1(run)
-      expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
-        "OUTCOME_CONTRACT_INVALID",
+      expect(researchRunEvaluationV1Schema.safeParse(evaluation).success).toBe(
+        true,
       )
     }
   })
@@ -2697,6 +2489,32 @@ describe("research run evaluation", () => {
     }
   })
 
+  it("fails closed when a derived intent retains no eligibility context", () => {
+    const { initialEligibility: _initialEligibility, ...withoutEligibility } =
+      derivedIntentRun()
+
+    const evaluation = evaluateResearchRunV1(withoutEligibility)
+
+    expect(evaluation.dimensions.failClosedBehavior.issueCodes).toContain(
+      "INTENT_ELIGIBILITY_CONTEXT_MISSING",
+    )
+  })
+
+  it("fails closed when a derived intent retains no trade window", () => {
+    const run = derivedIntentRun()
+    const { tradeIntentWindow: _tradeIntentWindow, ...eligibility } =
+      run.initialEligibility!
+
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      initialEligibility: eligibility,
+    })
+
+    expect(evaluation.dimensions.failClosedBehavior.issueCodes).toContain(
+      "INTENT_ELIGIBILITY_CONTEXT_MISSING",
+    )
+  })
+
   it("fails closed when an ineligible cycle claims to derive an intent", () => {
     const run = preliminaryRun()
     const invalidOutcome = {
@@ -2777,181 +2595,4 @@ describe("research run evaluation", () => {
     })
   })
 
-  it("does not mark legacy intents without eligibility context as safe", () => {
-    const { initialEligibility: _initialEligibility, ...legacyRun } =
-      derivedIntentRun()
-
-    const evaluation = evaluateResearchRunV1(legacyRun)
-
-    expect(evaluation.dimensions.failClosedBehavior).toEqual({
-      status: "FAIL",
-      issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_MISSING"],
-    })
-  })
-
-  it("requires the cycle and eligibility session dates to match", () => {
-    const run = derivedIntentRun()
-    const evaluation = evaluateResearchRunV1({
-      ...run,
-      cycle: { ...run.cycle, sessionDate: "2026-08-27" },
-    })
-
-    expect(evaluation.dimensions.failClosedBehavior.issueCodes).toContain(
-      "INTENT_ELIGIBILITY_CONTEXT_INVALID",
-    )
-  })
-
-  it("rejects eligibility evaluated outside its retained trade window", () => {
-    const run = derivedIntentRun()
-    if (run.initialEligibility === undefined) {
-      throw new Error("Expected retained eligibility")
-    }
-
-    const evaluation = evaluateResearchRunV1({
-      ...run,
-      initialEligibility: {
-        ...run.initialEligibility,
-        evaluatedAt: "2026-08-26T13:59:59.000Z",
-      },
-    })
-
-    expect(evaluation.dimensions.failClosedBehavior).toEqual({
-      status: "FAIL",
-      issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_INVALID"],
-    })
-  })
-
-  it("rejects initial eligibility recorded after the cycle starts", () => {
-    const run = derivedIntentRun()
-    if (run.initialEligibility === undefined) {
-      throw new Error("Expected retained eligibility")
-    }
-
-    const evaluation = evaluateResearchRunV1({
-      ...run,
-      initialEligibility: {
-        ...run.initialEligibility,
-        evaluatedAt: "2026-08-26T14:00:32.000Z",
-      },
-    })
-
-    expect(evaluation.dimensions.failClosedBehavior).toEqual({
-      status: "FAIL",
-      issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_INVALID"],
-    })
-  })
-
-  it("uses the retained session close for the entry cutoff", () => {
-    const run = derivedIntentRun()
-    if (run.initialEligibility === undefined) {
-      throw new Error("Expected retained eligibility")
-    }
-
-    const evaluation = evaluateResearchRunV1({
-      ...run,
-      initialEligibility: {
-        ...run.initialEligibility,
-        sessionClose: "2026-08-26T15:00:00.000Z",
-      },
-    })
-
-    expect(evaluation.dimensions.failClosedBehavior).toEqual({
-      status: "FAIL",
-      issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_INVALID"],
-    })
-  })
-
-  it("requires eligibility evaluation at or after the retained session open", () => {
-    const run = derivedIntentRun()
-    if (run.initialEligibility === undefined) {
-      throw new Error("Expected retained eligibility")
-    }
-
-    const evaluation = evaluateResearchRunV1({
-      ...run,
-      initialEligibility: {
-        ...run.initialEligibility,
-        sessionOpen: "2026-08-26T14:00:31.000Z",
-      },
-    })
-
-    expect(evaluation.dimensions.failClosedBehavior).toEqual({
-      status: "FAIL",
-      issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_INVALID"],
-    })
-  })
-
-  it("rejects a retained trade window with impossible runtime boundaries", () => {
-    const run = derivedIntentRun()
-    if (run.initialEligibility?.tradeIntentWindow === undefined) {
-      throw new Error("Expected retained trade-intent window")
-    }
-
-    const evaluation = evaluateResearchRunV1({
-      ...run,
-      initialEligibility: {
-        ...run.initialEligibility,
-        tradeIntentWindow: {
-          ...run.initialEligibility.tradeIntentWindow,
-          deadline: "2026-08-26T14:06:00.000Z",
-        },
-      },
-    })
-
-    expect(evaluation.dimensions.failClosedBehavior).toEqual({
-      status: "FAIL",
-      issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_INVALID"],
-    })
-  })
-
-  it("rejects a retained trade slot outside runtime entry hours", () => {
-    const run = derivedIntentRun()
-    if (
-      run.initialEligibility?.tradeIntentWindow === undefined ||
-      run.outcome.status !== "INTENT_DERIVED"
-    ) {
-      throw new Error("Expected a derived-intent fixture")
-    }
-    const intent = {
-      ...run.outcome.intent,
-      evaluatedAt: "2026-08-26T19:04:00.000Z",
-      longQuote: {
-        ...run.outcome.intent.longQuote,
-        providerTimestamp: "2026-08-26T19:03:59.000Z",
-      },
-      shortQuote: {
-        ...run.outcome.intent.shortQuote,
-        providerTimestamp: "2026-08-26T19:03:59.000Z",
-      },
-    }
-
-    const evaluation = evaluateResearchRunV1({
-      ...run,
-      cycle: {
-        ...run.cycle,
-        startedAt: "2026-08-26T19:00:31.000Z",
-        completedAt: "2026-08-26T19:05:00.000Z",
-      },
-      initialEligibility: {
-        ...run.initialEligibility,
-        evaluatedAt: "2026-08-26T19:00:30.000Z",
-        sessionClose: "2026-08-26T20:00:00.000Z",
-        tradeIntentWindow: {
-          slotStartedAt: "2026-08-26T19:00:00.000Z",
-          deadline: "2026-08-26T19:05:00.000Z",
-        },
-      },
-      evidenceSnapshots: run.evidenceSnapshots.map((snapshot) => ({
-        ...snapshot,
-        retrievedAt: "2026-08-26T19:03:59.000Z",
-        freshUntil: "2026-08-26T19:04:59.000Z",
-      })),
-      outcome: { ...run.outcome, intent },
-    })
-
-    expect(evaluation.dimensions.failClosedBehavior).toEqual({
-      status: "FAIL",
-      issueCodes: ["INTENT_ELIGIBILITY_CONTEXT_INVALID"],
-    })
-  })
 })

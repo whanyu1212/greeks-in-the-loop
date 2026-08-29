@@ -24,14 +24,29 @@ only when it cannot load and project a completed run.
 
 | Dimension | Deterministic checks |
 | --- | --- |
-| Contract compliance | Reuses the existing report, decision, preliminary-research, eligibility, intent, and invocation schemas; checks that the report, retained record, terminal outcome, cycle mode, and retained versions agree. An anytime research-only run must remain trade-ineligible, have no trade window, and use the research-only reason. |
-| Temporal integrity | Checks the cycle time range and ensures report, source-retrieval, snapshot-retrieval, and intent-evaluation timestamps remain inside it where applicable. |
+| Contract compliance | Checks that the report result, the retained record, and the terminal outcome agree, that a successful outcome retains its report, and that the report's declared strategy and contract versions match what the invocation authorized. |
+| Temporal integrity | Checks the cycle time range and ensures the report's own `asOf` and source-retrieval timestamps remain inside it, plus report and evidence freshness at intent evaluation and the retained preliminary session context. |
 | Grounding | Checks inference-to-sourced-fact links and decision snapshot references. |
 | Candidate identity | Checks candidate agreement across the report result, retained decision or preliminary result, report diagnostics, and derived intent. |
-| Fail-closed behavior | Detects intent derivation from an ineligible cycle or without a validated proposal. |
+| Fail-closed behavior | Detects intent derivation from an ineligible cycle, without a validated proposal, outside the retained trade window, or with no retained eligibility context at all. |
 
 Healthy `DRY_RUN_ANYTIME` preliminary-research and no-action outcomes are valid
 evaluation inputs. Any derived intent remains a fail-closed violation.
+
+## What the dimensions deliberately do not check
+
+The graded checks are limited to failures the **research agent** can cause.
+Checks that only application code could fail were removed in evaluation version
+`1.1.0`: re-parsing contracts that `.strict()` schemas already reject at the
+trust boundary, re-deriving app-computed eligibility windows, and comparing
+app-generated invocation constants against themselves. None of them could fire
+without a hand-edited ledger row.
+
+A `PASS` therefore means the agent behaved, not that application-side
+invariants were re-verified — those are enforced at the contract boundary and
+by `evaluateTradeIntentRiskV1`, which re-fetches every financial input itself.
+Because this changes what a result means, compare two evaluations only when
+they report the same `evaluationVersion`.
 
 The result also reports counts for sourced facts, inferences, grounded
 inferences, snapshot references, and retained Exa and FMP sources. It carries
