@@ -495,8 +495,13 @@ const runScenario = async (
 export async function runResearchBehaviorEvaluateCli(args: readonly string[]) {
   const options = parseOptions(args)
   const sourceRoot = process.cwd()
+  // "all" runs only the procedure-conforming scenarios. The negative fixtures
+  // encode deterministic grader failures, so a correct live model necessarily
+  // fails their expectations; name one explicitly to run it anyway.
   const selected = options.scenario === "all"
-    ? [...researchBehaviorScenarios]
+    ? researchBehaviorScenarios.filter(
+        ({ expectedIssues }) => expectedIssues === undefined,
+      )
     : researchBehaviorScenarios.filter(({ id }) => id === options.scenario)
   if (selected.length === 0) {
     throw new Error(`Unknown research evaluation scenario: ${options.scenario}`)
