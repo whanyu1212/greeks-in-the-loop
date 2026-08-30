@@ -1,9 +1,17 @@
 import { z } from "zod"
 
 import {
+  aggregateReplayCents,
+  replayMonitorCyclesSchema,
+  simulateReplayScenario,
+  type ReplayExitReason,
+  type ReplayMonitorCycle,
+} from "./replay-core.js"
+import {
   tradeIntentV1Schema,
   type TradeIntentV1,
 } from "../contracts/trade-intent-v1.js"
+import type { ResearchSnapshotStrategyManifestV1 } from "../contracts/research-market-snapshot-v1.js"
 import {
   evaluateTradeIntentRiskV1,
   RISK_EVALUATION_VERSION,
@@ -46,6 +54,71 @@ export {
 } from "./replay-identity.js"
 
 const INITIAL_EQUITY_CENTS = 10_000_000
+
+const deepFreeze = <T>(value: T): T => {
+  if (typeof value !== "object" || value === null || Object.isFrozen(value)) {
+    return value
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    deepFreeze(value[key as keyof T])
+  }
+  return Object.freeze(value)
+}
+
+/** Immutable #83-era manifest admitted by retained Replay V1 only. */
+export const RETAINED_REPLAY_V1_STRATEGY_MANIFEST = deepFreeze({
+  manifestVersion: "1.0.0",
+  strategyId: "spy-directional-debit-vertical",
+  strategyVersion: "1.1.0",
+  underlying: "SPY",
+  components: {
+    universePolicy: {
+      componentId: "validateSpyOptionUniverseV1",
+      componentVersion: "1.0.0",
+    },
+    featureCalculation: {
+      componentId: "spy-debit-spread-research",
+      componentVersion: "1.2.0",
+      authority: "RESEARCH_SKILL_POLICY",
+    },
+    candidateGenerationRanking: {
+      componentId: "spy-debit-spread-research",
+      componentVersion: "1.2.0",
+      authority: "RESEARCH_SKILL_POLICY",
+    },
+    intentDerivation: {
+      componentId: "deriveTradeIntentV1",
+      componentVersion: "1.0.0",
+    },
+    riskRule: {
+      componentId: "evaluateTradeIntentRiskV1",
+      componentVersion: "1.0.0",
+      evaluationVersion: "1.0.0",
+    },
+    exitPolicy: {
+      componentId: "runBacktestReplayV1",
+      componentVersion: "1.0.0",
+      availability: "REPLAY_ONLY",
+    },
+  },
+  researchPlanCompatibility: {
+    kind: "LEGACY_RESEARCH_INVOCATION_V1",
+    invocationVersion: "1.3.0",
+    agentName: "research",
+    promptVersion: "1.4.1",
+    skillName: "spy-debit-spread-research",
+    skillVersion: "1.2.0",
+    decisionContractVersion: "1.0.0",
+    reportVersion: "2.0.0",
+  },
+  replayCompatibility: {
+    kind: "BACKTEST_REPLAY_V1",
+    replayVersion: "1.0.0",
+    executionModelVersion: "1.0.0",
+    datasetVersion: "1.0.0",
+    normalizationVersion: "1.0.0",
+  },
+} as const satisfies ResearchSnapshotStrategyManifestV1)
 
 const positiveSafeInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
 const nonnegativeSafeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
@@ -160,47 +233,6 @@ const signalSnapshotSchema = z
     }
   })
 
-const monitorCycleSchema = z
-  .object({
-    decidedAt: timestamp,
-    marketOpen: z.boolean(),
-    lateFill: z.boolean(),
-    dte: z.number().int().min(0).max(365),
-    minutesToClose: z.number().int().min(0).max(1_440),
-    staleMinutes: z.number().int().min(0).max(1_440),
-    markHalfCentsPerShare: nonnegativeSafeInteger.optional(),
-    completedDailyCloseMicros: positiveSafeInteger.optional(),
-    sma20Micros: positiveSafeInteger.optional(),
-    holdingSessionIndex: z.number().int().min(1).max(365),
-  })
-  .strict()
-
-const monitorCyclesSchema = z
-  .array(monitorCycleSchema)
-  .min(1)
-  .max(10_000)
-  .superRefine((cycles, context) => {
-    let lateFillLatched = false
-    for (let index = 0; index < cycles.length; index += 1) {
-      if (lateFillLatched && !cycles[index]!.lateFill) {
-        context.addIssue({
-          code: "custom",
-          path: [index, "lateFill"],
-          message: "Late-fill protection must remain latched across monitor cycles",
-        })
-      }
-      lateFillLatched ||= cycles[index]!.lateFill
-    }
-    for (let index = 1; index < cycles.length; index += 1) {
-      if (instant(cycles[index]!.decidedAt) > instant(cycles[index - 1]!.decidedAt)) continue
-      context.addIssue({
-        code: "custom",
-        path: [index, "decidedAt"],
-        message: "Monitor cycle timestamps must be strictly increasing",
-      })
-    }
-  })
-
 const commonScenarioFields = {
   scenarioId: z.string().min(1).max(128),
 } as const
@@ -208,7 +240,7 @@ const commonScenarioFields = {
 const exactScenarioSchema = z
   .object({
     ...commonScenarioFields,
-    monitorCycles: monitorCyclesSchema,
+    monitorCycles: replayMonitorCyclesSchema,
     fidelity: z.literal("EXACT_SNAPSHOT"),
     signal: signalSnapshotSchema,
     candidates: z.array(riskEvaluationInputV1Schema).min(1).max(10_000),
@@ -273,7 +305,7 @@ const exactScenarioSchema = z
 const proxyScenarioSchema = z
   .object({
     ...commonScenarioFields,
-    monitorCycles: monitorCyclesSchema.optional(),
+    monitorCycles: replayMonitorCyclesSchema.optional(),
     fidelity: z.literal("HISTORICAL_BAR_PROXY"),
     retainedIntent: tradeIntentV1Schema,
   })
@@ -301,15 +333,7 @@ export const backtestReplayInputV1Schema = z
 
 export type BacktestReplayInputV1 = Readonly<z.infer<typeof backtestReplayInputV1Schema>>
 export type BacktestSignalDirectionV1 = "BULLISH" | "BEARISH" | "NO_ACTION"
-export type BacktestExitReasonV1 =
-  | "LATE_FILL"
-  | "EXPIRATION"
-  | "STALE_DATA"
-  | "STOP_LOSS"
-  | "PROFIT_TARGET"
-  | "TREND_INVALIDATION"
-  | "MAX_HOLDING_PERIOD"
-  | "END_OF_REPLAY"
+export type BacktestExitReasonV1 = ReplayExitReason
 
 const mean = (values: readonly number[]) =>
   values.reduce((total, value) => total + value, 0) / values.length
@@ -388,38 +412,6 @@ const candidateTuple = (input: z.infer<typeof riskEvaluationInputV1Schema>) => {
     longContractSymbol: intent.longContractSymbol,
     shortContractSymbol: intent.shortContractSymbol,
   })
-}
-
-const exitReason = (
-  intent: TradeIntentV1,
-  cycle: z.infer<typeof monitorCycleSchema>,
-): BacktestExitReasonV1 | undefined => {
-  if (!cycle.marketOpen) return undefined
-  if (cycle.lateFill) return "LATE_FILL"
-  if (
-    (cycle.dte < 3 || (cycle.dte === 3 && cycle.minutesToClose <= 60))
-  ) return "EXPIRATION"
-  if (cycle.staleMinutes >= 5) return "STALE_DATA"
-  if (
-    cycle.markHalfCentsPerShare !== undefined &&
-    cycle.markHalfCentsPerShare <= intent.stopLossMarkHalfCentsPerShare
-  ) return "STOP_LOSS"
-  if (
-    cycle.markHalfCentsPerShare !== undefined &&
-    cycle.markHalfCentsPerShare >= intent.profitTargetMarkHalfCentsPerShare
-  ) return "PROFIT_TARGET"
-  if (
-    cycle.completedDailyCloseMicros !== undefined &&
-    cycle.sma20Micros !== undefined &&
-    (intent.direction === "BULLISH"
-      ? cycle.completedDailyCloseMicros <= cycle.sma20Micros
-      : cycle.completedDailyCloseMicros >= cycle.sma20Micros)
-  ) return "TREND_INVALIDATION"
-  if (
-    (cycle.holdingSessionIndex > 5 ||
-      (cycle.holdingSessionIndex === 5 && cycle.minutesToClose <= 30))
-  ) return "MAX_HOLDING_PERIOD"
-  return undefined
 }
 
 const sessionForTimestamp = (
@@ -515,7 +507,7 @@ export function deriveHistoricalBarProxyCyclesV1(
     })
     .sort((left, right) => instant(left.decidedAt) - instant(right.decidedAt))
 
-  let previousCycle: (typeof cycles)[number] | undefined
+  let previousCycle: ReplayMonitorCycle | undefined
   const observedCycles = cycles.map((cycle) => {
     const session = sessionForTimestamp(sessions, cycle.decidedAt)!
     const previousSession = previousCycle === undefined
@@ -557,6 +549,100 @@ export function deriveHistoricalBarProxyCyclesV1(
     }]
   }
   return observedCycles
+}
+
+/** Applies the retained-calendar checks shared by explicit and proxy monitor cycles. */
+export function validateReplayMonitorCyclesV1(
+  records: readonly BacktestDatasetRecord[],
+  scenarioId: string,
+  intent: TradeIntentV1,
+  monitorCycles: readonly ReplayMonitorCycle[],
+  explicitlySupplied: boolean,
+): void {
+  if (monitorCycles.length === 0) {
+    throw new Error(`Scenario ${scenarioId} has no synchronized replay marks`)
+  }
+  if (monitorCycles.some(({ decidedAt }) => instant(decidedAt) < instant(intent.evaluatedAt))) {
+    throw new Error(`Scenario ${scenarioId} has a monitor cycle before intent evaluation`)
+  }
+  const sessions = records
+    .filter((record): record is MarketSessionRecord => record.recordType === "MARKET_SESSION")
+    .sort((left, right) => instant(left.open) - instant(right.open))
+  if (explicitlySupplied) {
+    const entrySessionIndex = sessions.findIndex(({ open, close }) =>
+      instant(intent.evaluatedAt) >= instant(open) && instant(intent.evaluatedAt) <= instant(close))
+    if (entrySessionIndex < 0) {
+      throw new Error(`Scenario ${scenarioId} entry session is absent from the replay calendar`)
+    }
+    if (monitorCycles.some(({ decidedAt, holdingSessionIndex }) => {
+      const cycleSessionIndex = sessions.findIndex(
+        ({ date }) => date === newYorkDate(new Date(decidedAt)),
+      )
+      return cycleSessionIndex < entrySessionIndex ||
+        holdingSessionIndex !== cycleSessionIndex - entrySessionIndex + 1
+    })) {
+      throw new Error(`Scenario ${scenarioId} has an incorrect holding session index`)
+    }
+    if (monitorCycles.some(({ decidedAt, minutesToClose }) => {
+      const session = sessions.find(
+        ({ date }) => date === newYorkDate(new Date(decidedAt)),
+      )
+      return session === undefined || minutesToClose !== Math.max(
+        0,
+        Math.floor((instant(session.close) - instant(decidedAt)) / 60_000),
+      )
+    })) {
+      throw new Error(`Scenario ${scenarioId} has incorrect minutes to session close`)
+    }
+    if (monitorCycles.some(({ decidedAt, marketOpen }) => {
+      if (!marketOpen) return false
+      const session = sessions.find(
+        ({ date }) => date === newYorkDate(new Date(decidedAt)),
+      )!
+      return instant(decidedAt) < instant(session.open) ||
+        instant(decidedAt) > instant(session.close)
+    })) {
+      throw new Error(`Scenario ${scenarioId} has an open cycle outside session hours`)
+    }
+    const dailyBarsBySessionDate = new Map<string, UnderlyingBarRecord[]>()
+    for (const record of records) {
+      if (record.recordType !== "UNDERLYING_BAR" || record.timeframe !== "1DAY") continue
+      const date = newYorkDate(new Date(record.timestamp))
+      const retained = dailyBarsBySessionDate.get(date) ?? []
+      retained.push(record)
+      dailyBarsBySessionDate.set(date, retained)
+    }
+    if (monitorCycles.some((cycle) => {
+      const hasClose = cycle.completedDailyCloseMicros !== undefined
+      const hasSma = cycle.sma20Micros !== undefined
+      if (!hasClose && !hasSma) return false
+      if (!hasClose || !hasSma) return true
+      const cycleSessionIndex = sessions.findIndex(
+        ({ date }) => date === newYorkDate(new Date(cycle.decidedAt)),
+      )
+      const trendBars = sessions
+        .slice(0, cycleSessionIndex)
+        .slice(-20)
+        .flatMap(({ date }) => {
+          const bars = dailyBarsBySessionDate.get(date)
+          return bars?.length === 1 ? bars : []
+        })
+      return trendBars.length !== 20 ||
+        cycle.completedDailyCloseMicros !== trendBars.at(-1)!.closeMicros ||
+        cycle.sma20Micros !== mean(trendBars.map(({ closeMicros }) => closeMicros))
+    })) {
+      throw new Error(`Scenario ${scenarioId} has invalid trend evidence`)
+    }
+  }
+  if (monitorCycles.some(({ decidedAt, dte }) =>
+    dte !== daysBetween(newYorkDate(new Date(decidedAt)), intent.expiration))) {
+    throw new Error(`Scenario ${scenarioId} has a monitor cycle with incorrect DTE`)
+  }
+  if (monitorCycles.some(({ markHalfCentsPerShare }) =>
+    markHalfCentsPerShare !== undefined &&
+    markHalfCentsPerShare > intent.widthCentsPerShare * 2)) {
+    throw new Error(`Scenario ${scenarioId} has a mark above the spread width`)
+  }
 }
 
 type SelectedIntent = Readonly<{
@@ -615,6 +701,8 @@ export function runBacktestReplayV1(
   const replay = backtestReplayInputV1Schema.parse(replayInput)
   if (isBacktestDatasetDefinitionV2(manifest.definition)) {
     if (
+      canonicalJson(manifest.definition.strategyManifest) !==
+        canonicalJson(RETAINED_REPLAY_V1_STRATEGY_MANIFEST) ||
       manifest.definition.datasetVersion !== BACKTEST_DATASET_VERSION ||
       manifest.definition.normalizationVersion !==
         BACKTEST_NORMALIZATION_VERSION ||
@@ -667,14 +755,6 @@ export function runBacktestReplayV1(
   const sessions = records
     .filter((record): record is MarketSessionRecord => record.recordType === "MARKET_SESSION")
     .sort((left, right) => instant(left.open) - instant(right.open))
-  const dailyBarsBySessionDate = new Map<string, UnderlyingBarRecord[]>()
-  for (const record of records) {
-    if (record.recordType !== "UNDERLYING_BAR" || record.timeframe !== "1DAY") continue
-    const date = newYorkDate(new Date(record.timestamp))
-    const retained = dailyBarsBySessionDate.get(date) ?? []
-    retained.push(record)
-    dailyBarsBySessionDate.set(date, retained)
-  }
   const scenarioResults = replay.scenarios.map((scenario) => {
     if (scenario.fidelity === "EXACT_SNAPSHOT") {
       const signalSessionIndex = sessions.findIndex(
@@ -724,142 +804,46 @@ export function runBacktestReplayV1(
         throw new Error(`Scenario ${scenario.scenarioId} entry session is outside the dataset interval`)
       }
     }
-    const monitorCycles: readonly z.infer<typeof monitorCycleSchema>[] =
+    const monitorCycles: readonly ReplayMonitorCycle[] =
       scenario.fidelity === "HISTORICAL_BAR_PROXY" && scenario.monitorCycles === undefined
         ? deriveHistoricalBarProxyCyclesV1(records, selected.intent)
         : scenario.monitorCycles!
-    if (monitorCycles.length === 0) {
-      throw new Error(`Scenario ${scenario.scenarioId} has no synchronized replay marks`)
-    }
-    if (monitorCycles.some(({ decidedAt }) => instant(decidedAt) < instant(selected.intent!.evaluatedAt))) {
-      throw new Error(`Scenario ${scenario.scenarioId} has a monitor cycle before intent evaluation`)
-    }
-    if (scenario.monitorCycles !== undefined) {
-      const entrySessionIndex = sessions.findIndex(({ open, close }) =>
-        instant(selected.intent!.evaluatedAt) >= instant(open) &&
-        instant(selected.intent!.evaluatedAt) <= instant(close))
-      if (entrySessionIndex < 0) {
-        throw new Error(`Scenario ${scenario.scenarioId} entry session is absent from the replay calendar`)
-      }
-      if (monitorCycles.some(({ decidedAt, holdingSessionIndex }) => {
-        const cycleSessionIndex = sessions.findIndex(
-          ({ date }) => date === newYorkDate(new Date(decidedAt)),
-        )
-        return cycleSessionIndex < entrySessionIndex ||
-          holdingSessionIndex !== cycleSessionIndex - entrySessionIndex + 1
-      })) {
-        throw new Error(`Scenario ${scenario.scenarioId} has an incorrect holding session index`)
-      }
-      if (monitorCycles.some(({ decidedAt, minutesToClose }) => {
-        const session = sessions.find(
-          ({ date }) => date === newYorkDate(new Date(decidedAt)),
-        )
-        return session === undefined || minutesToClose !== Math.max(
-          0,
-          Math.floor((instant(session.close) - instant(decidedAt)) / 60_000),
-        )
-      })) {
-        throw new Error(`Scenario ${scenario.scenarioId} has incorrect minutes to session close`)
-      }
-      if (monitorCycles.some(({ decidedAt, marketOpen }) => {
-        if (!marketOpen) return false
-        const session = sessions.find(
-          ({ date }) => date === newYorkDate(new Date(decidedAt)),
-        )!
-        return instant(decidedAt) < instant(session.open) ||
-          instant(decidedAt) > instant(session.close)
-      })) {
-        throw new Error(`Scenario ${scenario.scenarioId} has an open cycle outside session hours`)
-      }
-      if (monitorCycles.some((cycle) => {
-        const hasClose = cycle.completedDailyCloseMicros !== undefined
-        const hasSma = cycle.sma20Micros !== undefined
-        if (!hasClose && !hasSma) return false
-        if (!hasClose || !hasSma) return true
-        const cycleSessionIndex = sessions.findIndex(
-          ({ date }) => date === newYorkDate(new Date(cycle.decidedAt)),
-        )
-        const trendBars = sessions
-          .slice(0, cycleSessionIndex)
-          .slice(-20)
-          .flatMap(({ date }) => {
-            const bars = dailyBarsBySessionDate.get(date)
-            return bars?.length === 1 ? bars : []
-          })
-        return trendBars.length !== 20 ||
-          cycle.completedDailyCloseMicros !== trendBars.at(-1)!.closeMicros ||
-          cycle.sma20Micros !== mean(trendBars.map(({ closeMicros }) => closeMicros))
-      })) {
-        throw new Error(`Scenario ${scenario.scenarioId} has invalid trend evidence`)
-      }
-    }
-    if (monitorCycles.some(({ decidedAt, dte }) =>
-      dte !== daysBetween(newYorkDate(new Date(decidedAt)), selected.intent!.expiration))) {
-      throw new Error(`Scenario ${scenario.scenarioId} has a monitor cycle with incorrect DTE`)
-    }
-    if (monitorCycles.some(({ markHalfCentsPerShare }) =>
-      markHalfCentsPerShare !== undefined &&
-      markHalfCentsPerShare > selected.intent!.widthCentsPerShare * 2)) {
-      throw new Error(`Scenario ${scenario.scenarioId} has a mark above the spread width`)
-    }
-    const triggered = monitorCycles.find((cycle) => exitReason(selected.intent!, cycle))
-    const finalCycle = triggered ??
-      monitorCycles.filter(({ marketOpen }) => marketOpen).at(-1) ??
-      { ...monitorCycles.at(-1)!, markHalfCentsPerShare: undefined }
-    const reason = triggered === undefined ? "END_OF_REPLAY" : exitReason(selected.intent, triggered)!
-    const entryMark = selected.intent.entryLimitCentsPerShare * 2
-    if (finalCycle.markHalfCentsPerShare === undefined) {
-      return {
+    validateReplayMonitorCyclesV1(
+      records,
+      scenario.scenarioId,
+      selected.intent,
+      monitorCycles,
+      scenario.monitorCycles !== undefined,
+    )
+    const simulation = simulateReplayScenario(
+      selected.intent,
+      monitorCycles,
+      replay.execution,
+    )
+    return Object.assign(
+      {
         scenarioId: scenario.scenarioId,
         fidelity: scenario.fidelity,
         signalDirection: selected.signalDirection,
         riskStatus: selected.riskStatus,
         riskEvaluations: selected.riskEvaluations,
-        outcome: "EXIT_UNPRICED" as const,
+        outcome: simulation.outcome,
         intent: selected.intent,
-        exitReason: reason,
-        exitDecidedAt: finalCycle.decidedAt,
-        entryFillHalfCentsPerShare: entryMark,
-        pnlCents: null,
-      }
-    }
-    const exitMark = Math.max(
-      0,
-      finalCycle.markHalfCentsPerShare - replay.execution.exitSlippageHalfCentsPerShare,
+      },
+      simulation,
     )
-    const pnlCents =
-      (exitMark - entryMark) * 50 -
-      replay.execution.entrySlippageHalfCentsPerShare * 50 -
-      replay.execution.commissionCentsPerContract * 4
-    return {
-      scenarioId: scenario.scenarioId,
-      fidelity: scenario.fidelity,
-      signalDirection: selected.signalDirection,
-      riskStatus: selected.riskStatus,
-      riskEvaluations: selected.riskEvaluations,
-      outcome: "CLOSED" as const,
-      intent: selected.intent,
-      exitReason: reason,
-      exitDecidedAt: finalCycle.decidedAt,
-      entryFillHalfCentsPerShare: entryMark,
-      exitFillHalfCentsPerShare: exitMark,
-      pnlCents,
-    }
   })
   const entered = scenarioResults.filter((result) => result.outcome !== "NO_ENTRY")
   const closed = scenarioResults.filter((result) => result.outcome === "CLOSED")
-  const totalPnlCents = scenarioResults.reduce(
-    (total, result) => total + (result.pnlCents ?? 0),
-    0,
+  const {
+    totalPnlCents,
+    finalEquityCents: equityCents,
+    returnBps,
+    maxDrawdownCents,
+  } = aggregateReplayCents(
+    INITIAL_EQUITY_CENTS,
+    scenarioResults.map(({ pnlCents }) => pnlCents),
   )
-  let equityCents = INITIAL_EQUITY_CENTS
-  let peakEquityCents = equityCents
-  let maxDrawdownCents = 0
-  for (const result of scenarioResults) {
-    equityCents += result.pnlCents ?? 0
-    peakEquityCents = Math.max(peakEquityCents, equityCents)
-    maxDrawdownCents = Math.max(maxDrawdownCents, peakEquityCents - equityCents)
-  }
   const riskRejectionCounts: Record<string, number> = {}
   for (const result of scenarioResults) {
     for (const evaluation of result.riskEvaluations) {
@@ -885,7 +869,7 @@ export function runBacktestReplayV1(
     initialEquityCents: INITIAL_EQUITY_CENTS,
     finalEquityCents: equityCents,
     totalPnlCents,
-    returnBps: Math.trunc((totalPnlCents * 10_000) / INITIAL_EQUITY_CENTS),
+    returnBps,
     maxDrawdownCents,
     hitRateBps:
       closed.length === 0

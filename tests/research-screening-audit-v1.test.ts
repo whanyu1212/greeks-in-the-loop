@@ -97,7 +97,7 @@ describe("research screening audit V1", () => {
       status: "SELECTED",
       eligibleCandidateCount: 2,
       selectedCandidate: {
-        candidateId: "926f907fb4be051b2908251bbcf73b30ecbe5c98561b8f8788f30dad57c7d2f5",
+        candidateId: "529e4c4d555f74062f0f1dd004b30872ef0c091f7bdb9db1b978f844b2925366",
         candidateVersion: "1.0.0",
       },
     })

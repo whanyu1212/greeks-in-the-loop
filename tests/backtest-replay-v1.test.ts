@@ -12,6 +12,7 @@ import {
 } from "../src/backtest/dataset-v2.js"
 import {
   createBacktestDatasetDefinitionV2Fixture,
+  createReplayV1StrategyManifest,
   createSyntheticStrategyManifest,
 } from "./fixtures/backtest-dataset-v2.js"
 
@@ -250,6 +251,7 @@ const signalSnapshot = (
 describe("backtest replay v1", () => {
   it("admits a compatible V2 dataset and rejects embedded replay identity drift", () => {
     const definition = createBacktestDatasetDefinitionV2Fixture({
+      strategyManifest: createReplayV1StrategyManifest(),
       optionSymbols: [],
     })
     const compatible = {
@@ -300,6 +302,43 @@ describe("backtest replay v1", () => {
         }],
       }, [])
     ).toThrow("replay identity is incompatible")
+  })
+
+  it("rejects reidentified V2 datasets with retained manifest prompt drift", () => {
+    const original = createBacktestDatasetDefinitionV2Fixture({
+      strategyManifest: createReplayV1StrategyManifest(),
+      optionSymbols: [],
+    })
+    const { datasetId: _datasetId, ...content } = original
+    const driftedContent = {
+      ...content,
+      strategyManifest: {
+        ...content.strategyManifest,
+        researchPlanCompatibility: {
+          ...content.strategyManifest.researchPlanCompatibility,
+          promptVersion: "9.9.9",
+        },
+      },
+    }
+    const definition = {
+      ...driftedContent,
+      datasetId: computeBacktestDatasetIdV2(driftedContent),
+    }
+
+    expect(() => runReplay({
+      ...manifest,
+      definition,
+      checksum: "b".repeat(64),
+    }, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [{
+        scenarioId: "prompt-drift-v2-proxy",
+        fidelity: "HISTORICAL_BAR_PROXY",
+        retainedIntent: intent,
+        monitorCycles: [monitorCycle],
+      }],
+    }, replayCalendar)).toThrow("replay identity is incompatible")
   })
 
   it("rejects unsupported embedded V2 executable component identity", () => {
@@ -372,9 +411,9 @@ describe("backtest replay v1", () => {
     ).toThrow("replay identity is incompatible")
   })
 
-  it("rejects V1 scenario identity that disagrees with a V2 dataset symbol", () => {
+  it("rejects a V2 dataset outside the retained V1 manifest allowlist", () => {
     const definition = createBacktestDatasetDefinitionV2Fixture({
-      strategyManifest: createSyntheticStrategyManifest("QQQ"),
+      strategyManifest: createReplayV1StrategyManifest("QQQ"),
       optionSymbols: [],
     })
     expect(() =>
@@ -392,7 +431,7 @@ describe("backtest replay v1", () => {
           monitorCycles: [monitorCycle],
         }],
       }, [])
-    ).toThrow("scenario identity is incompatible")
+    ).toThrow("replay identity is incompatible")
   })
 
   it("context-validates V2 records for direct replay callers", () => {

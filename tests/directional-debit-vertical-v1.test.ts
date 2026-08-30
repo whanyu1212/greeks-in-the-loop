@@ -11,6 +11,7 @@ import {
   calculateDirectionalTrendFeaturesV1,
   compareDebitVerticalCandidateRanksV1,
   createDebitVerticalCandidateRankV1,
+  screenSpyDirectionalDebitVerticalForManifestV1,
   screenSpyDirectionalDebitVerticalV1,
 } from "../src/strategy/directional-debit-vertical-v1.js"
 import {
@@ -330,7 +331,7 @@ describe("directional debit vertical V1", () => {
     })
     if (baseline.status !== "SELECTED") return
     expect(baseline.selectedCandidate.candidateId).toBe(
-      "926f907fb4be051b2908251bbcf73b30ecbe5c98561b8f8788f30dad57c7d2f5",
+      "529e4c4d555f74062f0f1dd004b30872ef0c091f7bdb9db1b978f844b2925366",
     )
     expect([
       baseline,
@@ -361,6 +362,26 @@ describe("directional debit vertical V1", () => {
         baseline.selectedCandidate.candidateId,
       )
     }
+  })
+
+  it("matches the runtime wrapper and rejects a different explicit manifest", () => {
+    const pair = buildPair(validCallPair())
+    expect(
+      screenSpyDirectionalDebitVerticalForManifestV1(
+        pair,
+        pair.underlying.strategyManifest,
+      ),
+    ).toEqual(screenSpyDirectionalDebitVerticalV1(pair))
+
+    expect(
+      screenSpyDirectionalDebitVerticalForManifestV1(pair, {
+        ...pair.underlying.strategyManifest,
+        strategyVersion: "1.0.0",
+      }),
+    ).toEqual({
+      status: "NO_ACTION",
+      reason: "STRATEGY_MANIFEST_INCOMPATIBLE",
+    })
   })
 
   it("constructs the bearish put structure from the same feature engine", () => {

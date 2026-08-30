@@ -72,7 +72,7 @@ The frozen MVP strategy is documented in [SPY Directional Debit Spreads](docs/st
 | [Research Report V2](docs/research-report-v2.md) | Bounded report retained per cycle |
 | [Research Plan V1](docs/research-plan-v1.md) | Plan-driven qualitative contract and candidate-reference response (not production-active) |
 | [Event Ledger V1](docs/event-ledger-v1.md) | Append-only audit record and SQL invariants |
-| [Backtest Replay V1](docs/backtest-replay-v1.md) | Offline scenario contracts and fidelities |
+| [Backtest Replay V1/V2](docs/backtest-replay-v1.md) | Offline scenario contracts and fidelities |
 | [Research Market Snapshots V1](docs/research-market-snapshots-v1.md) | Application-owned SPY market-data identity and capture (runtime audit wiring is unbuilt) |
 | [Pre-Market Research V1](docs/pre-market-research-v1.md) | Research vs. trade-intent eligibility windows |
 | [Research Source Policy](docs/research-source-policy.md) | Source precedence and freshness rules |
@@ -322,11 +322,13 @@ pnpm backtest -- --dataset .state/backtests/<content-id>.sqlite \
   --scenarios scenarios.json --output report.json
 ```
 
-Exact forward-captured snapshots rerun the strategy signal, production risk
-rules, and candidate ranking. Historical option-bar runs are explicitly labeled
-proxy fidelity and cannot claim historical signal or risk approval. See
-[Backtest Replay V1](docs/backtest-replay-v1.md) for scenario contracts,
-execution assumptions, output metrics, and Alpaca data limitations.
+Replay V2 exact snapshots are content-addressed and bound to the dataset's full
+strategy manifest; static recorded components re-screen before risking only the
+rank-one candidate. Retained Replay V1 tuples remain executable under Replay V1.
+Historical option-bar runs are proxy fidelity and cannot claim historical signal
+or risk approval. See [Backtest Replay V1/V2](docs/backtest-replay-v1.md) for
+scenario contracts, execution assumptions, output metrics, and Alpaca data
+limitations.
 
 ### Why backtest replay exists
 

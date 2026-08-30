@@ -5,8 +5,10 @@ import {
   BACKTEST_NORMALIZATION_VERSION,
 } from "../backtest/dataset-v1.js"
 import {
-  BACKTEST_EXECUTION_MODEL_VERSION,
-  BACKTEST_REPLAY_VERSION,
+  BACKTEST_EXECUTION_MODEL_V2_VERSION,
+  BACKTEST_EXIT_POLICY_COMPONENT_ID,
+  BACKTEST_EXIT_POLICY_COMPONENT_VERSION,
+  BACKTEST_REPLAY_V2_VERSION,
 } from "../backtest/replay-identity.js"
 import { TRADE_INTENT_CONTRACT_VERSION } from "../contracts/trade-intent-v1.js"
 import {
@@ -75,8 +77,8 @@ export const strategyComponentManifestV1Schema = z
           evaluationVersion: z.literal(RISK_EVALUATION_VERSION),
         }),
         exitPolicy: componentIdentitySchema.extend({
-          componentId: z.literal("runBacktestReplayV1"),
-          componentVersion: z.literal(BACKTEST_REPLAY_VERSION),
+          componentId: z.literal(BACKTEST_EXIT_POLICY_COMPONENT_ID),
+          componentVersion: z.literal(BACKTEST_EXIT_POLICY_COMPONENT_VERSION),
           availability: z.literal("REPLAY_ONLY"),
         }),
       })
@@ -97,9 +99,9 @@ export const strategyComponentManifestV1Schema = z
       .strict(),
     replayCompatibility: z
       .object({
-        kind: z.literal("BACKTEST_REPLAY_V1"),
-        replayVersion: z.literal(BACKTEST_REPLAY_VERSION),
-        executionModelVersion: z.literal(BACKTEST_EXECUTION_MODEL_VERSION),
+        kind: z.literal("BACKTEST_REPLAY_V2"),
+        replayVersion: z.literal(BACKTEST_REPLAY_V2_VERSION),
+        executionModelVersion: z.literal(BACKTEST_EXECUTION_MODEL_V2_VERSION),
         datasetVersion: z.literal(BACKTEST_DATASET_VERSION),
         normalizationVersion: z.literal(BACKTEST_NORMALIZATION_VERSION),
       })
@@ -152,8 +154,8 @@ const currentManifest = deepFreeze(
         evaluationVersion: RISK_EVALUATION_VERSION,
       },
       exitPolicy: {
-        componentId: "runBacktestReplayV1",
-        componentVersion: BACKTEST_REPLAY_VERSION,
+        componentId: BACKTEST_EXIT_POLICY_COMPONENT_ID,
+        componentVersion: BACKTEST_EXIT_POLICY_COMPONENT_VERSION,
         availability: "REPLAY_ONLY",
       },
     },
@@ -169,9 +171,9 @@ const currentManifest = deepFreeze(
       reportVersion: currentResearchProvenance.reportVersion,
     },
     replayCompatibility: {
-      kind: "BACKTEST_REPLAY_V1",
-      replayVersion: BACKTEST_REPLAY_VERSION,
-      executionModelVersion: BACKTEST_EXECUTION_MODEL_VERSION,
+      kind: "BACKTEST_REPLAY_V2",
+      replayVersion: BACKTEST_REPLAY_V2_VERSION,
+      executionModelVersion: BACKTEST_EXECUTION_MODEL_V2_VERSION,
       datasetVersion: BACKTEST_DATASET_VERSION,
       normalizationVersion: BACKTEST_NORMALIZATION_VERSION,
     },

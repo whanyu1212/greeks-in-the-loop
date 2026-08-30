@@ -3,6 +3,7 @@ import {
   type BacktestDatasetDefinitionV2,
 } from "../../src/backtest/dataset-v2.js"
 import type { ResearchSnapshotStrategyManifestV1 } from "../../src/contracts/research-market-snapshot-v1.js"
+import { RETAINED_REPLAY_V1_STRATEGY_MANIFEST } from "../../src/backtest/replay-v1.js"
 import { CURRENT_STRATEGY_MANIFEST } from "../../src/strategy/strategy-registry.js"
 
 export const createSyntheticStrategyManifest = (
@@ -19,6 +20,25 @@ export const createSyntheticStrategyManifest = (
     },
   },
 })
+
+export const createReplayV1StrategyManifest = (
+  underlying = "SPY",
+): ResearchSnapshotStrategyManifestV1 => {
+  const manifest = structuredClone(RETAINED_REPLAY_V1_STRATEGY_MANIFEST)
+  return underlying === "SPY"
+    ? manifest
+    : {
+        ...manifest,
+        underlying,
+        components: {
+          ...manifest.components,
+          universePolicy: {
+            componentId: `validate${underlying}OptionUniverseV1`,
+            componentVersion: manifest.components.universePolicy.componentVersion,
+          },
+        },
+      }
+}
 
 export const createBacktestDatasetDefinitionV2Fixture = (
   overrides: Partial<{
