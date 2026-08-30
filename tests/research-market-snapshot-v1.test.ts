@@ -11,6 +11,7 @@ import {
   optionUniverseSnapshotV1Schema,
   underlyingSessionSnapshotV1Schema,
 } from "../src/contracts/research-market-snapshot-v1.js"
+import { screenSpyDirectionalDebitVerticalV1 } from "../src/strategy/directional-debit-vertical-v1.js"
 import {
   createOptionUniverseSnapshotInputV1,
   createUnderlyingSnapshotInputV1,
@@ -81,6 +82,43 @@ describe("research market snapshot V1", () => {
       .toBe(true)
     expect(allObjects(underlying).every(Object.isFrozen)).toBe(true)
     expect(allObjects(optionUniverse).every(Object.isFrozen)).toBe(true)
+  })
+
+  it("rejects decode-only manifests before current-runtime screening", () => {
+    const { underlying, optionUniverse } = buildOptionUniverse()
+    const historicalManifest = {
+      ...underlying.strategyManifest,
+      strategyVersion: "1.0.0" as const,
+    }
+    const { snapshotId: _underlyingId, ...underlyingBase } = underlying
+    const underlyingContent = {
+      ...structuredClone(underlyingBase),
+      strategyManifest: historicalManifest,
+    }
+    const historicalUnderlying = {
+      ...underlyingContent,
+      snapshotId: computeUnderlyingSessionSnapshotIdV1(underlyingContent),
+    }
+    const { snapshotId: _optionId, ...optionBase } = optionUniverse
+    const optionContent = {
+      ...structuredClone(optionBase),
+      underlyingSnapshotId: historicalUnderlying.snapshotId,
+    }
+    const historicalOptionUniverse = {
+      ...optionContent,
+      snapshotId: computeOptionUniverseSnapshotIdV1(optionContent),
+    }
+
+    const decoded = validateResearchSnapshotPairV1(
+      historicalUnderlying,
+      historicalOptionUniverse,
+    )
+    expect(decoded).toMatchObject({ success: true })
+    if (!decoded.success) return
+    expect(screenSpyDirectionalDebitVerticalV1(decoded)).toEqual({
+      status: "NO_ACTION",
+      reason: "STRATEGY_MANIFEST_INCOMPATIBLE",
+    })
   })
 
   it("is invariant to provider response ordering", () => {

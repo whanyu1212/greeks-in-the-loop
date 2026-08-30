@@ -17,6 +17,10 @@ import {
   createDebitVerticalCandidateRankV1,
 } from "../strategy/directional-debit-vertical-v1.js"
 import {
+  BACKTEST_EXECUTION_MODEL_VERSION,
+  BACKTEST_REPLAY_VERSION,
+} from "./replay-identity.js"
+import {
   backtestDatasetManifestV1Schema,
   type BacktestDatasetRecordV1,
   type MarketSessionRecordV1,
@@ -24,8 +28,11 @@ import {
   type UnderlyingBarRecordV1,
 } from "./dataset-v1.js"
 
-export const BACKTEST_REPLAY_VERSION = "1.0.0" as const
-export const BACKTEST_EXECUTION_MODEL_VERSION = "1.0.0" as const
+export {
+  BACKTEST_EXECUTION_MODEL_VERSION,
+  BACKTEST_REPLAY_VERSION,
+} from "./replay-identity.js"
+
 const INITIAL_EQUITY_CENTS = 10_000_000
 
 const positiveSafeInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER)

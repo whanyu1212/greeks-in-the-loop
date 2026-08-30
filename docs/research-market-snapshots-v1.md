@@ -130,10 +130,11 @@ IDs without importing mutable current registry state. This preserves historical
 meaning.
 
 `buildUnderlyingSessionSnapshotV1` and `buildOptionUniverseSnapshotV1` are pure,
-I/O-free current-runtime constructors. Only the builder module imports the
-strategy registry. New construction requires the exact current manifest,
-canonicalizes inputs, returns bounded ordered reasons, verifies the persisted
-schema, and recursively freezes successful output.
+I/O-free current-runtime constructors. New construction requires the exact
+current manifest, canonicalizes inputs, returns bounded ordered reasons,
+verifies the persisted schema, and recursively freezes successful output. Pair validation remains
+decode-only for historical artifacts; current screening separately rejects any
+embedded manifest that is not compatible with the runtime registry.
 
 Malformed input returns `INPUT_INVALID`. Other bounded failures distinguish
 manifest, underlying, duplicate, completeness, identity, future/stale

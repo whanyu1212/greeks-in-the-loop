@@ -9,6 +9,7 @@ import type {
   OptionUniverseContractV1,
 } from "../contracts/research-market-snapshot-v1.js"
 import { canonicalJsonSha256 } from "../shared/canonical-json.js"
+import { checkStrategyManifestCompatibility } from "./strategy-registry.js"
 
 export const DIRECTIONAL_TREND_FEATURE_COMPONENT_ID =
   "calculateDirectionalTrendFeaturesV1" as const
@@ -231,6 +232,10 @@ export type SpyDebitVerticalScreeningResultV1 =
         | "NO_ELIGIBLE_SPREAD"
       features: DirectionalTrendFeaturesV1
     }>
+  | Readonly<{
+      status: "NO_ACTION"
+      reason: "STRATEGY_MANIFEST_INCOMPATIBLE"
+    }>
 
 export type ValidatedResearchSnapshotPairV1 = Extract<
   ResearchSnapshotPairValidationResultV1,
@@ -318,6 +323,15 @@ export function screenSpyDirectionalDebitVerticalV1(
   pair: ValidatedResearchSnapshotPairV1,
 ): SpyDebitVerticalScreeningResultV1 {
   const { underlying, optionUniverse } = pair
+  const compatibility = checkStrategyManifestCompatibility(
+    underlying.strategyManifest,
+  )
+  if (!compatibility.success) {
+    return Object.freeze({
+      status: "NO_ACTION" as const,
+      reason: "STRATEGY_MANIFEST_INCOMPATIBLE" as const,
+    })
+  }
   const featureResult = calculateDirectionalTrendFeaturesV1({
     completedDailyClosesMicrosPerShare: underlying.dailyBars.map(
       ({ closeMicrosPerShare }) => closeMicrosPerShare,
@@ -433,8 +447,8 @@ export function screenSpyDirectionalDebitVerticalV1(
         contractVersion: DEBIT_VERTICAL_CANDIDATE_CONTRACT_VERSION,
         underlyingSnapshotId: underlying.snapshotId,
         optionUniverseSnapshotId: optionUniverse.snapshotId,
-        strategyId: underlying.strategyManifest.strategyId,
-        strategyVersion: underlying.strategyManifest.strategyVersion,
+        strategyId: compatibility.manifest.strategyId,
+        strategyVersion: compatibility.manifest.strategyVersion,
         featureComponentId: DIRECTIONAL_TREND_FEATURE_COMPONENT_ID,
         featureVersion: DIRECTIONAL_TREND_FEATURE_VERSION,
         candidateComponentId: DEBIT_VERTICAL_CANDIDATE_COMPONENT_ID,
