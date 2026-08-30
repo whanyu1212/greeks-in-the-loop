@@ -4,10 +4,12 @@
 
 This document defines the normalized, application-owned market-data identity used
 by deterministic SPY screening. Contract version `1.0.0` and normalization
-version `1.0.0` define data only. Provider capture is implemented separately by
-issue #65. The pure `directional-debit-vertical-v1` strategy component consumes a
-validated snapshot pair to calculate exact features and select the deterministic
-rank-one SPY candidate; runtime authority remains unchanged until #67.
+version `1.0.0` define data only. `createAlpacaResearchSnapshotProvider` captures
+that data without invoking the research agent; runtime audit wiring remains
+separate under #66. The pure `directional-debit-vertical-v1` strategy component
+consumes a validated snapshot pair to calculate exact features and select the
+deterministic rank-one SPY candidate; runtime authority remains unchanged until
+#67.
 
 The contract contains no provider client, model output, account state, risk
 result, runtime callback, credential, URL, page token, or raw provider payload.
@@ -40,8 +42,9 @@ All values use bounded JSON-safe integers rather than financial floats:
 | Volume and open interest | contracts |
 
 Delta is bounded to `[-1_000_000, 1_000_000]`, and implied volatility must be
-positive. The provider decimal-to-millionths normalization policy belongs to
-#65 and must be deterministic under normalization version `1.0.0`.
+positive. Provider Greeks and implied volatility are rounded to the nearest
+millionth with ties away from zero. Prices and counts must be exactly
+representable in their canonical units; unsupported precision fails capture.
 
 Every timestamp is canonical UTC with millisecond precision:
 `YYYY-MM-DDTHH:mm:ss.sssZ`. Dates use `YYYY-MM-DD`.
@@ -68,9 +71,9 @@ records, daily-bar timestamps bound to their declared sessions, positive
 OHLC/VWAP/volume, OHLC relationships, source times inside the capture window,
 and quote freshness. Provider observation timestamps may not follow the
 application retrieval time of the response that supplied them. The contract
-cannot derive exchange holidays by itself;
-#65 must obtain the complete ordered session list from the Alpaca calendar and
-must fail capture when that provider evidence is incomplete. Initial freshness
+cannot derive exchange holidays by itself; the provider obtains the complete
+ordered session list from the Alpaca calendar and fails capture when that
+evidence is incomplete. Initial freshness
 is measured against `observedAt`,
 the application timestamp captured after the final snapshot-forming response.
 Later approval must recheck freshness independently.
@@ -106,6 +109,20 @@ thresholds, quote-width limits, spread construction, or ranking.
 Open interest must be dated no later than the session and, when linked with the
 underlying calendar, must be from the current date or one of the two latest
 completed sessions.
+
+## Alpaca capture boundary
+
+`createAlpacaResearchSnapshotProvider` is a read-only SPY-only adapter. It uses
+credential-free allowlisted Alpaca origins, explicit IEX and indicative feeds,
+bounded retries and request timeouts, terminal pagination evidence, and exact
+symbol-set joins. Missing, empty, repeated, over-limit, stale, future-dated, or
+cross-symbol responses fail closed with bounded reason codes. Caller
+cancellation escapes without recording a misleading capture failure. Raw
+provider payloads and credentials never cross the adapter boundary.
+
+The provider returns a validated snapshot pair but does not persist it or invoke
+screening. Composition-root wiring, audit comparison, and ledger diagnostics
+belong to #66.
 
 ## Content identity
 
