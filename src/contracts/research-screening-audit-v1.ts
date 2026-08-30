@@ -20,7 +20,11 @@ import {
 import type { ResearchInvocationV1 } from "../research/research-invocation-v1.js"
 import { SUPPORTED_RESEARCH_INVOCATION_VERSIONS } from "../research/research-invocation-v1.js"
 import { canonicalJsonSha256 } from "../shared/canonical-json.js"
-import { spyAlpacaOptionSymbolV1Schema } from "../shared/alpaca-option-identity.js"
+import {
+  alpacaOptionStrikeCents,
+  parseAlpacaOptionSymbol,
+  spyAlpacaOptionSymbolV1Schema,
+} from "../shared/alpaca-option-identity.js"
 
 export const RESEARCH_SCREENING_AUDIT_VERSION = "1.0.0" as const
 export const RESEARCH_SCREENING_COMPARISON_VERSION = "1.0.0" as const
@@ -284,6 +288,40 @@ export const debitVerticalScreeningDiagnosticsV1Schema = z
     }
   })
 
+type CandidateLegIdentity = Readonly<{
+  direction: "BULLISH" | "BEARISH"
+  structure: "BULL_CALL_SPREAD" | "BEAR_PUT_SPREAD"
+  expiration: string
+  longContractSymbol: string
+  shortContractSymbol: string
+}>
+
+const candidateLegWidthCents = (candidate: CandidateLegIdentity) => {
+  const long = parseAlpacaOptionSymbol(candidate.longContractSymbol)
+  const short = parseAlpacaOptionSymbol(candidate.shortContractSymbol)
+  if (!long.success || !short.success) return undefined
+  const longStrike = alpacaOptionStrikeCents(long.identity)
+  const shortStrike = alpacaOptionStrikeCents(short.identity)
+  if (!longStrike.success || !shortStrike.success) return undefined
+  const bullish = candidate.direction === "BULLISH"
+  const expectedStructure = bullish ? "BULL_CALL_SPREAD" : "BEAR_PUT_SPREAD"
+  const expectedOptionType = bullish ? "C" : "P"
+  if (
+    candidate.structure !== expectedStructure ||
+    long.identity.optionType !== expectedOptionType ||
+    short.identity.optionType !== expectedOptionType ||
+    long.identity.expiration !== candidate.expiration ||
+    short.identity.expiration !== candidate.expiration ||
+    candidate.longContractSymbol === candidate.shortContractSymbol ||
+    (bullish
+      ? longStrike.strikeCentsPerShare >= shortStrike.strikeCentsPerShare
+      : longStrike.strikeCentsPerShare <= shortStrike.strikeCentsPerShare)
+  ) return undefined
+  return Math.abs(
+    longStrike.strikeCentsPerShare - shortStrike.strikeCentsPerShare,
+  )
+}
+
 const selectedApplicationResultSchema = z
   .object({
     status: z.literal("SELECTED"),
@@ -291,13 +329,26 @@ const selectedApplicationResultSchema = z
     direction: z.enum(["BULLISH", "BEARISH"]),
     structure: z.enum(["BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"]),
     expirationDate: z.iso.date(),
-    dte: safeCount,
-    widthCentsPerShare: z.number().int().positive().safe(),
+    dte: safeCount.min(14).max(30),
+    widthCentsPerShare: z.number().int().min(100).max(1_000),
     longContractSymbol: spyAlpacaOptionSymbolV1Schema,
     shortContractSymbol: spyAlpacaOptionSymbolV1Schema,
     eligibleCandidateCount: z.number().int().positive().safe(),
   })
   .strict()
+  .superRefine((candidate, refinement) => {
+    const width = candidateLegWidthCents({
+      ...candidate,
+      expiration: candidate.expirationDate,
+    })
+    if (width === undefined || width !== candidate.widthCentsPerShare) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["longContractSymbol"],
+        message: "Selected leg identity and spread width must be coherent",
+      })
+    }
+  })
 
 const noActionApplicationResultSchema = z
   .object({
@@ -373,7 +424,47 @@ export const applicationResearchScreeningAuditV1Schema = z.discriminatedUnion(
             message: "Diagnostic and screening candidate counts must match",
           })
         }
+        const failureCount = (reason: DebitVerticalFirstFailureReasonV1) =>
+          audit.diagnostics.firstFailureCounts.find(
+            (failure) => failure.reason === reason,
+          )?.count ?? 0
+        if (audit.result.status === "NO_ACTION") {
+          const cycleFailureCount = [...CYCLE_FAILURE_REASONS].reduce(
+            (total, reason) => total + failureCount(reason),
+            0,
+          )
+          const reasonMatches = audit.result.reason ===
+              "STRATEGY_MANIFEST_INCOMPATIBLE"
+            ? failureCount("STRATEGY_MANIFEST_INCOMPATIBLE") === 1
+            : audit.result.reason === "SIGNAL_NOT_ACTIONABLE"
+              ? failureCount("FEATURE_SIGNAL_NOT_ACTIONABLE") === 1
+              : audit.result.reason === "MARKET_DATA_STALE"
+                ? failureCount("UNDERLYING_QUOTE_STALE") +
+                    failureCount("LATEST_MINUTE_BAR_STALE") === 1
+                : cycleFailureCount === 0 &&
+                  audit.diagnostics.contractRoleEvaluationCount ===
+                    audit.diagnostics.inputContractCount * 2
+          if (!reasonMatches) {
+            refinement.addIssue({
+              code: "custom",
+              path: ["result", "reason"],
+              message: "No-action reason must match the recorded stopping stage",
+            })
+          }
+        }
         if (audit.result.status === "SELECTED") {
+          const sessionDate = audit.inputIdentity.evaluatedAt.slice(0, 10)
+          const expectedDte = (
+            Date.parse(`${audit.result.expirationDate}T00:00:00.000Z`) -
+            Date.parse(`${sessionDate}T00:00:00.000Z`)
+          ) / 86_400_000
+          if (audit.result.dte !== expectedDte) {
+            refinement.addIssue({
+              code: "custom",
+              path: ["result", "dte"],
+              message: "Selected DTE must match evaluation and expiration dates",
+            })
+          }
           const expectedCandidateId = computeDebitVerticalCandidateIdV1({
             underlyingSnapshotId: audit.inputIdentity.underlyingSnapshotId,
             optionUniverseSnapshotId:
@@ -412,6 +503,15 @@ const agentCandidateIdentitySchema = z
     shortContractSymbol: spyAlpacaOptionSymbolV1Schema,
   })
   .strict()
+  .superRefine((candidate, refinement) => {
+    if (candidateLegWidthCents(candidate) === undefined) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["longContractSymbol"],
+        message: "Agent candidate leg identity must be coherent",
+      })
+    }
+  })
 
 const agentEvidenceReferenceSchema = z.discriminatedUnion("kind", [
   z

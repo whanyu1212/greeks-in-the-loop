@@ -159,12 +159,21 @@ describe("research screening audit V1", () => {
     expect(audited.result).toEqual(screenSpyDirectionalDebitVerticalV1(pair))
     expect(audited.result.status).toBe("NO_ACTION")
     expect(failureCount(audited, reason)).toBeGreaterThan(0)
-    expect(createApplicationResearchScreeningAuditV1({
+    const application = createApplicationResearchScreeningAuditV1({
       pair,
       audited,
       captureDurationMs: 1,
       screeningDurationMs: 1,
-    }).status).toBe("SCREENED")
+    })
+    expect(application.status).toBe("SCREENED")
+    if (reason === "CONTRACT_NOT_TRADABLE" &&
+      application.status === "SCREENED" &&
+      application.result.status === "NO_ACTION") {
+      expect(applicationResearchScreeningAuditV1Schema.safeParse({
+        ...application,
+        result: { ...application.result, reason: "SIGNAL_NOT_ACTIONABLE" },
+      }).success).toBe(false)
+    }
   })
 
   it.each([
@@ -272,6 +281,7 @@ describe("research screening audit V1", () => {
         shortContractSymbol: "SPY260918C00635000",
       },
     })
+    if (projected.status !== "AVAILABLE") return
     const retained = JSON.stringify(projected)
     for (const excluded of [
       "Model prose",
@@ -287,6 +297,14 @@ describe("research screening audit V1", () => {
     expect(agentResearchScreeningAuditV1Schema.safeParse({
       ...projected,
       thesis: "not allowed",
+    }).success).toBe(false)
+    expect(agentResearchScreeningAuditV1Schema.safeParse({
+      ...projected,
+      proposalCandidate: {
+        ...projected.proposalCandidate!,
+        direction: "BEARISH",
+        structure: "BEAR_PUT_SPREAD",
+      },
     }).success).toBe(false)
     expect(agentResearchScreeningAuditV1Schema.safeParse({
       ...projected,
@@ -345,13 +363,54 @@ describe("research screening audit V1", () => {
       longLeg: { contractSymbol: application.result.longContractSymbol },
       shortLeg: { contractSymbol: application.result.shortContractSymbol },
     })).toBe(application.result.candidateId)
-    expect(applicationResearchScreeningAuditV1Schema.safeParse({
-      ...application,
-      result: {
+    for (const result of [
+      { ...application.result, dte: 20 },
+      { ...application.result, widthCentsPerShare: 100 },
+    ]) {
+      expect(applicationResearchScreeningAuditV1Schema.safeParse({
+        ...application,
+        result,
+      }).success).toBe(false)
+    }
+    const reidentify = (
+      result: typeof application.result,
+    ): typeof application.result => ({
+      ...result,
+      candidateId: computeDebitVerticalCandidateIdV1({
+        underlyingSnapshotId: application.inputIdentity.underlyingSnapshotId,
+        optionUniverseSnapshotId:
+          application.inputIdentity.optionUniverseSnapshotId,
+        ...application.strategy,
+        underlying: "SPY",
+        direction: result.direction,
+        structure: result.structure,
+        expirationDate: result.expirationDate,
+        longLeg: { contractSymbol: result.longContractSymbol },
+        shortLeg: { contractSymbol: result.shortContractSymbol },
+      }),
+    })
+    for (const result of [
+      reidentify({
         ...application.result,
-        expirationDate: "2026-09-19",
-      },
-    }).success).toBe(false)
+        direction: "BEARISH",
+        structure: "BEAR_PUT_SPREAD",
+      }),
+      reidentify({ ...application.result, expirationDate: "2026-09-19" }),
+      reidentify({
+        ...application.result,
+        shortContractSymbol: application.result.longContractSymbol,
+      }),
+      reidentify({
+        ...application.result,
+        longContractSymbol: application.result.shortContractSymbol,
+        shortContractSymbol: application.result.longContractSymbol,
+      }),
+    ]) {
+      expect(applicationResearchScreeningAuditV1Schema.safeParse({
+        ...application,
+        result,
+      }).success).toBe(false)
+    }
     expect(applicationResearchScreeningAuditV1Schema.safeParse({
       ...application,
       diagnostics: {
