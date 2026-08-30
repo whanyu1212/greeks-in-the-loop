@@ -310,6 +310,7 @@ const exactOptionContract = (
 
 export const deriveBacktestReplayEligibilityV2 = (
   underlying: UnderlyingSessionSnapshotV1,
+  retainedTradeIntentWindow = true,
 ) => {
   const compatibility = resolveV1StrategyVersionCompatibility(
     underlying.strategyManifest.strategyVersion,
@@ -318,7 +319,6 @@ export const deriveBacktestReplayEligibilityV2 = (
     throw new Error("Replay eligibility strategy version is unsupported")
   }
   const evaluatedAt = Date.parse(underlying.times.evaluatedAt)
-  const captureStartedAt = Date.parse(underlying.times.captureStartedAt)
   const open = Date.parse(underlying.session.openAt)
   const close = Date.parse(underlying.session.closeAt)
   const sessionDate = underlying.session.date
@@ -331,7 +331,6 @@ export const deriveBacktestReplayEligibilityV2 = (
   const premarketStart = newYorkLocalTime(sessionDate, "08:00").getTime()
   if (
     !Number.isFinite(evaluatedAt) ||
-    !Number.isFinite(captureStartedAt) ||
     !Number.isFinite(open) ||
     !Number.isFinite(close) ||
     open >= close ||
@@ -359,9 +358,7 @@ export const deriveBacktestReplayEligibilityV2 = (
   const entryStart = newYorkLocalTime(sessionDate, "10:00").getTime()
   const timing = compatibility.compatibility.tradeIntentTiming
   const tradeIntentWindow =
-    captureStartedAt >= open &&
-    captureStartedAt - slot.getTime() >= 0 &&
-    captureStartedAt - slot.getTime() < timing.startGraceMs &&
+    retainedTradeIntentWindow &&
     slot.getTime() >= entryStart &&
     slot.getTime() < entryCutoff
       ? {
@@ -416,7 +413,10 @@ const boundRiskEvaluationInput = (
     openInterest: contract.openInterest.contracts,
     openInterestDate: contract.openInterest.asOfDate,
   })
-  const eligibility = deriveBacktestReplayEligibilityV2(underlying)
+  const eligibility = deriveBacktestReplayEligibilityV2(
+    underlying,
+    input.context.eligibility.tradeIntentWindow !== undefined,
+  )
   if (canonicalJson(input.context.eligibility) !== canonicalJson(eligibility)) {
     throw new Error("Risk eligibility does not match the selected snapshot")
   }

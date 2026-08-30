@@ -510,13 +510,19 @@ describe("backtest replay v2", () => {
 
   it("preserves a retained window after start grace and through expiry", () => {
     const underlying = createSelectedSnapshots(true).pair.underlying
-    const eligibilityAtSevenMinutes = deriveBacktestReplayEligibilityV2({
+    const delayedSnapshot = {
       ...underlying,
       times: {
         ...underlying.times,
+        captureStartedAt: "2026-08-28T14:06:00.000Z",
+        observedAt: "2026-08-28T14:06:59.000Z",
         evaluatedAt: "2026-08-28T14:07:00.000Z",
       },
-    })
+    }
+    const eligibilityAtSevenMinutes =
+      deriveBacktestReplayEligibilityV2(delayedSnapshot)
+    const eligibilityWithoutRetainedWindow =
+      deriveBacktestReplayEligibilityV2(delayedSnapshot, false)
     const eligibilityAtExpiry = deriveBacktestReplayEligibilityV2({
       ...underlying,
       times: {
@@ -532,6 +538,13 @@ describe("backtest replay v2", () => {
         deadline: "2026-08-28T14:10:00.000Z",
       },
     })
+    expect(eligibilityWithoutRetainedWindow).toMatchObject({
+      tradeIntentEligible: false,
+      reason: "OUTSIDE_TRADE_INTENT_WINDOW",
+    })
+    expect(eligibilityWithoutRetainedWindow).not.toHaveProperty(
+      "tradeIntentWindow",
+    )
     expect(eligibilityAtExpiry).toMatchObject({
       tradeIntentEligible: false,
       tradeIntentWindow: {
