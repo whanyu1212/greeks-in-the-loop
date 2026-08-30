@@ -120,8 +120,10 @@ evaluate risk.
 
 `evaluateQualitativeResearchV1` grades one response and sanitized tool trace
 against one plan. It reads total, Exa, FMP, freshness, contradiction-search,
-skill, provider, and model expectations from that plan. The evaluator performs
-no I/O and invokes no semantic grader.
+skill, provider, and model expectations from that plan. The evaluator requires
+observed skill name/version independently of the tool-selected skill name, so a
+historical plan cannot pass against a different installed skill revision. The
+evaluator performs no I/O and invokes no semantic grader.
 
 The evaluator permits only the generic skill, Exa, and FMP tool classes.
 Application-owned snapshot capture and financial calculations are outside the

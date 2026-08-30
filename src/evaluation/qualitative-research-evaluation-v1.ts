@@ -17,6 +17,7 @@ export const QUALITATIVE_RESEARCH_EVALUATION_ISSUE_CODES = Object.freeze([
   "MODEL_DRIFT",
   "FORBIDDEN_TOOL_USED",
   "SKILL_CALL_INVALID",
+  "SKILL_IDENTITY_DRIFT",
   "TOTAL_TOOL_BUDGET_EXCEEDED",
   "EXA_TOOL_BUDGET_EXCEEDED",
   "FMP_TOOL_BUDGET_EXCEEDED",
@@ -53,6 +54,7 @@ export type EvaluateQualitativeResearchInput = Readonly<{
   rawResponse: string
   toolCalls: readonly QualitativeResearchToolCall[]
   observedModel: Readonly<{ providerId: string; modelId: string }>
+  observedSkill: Readonly<{ name: string; version: string }>
   evaluatedAt: string
 }>
 
@@ -70,6 +72,7 @@ export function evaluateQualitativeResearchV1({
   rawResponse,
   toolCalls,
   observedModel,
+  observedSkill,
   evaluatedAt,
 }: EvaluateQualitativeResearchInput): QualitativeResearchEvaluationV1 {
   const parsedPlan = researchPlanV1Schema.parse(plan)
@@ -100,6 +103,12 @@ export function evaluateQualitativeResearchV1({
   }
   if (observedModel.modelId !== parsedPlan.invocation.modelId) {
     issues.push("MODEL_DRIFT")
+  }
+  if (
+    observedSkill.name !== parsedPlan.invocation.skillName ||
+    observedSkill.version !== parsedPlan.invocation.skillVersion
+  ) {
+    issues.push("SKILL_IDENTITY_DRIFT")
   }
 
   const allowed = (name: string) =>

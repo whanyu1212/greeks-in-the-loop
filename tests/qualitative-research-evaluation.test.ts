@@ -35,6 +35,10 @@ const evaluate = (
     rawResponse: JSON.stringify(createQualitativeResponseV1(plan)),
     toolCalls: validToolCalls(),
     observedModel: plan.invocation,
+    observedSkill: {
+      name: plan.invocation.skillName,
+      version: plan.invocation.skillVersion,
+    },
     evaluatedAt: PLAN_EVALUATED_AT,
     ...overrides,
   })
@@ -147,6 +151,29 @@ describe("plan-driven qualitative research evaluation", () => {
         "CONTRADICTION_SEARCH_TOOL_MISSING",
       ])
     }
+  })
+
+  it("rejects observed skill identity drift even when the tool-selected name matches", () => {
+    const original = createResearchPlanV1()
+    const { planId: _planId, ...content } = original
+    const historical = {
+      ...content,
+      invocation: {
+        ...content.invocation,
+        skillVersion: "0.9.0",
+      },
+    }
+    const plan = {
+      ...historical,
+      planId: computeResearchPlanIdV1(historical),
+    }
+
+    expect(
+      evaluate({
+        plan,
+        rawResponse: JSON.stringify(createQualitativeResponseV1(plan)),
+      }).issueCodes,
+    ).toEqual(["SKILL_IDENTITY_DRIFT"])
   })
 
   it("detects forbidden tools, skill substitution, missing challenge search, and model drift", () => {
