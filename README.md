@@ -305,9 +305,10 @@ for the dimensions, privacy boundary, and current limitations.
 
 ## Backtest replay
 
-Acquire a resumable, checksummed Alpaca dataset for fully completed historical
-dates. Repeat `--option` for each retained spread leg whose bars and trades are
-needed:
+Acquire a resumable, content-addressed Alpaca dataset for fully completed
+historical dates. New datasets bind the current registered strategy/component
+manifest and underlying. Repeat `--option` for each retained spread leg whose
+bars and trades are needed:
 
 ```bash
 pnpm backtest:data -- --from 2024-06-03 --to 2024-06-28 \
@@ -317,7 +318,7 @@ pnpm backtest:data -- --from 2024-06-03 --to 2024-06-28 \
 Run the standalone deterministic replay against that immutable SQLite dataset:
 
 ```bash
-pnpm backtest -- --dataset .state/backtests/SPY-2024-06-03-2024-06-28.sqlite \
+pnpm backtest -- --dataset .state/backtests/<content-id>.sqlite \
   --scenarios scenarios.json --output report.json
 ```
 

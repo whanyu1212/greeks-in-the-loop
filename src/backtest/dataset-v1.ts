@@ -1,22 +1,43 @@
 import { z } from "zod"
 
-import { spyAlpacaOptionSymbolV1Schema } from "../shared/alpaca-option-identity.js"
+import {
+  alpacaOptionSymbolSchema,
+  spyAlpacaOptionSymbolV1Schema,
+} from "../shared/alpaca-option-identity.js"
 import { canonicalJsonSha256 } from "../shared/canonical-json.js"
 
 export const BACKTEST_DATASET_VERSION = "1.0.0" as const
 export const BACKTEST_NORMALIZATION_VERSION = "1.0.0" as const
 
-const timestamp = z.iso.datetime({ offset: true, precision: 3 })
-const date = z.iso.date()
-const identifier = z
+export const backtestTimestampSchema = z.iso.datetime({
+  offset: true,
+  precision: 3,
+})
+export const backtestDateSchema = z.iso.date()
+export const backtestIdentifierSchema = z
   .string()
   .min(1)
   .max(160)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u)
-const safeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
-const positiveSafeInteger = safeInteger.positive()
+export const backtestUnderlyingSymbolSchema = z
+  .string()
+  .regex(/^[A-Z0-9]{1,6}$/u)
+export const backtestSafeIntegerSchema = z
+  .number()
+  .int()
+  .min(0)
+  .max(Number.MAX_SAFE_INTEGER)
+export const backtestPositiveSafeIntegerSchema =
+  backtestSafeIntegerSchema.positive()
+export const backtestSha256Schema = z.string().regex(/^[a-f0-9]{64}$/u)
+
+const timestamp = backtestTimestampSchema
+const date = backtestDateSchema
+const identifier = backtestIdentifierSchema
+const safeInteger = backtestSafeIntegerSchema
+const positiveSafeInteger = backtestPositiveSafeIntegerSchema
 const optionSymbol = spyAlpacaOptionSymbolV1Schema
-const sha256 = z.string().regex(/^[a-f0-9]{64}$/u)
+const sha256 = backtestSha256Schema
 
 export const backtestDatasetDefinitionV1Schema = z
   .object({
@@ -168,19 +189,23 @@ const marketSessionV1Schema = z
     message: "Market session close must follow its open",
   })
 
-const underlyingBarV1Schema = z
+export const backtestUnderlyingBarStructuralSchema = z
   .object({
     recordType: z.literal("UNDERLYING_BAR"),
-    symbol: z.literal("SPY"),
+    symbol: backtestUnderlyingSymbolSchema,
     timeframe: z.enum(["1DAY", "1MINUTE"]),
     ...barFields,
   })
   .strict()
 
-const optionContractV1Schema = z
+const underlyingBarV1Schema = backtestUnderlyingBarStructuralSchema
+  .extend({ symbol: z.literal("SPY") })
+  .strict()
+
+export const backtestOptionContractStructuralSchema = z
   .object({
     recordType: z.literal("OPTION_CONTRACT"),
-    contractSymbol: optionSymbol,
+    contractSymbol: alpacaOptionSymbolSchema,
     expirationDate: date,
     optionType: z.enum(["CALL", "PUT"]),
     strikeCentsPerShare: positiveSafeInteger,
@@ -202,20 +227,27 @@ const optionContractV1Schema = z
     },
   )
 
-const optionBarV1Schema = z
+const optionContractV1Schema = backtestOptionContractStructuralSchema
+  .safeExtend({ contractSymbol: optionSymbol })
+
+export const backtestOptionBarStructuralSchema = z
   .object({
     recordType: z.literal("OPTION_BAR"),
-    contractSymbol: optionSymbol,
+    contractSymbol: alpacaOptionSymbolSchema,
     timeframe: z.enum(["1DAY", "1MINUTE"]),
     ...barFields,
     tradeCount: safeInteger,
   })
   .strict()
 
-const optionTradeV1Schema = z
+const optionBarV1Schema = backtestOptionBarStructuralSchema
+  .extend({ contractSymbol: optionSymbol })
+  .strict()
+
+export const backtestOptionTradeStructuralSchema = z
   .object({
     recordType: z.literal("OPTION_TRADE"),
-    contractSymbol: optionSymbol,
+    contractSymbol: alpacaOptionSymbolSchema,
     timestamp,
     priceMicros: positiveSafeInteger,
     size: positiveSafeInteger,
@@ -223,6 +255,10 @@ const optionTradeV1Schema = z
     exchange: z.string().min(1).max(16).optional(),
     conditions: z.array(z.string().min(1).max(16)).max(32),
   })
+  .strict()
+
+const optionTradeV1Schema = backtestOptionTradeStructuralSchema
+  .extend({ contractSymbol: optionSymbol })
   .strict()
 
 export const backtestDatasetRecordV1Schema = z.discriminatedUnion("recordType", [

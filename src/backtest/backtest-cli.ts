@@ -6,7 +6,11 @@ import {
   runBacktestReplayV1,
 } from "./replay-v1.js"
 import { createBacktestDatasetStore } from "./sqlite-dataset-store.js"
-import { CURRENT_STRATEGY_MANIFEST } from "../strategy/strategy-registry.js"
+import {
+  checkStrategyManifestCompatibility,
+  CURRENT_STRATEGY_MANIFEST,
+} from "../strategy/strategy-registry.js"
+import { isBacktestDatasetDefinitionV2 } from "./dataset.js"
 
 const usage = `Usage: pnpm backtest -- --dataset <sqlite> --scenarios <json> [--output <json>]`
 
@@ -40,8 +44,15 @@ try {
     JSON.parse(readFileSync(scenariosPath, "utf8")) as unknown,
   )
   const compatibility = CURRENT_STRATEGY_MANIFEST.replayCompatibility
+  const manifestCompatible = isBacktestDatasetDefinitionV2(
+    manifest.definition,
+  )
+    ? checkStrategyManifestCompatibility(
+        manifest.definition.strategyManifest,
+      ).success
+    : manifest.definition.symbol === CURRENT_STRATEGY_MANIFEST.underlying
   if (
-    manifest.definition.symbol !== CURRENT_STRATEGY_MANIFEST.underlying ||
+    !manifestCompatible ||
     manifest.definition.datasetVersion !== compatibility.datasetVersion ||
     manifest.definition.normalizationVersion !==
       compatibility.normalizationVersion ||

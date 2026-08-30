@@ -11,6 +11,7 @@ import {
 } from "../risk/risk-evaluation-v1.js"
 import { newYorkDate, newYorkLocalTime } from "../scheduling/research-eligibility.js"
 import { canonicalJson, canonicalJsonSha256 } from "../shared/canonical-json.js"
+import { parseAlpacaOptionSymbol } from "../shared/alpaca-option-identity.js"
 import {
   calculateDirectionalTrendFeaturesV1,
   compareDebitVerticalCandidateRanksV1,
@@ -21,13 +22,14 @@ import {
   BACKTEST_REPLAY_VERSION,
 } from "./replay-identity.js"
 import {
-  backtestDatasetManifestV1Schema,
-  type BacktestDatasetRecordV1,
-  type MarketSessionRecordV1,
-  type OptionBarRecordV1,
-  type UnderlyingBarRecordV1,
-} from "./dataset-v1.js"
-
+  decodeBacktestDatasetManifest,
+  isBacktestDatasetDefinitionV2,
+  parseBacktestDatasetRecord,
+  type BacktestDatasetRecord,
+  type MarketSessionRecord,
+  type OptionBarRecord,
+  type UnderlyingBarRecord,
+} from "./dataset.js"
 export {
   BACKTEST_EXECUTION_MODEL_VERSION,
   BACKTEST_REPLAY_VERSION,
@@ -411,7 +413,7 @@ const exitReason = (
 }
 
 const sessionForTimestamp = (
-  sessions: readonly MarketSessionRecordV1[],
+  sessions: readonly MarketSessionRecord[],
   value: string,
 ) => sessions.find(({ open, close }) => instant(value) >= instant(open) && instant(value) <= instant(close))
 
@@ -420,19 +422,19 @@ const minuteBarCompletedAt = (timestamp: string) =>
 
 /** Derives conservative proxy marks from synchronized option minute bars. */
 export function deriveHistoricalBarProxyCyclesV1(
-  records: readonly BacktestDatasetRecordV1[],
+  records: readonly BacktestDatasetRecord[],
   intent: TradeIntentV1,
 ) {
   const sessions = records
-    .filter((record): record is MarketSessionRecordV1 => record.recordType === "MARKET_SESSION")
+    .filter((record): record is MarketSessionRecord => record.recordType === "MARKET_SESSION")
     .sort((left, right) => instant(left.open) - instant(right.open))
   const dailyBars = records
     .filter(
-      (record): record is UnderlyingBarRecordV1 =>
+      (record): record is UnderlyingBarRecord =>
         record.recordType === "UNDERLYING_BAR" && record.timeframe === "1DAY",
     )
     .sort((left, right) => instant(left.timestamp) - instant(right.timestamp))
-  const dailyBarsBySessionDate = new Map<string, UnderlyingBarRecordV1[]>()
+  const dailyBarsBySessionDate = new Map<string, UnderlyingBarRecord[]>()
   for (const bar of dailyBars) {
     const sessionDate = newYorkDate(new Date(bar.timestamp))
     const retained = dailyBarsBySessionDate.get(sessionDate) ?? []
@@ -440,7 +442,7 @@ export function deriveHistoricalBarProxyCyclesV1(
     dailyBarsBySessionDate.set(sessionDate, retained)
   }
   const minuteBars = records.filter(
-    (record): record is OptionBarRecordV1 =>
+    (record): record is OptionBarRecord =>
       record.recordType === "OPTION_BAR" && record.timeframe === "1MINUTE",
   )
   const shortByTimestamp = new Map(
@@ -593,15 +595,48 @@ const selectIntent = (
 export function runBacktestReplayV1(
   manifestInput: unknown,
   replayInput: unknown,
-  records: readonly BacktestDatasetRecordV1[] = [],
+  records: readonly BacktestDatasetRecord[] = [],
 ) {
-  const manifest = backtestDatasetManifestV1Schema.parse(manifestInput)
+  const manifest = decodeBacktestDatasetManifest(manifestInput)
   if (!manifest.complete) throw new Error("Backtest dataset must be complete")
+  records = records.map((record) =>
+    parseBacktestDatasetRecord(manifest.definition, record)
+  )
   const replay = backtestReplayInputV1Schema.parse(replayInput)
+  if (isBacktestDatasetDefinitionV2(manifest.definition)) {
+    if (
+      replay.replayVersion !==
+        manifest.definition.strategyManifest.replayCompatibility.replayVersion ||
+      replay.execution.modelVersion !==
+        manifest.definition.strategyManifest.replayCompatibility
+          .executionModelVersion
+    ) {
+      throw new Error("Backtest replay identity is incompatible with the dataset")
+    }
+    const scenarioIntents = replay.scenarios.flatMap((scenario) =>
+      scenario.fidelity === "HISTORICAL_BAR_PROXY"
+        ? [scenario.retainedIntent]
+        : scenario.candidates.map(({ intent }) => intent)
+    )
+    if (
+      scenarioIntents.some((intent) => {
+        const long = parseAlpacaOptionSymbol(intent.longContractSymbol)
+        const short = parseAlpacaOptionSymbol(intent.shortContractSymbol)
+        return (
+          !long.success ||
+          !short.success ||
+          long.identity.root !== manifest.definition.symbol ||
+          short.identity.root !== manifest.definition.symbol
+        )
+      })
+    ) {
+      throw new Error("Backtest scenario identity is incompatible with the dataset")
+    }
+  }
   const sessions = records
-    .filter((record): record is MarketSessionRecordV1 => record.recordType === "MARKET_SESSION")
+    .filter((record): record is MarketSessionRecord => record.recordType === "MARKET_SESSION")
     .sort((left, right) => instant(left.open) - instant(right.open))
-  const dailyBarsBySessionDate = new Map<string, UnderlyingBarRecordV1[]>()
+  const dailyBarsBySessionDate = new Map<string, UnderlyingBarRecord[]>()
   for (const record of records) {
     if (record.recordType !== "UNDERLYING_BAR" || record.timeframe !== "1DAY") continue
     const date = newYorkDate(new Date(record.timestamp))
@@ -645,7 +680,7 @@ export function runBacktestReplayV1(
         throw new Error(`Scenario ${scenario.scenarioId} references option symbols absent from the dataset`)
       }
       const entrySession = records.find(
-        (record): record is MarketSessionRecordV1 =>
+        (record): record is MarketSessionRecord =>
           record.recordType === "MARKET_SESSION" &&
           instant(selected.intent!.evaluatedAt) >= instant(record.open) &&
           instant(selected.intent!.evaluatedAt) <= instant(record.close),
