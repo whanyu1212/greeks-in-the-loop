@@ -7,7 +7,7 @@ import {
 import {
   BACKTEST_EXECUTION_MODEL_VERSION,
   BACKTEST_REPLAY_VERSION,
-} from "../backtest/replay-v1.js"
+} from "../backtest/replay-identity.js"
 import { TRADE_INTENT_CONTRACT_VERSION } from "../contracts/trade-intent-v1.js"
 import {
   RESEARCH_INVOCATION_PROVENANCE_BY_VERSION,
