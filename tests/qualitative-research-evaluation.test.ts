@@ -214,7 +214,7 @@ describe("plan-driven qualitative research evaluation", () => {
     expect(result.issueCodes).toEqual(["CANDIDATE_ID_MISMATCH"])
   })
 
-  it("allows a fail-closed veto when the challenge search cannot complete", () => {
+  it("allows a fail-closed veto only when it reports the challenge search did not complete", () => {
     const plan = createResearchPlanV1()
     const response = {
       ...createQualitativeResponseV1(plan, "VETO"),
@@ -222,21 +222,33 @@ describe("plan-driven qualitative research evaluation", () => {
       externalEvidence: [],
       conflicts: ["Required current evidence could not be established."],
     }
-    const result = evaluate({
+    const toolCalls = [
+      {
+        name: "skill",
+        outcome: "completed" as const,
+        input: { name: "options-qualitative-research" },
+      },
+      { name: "exa_search", outcome: "error" as const },
+    ]
+
+    const safeVeto = evaluate({
       plan,
       rawResponse: JSON.stringify(response),
-      toolCalls: [
-        {
-          name: "skill",
-          outcome: "completed",
-          input: { name: "options-qualitative-research" },
-        },
-        { name: "exa_search", outcome: "error" },
-      ],
+      toolCalls,
     })
+    expect(safeVeto.status).toBe("PASS")
+    expect(safeVeto.issueCodes).toEqual([])
 
-    expect(result.status).toBe("PASS")
-    expect(result.issueCodes).toEqual([])
+    expect(
+      evaluate({
+        plan,
+        rawResponse: JSON.stringify({
+          ...response,
+          contradictionSearchPerformed: true,
+        }),
+        toolCalls,
+      }).issueCodes,
+    ).toEqual(["CONTRADICTION_SEARCH_TOOL_MISSING"])
   })
 
   it("reports malformed output without trusting it", () => {

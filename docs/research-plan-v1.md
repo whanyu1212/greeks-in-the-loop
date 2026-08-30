@@ -94,8 +94,10 @@ Application validation fails closed on:
 - `CONTINUE` with an unresolved material conflict.
 
 A fail-closed `VETO` remains valid when required evidence or a contradiction
-search cannot be completed; otherwise an unavailable provider could prevent the
-agent from expressing the safe disposition.
+search cannot be completed and the response reports
+`contradictionSearchPerformed: false`; otherwise an unavailable provider could
+prevent the agent from expressing the safe disposition. A veto claiming the
+search was performed must still be corroborated by the sanitized tool trace.
 
 Failures expose bounded codes and paths, not raw model prose.
 

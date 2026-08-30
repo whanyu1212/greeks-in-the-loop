@@ -80,6 +80,7 @@ export function evaluateQualitativeResearchV1({
 
   let responseInput: unknown
   let disposition: "CONTINUE" | "VETO" | undefined
+  let contradictionSearchPerformed: boolean | undefined
   try {
     responseInput = JSON.parse(rawResponse)
   } catch {
@@ -93,6 +94,8 @@ export function evaluateQualitativeResearchV1({
     )
     if (validation.success) {
       disposition = validation.data.disposition
+      contradictionSearchPerformed =
+        validation.data.contradictionSearchPerformed
     } else {
       issues.push(...validation.issues.map(({ code }) => code))
     }
@@ -149,7 +152,7 @@ export function evaluateQualitativeResearchV1({
         index
     ).length
   if (
-    disposition !== "VETO" &&
+    (disposition !== "VETO" || contradictionSearchPerformed === true) &&
     parsedPlan.evidencePolicy.requireContradictionSearch &&
     distinctCompletedExaSearchCalls <
       parsedPlan.evidencePolicy.minimumCompletedExaSearchCalls
