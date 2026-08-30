@@ -93,7 +93,7 @@ describe("plan-driven qualitative research evaluation", () => {
       ...content,
       evidencePolicy: {
         ...content.evidencePolicy,
-        minimumCompletedExaCalls: 3,
+        minimumCompletedExaSearchCalls: 3,
       },
     }
     const plan = {
@@ -109,25 +109,44 @@ describe("plan-driven qualitative research evaluation", () => {
     ).toEqual(["CONTRADICTION_SEARCH_TOOL_MISSING"])
   })
 
-  it("does not count duplicate Exa requests as a contradiction search", () => {
+  it("requires distinct completed Exa search requests for contradiction search", () => {
     const duplicate = {
       name: "exa_search",
       outcome: "completed" as const,
       input: { query: "same query" },
     }
-    expect(
-      evaluate({
-        toolCalls: [
-          {
-            name: "skill",
-            outcome: "completed",
-            input: { name: "options-qualitative-research" },
-          },
-          duplicate,
-          duplicate,
-        ],
-      }).issueCodes,
-    ).toEqual(["CONTRADICTION_SEARCH_TOOL_MISSING"])
+    for (const toolCalls of [
+      [
+        {
+          name: "skill",
+          outcome: "completed" as const,
+          input: { name: "options-qualitative-research" },
+        },
+        duplicate,
+        duplicate,
+      ],
+      [
+        {
+          name: "skill",
+          outcome: "completed" as const,
+          input: { name: "options-qualitative-research" },
+        },
+        {
+          name: "exa_fetch",
+          outcome: "completed" as const,
+          input: { url: "https://example.com/one" },
+        },
+        {
+          name: "exa_fetch",
+          outcome: "completed" as const,
+          input: { url: "https://example.com/two" },
+        },
+      ],
+    ]) {
+      expect(evaluate({ toolCalls }).issueCodes).toEqual([
+        "CONTRADICTION_SEARCH_TOOL_MISSING",
+      ])
+    }
   })
 
   it("detects forbidden tools, skill substitution, missing challenge search, and model drift", () => {

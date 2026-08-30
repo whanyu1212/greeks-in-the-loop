@@ -56,7 +56,9 @@ The plan is strict and deeply immutable after construction. Validation rejects:
 
 Provider maxima and the total tool maximum are independent caps; the total may
 be tighter than the sum of provider maxima. The plan separately declares the
-minimum completed Exa calls needed for its contradiction-search policy.
+minimum distinct completed `exa_search` calls needed for its
+contradiction-search policy. Other Exa tools still count toward provider and
+total budgets but cannot satisfy this search requirement.
 
 The plan carries bounded candidate identity needed for qualitative research:
 direction, structure, expiration, and exact OCC leg symbols. It deliberately

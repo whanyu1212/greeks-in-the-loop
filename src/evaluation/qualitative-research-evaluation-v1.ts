@@ -133,8 +133,8 @@ export function evaluateQualitativeResearchV1({
   if (fmpCallCount > parsedPlan.evidencePolicy.maximumFmpCalls) {
     issues.push("FMP_TOOL_BUDGET_EXCEEDED")
   }
-  const distinctCompletedExaCalls = completedCalls
-    .filter(({ name }) => name.startsWith("exa_"))
+  const distinctCompletedExaSearchCalls = completedCalls
+    .filter(({ name }) => name === "exa_search")
     .filter((call, index, calls) =>
       calls.findIndex((other) => isDeepStrictEqual(other.input, call.input)) ===
         index
@@ -142,8 +142,8 @@ export function evaluateQualitativeResearchV1({
   if (
     disposition !== "VETO" &&
     parsedPlan.evidencePolicy.requireContradictionSearch &&
-    distinctCompletedExaCalls <
-      parsedPlan.evidencePolicy.minimumCompletedExaCalls
+    distinctCompletedExaSearchCalls <
+      parsedPlan.evidencePolicy.minimumCompletedExaSearchCalls
   ) {
     issues.push("CONTRADICTION_SEARCH_TOOL_MISSING")
   }

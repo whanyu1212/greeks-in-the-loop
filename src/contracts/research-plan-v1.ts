@@ -119,7 +119,7 @@ const researchPlanContentV1Schema = z
           .int()
           .nonnegative()
           .max(MAX_QUALITATIVE_EXA_CALLS),
-        minimumCompletedExaCalls: z
+        minimumCompletedExaSearchCalls: z
           .number()
           .int()
           .nonnegative()
@@ -263,7 +263,7 @@ const researchPlanContentV1Schema = z
       })
     }
     if (
-      plan.evidencePolicy.minimumCompletedExaCalls + 1 >
+      plan.evidencePolicy.minimumCompletedExaSearchCalls + 1 >
         plan.evidencePolicy.maximumTotalToolCalls
     ) {
       refinement.addIssue({
@@ -275,10 +275,10 @@ const researchPlanContentV1Schema = z
     if (
       plan.evidencePolicy.minimumDirectionalExaSources >
         plan.evidencePolicy.maximumExaCalls ||
-      plan.evidencePolicy.minimumCompletedExaCalls >
+      plan.evidencePolicy.minimumCompletedExaSearchCalls >
         plan.evidencePolicy.maximumExaCalls ||
       (plan.evidencePolicy.requireContradictionSearch &&
-        plan.evidencePolicy.minimumCompletedExaCalls < 2)
+        plan.evidencePolicy.minimumCompletedExaSearchCalls < 2)
     ) {
       refinement.addIssue({
         code: "custom",
@@ -415,7 +415,7 @@ export function buildSpyResearchPlanV1({
       requireContradictionSearch: true,
       maximumTotalToolCalls: 8,
       minimumDirectionalExaSources: 1,
-      minimumCompletedExaCalls: 2,
+      minimumCompletedExaSearchCalls: 2,
       maximumExaCalls: 4,
       maximumFmpCalls: 3,
       currentEvidenceRetrievedAfter: issuedAt,
