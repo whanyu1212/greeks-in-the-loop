@@ -1,4 +1,4 @@
-# Backtest Replay V1
+# Backtest Replay V1 and V2
 
 Backtest replay is a standalone, read-only component. It has no broker mutation
 dependency and cannot submit orders. It uses a separate SQLite file; the live
@@ -29,10 +29,11 @@ minutes after the exact historical request end. Calendar and underlying daily
 bars include a fixed 90-calendar-day warm-up for SMA50. The requested interval
 is used for minute bars and option data.
 
-New acquisitions use manifest-bound Dataset V2. Its schema is symbol-neutral,
-but the CLI can select only a manifest admitted by the compile-time registry;
-the current registry therefore remains SPY-only. Generic dataset decoding does
-not admit QQQ/IWM to runtime research.
+New acquisitions use manifest-bound Dataset V2. Current definitions bind the
+V2 replay exit tuple (`simulateReplayScenario@1.0.0`). Its schema is
+symbol-neutral, but the CLI can select only a manifest admitted by the
+compile-time registry; the current registry therefore remains SPY-only. Generic
+dataset decoding does not admit QQQ/IWM to runtime research.
 
 Each normalized request is an immutable partition. Page tokens and normalized
 records are committed atomically, so rerunning the same command resumes an
@@ -68,23 +69,59 @@ pnpm backtest -- \
   --output report.json
 ```
 
-`scenarios.json` is validated by `backtestReplayInputV1Schema` in
-`src/backtest/replay-v1.ts`. It fixes the replay and execution-model versions,
-slippage in half-cents per share, commission in cents per contract, and an
-ordered list of scenarios. Omitting `--output` prints the report.
+`scenarios.json` selects its parser by `replayVersion`: Replay V1 uses
+`backtestReplayInputV1Schema` and Replay V2 uses `backtestReplayInputV2Schema`.
+Both fix execution slippage in half-cents per share, commission in cents per
+contract, and an ordered list of scenarios. Omitting `--output` prints the
+report.
 
-Replay V1 can consume a compatible Dataset V2 as an interim path. It validates
-the embedded strategy manifest, replay version, execution model, and every
-record against the dataset symbol before applying existing V1 scenario
-semantics. Static feature/candidate component dispatch and Replay V2 scenario
-identity remain deferred to the next #57 PR.
+| Dataset tuple | Replay V1 | Replay V2 |
+| --- | --- | --- |
+| Legacy Dataset V1 | Supported | Rejected |
+| Dataset V2 with retained V1 replay/exit tuple | Supported | Rejected |
+| Dataset V2 with current V2 replay/exit tuple | Rejected | Supported |
 
-The report includes dataset identity and checksum, fidelity counts, trade count,
-P&L, return, maximum drawdown, hit rate, risk rejection counts, per-scenario
-results, and its own deterministic checksum. Scenario order defines the equity
-curve.
+Replay V1 retains its original report bytes and can execute a retained Dataset
+V2 + Replay V1 tuple even though the current registry is V2. Dataset and
+snapshot schemas remain structurally decodable across these tuples; execution
+admission is version-specific.
 
-## Fidelity modes
+### Replay V2 identity and exact flow
+
+A V2 scenario ID is the SHA-256 of the canonical scenario content (under a V2
+domain tag) without `scenarioId`. The schema rejects a mismatched hash and
+duplicate IDs. Scenario-file ordering does not affect those IDs, although
+scenario order still defines the report equity curve.
+
+V2 requires a complete Dataset V2. Every exact snapshot pair must validate and
+its complete embedded strategy manifest must canonically equal the dataset
+manifest. Resolution is a static allowlist of the recorded V2 feature, ranking,
+risk, exit, and execution tuples; it does not look up the mutable current
+registry. Manifest, component, replay, execution, snapshot-contract, dataset
+identity, or symbol drift fails closed. Synthetic QQQ definitions stay
+structurally decodable but are not admitted for V2 execution.
+
+An exact scenario re-screens that immutable snapshot. `NO_ACTION` must omit
+risk input. A selected path accepts exactly one fully snapshot-bound risk input:
+the screener's rank-one candidate fixes both legs, all economics, quote snapshot
+reference, eligibility calendar and timing, and contract metrics. Risk rejection
+is `NO_ENTRY`; V2 never tries another candidate. Approved risk then uses the
+frozen exit simulation.
+
+V2 proxy scenarios retain their intent and use retained dataset records to
+derive monitor cycles when cycles are omitted. They report signal and risk as
+`NOT_EVALUABLE` and cannot claim historical candidate selection or approval.
+They remain exit-mechanics evidence only.
+
+The report includes dataset provenance, full strategy/component identity,
+execution identity, fidelity counts, P&L, risk rejection counts, results, and a
+deterministic checksum over its canonical content. The checksum changes when
+provenance, execution, or results change.
+
+Plan-driven behavior evaluation is intentionally deferred to the final #57 PR;
+replay never invokes a model or evaluates prompt behavior.
+
+## Replay V1 fidelity modes
 
 `EXACT_SNAPSHOT` contains the expected 50-session calendar, one dated completed
 daily bar for each of those sessions, and every uniquely dated completed

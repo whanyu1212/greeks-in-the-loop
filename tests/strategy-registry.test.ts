@@ -118,7 +118,7 @@ describe("static strategy registry", () => {
           evaluationVersion: "1.0.0",
         },
         exitPolicy: {
-          componentId: "runBacktestReplayV1",
+          componentId: "simulateReplayScenario",
           componentVersion: "1.0.0",
           availability: "REPLAY_ONLY",
         },
@@ -134,8 +134,8 @@ describe("static strategy registry", () => {
         reportVersion: "2.0.0",
       },
       replayCompatibility: {
-        kind: "BACKTEST_REPLAY_V1",
-        replayVersion: "1.0.0",
+        kind: "BACKTEST_REPLAY_V2",
+        replayVersion: "2.0.0",
         executionModelVersion: "1.0.0",
         datasetVersion: "1.0.0",
         normalizationVersion: "1.0.0",

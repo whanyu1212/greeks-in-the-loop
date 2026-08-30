@@ -20,9 +20,6 @@ import {
   type ResearchSnapshotStrategyManifestV1,
 } from "../contracts/research-market-snapshot-v1.js"
 import {
-  BACKTEST_REPLAY_VERSION,
-} from "./replay-identity.js"
-import {
   backtestDatasetPartitionV1Schema,
   backtestDateSchema,
   backtestOptionBarStructuralSchema,
@@ -218,8 +215,8 @@ export function createBacktestDatasetDefinitionV2({
         evaluationVersion: RISK_EVALUATION_VERSION,
       },
       exitPolicy: {
-        componentId: "runBacktestReplayV1",
-        componentVersion: BACKTEST_REPLAY_VERSION,
+        componentId: strategyManifest.components.exitPolicy.componentId,
+        componentVersion: strategyManifest.components.exitPolicy.componentVersion,
       },
     },
     symbol: strategyManifest.underlying,

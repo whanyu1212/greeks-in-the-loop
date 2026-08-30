@@ -5,10 +5,12 @@ import {
 import type {
   ResearchSnapshotPairValidationResultV1,
 } from "../contracts/research-market-snapshot-builders-v1.js"
-import type {
-  OptionUniverseContractV1,
+import {
+  researchSnapshotStrategyManifestV1Schema,
+  type OptionUniverseContractV1,
+  type ResearchSnapshotStrategyManifestV1,
 } from "../contracts/research-market-snapshot-v1.js"
-import { canonicalJsonSha256 } from "../shared/canonical-json.js"
+import { canonicalJson, canonicalJsonSha256 } from "../shared/canonical-json.js"
 import { checkStrategyManifestCompatibility } from "./strategy-registry.js"
 
 export const DIRECTIONAL_TREND_FEATURE_COMPONENT_ID =
@@ -470,10 +472,10 @@ export type SpyDebitVerticalAuditedScreeningResultV1 = Readonly<{
   diagnostics: DebitVerticalScreeningDiagnosticsV1
 }>
 
-/** Screens one snapshot pair and retains bounded, first-failure audit counts. */
-export function screenSpyDirectionalDebitVerticalWithAuditV1(
+const screenSpyDirectionalDebitVerticalForManifestWithAuditV1 = (
   pair: ValidatedResearchSnapshotPairV1,
-): SpyDebitVerticalAuditedScreeningResultV1 {
+  strategyManifest: ResearchSnapshotStrategyManifestV1 | undefined,
+): SpyDebitVerticalAuditedScreeningResultV1 => {
   const { underlying, optionUniverse } = pair
   const failureCounts = new Map<DebitVerticalFirstFailureReasonV1, number>()
   let contractRoleEvaluationCount = 0
@@ -511,11 +513,13 @@ export function screenSpyDirectionalDebitVerticalWithAuditV1(
       }),
     },
   })
-
-  const compatibility = checkStrategyManifestCompatibility(
-    underlying.strategyManifest,
+  const manifest = researchSnapshotStrategyManifestV1Schema.safeParse(
+    strategyManifest,
   )
-  if (!compatibility.success) {
+  if (
+    !manifest.success ||
+    canonicalJson(underlying.strategyManifest) !== canonicalJson(manifest.data)
+  ) {
     reject("STRATEGY_MANIFEST_INCOMPATIBLE")
     return finish({
       status: "NO_ACTION",
@@ -638,8 +642,8 @@ export function screenSpyDirectionalDebitVerticalWithAuditV1(
         contractVersion: DEBIT_VERTICAL_CANDIDATE_CONTRACT_VERSION,
         underlyingSnapshotId: underlying.snapshotId,
         optionUniverseSnapshotId: optionUniverse.snapshotId,
-        strategyId: compatibility.manifest.strategyId,
-        strategyVersion: compatibility.manifest.strategyVersion,
+        strategyId: manifest.data.strategyId,
+        strategyVersion: manifest.data.strategyVersion,
         featureComponentId: DIRECTIONAL_TREND_FEATURE_COMPONENT_ID,
         featureVersion: DIRECTIONAL_TREND_FEATURE_VERSION,
         candidateComponentId: DEBIT_VERTICAL_CANDIDATE_COMPONENT_ID,
@@ -683,6 +687,30 @@ export function screenSpyDirectionalDebitVerticalWithAuditV1(
           eligibleCandidateCount,
         },
   )
+}
+
+/** Screens one current-runtime snapshot pair with bounded audit counts. */
+export function screenSpyDirectionalDebitVerticalWithAuditV1(
+  pair: ValidatedResearchSnapshotPairV1,
+): SpyDebitVerticalAuditedScreeningResultV1 {
+  const compatibility = checkStrategyManifestCompatibility(
+    pair.underlying.strategyManifest,
+  )
+  return screenSpyDirectionalDebitVerticalForManifestWithAuditV1(
+    pair,
+    compatibility.success ? compatibility.manifest : undefined,
+  )
+}
+
+/** Screens one validated pair against its explicit, immutable strategy manifest. */
+export function screenSpyDirectionalDebitVerticalForManifestV1(
+  pair: ValidatedResearchSnapshotPairV1,
+  strategyManifest: ResearchSnapshotStrategyManifestV1,
+): SpyDebitVerticalScreeningResultV1 {
+  return screenSpyDirectionalDebitVerticalForManifestWithAuditV1(
+    pair,
+    strategyManifest,
+  ).result
 }
 
 /** Selects the frozen V1 rank-one SPY debit spread from one validated snapshot pair. */
