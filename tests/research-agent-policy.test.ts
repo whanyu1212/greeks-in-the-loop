@@ -130,6 +130,11 @@ describe("research agent policy", () => {
     }
   })
 
+  it("spells out the strict candidate-leg role enum", () => {
+    expect(systemPrompt).toContain("`LONG` or `SHORT` only")
+    expect(systemPrompt).toContain("never `LONG_CALL`, `SHORT_CALL`")
+  })
+
   it("runs policy, MCP, and behavior diagnostics through reviewed entrypoints", () => {
     expect(manifest.scripts?.["agent:config"]).toContain(
       "scripts/run-isolated-opencode.mjs",

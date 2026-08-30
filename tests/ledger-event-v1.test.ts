@@ -96,7 +96,7 @@ describe("LedgerEventV1", () => {
       cycleId: "cycle-1",
       sessionId: "session-1",
       payload: {
-        invocationVersion: "1.2.0",
+        invocationVersion: "1.3.0",
         reason: "MODEL_DRIFT",
         expected: "gpt-5.6-sol",
         observed: "gpt-5.6-sol-fast",
@@ -104,6 +104,14 @@ describe("LedgerEventV1", () => {
     } as const
     expect(ledgerEventV1Schema.parse(cycleScoped)).toMatchObject({
       eventType: "RESEARCH_INVOCATION_IDENTITY_REJECTED",
+    })
+    expect(
+      ledgerEventV1Schema.parse({
+        ...cycleScoped,
+        payload: { ...cycleScoped.payload, invocationVersion: "1.2.0" },
+      }),
+    ).toMatchObject({
+      payload: { invocationVersion: "1.2.0" },
     })
 
     // Unlike the breaker events, drift happens inside a live cycle.

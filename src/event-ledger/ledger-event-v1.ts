@@ -6,9 +6,9 @@ import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
 import { researchReportV2Schema } from "../contracts/research-report-v2.js"
 import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
 import {
-  RESEARCH_INVOCATION_VERSION,
   RESEARCH_MODEL_DRIFT_CODES,
   researchInvocationV1Schema,
+  SUPPORTED_RESEARCH_INVOCATION_VERSIONS,
 } from "../research/research-invocation-v1.js"
 import { SCHEMA_VIOLATION_CATEGORIES } from "../shared/schema-diagnostics.js"
 import {
@@ -173,7 +173,7 @@ const payloadSchemas = {
     .strict(),
   RESEARCH_INVOCATION_IDENTITY_REJECTED: z
     .object({
-      invocationVersion: z.literal(RESEARCH_INVOCATION_VERSION),
+      invocationVersion: z.enum(SUPPORTED_RESEARCH_INVOCATION_VERSIONS),
       reason: z.enum(RESEARCH_MODEL_DRIFT_CODES),
       expected: identifier,
       observed: identifier,

@@ -49,10 +49,10 @@ describe("research market snapshot V1", () => {
     const { underlying, optionUniverse } = buildOptionUniverse()
 
     expect(underlying.snapshotId).toBe(
-      "dd97255c7891b2f20d39ae273fa82daedf770cdfd0949de55380ca1083cd9e32",
+      "08b4b0080b95947ce5ff8365cf9731aa667578e99ad28df8e7c08e62b7cc6096",
     )
     expect(optionUniverse.snapshotId).toBe(
-      "dd2547346e4d6c1604902ed41342224ac504383599d8fea9ae7820fe9515fef7",
+      "71dd53ded06847e33b065813d0199fcf2f5d0c9ccd61458f8b61d1834b993997",
     )
     expect(optionUniverse.underlyingSnapshotId).toBe(underlying.snapshotId)
     expect(underlying.dailyBars).toHaveLength(50)

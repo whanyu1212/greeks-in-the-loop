@@ -17,8 +17,9 @@ describe("ResearchInvocationV1", () => {
       "1.0.0",
       "1.1.0",
       "1.2.0",
+      "1.3.0",
     ])
-    expect(RESEARCH_INVOCATION_VERSION).toBe("1.2.0")
+    expect(RESEARCH_INVOCATION_VERSION).toBe("1.3.0")
     expect(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION["1.0.0"]).toMatchObject({
       promptVersion: "1.3.0",
       skillVersion: "1.1.0",
@@ -32,6 +33,15 @@ describe("ResearchInvocationV1", () => {
     })
     expect(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION["1.2.0"]).toMatchObject({
       promptVersion: "1.4.0",
+      skillVersion: "1.2.0",
+      strategyVersion: "1.1.0",
+      decisionContractVersion: "1.0.0",
+      reportVersion: "2.0.0",
+      providerId: "openai",
+      modelId: "gpt-5.6-sol",
+    })
+    expect(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION["1.3.0"]).toMatchObject({
+      promptVersion: "1.4.1",
       skillVersion: "1.2.0",
       strategyVersion: "1.1.0",
       decisionContractVersion: "1.0.0",

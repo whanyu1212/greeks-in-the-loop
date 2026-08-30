@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Evaluation version | `1.0.0` |
-| Prompt version | `1.4.0` |
+| Prompt version | `1.4.1` |
 | Skill version | `1.2.0` |
 | Strategy version | `1.1.0` |
 | Production credentials | Not used |
