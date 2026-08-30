@@ -5,8 +5,15 @@ import {
   evaluateBacktestSignalV1,
   runBacktestReplayV1,
 } from "../src/backtest/replay-v1.js"
-import type { BacktestDatasetRecordV1 } from "../src/backtest/dataset-v1.js"
+import type { BacktestDatasetRecord } from "../src/backtest/dataset.js"
 import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
+import {
+  computeBacktestDatasetIdV2,
+} from "../src/backtest/dataset-v2.js"
+import {
+  createBacktestDatasetDefinitionV2Fixture,
+  createSyntheticStrategyManifest,
+} from "./fixtures/backtest-dataset-v2.js"
 
 const optionSymbol = (strikeCents: number) =>
   `SPY260911C${String(strikeCents * 10).padStart(8, "0")}`
@@ -162,7 +169,7 @@ const precedingSessionDates = (() => {
 })()
 
 const replaySessionDates = [...precedingSessionDates, "2026-08-27", "2026-08-28"]
-const replayCalendar: readonly BacktestDatasetRecordV1[] = [
+const replayCalendar: readonly BacktestDatasetRecord[] = [
   ...replaySessionDates.map((date) => ({
     recordType: "MARKET_SESSION" as const,
     date,
@@ -186,7 +193,7 @@ const replayCalendar: readonly BacktestDatasetRecordV1[] = [
 const runReplay = (
   manifestInput: unknown,
   replayInput: unknown,
-  records: readonly BacktestDatasetRecordV1[] = replayCalendar,
+  records: readonly BacktestDatasetRecord[] = replayCalendar,
 ) => runBacktestReplayV1(manifestInput, replayInput, records)
 
 const monitorCycle = {
@@ -241,6 +248,180 @@ const signalSnapshot = (
 })
 
 describe("backtest replay v1", () => {
+  it("admits a compatible V2 dataset and rejects embedded replay identity drift", () => {
+    const definition = createBacktestDatasetDefinitionV2Fixture({
+      optionSymbols: [],
+    })
+    const compatible = {
+      ...manifest,
+      definition,
+      checksum: "b".repeat(64),
+    }
+    expect(
+      runReplay(compatible, {
+        replayVersion: "1.0.0",
+        execution,
+        scenarios: [{
+          scenarioId: "v2-proxy",
+          fidelity: "HISTORICAL_BAR_PROXY",
+          retainedIntent: intent,
+          monitorCycles: [monitorCycle],
+        }],
+      }, replayCalendar),
+    ).toMatchObject({
+      datasetId: definition.datasetId,
+      datasetChecksum: "b".repeat(64),
+      scenarioCount: 1,
+    })
+
+    const driftedManifest = {
+      ...createSyntheticStrategyManifest("QQQ"),
+      replayCompatibility: {
+        ...createSyntheticStrategyManifest("QQQ").replayCompatibility,
+        replayVersion: "9.9.9",
+      },
+    }
+    const driftedDefinition = createBacktestDatasetDefinitionV2Fixture({
+      strategyManifest: driftedManifest,
+      optionSymbols: [],
+    })
+    expect(() =>
+      runReplay({
+        ...compatible,
+        definition: driftedDefinition,
+      }, {
+        replayVersion: "1.0.0",
+        execution,
+        scenarios: [{
+          scenarioId: "drifted-v2-proxy",
+          fidelity: "HISTORICAL_BAR_PROXY",
+          retainedIntent: intent,
+          monitorCycles: [monitorCycle],
+        }],
+      }, [])
+    ).toThrow("replay identity is incompatible")
+  })
+
+  it("rejects unsupported embedded V2 executable component identity", () => {
+    const original = createBacktestDatasetDefinitionV2Fixture({
+      optionSymbols: [],
+    })
+    const { datasetId: _datasetId, ...content } = original
+    const driftedContent = {
+      ...content,
+      replayComponents: {
+        ...content.replayComponents,
+        riskRule: {
+          ...content.replayComponents.riskRule,
+          componentVersion: "9.9.9",
+        },
+      },
+    }
+    const driftedDefinition = {
+      ...driftedContent,
+      datasetId: computeBacktestDatasetIdV2(driftedContent),
+    }
+
+    expect(() =>
+      runReplay({
+        ...manifest,
+        definition: driftedDefinition,
+        checksum: "b".repeat(64),
+      }, {
+        replayVersion: "1.0.0",
+        execution,
+        scenarios: [{
+          scenarioId: "unsupported-component-proxy",
+          fidelity: "HISTORICAL_BAR_PROXY",
+          retainedIntent: intent,
+          monitorCycles: [monitorCycle],
+        }],
+      }, replayCalendar)
+    ).toThrow("replay identity is incompatible")
+  })
+
+  it("rejects internally consistent but unsupported V2 data versions", () => {
+    const strategyManifest = {
+      ...createSyntheticStrategyManifest("SPY"),
+      replayCompatibility: {
+        ...createSyntheticStrategyManifest("SPY").replayCompatibility,
+        datasetVersion: "9.9.9",
+        normalizationVersion: "9.9.9",
+      },
+    }
+    const definition = createBacktestDatasetDefinitionV2Fixture({
+      strategyManifest,
+      optionSymbols: [],
+    })
+
+    expect(() =>
+      runReplay({
+        ...manifest,
+        definition,
+        checksum: "b".repeat(64),
+      }, {
+        replayVersion: "1.0.0",
+        execution,
+        scenarios: [{
+          scenarioId: "unsupported-data-proxy",
+          fidelity: "HISTORICAL_BAR_PROXY",
+          retainedIntent: intent,
+          monitorCycles: [monitorCycle],
+        }],
+      }, replayCalendar)
+    ).toThrow("replay identity is incompatible")
+  })
+
+  it("rejects V1 scenario identity that disagrees with a V2 dataset symbol", () => {
+    const definition = createBacktestDatasetDefinitionV2Fixture({
+      strategyManifest: createSyntheticStrategyManifest("QQQ"),
+      optionSymbols: [],
+    })
+    expect(() =>
+      runReplay({
+        ...manifest,
+        definition,
+        checksum: "b".repeat(64),
+      }, {
+        replayVersion: "1.0.0",
+        execution,
+        scenarios: [{
+          scenarioId: "cross-symbol-proxy",
+          fidelity: "HISTORICAL_BAR_PROXY",
+          retainedIntent: intent,
+          monitorCycles: [monitorCycle],
+        }],
+      }, [])
+    ).toThrow("scenario identity is incompatible")
+  })
+
+  it("context-validates V2 records for direct replay callers", () => {
+    const definition = createBacktestDatasetDefinitionV2Fixture({
+      optionSymbols: [],
+    })
+    expect(() =>
+      runReplay({
+        ...manifest,
+        definition,
+        checksum: "b".repeat(64),
+      }, {
+        replayVersion: "1.0.0",
+        execution,
+        scenarios: [],
+      }, [{
+        recordType: "UNDERLYING_BAR",
+        symbol: "QQQ",
+        timeframe: "1DAY",
+        timestamp: "2024-06-03T13:30:00.000Z",
+        openMicros: 1,
+        highMicros: 1,
+        lowMicros: 1,
+        closeMicros: 1,
+        volume: 1,
+        vwapMicros: 1,
+      }])
+    ).toThrow("does not match")
+  })
   it("uses strict SMA and VWAP inequalities", () => {
     const closes = Array.from({ length: 50 }, (_, index) => 50_000_000 + index * 100_000)
     const bullish = evaluateBacktestSignalV1(signalSnapshot(closes))

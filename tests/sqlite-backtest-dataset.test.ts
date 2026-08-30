@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest"
 
 import type { BacktestDatasetDefinitionV1 } from "../src/backtest/dataset-v1.js"
 import { createBacktestDatasetStore } from "../src/backtest/sqlite-dataset-store.js"
+import { createBacktestDatasetDefinitionV2Fixture } from "./fixtures/backtest-dataset-v2.js"
 
 const roots: string[] = []
 afterEach(() => {
@@ -123,6 +124,97 @@ describe("SQLite backtest dataset", () => {
       }),
     ).toThrow("page token changed")
     store.close()
+  })
+
+  it("creates, reopens, and context-validates V2 datasets in the unchanged SQLite schema", () => {
+    const path = createPath()
+    const definitionV2 = createBacktestDatasetDefinitionV2Fixture({
+      optionSymbols: [],
+    })
+    const store = createBacktestDatasetStore({
+      path,
+      definition: definitionV2,
+    })
+    store.beginPartition({
+      partitionKey: "underlying-daily",
+      kind: "UNDERLYING_DAILY_BARS",
+      request: {
+        endpoint: "/v2/stocks/bars",
+        parameters: { symbols: "SPY" },
+      },
+      updatedAt: "2024-06-05T10:00:00.000Z",
+    })
+    expect(() =>
+      store.appendPage({
+        partitionKey: "underlying-daily",
+        records: [{
+          recordType: "UNDERLYING_BAR",
+          symbol: "QQQ",
+          timeframe: "1DAY",
+          timestamp: "2024-06-03T13:30:00.000Z",
+          openMicros: 1,
+          highMicros: 1,
+          lowMicros: 1,
+          closeMicros: 1,
+          volume: 1,
+          vwapMicros: 1,
+        }],
+        updatedAt: "2024-06-05T10:00:01.000Z",
+      })
+    ).toThrow("does not match")
+    store.close()
+
+    const reopened = createBacktestDatasetStore({ path, readonly: true })
+    expect(reopened.definition).toEqual(definitionV2)
+    reopened.close()
+  })
+
+  it("produces the same V2 partition checksum regardless of provider row order", () => {
+    const create = (records: readonly {
+      recordType: "MARKET_SESSION"
+      date: string
+      open: string
+      close: string
+    }[]) => {
+      const store = createBacktestDatasetStore({
+        path: createPath(),
+        definition: createBacktestDatasetDefinitionV2Fixture({
+          optionSymbols: [],
+        }),
+      })
+      store.beginPartition({
+        partitionKey: "calendar",
+        kind: "MARKET_CALENDAR",
+        request: { endpoint: "/v2/calendar", parameters: {} },
+        updatedAt: "2024-06-05T10:00:00.000Z",
+      })
+      store.appendPage({
+        partitionKey: "calendar",
+        records,
+        updatedAt: "2024-06-05T10:00:01.000Z",
+      })
+      const checksum = store.completePartition(
+        "calendar",
+        "2024-06-05T10:00:02.000Z",
+      ).checksum
+      store.close()
+      return checksum
+    }
+    const records = [
+      {
+        recordType: "MARKET_SESSION" as const,
+        date: "2024-06-03",
+        open: "2024-06-03T13:30:00.000Z",
+        close: "2024-06-03T20:00:00.000Z",
+      },
+      {
+        recordType: "MARKET_SESSION" as const,
+        date: "2024-06-04",
+        open: "2024-06-04T13:30:00.000Z",
+        close: "2024-06-04T20:00:00.000Z",
+      },
+    ]
+    expect(create(records)).toBe(create([...records].reverse()))
   })
 
   it("opens a completed dataset read-only and rejects mismatched identity", () => {

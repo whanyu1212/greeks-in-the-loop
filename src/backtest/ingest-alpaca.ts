@@ -4,10 +4,13 @@ import {
   type HistoricalDataPage,
 } from "../market-data/alpaca-historical-client.js"
 import type {
-  BacktestDatasetDefinitionV1,
   BacktestPartitionKind,
   BacktestPartitionRequestV1,
 } from "./dataset-v1.js"
+import {
+  isBacktestDatasetDefinitionV2,
+  type BacktestDatasetDefinition,
+} from "./dataset.js"
 import {
   backtestOptionChunkId,
   backtestOptionSymbolChunks,
@@ -90,8 +93,9 @@ export async function ingestAlpacaBacktestDataset({
   signal,
   now = () => new Date(),
 }: IngestAlpacaBacktestDatasetOptions) {
-  const definition: BacktestDatasetDefinitionV1 = store.definition
-  const { fromDate, toDate, optionSymbols } = definition
+  const definition: BacktestDatasetDefinition = store.definition
+  const { fromDate, toDate, optionSymbols, symbol } = definition
+  const v2 = isBacktestDatasetDefinitionV2(definition)
   const historicalEnd = alpacaHistoricalEndTimestamp(toDate)
   const finalizationDelayMs =
     Date.parse(definition.requestStartedAt) - Date.parse(historicalEnd)
@@ -123,7 +127,13 @@ export async function ingestAlpacaBacktestDataset({
 
   for (const timeframe of ["1DAY", "1MINUTE"] as const) {
     const barsFromDate = timeframe === "1DAY" ? signalHistoryFrom : fromDate
-    const partitionKey = timeframe === "1DAY" ? "spy-daily" : "spy-minute"
+    const partitionKey = v2
+      ? timeframe === "1DAY"
+        ? "underlying-daily"
+        : "underlying-minute"
+      : timeframe === "1DAY"
+        ? "spy-daily"
+        : "spy-minute"
     await ingestPartition(store, {
       partitionKey,
       kind:
@@ -133,7 +143,7 @@ export async function ingestAlpacaBacktestDataset({
       request: {
         endpoint: "/v2/stocks/bars",
         parameters: {
-          symbols: "SPY",
+          symbols: symbol,
           timeframe: timeframe === "1DAY" ? "1Day" : "1Min",
           start: barsFromDate,
           end: historicalEnd,
@@ -144,6 +154,7 @@ export async function ingestAlpacaBacktestDataset({
       now,
       load: (pageToken) =>
         client.getUnderlyingBarsPage({
+          symbol,
           timeframe,
           fromDate: barsFromDate,
           toDate,
@@ -160,7 +171,7 @@ export async function ingestAlpacaBacktestDataset({
       request: {
         endpoint: "/v2/options/contracts",
         parameters: {
-          underlying_symbols: "SPY",
+          underlying_symbols: symbol,
           expiration_date_gte: expirationFrom,
           expiration_date_lte: expirationTo,
           status,
@@ -169,6 +180,7 @@ export async function ingestAlpacaBacktestDataset({
       now,
       load: (pageToken) =>
         client.getOptionContractsPage({
+          underlying: symbol,
           fromDate: expirationFrom,
           toDate: expirationTo,
           status,

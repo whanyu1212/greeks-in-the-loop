@@ -10,19 +10,22 @@ import {
 } from "../shared/canonical-json.js"
 import {
   BACKTEST_DATASET_VERSION,
-  backtestDatasetDefinitionV1Schema,
   backtestDatasetPartitionV1Schema,
-  backtestDatasetRecordV1Schema,
   backtestPartitionRequestV1Schema,
-  backtestRecordKey,
-  expectedBacktestPartitionKeys,
-  type BacktestDatasetDefinitionV1,
-  type BacktestDatasetManifestV1,
   type BacktestDatasetPartitionV1,
-  type BacktestDatasetRecordV1,
   type BacktestPartitionKind,
   type BacktestPartitionRequestV1,
 } from "./dataset-v1.js"
+import {
+  backtestRecordKey,
+  decodeBacktestDatasetDefinition,
+  decodeBacktestDatasetManifest,
+  expectedBacktestPartitionKeys,
+  parseBacktestDatasetRecord,
+  type BacktestDatasetDefinition,
+  type BacktestDatasetManifest,
+  type BacktestDatasetRecord,
+} from "./dataset.js"
 
 const SCHEMA_VERSION = "1" as const
 const LIMITATIONS = [
@@ -57,7 +60,7 @@ const decodePartition = (row: PartitionRow): BacktestDatasetPartitionV1 =>
   })
 
 export type BacktestDatasetStore = Readonly<{
-  definition: BacktestDatasetDefinitionV1
+  definition: BacktestDatasetDefinition
   getPartition(partitionKey: string): BacktestDatasetPartitionV1 | undefined
   beginPartition(input: Readonly<{
     partitionKey: string
@@ -68,22 +71,22 @@ export type BacktestDatasetStore = Readonly<{
   appendPage(input: Readonly<{
     partitionKey: string
     expectedPageToken?: string
-    records: readonly BacktestDatasetRecordV1[]
+    records: readonly BacktestDatasetRecord[]
     nextPageToken?: string
     updatedAt: string
   }>): BacktestDatasetPartitionV1
   completePartition(partitionKey: string, updatedAt: string): BacktestDatasetPartitionV1
   listRecords(input?: Readonly<{
     partitionKey?: string
-    recordType?: BacktestDatasetRecordV1["recordType"]
-  }>): readonly BacktestDatasetRecordV1[]
-  manifest(): BacktestDatasetManifestV1
+    recordType?: BacktestDatasetRecord["recordType"]
+  }>): readonly BacktestDatasetRecord[]
+  manifest(): BacktestDatasetManifest
   close(): void
 }>
 
 export type CreateBacktestDatasetStoreOptions = Readonly<{
   path: string
-  definition?: BacktestDatasetDefinitionV1
+  definition?: BacktestDatasetDefinition
   knownCredentialValues?: readonly string[]
   readonly?: boolean
 }>
@@ -151,7 +154,7 @@ export function createBacktestDatasetStore({
       database.close()
       throw new Error("Backtest dataset is not initialized")
     }
-    const parsedDefinition = backtestDatasetDefinitionV1Schema.parse(definition)
+    const parsedDefinition = decodeBacktestDatasetDefinition(definition)
     assertPersistenceSafe(parsedDefinition, knownCredentialValues)
     const initialize = database.transaction(() => {
       insertMetadata.run("schema_version", SCHEMA_VERSION)
@@ -166,7 +169,7 @@ export function createBacktestDatasetStore({
     throw new Error("Backtest dataset schema is unsupported")
   }
 
-  const storedDefinition = backtestDatasetDefinitionV1Schema.parse(
+  const storedDefinition = decodeBacktestDatasetDefinition(
     JSON.parse(
       (getMetadata.get("definition") as { value: string }).value,
     ) as unknown,
@@ -176,7 +179,7 @@ export function createBacktestDatasetStore({
   )
   if (
     definition !== undefined &&
-    canonicalJson(backtestDatasetDefinitionV1Schema.parse(definition)) !==
+    canonicalJson(decodeBacktestDatasetDefinition(definition)) !==
       canonicalJson(storedDefinition)
   ) {
     database.close()
@@ -234,7 +237,7 @@ export function createBacktestDatasetStore({
       assertOpen()
       assertWritable()
       const records = input.records.map((record) =>
-        backtestDatasetRecordV1Schema.parse(record),
+        parseBacktestDatasetRecord(storedDefinition, record),
       )
       assertPersistenceSafe(records, knownCredentialValues)
       const append = database.transaction(() => {
@@ -329,7 +332,10 @@ export function createBacktestDatasetStore({
         ORDER BY partition_key ASC, record_key ASC
       `).all(...parameters) as { record_json: string }[]
       return rows.map(({ record_json }) =>
-        backtestDatasetRecordV1Schema.parse(JSON.parse(record_json) as unknown),
+        parseBacktestDatasetRecord(
+          storedDefinition,
+          JSON.parse(record_json) as unknown,
+        ),
       )
     },
     manifest() {
@@ -363,10 +369,10 @@ export function createBacktestDatasetStore({
           ),
         limitations: [...LIMITATIONS],
       }
-      return {
+      return decodeBacktestDatasetManifest({
         ...content,
         checksum: canonicalJsonSha256(content),
-      }
+      })
     },
     close() {
       if (closed) return

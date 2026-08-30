@@ -1,18 +1,15 @@
 import { z } from "zod"
 
 import type {
-  BacktestDatasetRecordV1,
-  MarketSessionRecordV1,
-  OptionBarRecordV1,
-  OptionContractRecordV1,
-  OptionTradeRecordV1,
-  UnderlyingBarRecordV1,
-} from "../backtest/dataset-v1.js"
+  BacktestDatasetRecord,
+  MarketSessionRecord,
+  OptionBarRecord,
+  OptionContractRecord,
+  OptionTradeRecord,
+  UnderlyingBarRecord,
+} from "../backtest/dataset.js"
 import { newYorkLocalTime } from "../scheduling/research-eligibility.js"
-import {
-  parseAlpacaOptionSymbol,
-  validateSpyOptionUniverseV1,
-} from "../shared/alpaca-option-identity.js"
+import { parseAlpacaOptionSymbol } from "../shared/alpaca-option-identity.js"
 
 const DEFAULT_DATA_URL = "https://data.alpaca.markets"
 const DEFAULT_TRADING_URL = "https://paper-api.alpaca.markets"
@@ -77,7 +74,7 @@ const calendarSchema = z.array(
 )
 
 export type HistoricalDataPage = Readonly<{
-  records: readonly BacktestDatasetRecordV1[]
+  records: readonly BacktestDatasetRecord[]
   nextPageToken?: string
 }>
 
@@ -86,8 +83,9 @@ export type AlpacaHistoricalClient = Readonly<{
     fromDate: string
     toDate: string
     signal: AbortSignal
-  }>): Promise<readonly MarketSessionRecordV1[]>
+  }>): Promise<readonly MarketSessionRecord[]>
   getUnderlyingBarsPage(input: Readonly<{
+    symbol: string
     timeframe: "1DAY" | "1MINUTE"
     fromDate: string
     toDate: string
@@ -95,6 +93,7 @@ export type AlpacaHistoricalClient = Readonly<{
     signal: AbortSignal
   }>): Promise<HistoricalDataPage>
   getOptionContractsPage(input: Readonly<{
+    underlying: string
     fromDate: string
     toDate: string
     status: "active" | "inactive"
@@ -191,15 +190,22 @@ const sessionTimestamp = (date: string, value: string, label: string) =>
     ? newYorkLocalTime(date, value).toISOString()
     : timestamp(value, label)
 
+const underlyingSymbol = (value: string) =>
+  z.string().regex(/^[A-Z0-9]{1,6}$/u).parse(value)
+
 const optionSymbols = (values: readonly string[]) => {
   const identities = values.map(parseAlpacaOptionSymbol)
+  const firstRoot = identities[0]?.success
+    ? identities[0].identity.root
+    : undefined
   if (
     values.length === 0 ||
     values.length > 100 ||
+    firstRoot === undefined ||
     identities.some(
       (parsed) =>
         !parsed.success ||
-        !validateSpyOptionUniverseV1(parsed.identity).success,
+        parsed.identity.root !== firstRoot,
     )
   ) {
     throw new Error("Alpaca option symbols are invalid")
@@ -216,7 +222,7 @@ export const alpacaHistoricalEndTimestamp = (date: string) =>
   `${z.iso.date().parse(date)}T23:59:59.999Z`
 
 const historicalPage = (
-  records: readonly BacktestDatasetRecordV1[],
+  records: readonly BacktestDatasetRecord[],
   token: string | null | undefined,
 ): HistoricalDataPage => {
   const nextPageToken = pageToken(token)
@@ -339,37 +345,52 @@ export function createAlpacaHistoricalClient(
     }
   }
 
-  const mapBars = (
+  const mapUnderlyingBars = (
     bars: Record<string, z.infer<typeof barSchema>[]>,
     timeframe: "1DAY" | "1MINUTE",
-    option: boolean,
-  ): readonly (UnderlyingBarRecordV1 | OptionBarRecordV1)[] => {
-    const records: (UnderlyingBarRecordV1 | OptionBarRecordV1)[] = []
-    for (const [symbol, values] of Object.entries(bars)) {
-      for (const bar of values) {
-        const common = {
-          timeframe,
-          timestamp: timestamp(bar.t, "bar timestamp"),
-          openMicros: decimalToInteger(bar.o, 6, "bar open"),
-          highMicros: decimalToInteger(bar.h, 6, "bar high"),
-          lowMicros: decimalToInteger(bar.l, 6, "bar low"),
-          closeMicros: decimalToInteger(bar.c, 6, "bar close"),
-          volume: count(bar.v, "bar volume"),
-          vwapMicros: decimalToInteger(bar.vw, 6, "bar VWAP"),
-        }
-        records.push(
-          option
-            ? {
-                recordType: "OPTION_BAR",
-                contractSymbol: symbol,
-                tradeCount: count(bar.n ?? 0, "bar trade count"),
-                ...common,
-              }
-            : { recordType: "UNDERLYING_BAR", symbol: "SPY", ...common },
-        )
-      }
+    expectedSymbol: string,
+  ): readonly UnderlyingBarRecord[] => {
+    if (Object.keys(bars).some((symbol) => symbol !== expectedSymbol)) {
+      throw new Error("Alpaca historical bars contain an unexpected symbol")
     }
-    return records
+    return (bars[expectedSymbol] ?? []).map((bar) => ({
+      recordType: "UNDERLYING_BAR",
+      symbol: expectedSymbol,
+      timeframe,
+      timestamp: timestamp(bar.t, "bar timestamp"),
+      openMicros: decimalToInteger(bar.o, 6, "bar open"),
+      highMicros: decimalToInteger(bar.h, 6, "bar high"),
+      lowMicros: decimalToInteger(bar.l, 6, "bar low"),
+      closeMicros: decimalToInteger(bar.c, 6, "bar close"),
+      volume: count(bar.v, "bar volume"),
+      vwapMicros: decimalToInteger(bar.vw, 6, "bar VWAP"),
+    }))
+  }
+
+  const mapOptionBars = (
+    bars: Record<string, z.infer<typeof barSchema>[]>,
+    timeframe: "1DAY" | "1MINUTE",
+    expectedSymbols: readonly string[],
+  ): readonly OptionBarRecord[] => {
+    const expected = new Set(expectedSymbols)
+    if (Object.keys(bars).some((symbol) => !expected.has(symbol))) {
+      throw new Error("Alpaca historical option bars contain an unexpected symbol")
+    }
+    return Object.entries(bars).flatMap(([contractSymbol, values]) =>
+      values.map((bar) => ({
+        recordType: "OPTION_BAR",
+        contractSymbol,
+        timeframe,
+        timestamp: timestamp(bar.t, "bar timestamp"),
+        openMicros: decimalToInteger(bar.o, 6, "bar open"),
+        highMicros: decimalToInteger(bar.h, 6, "bar high"),
+        lowMicros: decimalToInteger(bar.l, 6, "bar low"),
+        closeMicros: decimalToInteger(bar.c, 6, "bar close"),
+        volume: count(bar.v, "bar volume"),
+        vwapMicros: decimalToInteger(bar.vw, 6, "bar VWAP"),
+        tradeCount: count(bar.n ?? 0, "bar trade count"),
+      }))
+    )
   }
 
   return {
@@ -390,22 +411,24 @@ export function createAlpacaHistoricalClient(
       }))
     },
     async getUnderlyingBarsPage(input) {
+      const symbol = underlyingSymbol(input.symbol)
       const url = new URL("/v2/stocks/bars", dataBaseUrl)
       setCommon(url, input)
-      url.searchParams.set("symbols", "SPY")
+      url.searchParams.set("symbols", symbol)
       url.searchParams.set("timeframe", input.timeframe === "1DAY" ? "1Day" : "1Min")
       url.searchParams.set("feed", "iex")
       url.searchParams.set("adjustment", "all")
       const parsed = barsResponseSchema.safeParse(await getJson(url, input.signal))
       if (!parsed.success) throw new Error("Alpaca historical bars are invalid")
       return historicalPage(
-        mapBars(parsed.data.bars, input.timeframe, false),
+        mapUnderlyingBars(parsed.data.bars, input.timeframe, symbol),
         parsed.data.next_page_token,
       )
     },
     async getOptionContractsPage(input) {
+      const underlying = underlyingSymbol(input.underlying)
       const url = new URL("/v2/options/contracts", tradingBaseUrl)
-      url.searchParams.set("underlying_symbols", "SPY")
+      url.searchParams.set("underlying_symbols", underlying)
       url.searchParams.set("expiration_date_gte", z.iso.date().parse(input.fromDate))
       url.searchParams.set("expiration_date_lte", z.iso.date().parse(input.toDate))
       url.searchParams.set("status", input.status)
@@ -414,31 +437,54 @@ export function createAlpacaHistoricalClient(
       const parsed = contractsResponseSchema.safeParse(await getJson(url, input.signal))
       if (!parsed.success) throw new Error("Alpaca option contracts are invalid")
       const retrievedAt = now().toISOString()
-      const records: OptionContractRecordV1[] = parsed.data.option_contracts.map(
-        (contract) => ({
-          recordType: "OPTION_CONTRACT",
-          contractSymbol: contract.symbol,
-          expirationDate: z.iso.date().parse(contract.expiration_date),
-          optionType: contract.type === "call" ? "CALL" : "PUT",
-          strikeCentsPerShare: decimalToInteger(contract.strike_price, 2, "contract strike"),
-          active: contract.status === "active",
-          tradable: contract.tradable,
-          exerciseStyle:
-            contract.style === "american"
-              ? "AMERICAN"
-              : contract.style === "european"
-                ? "EUROPEAN"
-                : "UNKNOWN",
-          multiplier: count(contract.size, "contract multiplier"),
-          retrievedAt,
-          ...(contract.open_interest === undefined || contract.open_interest === null
-            ? {}
-            : {
-                openInterest: count(contract.open_interest, "open interest"),
-                openInterestDate: z.iso.date().parse(contract.open_interest_date),
-              }),
-        }),
-      )
+      const records: OptionContractRecord[] =
+        parsed.data.option_contracts.map((contract) => {
+          const identity = parseAlpacaOptionSymbol(contract.symbol)
+          const expirationDate = z.iso.date().parse(contract.expiration_date)
+          const optionType = contract.type === "call" ? "CALL" : "PUT"
+          const strikeCentsPerShare = decimalToInteger(
+            contract.strike_price,
+            2,
+            "contract strike",
+          )
+          if (
+            !identity.success ||
+            identity.identity.root !== underlying ||
+            identity.identity.expiration !== expirationDate ||
+            (identity.identity.optionType === "C" ? "CALL" : "PUT") !==
+              optionType ||
+            identity.identity.strikeThousandthsPerShare !==
+              strikeCentsPerShare * 10
+          ) {
+            throw new Error("Alpaca option contract identity is inconsistent")
+          }
+          return {
+            recordType: "OPTION_CONTRACT",
+            contractSymbol: contract.symbol,
+            expirationDate,
+            optionType,
+            strikeCentsPerShare,
+            active: contract.status === "active",
+            tradable: contract.tradable,
+            exerciseStyle:
+              contract.style === "american"
+                ? "AMERICAN"
+                : contract.style === "european"
+                  ? "EUROPEAN"
+                  : "UNKNOWN",
+            multiplier: count(contract.size, "contract multiplier"),
+            retrievedAt,
+            ...(contract.open_interest === undefined ||
+              contract.open_interest === null
+              ? {}
+              : {
+                  openInterest: count(contract.open_interest, "open interest"),
+                  openInterestDate: z.iso.date().parse(
+                    contract.open_interest_date,
+                  ),
+                }),
+          }
+        })
       return historicalPage(records, parsed.data.next_page_token)
     },
     async getOptionBarsPage(input) {
@@ -450,7 +496,7 @@ export function createAlpacaHistoricalClient(
       const parsed = barsResponseSchema.safeParse(await getJson(url, input.signal))
       if (!parsed.success) throw new Error("Alpaca historical option bars are invalid")
       return historicalPage(
-        mapBars(parsed.data.bars, input.timeframe, true),
+        mapOptionBars(parsed.data.bars, input.timeframe, symbols),
         parsed.data.next_page_token,
       )
     },
@@ -467,8 +513,19 @@ export function createAlpacaHistoricalClient(
           .join(",")
         throw new Error(`Alpaca historical option trades are invalid (${issues})`)
       }
-      const records: OptionTradeRecordV1[] = Object.entries(parsed.data.trades).flatMap(
-        ([contractSymbol, trades]) =>
+      const expected = new Set(symbols)
+      if (
+        Object.keys(parsed.data.trades).some(
+          (contractSymbol) => !expected.has(contractSymbol),
+        )
+      ) {
+        throw new Error(
+          "Alpaca historical option trades contain an unexpected symbol",
+        )
+      }
+      const records: OptionTradeRecord[] = Object.entries(
+        parsed.data.trades,
+      ).flatMap(([contractSymbol, trades]) =>
           trades.map((trade) => ({
             recordType: "OPTION_TRADE",
             contractSymbol,

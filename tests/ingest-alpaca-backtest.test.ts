@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { ingestAlpacaBacktestDataset } from "../src/backtest/ingest-alpaca.js"
 import { createBacktestDatasetStore } from "../src/backtest/sqlite-dataset-store.js"
 import type { AlpacaHistoricalClient } from "../src/market-data/alpaca-historical-client.js"
+import { createBacktestDatasetDefinitionV2Fixture } from "./fixtures/backtest-dataset-v2.js"
 
 const directories: string[] = []
 afterEach(() => {
@@ -78,6 +79,46 @@ describe("Alpaca backtest ingestion", () => {
     expect(client.getCalendar).toHaveBeenCalledTimes(1)
     expect(client.getOptionBarsPage).toHaveBeenCalledTimes(2)
     expect(client.getOptionTradesPage).toHaveBeenCalledTimes(1)
+    store.close()
+  })
+
+  it("derives V2 request identity and neutral partition keys from the manifest", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "backtest-ingest-"))
+    directories.push(directory)
+    const store = createBacktestDatasetStore({
+      path: join(directory, "dataset.sqlite"),
+      definition: createBacktestDatasetDefinitionV2Fixture({
+        optionSymbols: [],
+      }),
+    })
+    const client: AlpacaHistoricalClient = {
+      getCalendar: vi.fn().mockResolvedValue([]),
+      getUnderlyingBarsPage: vi.fn().mockResolvedValue({ records: [] }),
+      getOptionContractsPage: vi.fn().mockResolvedValue({ records: [] }),
+      getOptionBarsPage: vi.fn().mockResolvedValue({ records: [] }),
+      getOptionTradesPage: vi.fn().mockResolvedValue({ records: [] }),
+    }
+
+    const result = await ingestAlpacaBacktestDataset({
+      store,
+      client,
+      signal: new AbortController().signal,
+      now: () => new Date("2024-06-05T10:00:00.000Z"),
+    })
+
+    expect(result.partitions.map(({ partitionKey }) => partitionKey)).toEqual([
+      "calendar",
+      "contracts-active",
+      "contracts-inactive",
+      "underlying-daily",
+      "underlying-minute",
+    ])
+    expect(client.getUnderlyingBarsPage).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "SPY" }),
+    )
+    expect(client.getOptionContractsPage).toHaveBeenCalledWith(
+      expect.objectContaining({ underlying: "SPY" }),
+    )
     store.close()
   })
 

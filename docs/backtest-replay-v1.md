@@ -14,20 +14,40 @@ pnpm backtest:data -- \
   --option SPY240621C00535000
 ```
 
-The command reads `ALPACA_API_KEY` and `ALPACA_SECRET_KEY`, downloads directly
-from Alpaca, and writes `.state/backtests/<dataset-id>.sqlite`. The final date
-must be earlier than the acquisition date so partial sessions cannot enter a
-dataset. The immutable `requestStartedAt` must be at least 15 minutes after the
-exact historical request end. Calendar and SPY daily bars include a fixed 90-calendar-day warm-up for
-SMA50. The requested interval is used for minute bars and option data.
+The command reads `ALPACA_API_KEY` and `ALPACA_SECRET_KEY`, resolves the current
+compile-time strategy manifest, downloads directly from Alpaca, and writes
+`.state/backtests/<content-id>.sqlite`. The content-derived ID binds the complete
+strategy/component manifest, explicit replay-executable feature/ranking/risk/exit
+component identities, underlying, date range, data versions, historical
+feed identity, and sorted retained option symbols. It deliberately excludes
+`requestStartedAt`, so rerunning the same acquisition scope resolves the same
+default file and resumes its original immutable request.
+
+The final date must be earlier than the acquisition date so partial sessions
+cannot enter a dataset. The immutable `requestStartedAt` must be at least 15
+minutes after the exact historical request end. Calendar and underlying daily
+bars include a fixed 90-calendar-day warm-up for SMA50. The requested interval
+is used for minute bars and option data.
+
+New acquisitions use manifest-bound Dataset V2. Its schema is symbol-neutral,
+but the CLI can select only a manifest admitted by the compile-time registry;
+the current registry therefore remains SPY-only. Generic dataset decoding does
+not admit QQQ/IWM to runtime research.
 
 Each normalized request is an immutable partition. Page tokens and normalized
 records are committed atomically, so rerunning the same command resumes an
-interrupted download and skips completed partitions. A changed request must use
-a new dataset ID. The requested option-symbol set is part of the immutable
-dataset definition, and the manifest is complete only when every declared base
-and option partition is sealed. The manifest and every completed partition have
+interrupted download and skips completed partitions. A changed acquisition
+scope derives a new dataset ID. The requested option-symbol set is part of the
+immutable dataset definition, and option bars/trades outside that explicit set
+fail closed. Underlying and option records must match the embedded manifest
+symbol. The manifest is complete only when every declared base and option
+partition is sealed. The manifest and every completed partition have
 deterministic SHA-256 checksums.
+
+Legacy Dataset V1 SQLite files retain their original SPY-only definition,
+partition names, record bytes, and checksums. They are decoded without being
+rewritten. Dataset V2 uses neutral `underlying-daily` and
+`underlying-minute` partition names with the same physical SQLite schema.
 
 Option bars and trades are acquired only for explicit, repeated `--option`
 symbols. This prevents an unbounded chain download and avoids pretending that
@@ -43,7 +63,7 @@ separate from latest quote and snapshot endpoints, which do accept explicit
 
 ```bash
 pnpm backtest -- \
-  --dataset .state/backtests/SPY-2024-06-03-2024-06-28.sqlite \
+  --dataset .state/backtests/<content-id>.sqlite \
   --scenarios scenarios.json \
   --output report.json
 ```
@@ -52,6 +72,12 @@ pnpm backtest -- \
 `src/backtest/replay-v1.ts`. It fixes the replay and execution-model versions,
 slippage in half-cents per share, commission in cents per contract, and an
 ordered list of scenarios. Omitting `--output` prints the report.
+
+Replay V1 can consume a compatible Dataset V2 as an interim path. It validates
+the embedded strategy manifest, replay version, execution model, and every
+record against the dataset symbol before applying existing V1 scenario
+semantics. Static feature/candidate component dispatch and Replay V2 scenario
+identity remain deferred to the next #57 PR.
 
 The report includes dataset identity and checksum, fidelity counts, trade count,
 P&L, return, maximum drawdown, hit rate, risk rejection counts, per-scenario

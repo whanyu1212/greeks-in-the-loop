@@ -90,6 +90,7 @@ describe("Alpaca historical client", () => {
       }),
     )
     const page = await createClient(fetchMock).getUnderlyingBarsPage({
+      symbol: "SPY",
       timeframe: "1MINUTE",
       fromDate: "2024-02-01",
       toDate: "2024-02-02",
@@ -152,6 +153,7 @@ describe("Alpaca historical client", () => {
     )
     await expect(
       client.getOptionContractsPage({
+        underlying: "SPY",
         fromDate: "2024-02-16",
         toDate: "2024-02-16",
         status: "inactive",
@@ -213,7 +215,10 @@ describe("Alpaca historical client", () => {
     ["empty", []],
     ["over-limit", Array(101).fill("SPY240216C00500000")],
     ["malformed", ["not-a-symbol"]],
-    ["unsupported", ["QQQ240216C00500000"]],
+    [
+      "mixed-underlying",
+      ["SPY240216C00500000", "QQQ240216C00500000"],
+    ],
     ["impossible-date", ["SPY240231C00500000"]],
   ])(
     "rejects a %s option-symbol request before provider I/O",
@@ -233,6 +238,131 @@ describe("Alpaca historical client", () => {
       expect(fetchMock).not.toHaveBeenCalled()
     },
   )
+
+  it("uses the requested underlying and rejects mixed provider bar responses", async () => {
+    const acceptedFetch = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        bars: {
+          QQQ: [{
+            t: "2024-02-01T14:30:00Z",
+            o: 420,
+            h: 421,
+            l: 419,
+            c: 420.5,
+            v: 100,
+            vw: 420.25,
+          }],
+        },
+      }),
+    )
+    const accepted = await createClient(acceptedFetch).getUnderlyingBarsPage({
+      symbol: "QQQ",
+      timeframe: "1MINUTE",
+      fromDate: "2024-02-01",
+      toDate: "2024-02-01",
+      signal: new AbortController().signal,
+    })
+    expect(accepted.records[0]).toMatchObject({
+      recordType: "UNDERLYING_BAR",
+      symbol: "QQQ",
+    })
+    expect(
+      new URL(String(acceptedFetch.mock.calls[0]![0])).searchParams.get(
+        "symbols",
+      ),
+    ).toBe("QQQ")
+
+    const mixed = createClient(
+      vi.fn<typeof fetch>().mockResolvedValue(
+        jsonResponse({ bars: { QQQ: [], SPY: [] } }),
+      ),
+    )
+    await expect(
+      mixed.getUnderlyingBarsPage({
+        symbol: "QQQ",
+        timeframe: "1DAY",
+        fromDate: "2024-02-01",
+        toDate: "2024-02-01",
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("unexpected symbol")
+  })
+
+  it("normalizes a valid non-SPY option request at the structural provider boundary", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        trades: {
+          QQQ240216C00420000: [{
+            t: "2024-02-01T15:00:00Z",
+            p: 2.5,
+            s: 3,
+          }],
+        },
+      }),
+    )
+
+    await expect(
+      createClient(fetchMock).getOptionTradesPage({
+        contractSymbols: ["QQQ240216C00420000"],
+        fromDate: "2024-02-01",
+        toDate: "2024-02-01",
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      records: [{
+        recordType: "OPTION_TRADE",
+        contractSymbol: "QQQ240216C00420000",
+      }],
+    })
+  })
+
+  it("rejects option response identities outside the requested scope", async () => {
+    const mixedBars = createClient(
+      vi.fn<typeof fetch>().mockResolvedValue(
+        jsonResponse({
+          bars: {
+            QQQ240216C00420000: [],
+            SPY240216C00500000: [],
+          },
+        }),
+      ),
+    )
+    await expect(
+      mixedBars.getOptionBarsPage({
+        contractSymbols: ["QQQ240216C00420000"],
+        timeframe: "1MINUTE",
+        fromDate: "2024-02-01",
+        toDate: "2024-02-01",
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("unexpected symbol")
+
+    const mismatchedContract = createClient(
+      vi.fn<typeof fetch>().mockResolvedValue(
+        jsonResponse({
+          option_contracts: [{
+            symbol: "QQQ240216C00420000",
+            expiration_date: "2024-02-16",
+            type: "call",
+            strike_price: "421",
+            status: "active",
+            tradable: true,
+            style: "american",
+            size: "100",
+          }],
+        }),
+      ),
+    )
+    await expect(
+      mismatchedContract.getOptionContractsPage({
+        underlying: "QQQ",
+        fromDate: "2024-02-16",
+        toDate: "2024-02-16",
+        status: "active",
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("identity is inconsistent")
+  })
 
   it("deduplicates and sorts exact option symbols in historical requests", async () => {
     const fetchMock = vi
@@ -274,6 +404,7 @@ describe("Alpaca historical client", () => {
       sleep,
     })
     await client.getUnderlyingBarsPage({
+      symbol: "SPY",
       timeframe: "1DAY",
       fromDate: "2024-02-01",
       toDate: "2024-02-02",
@@ -305,6 +436,7 @@ describe("Alpaca historical client", () => {
       })
 
       await client.getUnderlyingBarsPage({
+        symbol: "SPY",
         timeframe: "1DAY",
         fromDate: "2024-02-01",
         toDate: "2024-02-02",
