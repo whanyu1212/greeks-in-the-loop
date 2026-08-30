@@ -125,8 +125,8 @@ belong only under `workspace/` (gitignored, along with `.state/`).
 `docs/` holds the authoritative specs: `strategy-v1.md` (frozen MVP strategy),
 `risk-engine-v1.md`, `trade-intent-v1.md`, `research-decision-v1.md`,
 `research-report-v2.md`, `event-ledger-v1.md`, `backtest-replay-v1.md`,
-`pre-market-research-v1.md`, `research-market-snapshots-v1.md` (data only;
-capture and use are unbuilt), `research-source-policy.md`,
+`pre-market-research-v1.md`, `research-market-snapshots-v1.md` (contracts and
+provider capture; runtime audit wiring is unbuilt), `research-source-policy.md`,
 `research-evaluation.md`, `research-behavior-evaluation.md`, `observability.md`.
 Consult these before changing contract or rule behavior. The README's Strategy
 section indexes the same set with one-line descriptions.
