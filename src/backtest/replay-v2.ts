@@ -311,12 +311,26 @@ const exactOptionContract = (
 export const deriveBacktestReplayEligibilityV2 = (
   underlying: UnderlyingSessionSnapshotV1,
   retainedTradeIntentWindow = true,
+  retainedPreviousSessionDates: readonly string[] =
+    underlying.session.previousSessionDates.slice(-2),
 ) => {
   const compatibility = resolveV1StrategyVersionCompatibility(
     underlying.strategyManifest.strategyVersion,
   )
   if (!compatibility.success) {
     throw new Error("Replay eligibility strategy version is unsupported")
+  }
+  if (
+    retainedPreviousSessionDates.length === 0 ||
+    retainedPreviousSessionDates.length >
+      underlying.session.previousSessionDates.length ||
+    canonicalJson(retainedPreviousSessionDates) !== canonicalJson(
+      underlying.session.previousSessionDates.slice(
+        -retainedPreviousSessionDates.length,
+      ),
+    )
+  ) {
+    throw new Error("Risk eligibility calendar does not match the selected snapshot")
   }
   const evaluatedAt = Date.parse(underlying.times.evaluatedAt)
   const open = Date.parse(underlying.session.openAt)
@@ -378,7 +392,7 @@ export const deriveBacktestReplayEligibilityV2 = (
     researchEligible: true,
     tradeIntentEligible,
     ...(tradeIntentWindow === undefined ? {} : { tradeIntentWindow }),
-    previousSessionDates: underlying.session.previousSessionDates.slice(-2),
+    previousSessionDates: [...retainedPreviousSessionDates],
     ...(tradeIntentEligible
       ? {}
       : { reason: "OUTSIDE_TRADE_INTENT_WINDOW" as const }),
@@ -416,6 +430,7 @@ const boundRiskEvaluationInput = (
   const eligibility = deriveBacktestReplayEligibilityV2(
     underlying,
     input.context.eligibility.tradeIntentWindow !== undefined,
+    input.context.eligibility.previousSessionDates ?? [],
   )
   if (canonicalJson(input.context.eligibility) !== canonicalJson(eligibility)) {
     throw new Error("Risk eligibility does not match the selected snapshot")

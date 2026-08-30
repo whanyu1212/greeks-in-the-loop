@@ -361,6 +361,8 @@ describe("backtest replay v2", () => {
     const definition = createBacktestDatasetDefinitionV2Fixture()
     const selected = createSelectedSnapshots(true)
     const riskInput = createRiskInput(selected)
+    riskInput.context.eligibility.previousSessionDates =
+      selected.pair.underlying.session.previousSessionDates.slice(-10)
     const content = selectedScenario(definition, riskInput)
     const report = run(definition, [scenario(content)], exactRecords)
 
@@ -420,7 +422,10 @@ describe("backtest replay v2", () => {
         ...risk.context,
         eligibility: {
           ...risk.context.eligibility,
-          previousSessionDates: risk.context.eligibility.previousSessionDates.slice(-1),
+          previousSessionDates: [
+            ...risk.context.eligibility.previousSessionDates.slice(0, -1),
+            "2026-01-01",
+          ],
         },
       },
     })],
