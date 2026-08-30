@@ -2,6 +2,7 @@ import { isAbsolute, resolve, sep } from "node:path"
 import { isDeepStrictEqual } from "node:util"
 
 import { NO_ACTION_REASON_CODES } from "../contracts/research-decision-v1.js"
+import { canonicalExternalUrl } from "../shared/canonical-external-url.js"
 import {
   researchReportV2Schema,
   type ResearchReportV2,
@@ -217,18 +218,6 @@ const firstToolIndex = (
   calls: readonly ResearchBehaviorToolCall[],
   pattern: string,
 ) => calls.findIndex(({ name }) => toolMatches(name, pattern))
-
-const canonicalExternalUrl = (value: string) => {
-  const url = new URL(value)
-  url.hash = ""
-  for (const key of [...url.searchParams.keys()]) {
-    if (/^(?:utm_.+|gclid|fbclid)$/iu.test(key)) url.searchParams.delete(key)
-  }
-  url.hostname = url.hostname.toLowerCase()
-  if (url.pathname !== "/") url.pathname = url.pathname.replace(/\/+$/u, "")
-  url.searchParams.sort()
-  return url.toString()
-}
 
 const parseReport = (rawResponse: string) => {
   let input: unknown

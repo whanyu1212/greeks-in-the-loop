@@ -100,4 +100,10 @@ A valid proposal therefore contains:
 | Shadow risk engine | Approve or reject intents deterministically without broker mutation |
 | Future executor | Perform isolated broker mutations |
 
+The checked-in generic qualitative skill and `ResearchPlanV1` define the future
+candidate-reference boundary but are not production-active. They omit snapshot
+capture, signal calculation, candidate filtering/ranking, account gates, and
+risk logic. The atomic production migration and removal of the legacy skill
+belong to #67.
+
 Pre-market observations may be retained only through `PreliminaryResearchV1`. Each sourced observation identifies whether it is `LIVE`, `DELAYED`, or `PRIOR_CLOSE`, and the complete result is marked for mandatory refresh. Application code checks the Alpaca trading calendar and strategy window before exact-leg quote confirmation. A preliminary result is never an input to `TradeIntentV1` derivation.

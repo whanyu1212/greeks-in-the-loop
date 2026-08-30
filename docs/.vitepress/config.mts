@@ -42,6 +42,7 @@ export default withMermaid(defineConfig({
         items: [
           { text: 'Research Decision V1', link: '/research-decision-v1' },
           { text: 'Research Report V2', link: '/research-report-v2' },
+          { text: 'Research Plan V1', link: '/research-plan-v1' },
           { text: 'Research Source Policy', link: '/research-source-policy' },
           { text: 'Research Market Snapshots V1', link: '/research-market-snapshots-v1' },
         ],

@@ -662,9 +662,13 @@ candidate from a validated application-owned snapshot pair. Replay shares its
 feature and rank calculations, but production research does not consume its
 selection until audit and authority-promotion work under #66 and #67 completes.
 
-The manifest identifies exits as replay-only and research-plan compatibility as
-the existing versioned research invocation, not as the future `ResearchPlanV1`.
-V1 ledger, research-run, dataset, intent, risk, and replay schemas retain their
+The manifest identifies exits as replay-only and runtime research-plan
+compatibility as the existing versioned research invocation. `ResearchPlanV1`
+is now defined as a strict candidate-reference contract for isolated
+plan-driven evaluation, but it does not replace the manifest's legacy runtime
+compatibility or authorize the generic skill in production. That atomic
+migration belongs to #67. V1 ledger, research-run, dataset, intent, risk, and
+replay schemas retain their
 existing serialized shapes and decode from their embedded version fields without
 consulting the current runtime manifest.
 
