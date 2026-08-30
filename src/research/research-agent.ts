@@ -15,7 +15,7 @@ import {
 /** Checked-in OpenCode primary agent used by every unattended cycle. */
 export const RESEARCH_AGENT_NAME = "research" as const
 /** Increment when the system prompt or cycle-request behavior changes. */
-export const RESEARCH_PROMPT_VERSION = "1.4.0" as const
+export const RESEARCH_PROMPT_VERSION = "1.4.1" as const
 /** Checked-in skill selected by the research agent policy. */
 export const RESEARCH_SKILL_NAME = "spy-debit-spread-research" as const
 /** Increment when the selected skill's research behavior changes. */

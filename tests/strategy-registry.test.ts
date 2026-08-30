@@ -125,9 +125,9 @@ describe("static strategy registry", () => {
       },
       researchPlanCompatibility: {
         kind: "LEGACY_RESEARCH_INVOCATION_V1",
-        invocationVersion: "1.2.0",
+        invocationVersion: "1.3.0",
         agentName: "research",
-        promptVersion: "1.4.0",
+        promptVersion: "1.4.1",
         skillName: "spy-debit-spread-research",
         skillVersion: "1.2.0",
         decisionContractVersion: "1.0.0",

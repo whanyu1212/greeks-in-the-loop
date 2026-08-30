@@ -481,7 +481,7 @@ describe("createResearchLifecycleRecorder", () => {
         cycleId: "id-1",
         sessionId: "session-1",
         payload: {
-          invocationVersion: "1.2.0",
+          invocationVersion: "1.3.0",
           reason: "MODEL_DRIFT",
           expected: "gpt-5.6-sol",
           observed: "gpt-5.6-sol-fast",
