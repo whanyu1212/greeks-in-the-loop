@@ -6,9 +6,22 @@ import {
 } from "../shared/alpaca-option-identity.js"
 import { canonicalJsonSha256 } from "../shared/canonical-json.js"
 import {
+  RISK_EVALUATION_VERSION,
+  RISK_RULE_VERSION,
+} from "../risk/risk-evaluation-v1.js"
+import {
+  DEBIT_VERTICAL_CANDIDATE_COMPONENT_ID,
+  DEBIT_VERTICAL_CANDIDATE_VERSION,
+  DIRECTIONAL_TREND_FEATURE_COMPONENT_ID,
+  DIRECTIONAL_TREND_FEATURE_VERSION,
+} from "../strategy/directional-debit-vertical-v1.js"
+import {
   researchSnapshotStrategyManifestV1Schema,
   type ResearchSnapshotStrategyManifestV1,
 } from "../contracts/research-market-snapshot-v1.js"
+import {
+  BACKTEST_REPLAY_VERSION,
+} from "./replay-identity.js"
 import {
   backtestDatasetPartitionV1Schema,
   backtestDateSchema,
@@ -26,6 +39,22 @@ import {
 export const BACKTEST_DATASET_DEFINITION_V2_VERSION = "2.0.0" as const
 
 const optionHistoricalFeed = z.literal("ALPACA_ACCOUNT_DEFAULT")
+const componentIdentitySchema = z
+  .object({
+    componentId: z.string().min(1).max(128),
+    componentVersion: z.string().min(1).max(32),
+  })
+  .strict()
+const replayComponentsSchema = z
+  .object({
+    featureCalculation: componentIdentitySchema,
+    candidateGenerationRanking: componentIdentitySchema,
+    riskRule: componentIdentitySchema.extend({
+      evaluationVersion: z.string().min(1).max(32),
+    }),
+    exitPolicy: componentIdentitySchema,
+  })
+  .strict()
 const optionSymbolArray = z
   .array(z.string())
   .max(10_000)
@@ -56,6 +85,7 @@ const definitionContentSchema = z
     datasetVersion: z.string().min(1).max(32),
     normalizationVersion: z.string().min(1).max(32),
     strategyManifest: researchSnapshotStrategyManifestV1Schema,
+    replayComponents: replayComponentsSchema,
     symbol: backtestUnderlyingSymbolSchema,
     fromDate: backtestDateSchema,
     toDate: backtestDateSchema,
@@ -108,6 +138,7 @@ const acquisitionIdentity = (
   datasetVersion: content.datasetVersion,
   normalizationVersion: content.normalizationVersion,
   strategyManifest: content.strategyManifest,
+  replayComponents: content.replayComponents,
   symbol: content.symbol,
   fromDate: content.fromDate,
   toDate: content.toDate,
@@ -172,6 +203,25 @@ export function createBacktestDatasetDefinitionV2({
     normalizationVersion:
       strategyManifest.replayCompatibility.normalizationVersion,
     strategyManifest,
+    replayComponents: {
+      featureCalculation: {
+        componentId: DIRECTIONAL_TREND_FEATURE_COMPONENT_ID,
+        componentVersion: DIRECTIONAL_TREND_FEATURE_VERSION,
+      },
+      candidateGenerationRanking: {
+        componentId: DEBIT_VERTICAL_CANDIDATE_COMPONENT_ID,
+        componentVersion: DEBIT_VERTICAL_CANDIDATE_VERSION,
+      },
+      riskRule: {
+        componentId: "evaluateTradeIntentRiskV1",
+        componentVersion: RISK_RULE_VERSION,
+        evaluationVersion: RISK_EVALUATION_VERSION,
+      },
+      exitPolicy: {
+        componentId: "runBacktestReplayV1",
+        componentVersion: BACKTEST_REPLAY_VERSION,
+      },
+    },
     symbol: strategyManifest.underlying,
     fromDate,
     toDate,

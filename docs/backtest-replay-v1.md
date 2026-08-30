@@ -17,7 +17,8 @@ pnpm backtest:data -- \
 The command reads `ALPACA_API_KEY` and `ALPACA_SECRET_KEY`, resolves the current
 compile-time strategy manifest, downloads directly from Alpaca, and writes
 `.state/backtests/<content-id>.sqlite`. The content-derived ID binds the complete
-strategy/component manifest, underlying, date range, data versions, historical
+strategy/component manifest, explicit replay-executable feature/ranking/risk/exit
+component identities, underlying, date range, data versions, historical
 feed identity, and sorted retained option symbols. It deliberately excludes
 `requestStartedAt`, so rerunning the same acquisition scope resolves the same
 default file and resumes its original immutable request.

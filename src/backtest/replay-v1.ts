@@ -6,6 +6,8 @@ import {
 } from "../contracts/trade-intent-v1.js"
 import {
   evaluateTradeIntentRiskV1,
+  RISK_EVALUATION_VERSION,
+  RISK_RULE_VERSION,
   riskEvaluationInputV1Schema,
   type RiskEvaluationV1,
 } from "../risk/risk-evaluation-v1.js"
@@ -16,6 +18,10 @@ import {
   calculateDirectionalTrendFeaturesV1,
   compareDebitVerticalCandidateRanksV1,
   createDebitVerticalCandidateRankV1,
+  DEBIT_VERTICAL_CANDIDATE_COMPONENT_ID,
+  DEBIT_VERTICAL_CANDIDATE_VERSION,
+  DIRECTIONAL_TREND_FEATURE_COMPONENT_ID,
+  DIRECTIONAL_TREND_FEATURE_VERSION,
 } from "../strategy/directional-debit-vertical-v1.js"
 import {
   BACKTEST_DATASET_VERSION,
@@ -612,6 +618,24 @@ export function runBacktestReplayV1(
       manifest.definition.datasetVersion !== BACKTEST_DATASET_VERSION ||
       manifest.definition.normalizationVersion !==
         BACKTEST_NORMALIZATION_VERSION ||
+      manifest.definition.replayComponents.featureCalculation.componentId !==
+        DIRECTIONAL_TREND_FEATURE_COMPONENT_ID ||
+      manifest.definition.replayComponents.featureCalculation
+        .componentVersion !== DIRECTIONAL_TREND_FEATURE_VERSION ||
+      manifest.definition.replayComponents.candidateGenerationRanking
+        .componentId !== DEBIT_VERTICAL_CANDIDATE_COMPONENT_ID ||
+      manifest.definition.replayComponents.candidateGenerationRanking
+        .componentVersion !== DEBIT_VERTICAL_CANDIDATE_VERSION ||
+      manifest.definition.replayComponents.riskRule.componentId !==
+        "evaluateTradeIntentRiskV1" ||
+      manifest.definition.replayComponents.riskRule.componentVersion !==
+        RISK_RULE_VERSION ||
+      manifest.definition.replayComponents.riskRule.evaluationVersion !==
+        RISK_EVALUATION_VERSION ||
+      manifest.definition.replayComponents.exitPolicy.componentId !==
+        "runBacktestReplayV1" ||
+      manifest.definition.replayComponents.exitPolicy.componentVersion !==
+        BACKTEST_REPLAY_VERSION ||
       replay.replayVersion !==
         manifest.definition.strategyManifest.replayCompatibility.replayVersion ||
       replay.execution.modelVersion !==

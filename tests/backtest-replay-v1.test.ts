@@ -8,6 +8,9 @@ import {
 import type { BacktestDatasetRecord } from "../src/backtest/dataset.js"
 import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 import {
+  computeBacktestDatasetIdV2,
+} from "../src/backtest/dataset-v2.js"
+import {
   createBacktestDatasetDefinitionV2Fixture,
   createSyntheticStrategyManifest,
 } from "./fixtures/backtest-dataset-v2.js"
@@ -296,6 +299,44 @@ describe("backtest replay v1", () => {
           monitorCycles: [monitorCycle],
         }],
       }, [])
+    ).toThrow("replay identity is incompatible")
+  })
+
+  it("rejects unsupported embedded V2 executable component identity", () => {
+    const original = createBacktestDatasetDefinitionV2Fixture({
+      optionSymbols: [],
+    })
+    const { datasetId: _datasetId, ...content } = original
+    const driftedContent = {
+      ...content,
+      replayComponents: {
+        ...content.replayComponents,
+        riskRule: {
+          ...content.replayComponents.riskRule,
+          componentVersion: "9.9.9",
+        },
+      },
+    }
+    const driftedDefinition = {
+      ...driftedContent,
+      datasetId: computeBacktestDatasetIdV2(driftedContent),
+    }
+
+    expect(() =>
+      runReplay({
+        ...manifest,
+        definition: driftedDefinition,
+        checksum: "b".repeat(64),
+      }, {
+        replayVersion: "1.0.0",
+        execution,
+        scenarios: [{
+          scenarioId: "unsupported-component-proxy",
+          fidelity: "HISTORICAL_BAR_PROXY",
+          retainedIntent: intent,
+          monitorCycles: [monitorCycle],
+        }],
+      }, replayCalendar)
     ).toThrow("replay identity is incompatible")
   })
 
