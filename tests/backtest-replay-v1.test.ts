@@ -737,8 +737,8 @@ describe("backtest replay v1", () => {
     })
   })
 
-  it("does not value end of replay from closed-market cycles", () => {
-    const report = runReplay(manifest, {
+  it("rejects a closed-market end cycle during session hours", () => {
+    expect(() => runReplay(manifest, {
       replayVersion: "1.0.0",
       execution,
       scenarios: [{
@@ -751,14 +751,7 @@ describe("backtest replay v1", () => {
           markHalfCentsPerShare: 500,
         }],
       }],
-    })
-
-    expect(report.results[0]).toMatchObject({
-      outcome: "EXIT_UNPRICED",
-      exitReason: "END_OF_REPLAY",
-      exitDecidedAt: monitorCycle.decidedAt,
-      pnlCents: null,
-    })
+    })).toThrow(/incorrect market-open state/u)
   })
 
   it("rejects monitor cycles that are not strictly chronological", () => {
@@ -872,7 +865,7 @@ describe("backtest replay v1", () => {
           minutesToClose: 0,
         }],
       }],
-    })).toThrow(/open cycle outside session hours/u)
+    })).toThrow(/incorrect market-open state/u)
   })
 
   it("validates explicit trend evidence against retained daily bars", () => {

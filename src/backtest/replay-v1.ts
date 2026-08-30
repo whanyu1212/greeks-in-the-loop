@@ -595,14 +595,14 @@ export function validateReplayMonitorCyclesV1(
       throw new Error(`Scenario ${scenarioId} has incorrect minutes to session close`)
     }
     if (monitorCycles.some(({ decidedAt, marketOpen }) => {
-      if (!marketOpen) return false
       const session = sessions.find(
         ({ date }) => date === newYorkDate(new Date(decidedAt)),
       )!
-      return instant(decidedAt) < instant(session.open) ||
-        instant(decidedAt) > instant(session.close)
+      const isWithinSession = instant(decidedAt) >= instant(session.open) &&
+        instant(decidedAt) <= instant(session.close)
+      return marketOpen !== isWithinSession
     })) {
-      throw new Error(`Scenario ${scenarioId} has an open cycle outside session hours`)
+      throw new Error(`Scenario ${scenarioId} has incorrect market-open state`)
     }
     const dailyBarsBySessionDate = new Map<string, UnderlyingBarRecord[]>()
     for (const record of records) {
