@@ -38,8 +38,10 @@ and total ranking are unchanged.
 ## Trusted input identity
 
 Application input identity contains both content-addressed snapshot IDs, the
-evaluation time, contract count, and a membership digest over the canonical
-contract-symbol list. Only application code may supply this identity.
+evaluation time, contract count, and a Merkle membership commitment over the
+canonical contract-symbol list. A selected result retains logarithmic-size
+proofs that both leg symbols belong to that commitment. Only application code
+may supply this identity.
 
 `ResearchReportV2` cannot establish identical input. Model-stated times and
 candidate identity are useful diagnostics, but model output cannot assert that

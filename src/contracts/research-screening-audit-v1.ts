@@ -118,6 +118,107 @@ export type ResearchScreeningAuditInputIdentityV1 = Readonly<
   z.infer<typeof researchScreeningAuditInputIdentityV1Schema>
 >
 
+const MAX_OPTION_MEMBERSHIP_PROOF_DEPTH = 14
+const optionMembershipProofSchema = z
+  .object({
+    contractIndex: safeCount.max(MAX_OPTION_UNIVERSE_CONTRACTS - 1),
+    siblingHashes: z.array(digest).max(MAX_OPTION_MEMBERSHIP_PROOF_DEPTH),
+  })
+  .strict()
+
+const membershipLeaf = (contractSymbol: string): string =>
+  canonicalJsonSha256({
+    domain: "research-screening-option-membership-leaf-v1",
+    contractSymbol,
+  })
+
+const membershipNode = (left: string, right: string): string =>
+  canonicalJsonSha256({
+    domain: "research-screening-option-membership-node-v1",
+    left,
+    right,
+  })
+
+const membershipRoot = (contractSymbols: readonly string[]): string => {
+  let level = contractSymbols.map(membershipLeaf)
+  if (level.length === 0) {
+    return canonicalJsonSha256({
+      domain: "research-screening-option-membership-empty-v1",
+    })
+  }
+  while (level.length > 1) {
+    const next: string[] = []
+    for (let index = 0; index < level.length; index += 2) {
+      next.push(membershipNode(level[index]!, level[index + 1] ?? level[index]!))
+    }
+    level = next
+  }
+  return level[0]!
+}
+
+const membershipId = (root: string, contractCount: number): string =>
+  canonicalJsonSha256({
+    domain: "research-screening-option-membership-v1",
+    contractCount,
+    root,
+  })
+
+const canonicalContractSymbols = (
+  pair: ValidatedResearchSnapshotPairV1,
+): readonly string[] => pair.optionUniverse.contracts
+  .map(({ contractSymbol }) => contractSymbol)
+  .sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
+
+const createOptionMembershipProof = (
+  contractSymbols: readonly string[],
+  contractSymbol: string,
+): z.infer<typeof optionMembershipProofSchema> => {
+  const contractIndex = contractSymbols.indexOf(contractSymbol)
+  if (contractIndex < 0) {
+    throw new Error("Selected contract is absent from its option universe")
+  }
+  let index = contractIndex
+  let level = contractSymbols.map(membershipLeaf)
+  const siblingHashes: string[] = []
+  while (level.length > 1) {
+    const siblingIndex = index % 2 === 0 ? index + 1 : index - 1
+    siblingHashes.push(level[siblingIndex] ?? level[index]!)
+    const next: string[] = []
+    for (let cursor = 0; cursor < level.length; cursor += 2) {
+      next.push(membershipNode(
+        level[cursor]!,
+        level[cursor + 1] ?? level[cursor]!,
+      ))
+    }
+    index = Math.floor(index / 2)
+    level = next
+  }
+  return { contractIndex, siblingHashes }
+}
+
+const verifiesOptionMembership = (
+  contractSymbol: string,
+  proof: z.infer<typeof optionMembershipProofSchema>,
+  expectedMembershipId: string,
+  contractCount: number,
+): boolean => {
+  if (contractCount === 0 || proof.contractIndex >= contractCount) return false
+  let expectedDepth = 0
+  for (let width = contractCount; width > 1; width = Math.ceil(width / 2)) {
+    expectedDepth += 1
+  }
+  if (proof.siblingHashes.length !== expectedDepth) return false
+  let index = proof.contractIndex
+  let root = membershipLeaf(contractSymbol)
+  for (const sibling of proof.siblingHashes) {
+    root = index % 2 === 0
+      ? membershipNode(root, sibling)
+      : membershipNode(sibling, root)
+    index = Math.floor(index / 2)
+  }
+  return index === 0 && membershipId(root, contractCount) === expectedMembershipId
+}
+
 const strategyIdentitySchema = z
   .object({
     strategyId: identifier,
@@ -341,6 +442,8 @@ const selectedApplicationResultSchema = z
     widthCentsPerShare: z.number().int().min(100).max(1_000),
     longContractSymbol: spyAlpacaOptionSymbolV1Schema,
     shortContractSymbol: spyAlpacaOptionSymbolV1Schema,
+    longContractMembershipProof: optionMembershipProofSchema,
+    shortContractMembershipProof: optionMembershipProofSchema,
     eligibleCandidateCount: z.number().int().positive().safe(),
   })
   .strict()
@@ -489,6 +592,27 @@ export const applicationResearchScreeningAuditV1Schema = z.discriminatedUnion(
           }
         }
         if (audit.result.status === "SELECTED") {
+          for (const [symbol, proof, path] of [
+            [audit.result.longContractSymbol,
+              audit.result.longContractMembershipProof,
+              "longContractMembershipProof"],
+            [audit.result.shortContractSymbol,
+              audit.result.shortContractMembershipProof,
+              "shortContractMembershipProof"],
+          ] as const) {
+            if (!verifiesOptionMembership(
+              symbol,
+              proof,
+              audit.inputIdentity.optionUniverseMembershipId,
+              audit.inputIdentity.optionContractCount,
+            )) {
+              refinement.addIssue({
+                code: "custom",
+                path: ["result", path],
+                message: "Selected leg must belong to the retained option universe",
+              })
+            }
+          }
           const sessionDate = audit.inputIdentity.evaluatedAt.slice(0, 10)
           const expectedDte = (
             Date.parse(`${audit.result.expirationDate}T00:00:00.000Z`) -
@@ -804,12 +928,10 @@ export const createResearchScreeningAuditInputIdentityV1 = (
     evaluatedAt: pair.underlying.times.evaluatedAt,
     underlyingSnapshotId: pair.underlying.snapshotId,
     optionUniverseSnapshotId: pair.optionUniverse.snapshotId,
-    optionUniverseMembershipId: canonicalJsonSha256({
-      domain: "research-screening-option-membership-v1",
-      contractSymbols: pair.optionUniverse.contracts.map(
-        ({ contractSymbol }) => contractSymbol,
-      ),
-    }),
+    optionUniverseMembershipId: membershipId(
+      membershipRoot(canonicalContractSymbols(pair)),
+      pair.optionUniverse.contracts.length,
+    ),
     optionContractCount: pair.optionUniverse.contracts.length,
   })
 
@@ -845,6 +967,7 @@ export function createApplicationResearchScreeningAuditV1(options: Readonly<{
   ) {
     throw new Error("Audited screening result does not match its snapshot pair")
   }
+  const contractSymbols = canonicalContractSymbols(options.pair)
   return applicationResearchScreeningAuditV1Schema.parse({
     status: "SCREENED",
     captureDurationMs: options.captureDurationMs,
@@ -863,6 +986,14 @@ export function createApplicationResearchScreeningAuditV1(options: Readonly<{
           widthCentsPerShare: result.selectedCandidate.economics.widthCentsPerShare,
           longContractSymbol: result.selectedCandidate.longLeg.contractSymbol,
           shortContractSymbol: result.selectedCandidate.shortLeg.contractSymbol,
+          longContractMembershipProof: createOptionMembershipProof(
+            contractSymbols,
+            result.selectedCandidate.longLeg.contractSymbol,
+          ),
+          shortContractMembershipProof: createOptionMembershipProof(
+            contractSymbols,
+            result.selectedCandidate.shortLeg.contractSymbol,
+          ),
           eligibleCandidateCount: result.eligibleCandidateCount,
         },
     diagnostics: options.audited.diagnostics,

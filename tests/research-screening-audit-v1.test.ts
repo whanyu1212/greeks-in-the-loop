@@ -459,6 +459,12 @@ describe("research screening audit V1", () => {
         longContractSymbol: application.result.shortContractSymbol,
         shortContractSymbol: application.result.longContractSymbol,
       }),
+      reidentify({
+        ...application.result,
+        longContractSymbol: "SPY260918C00640000",
+        shortContractSymbol: "SPY260918C00645000",
+        widthCentsPerShare: 500,
+      }),
     ]) {
       expect(applicationResearchScreeningAuditV1Schema.safeParse({
         ...application,
