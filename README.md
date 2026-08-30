@@ -70,6 +70,7 @@ The frozen MVP strategy is documented in [SPY Directional Debit Spreads](docs/st
 | [Trade Intent V1](docs/trade-intent-v1.md) | Derived spread economics and integer-cent units |
 | [Research Decision V1](docs/research-decision-v1.md) | The agent-output trust boundary |
 | [Research Report V2](docs/research-report-v2.md) | Bounded report retained per cycle |
+| [Research Plan V1](docs/research-plan-v1.md) | Plan-driven qualitative contract and candidate-reference response (not production-active) |
 | [Event Ledger V1](docs/event-ledger-v1.md) | Append-only audit record and SQL invariants |
 | [Backtest Replay V1](docs/backtest-replay-v1.md) | Offline scenario contracts and fidelities |
 | [Research Market Snapshots V1](docs/research-market-snapshots-v1.md) | Application-owned SPY market-data identity and capture (runtime audit wiring is unbuilt) |
@@ -447,6 +448,8 @@ the exact span/attribute boundary, and intentionally deferred work.
 ## Research procedure
 
 Every unattended cycle loads the project-local `spy-debit-spread-research` skill. The checklist and [source/freshness policy](docs/research-source-policy.md) define source precedence, evidence classification, stale-data handling, conflict resolution, candidate eligibility, and fail-closed `NO_ACTION` behavior. Alpaca remains authoritative for broker and market facts. Exa evidence is mandatory once a cycle reaches substantive research; FMP is optional supporting context and cannot replace Exa.
+
+The checked-in [Research Plan V1](docs/research-plan-v1.md) contract and generic qualitative skill are available only for deterministic isolated evaluation. Production permissions and invocation remain on the legacy skill until the atomic authority migration tracked by #67.
 
 ## Security boundary
 

@@ -293,13 +293,29 @@ const contractIsEligibleForRole = (
   )
 }
 
+export type DebitVerticalCandidateIdentityInputV1 = Readonly<{
+  underlyingSnapshotId: string
+  optionUniverseSnapshotId: string
+  strategyId: string
+  strategyVersion: string
+  featureComponentId: string
+  featureVersion: string
+  candidateComponentId: string
+  candidateVersion: string
+  underlying: "SPY"
+  direction: Exclude<DirectionalSignalV1, "NO_ACTION">
+  structure: "BULL_CALL_SPREAD" | "BEAR_PUT_SPREAD"
+  expirationDate: string
+  longLeg: Readonly<{ contractSymbol: string }>
+  shortLeg: Readonly<{ contractSymbol: string }>
+}>
+
 type CandidateWithoutId = Omit<DebitVerticalCandidateV1, "candidateId">
 
-const withCandidateId = (
-  candidate: CandidateWithoutId,
-): DebitVerticalCandidateV1 => ({
-  ...candidate,
-  candidateId: canonicalJsonSha256({
+export const computeDebitVerticalCandidateIdV1 = (
+  candidate: DebitVerticalCandidateIdentityInputV1,
+) =>
+  canonicalJsonSha256({
     domain: "directional-debit-vertical-candidate-v1",
     underlyingSnapshotId: candidate.underlyingSnapshotId,
     optionUniverseSnapshotId: candidate.optionUniverseSnapshotId,
@@ -315,7 +331,13 @@ const withCandidateId = (
     expirationDate: candidate.expirationDate,
     longContractSymbol: candidate.longLeg.contractSymbol,
     shortContractSymbol: candidate.shortLeg.contractSymbol,
-  }),
+  })
+
+const withCandidateId = (
+  candidate: CandidateWithoutId,
+): DebitVerticalCandidateV1 => ({
+  ...candidate,
+  candidateId: computeDebitVerticalCandidateIdV1(candidate),
 })
 
 /** Selects the frozen V1 rank-one SPY debit spread from one validated snapshot pair. */
