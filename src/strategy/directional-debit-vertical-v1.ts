@@ -78,6 +78,7 @@ export type DebitVerticalScreeningDiagnosticsV1 = Readonly<{
   eligibleShortContractCount: number
   spreadPairEvaluationCount: number
   eligibleCandidateCount: number
+  rankOneCandidateId?: string
   firstFailureCounts: readonly DebitVerticalFirstFailureCountV1[]
 }>
 
@@ -495,6 +496,9 @@ export function screenSpyDirectionalDebitVerticalWithAuditV1(
       eligibleShortContractCount,
       spreadPairEvaluationCount,
       eligibleCandidateCount,
+      ...(result.status === "SELECTED"
+        ? { rankOneCandidateId: result.selectedCandidate.candidateId }
+        : {}),
       firstFailureCounts: DEBIT_VERTICAL_FIRST_FAILURE_REASONS.flatMap((reason) => {
         const count = failureCounts.get(reason)
         return count === undefined

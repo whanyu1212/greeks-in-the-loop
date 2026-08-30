@@ -457,6 +457,16 @@ describe("research screening audit V1", () => {
     })
     if (application.status !== "SCREENED" ||
       application.result.status !== "SELECTED") return
+    expect(application.diagnostics.rankOneCandidateId).toBe(
+      application.result.candidateId,
+    )
+    expect(applicationResearchScreeningAuditV1Schema.safeParse({
+      ...application,
+      diagnostics: {
+        ...application.diagnostics,
+        rankOneCandidateId: "f".repeat(64),
+      },
+    }).success).toBe(false)
     expect(computeDebitVerticalCandidateIdV1({
       underlyingSnapshotId: application.inputIdentity.underlyingSnapshotId,
       optionUniverseSnapshotId:

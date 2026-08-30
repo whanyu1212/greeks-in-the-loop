@@ -298,6 +298,7 @@ export const debitVerticalScreeningDiagnosticsV1Schema = z
     eligibleShortContractCount: safeCount,
     spreadPairEvaluationCount: safeCount,
     eligibleCandidateCount: safeCount,
+    rankOneCandidateId: digest.optional(),
     firstFailureCounts: z.array(firstFailureCountSchema).max(
       DEBIT_VERTICAL_FIRST_FAILURE_REASONS.length,
     ),
@@ -347,6 +348,14 @@ export const debitVerticalScreeningDiagnosticsV1Schema = z
         code: "custom",
         path: ["eligibleCandidateCount"],
         message: "Eligible candidates cannot exceed evaluated spread pairs",
+      })
+    }
+    if ((diagnostics.eligibleCandidateCount > 0) !==
+      (diagnostics.rankOneCandidateId !== undefined)) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["rankOneCandidateId"],
+        message: "Eligible candidates require one retained rank-one identity",
       })
     }
     const contractFailureCount = countFor(CONTRACT_FAILURE_REASONS)
@@ -561,6 +570,14 @@ export const applicationResearchScreeningAuditV1Schema = z.discriminatedUnion(
             code: "custom",
             path: ["diagnostics", "eligibleCandidateCount"],
             message: "Diagnostic and screening candidate counts must match",
+          })
+        }
+        if (audit.result.status === "SELECTED" &&
+          audit.result.candidateId !== audit.diagnostics.rankOneCandidateId) {
+          refinement.addIssue({
+            code: "custom",
+            path: ["result", "candidateId"],
+            message: "Selected candidate must match the screener rank-one identity",
           })
         }
         const failureCount = (reason: DebitVerticalFirstFailureReasonV1) =>

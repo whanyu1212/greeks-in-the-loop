@@ -26,8 +26,11 @@ Diagnostics count the first failed predicate for each evaluation unit:
 - every eligible candidate except rank one is counted as `NOT_RANK_ONE`.
 
 Predicates retain their existing short-circuit order. Failure counts are emitted
-once per nonzero reason in the canonical reason order. This prevents provider
-response order and traversal-time winner changes from changing the funnel.
+once per nonzero reason in the canonical reason order. When candidates exist,
+diagnostics retain the screener's rank-one candidate ID and the application
+result must match it. This prevents provider response order, serialized
+candidate substitution, and traversal-time winner changes from changing the
+funnel.
 Capture failures are outside the strategy engine and use their own bounded,
 unique, canonically ordered application-audit reasons.
 
