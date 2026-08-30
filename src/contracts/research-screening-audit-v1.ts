@@ -741,6 +741,39 @@ const availableAgentAuditSchema = z
         message: "Available result must match its pinned model identity",
       })
     }
+    for (const [index, reference] of audit.evidenceReferences.entries()) {
+      const asOf = Date.parse(audit.asOf)
+      const observedAt = reference.kind === "SNAPSHOT"
+        ? undefined
+        : Date.parse(reference.observedAt)
+      const invalid = reference.kind === "OBSERVATION"
+        ? observedAt! > asOf
+        : reference.kind === "EXTERNAL"
+          ? observedAt! > Date.parse(reference.retrievedAt) ||
+            Date.parse(reference.retrievedAt) > asOf
+          : false
+      if (invalid) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["evidenceReferences", index],
+          message: "Evidence chronology must precede the report cutoff",
+        })
+      }
+    }
+    if (audit.noActionReasonCodes !== undefined) {
+      const indexes = audit.noActionReasonCodes.map((reason) =>
+        NO_ACTION_REASON_CODES.indexOf(reason),
+      )
+      if (indexes.some(
+        (value, index) => index > 0 && indexes[index - 1]! >= value,
+      )) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["noActionReasonCodes"],
+          message: "No-action reasons must be unique and ordered",
+        })
+      }
+    }
     if ((audit.terminalClass === "NO_ACTION") !==
       (audit.noActionReasonCodes !== undefined)) {
       refinement.addIssue({
@@ -1093,7 +1126,12 @@ export function projectResearchReportV2ForScreeningAudit(
     terminalClass: report.result.outcome,
     evidenceReferences: [...resultReferences, ...externalReferences],
     ...(report.result.outcome === "NO_ACTION"
-      ? { noActionReasonCodes: report.result.reasonCodes }
+      ? {
+          noActionReasonCodes: NO_ACTION_REASON_CODES.filter((reason) =>
+            report.result.outcome === "NO_ACTION" &&
+            report.result.reasonCodes.includes(reason),
+          ),
+        }
       : {}),
     ...(candidateIdentity(report.result) === undefined
       ? {}

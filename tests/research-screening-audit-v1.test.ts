@@ -360,12 +360,44 @@ describe("research screening audit V1", () => {
       ...projected,
       invocation: { ...projected.invocation, modelId: "drifted-model" },
     }).success).toBe(false)
+    for (const evidenceReferences of [
+      [{
+        kind: "OBSERVATION",
+        claimId: "future-observation",
+        provider: "ALPACA",
+        observedAt: "2026-08-28T14:01:01.000Z",
+      }],
+      [{
+        kind: "EXTERNAL",
+        sourceId: "reversed-external",
+        provider: "EXA",
+        observedAt: "2026-08-28T14:00:01.000Z",
+        retrievedAt: "2026-08-28T14:00:00.000Z",
+      }],
+      [{
+        kind: "EXTERNAL",
+        sourceId: "future-retrieval",
+        provider: "FMP",
+        observedAt: "2026-08-28T14:00:00.000Z",
+        retrievedAt: "2026-08-28T14:01:01.000Z",
+      }],
+    ]) {
+      expect(agentResearchScreeningAuditV1Schema.safeParse({
+        ...projected,
+        evidenceReferences,
+      }).success).toBe(false)
+    }
     expect(agentResearchScreeningAuditV1Schema.safeParse({
       ...projected,
       terminalClass: "NO_ACTION",
       noActionReasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
     }).success).toBe(false)
-    for (const noActionReasonCodes of [[], ["UNBOUNDED_REASON"]]) {
+    for (const noActionReasonCodes of [
+      [],
+      ["UNBOUNDED_REASON"],
+      ["SIGNAL_NOT_ACTIONABLE", "SIGNAL_NOT_ACTIONABLE"],
+      ["NO_ELIGIBLE_SPREAD", "SIGNAL_NOT_ACTIONABLE"],
+    ]) {
       expect(agentResearchScreeningAuditV1Schema.safeParse({
         ...projected,
         terminalClass: "NO_ACTION",
@@ -373,6 +405,26 @@ describe("research screening audit V1", () => {
         proposalCandidate: undefined,
       }).success).toBe(false)
     }
+    const noActionReport = {
+      ...report,
+      result: {
+        contractVersion: "1.0.0",
+        strategyVersion: "1.1.0",
+        outcome: "NO_ACTION",
+        reasonCodes: [
+          "NO_ELIGIBLE_SPREAD",
+          "SIGNAL_NOT_ACTIONABLE",
+          "SIGNAL_NOT_ACTIONABLE",
+        ],
+        evidence: report.result.evidence,
+      },
+    } as typeof report
+    expect(projectResearchReportV2ForScreeningAudit(
+      noActionReport,
+      auditResearchInvocationV1,
+    )).toMatchObject({
+      noActionReasonCodes: ["SIGNAL_NOT_ACTIONABLE", "NO_ELIGIBLE_SPREAD"],
+    })
   })
 
   it("binds application results and deterministic components to one snapshot pair", () => {

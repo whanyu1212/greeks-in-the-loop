@@ -59,9 +59,11 @@ The bounded projection retains:
   available.
 
 Available projections must match the provider/model identity pinned by their
-invocation version. Model-identity-drift records retain that invocation version,
-name the registered expected provider or model, and require a different observed
-value.
+invocation version. `OBSERVATION` evidence requires `observedAt <= asOf`;
+`EXTERNAL` evidence requires `observedAt <= retrievedAt <= asOf`. No-action
+reasons are unique and canonically ordered.
+Model-identity-drift records retain that invocation version, name the registered
+expected provider or model, and require a different observed value.
 
 It excludes thesis, summaries, claims, URLs, locators, prices, strikes, Greeks,
 liquidity values, and economics.
