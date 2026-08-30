@@ -1,0 +1,751 @@
+import { z } from "zod"
+
+import type { ResearchReportV2 } from "./research-report-v2.js"
+import type {
+  ValidatedResearchSnapshotPairV1,
+  SpyDebitVerticalAuditedScreeningResultV1,
+} from "../strategy/directional-debit-vertical-v1.js"
+import {
+  computeDebitVerticalCandidateIdV1,
+  DEBIT_VERTICAL_CANDIDATE_COMPONENT_ID,
+  DEBIT_VERTICAL_CANDIDATE_VERSION,
+  DEBIT_VERTICAL_FIRST_FAILURE_REASONS,
+  DEBIT_VERTICAL_FIRST_FAILURE_STAGE_BY_REASON,
+  DEBIT_VERTICAL_SCREENING_DIAGNOSTICS_VERSION,
+  DIRECTIONAL_TREND_FEATURE_COMPONENT_ID,
+  DIRECTIONAL_TREND_FEATURE_VERSION,
+} from "../strategy/directional-debit-vertical-v1.js"
+import type { ResearchInvocationV1 } from "../research/research-invocation-v1.js"
+import { SUPPORTED_RESEARCH_INVOCATION_VERSIONS } from "../research/research-invocation-v1.js"
+import { canonicalJsonSha256 } from "../shared/canonical-json.js"
+import { spyAlpacaOptionSymbolV1Schema } from "../shared/alpaca-option-identity.js"
+
+export const RESEARCH_SCREENING_AUDIT_VERSION = "1.0.0" as const
+export const RESEARCH_SCREENING_COMPARISON_VERSION = "1.0.0" as const
+
+export const RESEARCH_SCREENING_COMPARISON_CLASSES = Object.freeze([
+  "IDENTICAL_INPUT_MATCH",
+  "IDENTICAL_INPUT_FEATURE_MISMATCH",
+  "IDENTICAL_INPUT_FILTER_MISMATCH",
+  "IDENTICAL_INPUT_RANKING_MISMATCH",
+  "IDENTICAL_INPUT_CANDIDATE_MISMATCH",
+  "DIFFERENT_SNAPSHOT_TIME",
+  "DIFFERENT_SNAPSHOT_MEMBERSHIP",
+  "APPLICATION_CAPTURE_UNAVAILABLE",
+  "APPLICATION_SCREENING_UNAVAILABLE",
+  "AGENT_RESULT_UNAVAILABLE",
+  "MODEL_IDENTITY_DRIFT",
+  "COMPARISON_NOT_REPRESENTABLE",
+] as const)
+
+export const APPLICATION_CAPTURE_AUDIT_FAILURE_REASONS = Object.freeze([
+  "CAPTURE_INPUT_INVALID",
+  "CAPTURE_TIME_INVALID",
+  "REQUEST_TIMED_OUT",
+  "PROVIDER_RATE_LIMITED",
+  "CALENDAR_REQUEST_FAILED",
+  "CALENDAR_RESPONSE_INVALID",
+  "DAILY_BARS_REQUEST_FAILED",
+  "DAILY_BARS_RESPONSE_INVALID",
+  "MINUTE_BARS_REQUEST_FAILED",
+  "MINUTE_BARS_RESPONSE_INVALID",
+  "UNDERLYING_QUOTE_REQUEST_FAILED",
+  "UNDERLYING_QUOTE_RESPONSE_INVALID",
+  "OPTION_CONTRACTS_REQUEST_FAILED",
+  "OPTION_CONTRACTS_RESPONSE_INVALID",
+  "OPTION_SNAPSHOTS_REQUEST_FAILED",
+  "OPTION_SNAPSHOTS_RESPONSE_INVALID",
+  "PAGINATION_INCOMPLETE",
+  "DATA_CONTAMINATED",
+  "INPUT_INVALID",
+  "STRATEGY_MANIFEST_INCOMPATIBLE",
+  "UNDERLYING_MISMATCH",
+  "DUPLICATE_RECORD",
+  "DATA_INCOMPLETE",
+  "OBSERVATION_FROM_FUTURE",
+  "OBSERVATION_STALE",
+  "SNAPSHOT_INVALID",
+  "UNDERLYING_SNAPSHOT_INVALID",
+  "IDENTITY_MISMATCH",
+  "OPTION_UNIVERSE_SNAPSHOT_INVALID",
+  "SNAPSHOT_LINK_MISMATCH",
+  "AUDIT_CANCELLED",
+  "AUDIT_DEADLINE_EXCEEDED",
+  "UNEXPECTED_FAILURE",
+] as const)
+
+const identifier = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u)
+const version = z
+  .string()
+  .min(1)
+  .max(32)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u)
+const timestamp = z.iso.datetime({ offset: true, precision: 3 })
+const digest = z.string().regex(/^[a-f0-9]{64}$/u)
+const safeCount = z.number().int().nonnegative().safe()
+const durationMs = safeCount
+
+export const researchScreeningAuditInputIdentityV1Schema = z
+  .object({
+    authority: z.literal("APPLICATION"),
+    evaluatedAt: timestamp,
+    underlyingSnapshotId: digest,
+    optionUniverseSnapshotId: digest,
+    optionUniverseMembershipId: digest,
+    optionContractCount: safeCount,
+  })
+  .strict()
+
+export type ResearchScreeningAuditInputIdentityV1 = Readonly<
+  z.infer<typeof researchScreeningAuditInputIdentityV1Schema>
+>
+
+const strategyIdentitySchema = z
+  .object({
+    strategyId: identifier,
+    strategyVersion: version,
+    featureComponentId: z.literal(DIRECTIONAL_TREND_FEATURE_COMPONENT_ID),
+    featureVersion: z.literal(DIRECTIONAL_TREND_FEATURE_VERSION),
+    candidateComponentId: z.literal(DEBIT_VERTICAL_CANDIDATE_COMPONENT_ID),
+    candidateVersion: z.literal(DEBIT_VERTICAL_CANDIDATE_VERSION),
+  })
+  .strict()
+
+const firstFailureCountSchema = z
+  .object({
+    stage: z.enum([
+      "COMPATIBILITY",
+      "FEATURE",
+      "FRESHNESS",
+      "ELIGIBILITY",
+      "LIQUIDITY",
+      "ECONOMICS",
+      "RANKING",
+    ]),
+    reason: z.enum(DEBIT_VERTICAL_FIRST_FAILURE_REASONS),
+    count: z.number().int().positive().safe(),
+  })
+  .strict()
+  .refine(
+    ({ stage, reason }) =>
+      DEBIT_VERTICAL_FIRST_FAILURE_STAGE_BY_REASON[reason] === stage,
+    { path: ["stage"], message: "Failure stage must match its bounded reason" },
+  )
+
+export const debitVerticalScreeningDiagnosticsV1Schema = z
+  .object({
+    diagnosticsVersion: z.literal(DEBIT_VERTICAL_SCREENING_DIAGNOSTICS_VERSION),
+    underlyingSnapshotId: digest,
+    optionUniverseSnapshotId: digest,
+    inputContractCount: safeCount,
+    contractRoleEvaluationCount: safeCount,
+    eligibleLongContractCount: safeCount,
+    eligibleShortContractCount: safeCount,
+    spreadPairEvaluationCount: safeCount,
+    eligibleCandidateCount: safeCount,
+    firstFailureCounts: z.array(firstFailureCountSchema).max(
+      DEBIT_VERTICAL_FIRST_FAILURE_REASONS.length,
+    ),
+  })
+  .strict()
+  .superRefine((diagnostics, refinement) => {
+    if (
+      diagnostics.eligibleLongContractCount +
+        diagnostics.eligibleShortContractCount >
+      diagnostics.contractRoleEvaluationCount
+    ) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["contractRoleEvaluationCount"],
+        message: "Eligible role counts cannot exceed role evaluations",
+      })
+    }
+    const indexes = diagnostics.firstFailureCounts.map(({ reason }) =>
+      DEBIT_VERTICAL_FIRST_FAILURE_REASONS.indexOf(reason),
+    )
+    if (indexes.some((value, index) => index > 0 && indexes[index - 1]! >= value)) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["firstFailureCounts"],
+        message: "Failure counts must be unique and canonically ordered",
+      })
+    }
+  })
+
+const selectedApplicationResultSchema = z
+  .object({
+    status: z.literal("SELECTED"),
+    candidateId: digest,
+    direction: z.enum(["BULLISH", "BEARISH"]),
+    structure: z.enum(["BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"]),
+    expirationDate: z.iso.date(),
+    dte: safeCount,
+    widthCentsPerShare: z.number().int().positive().safe(),
+    longContractSymbol: spyAlpacaOptionSymbolV1Schema,
+    shortContractSymbol: spyAlpacaOptionSymbolV1Schema,
+    eligibleCandidateCount: z.number().int().positive().safe(),
+  })
+  .strict()
+
+const noActionApplicationResultSchema = z
+  .object({
+    status: z.literal("NO_ACTION"),
+    reason: z.enum([
+      "SIGNAL_NOT_ACTIONABLE",
+      "MARKET_DATA_STALE",
+      "NO_ELIGIBLE_SPREAD",
+      "STRATEGY_MANIFEST_INCOMPATIBLE",
+    ]),
+  })
+  .strict()
+
+export const applicationResearchScreeningAuditV1Schema = z.discriminatedUnion(
+  "status",
+  [
+    z
+      .object({
+        status: z.literal("CAPTURE_UNAVAILABLE"),
+        captureDurationMs: durationMs,
+        reasons: z
+          .array(z.enum(APPLICATION_CAPTURE_AUDIT_FAILURE_REASONS))
+          .min(1)
+          .max(APPLICATION_CAPTURE_AUDIT_FAILURE_REASONS.length),
+      })
+      .strict(),
+    z
+      .object({
+        status: z.literal("SCREENING_UNAVAILABLE"),
+        captureDurationMs: durationMs,
+        screeningDurationMs: durationMs,
+        inputIdentity: researchScreeningAuditInputIdentityV1Schema,
+        strategy: strategyIdentitySchema,
+        reason: z.enum(["FEATURE_INPUT_INVALID", "UNEXPECTED_FAILURE"]),
+      })
+      .strict(),
+    z
+      .object({
+        status: z.literal("SCREENED"),
+        captureDurationMs: durationMs,
+        screeningDurationMs: durationMs,
+        inputIdentity: researchScreeningAuditInputIdentityV1Schema,
+        strategy: strategyIdentitySchema,
+        result: z.discriminatedUnion("status", [
+          selectedApplicationResultSchema,
+          noActionApplicationResultSchema,
+        ]),
+        diagnostics: debitVerticalScreeningDiagnosticsV1Schema,
+      })
+      .strict()
+      .superRefine((audit, refinement) => {
+        if (
+          audit.inputIdentity.optionContractCount !==
+            audit.diagnostics.inputContractCount ||
+          audit.inputIdentity.underlyingSnapshotId !==
+            audit.diagnostics.underlyingSnapshotId ||
+          audit.inputIdentity.optionUniverseSnapshotId !==
+            audit.diagnostics.optionUniverseSnapshotId
+        ) {
+          refinement.addIssue({
+            code: "custom",
+            path: ["diagnostics"],
+            message: "Diagnostics must identify the captured snapshot pair",
+          })
+        }
+        const expectedCandidates = audit.result.status === "SELECTED"
+          ? audit.result.eligibleCandidateCount
+          : 0
+        if (audit.diagnostics.eligibleCandidateCount !== expectedCandidates) {
+          refinement.addIssue({
+            code: "custom",
+            path: ["diagnostics", "eligibleCandidateCount"],
+            message: "Diagnostic and screening candidate counts must match",
+          })
+        }
+      }),
+  ],
+)
+
+export type ApplicationResearchScreeningAuditV1 = Readonly<
+  z.infer<typeof applicationResearchScreeningAuditV1Schema>
+>
+
+const agentCandidateIdentitySchema = z
+  .object({
+    direction: z.enum(["BULLISH", "BEARISH"]),
+    underlying: z.literal("SPY"),
+    structure: z.enum(["BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"]),
+    expiration: z.iso.date(),
+    longContractSymbol: spyAlpacaOptionSymbolV1Schema,
+    shortContractSymbol: spyAlpacaOptionSymbolV1Schema,
+  })
+  .strict()
+
+const agentEvidenceReferenceSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("SNAPSHOT"),
+      snapshotRef: identifier,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("OBSERVATION"),
+      claimId: identifier,
+      provider: z.enum(["ALPACA", "EXA", "FMP"]),
+      observedAt: timestamp,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("EXTERNAL"),
+      sourceId: identifier,
+      provider: z.enum(["EXA", "FMP"]),
+      observedAt: timestamp,
+      retrievedAt: timestamp,
+    })
+    .strict(),
+])
+
+const availableAgentAuditSchema = z
+  .object({
+    status: z.literal("AVAILABLE"),
+    invocation: z
+      .object({
+        invocationVersion: z.enum(SUPPORTED_RESEARCH_INVOCATION_VERSIONS),
+        providerId: identifier,
+        modelId: identifier,
+      })
+      .strict(),
+    reportVersion: z.literal("2.0.0"),
+    asOf: timestamp,
+    terminalClass: z.enum([
+      "NO_ACTION",
+      "PRELIMINARY_RESEARCH",
+      "PROPOSE_TRADE",
+    ]),
+    evidenceReferences: z.array(agentEvidenceReferenceSchema).max(72),
+    noActionReasonCodes: z.array(identifier).max(16).optional(),
+    proposalCandidate: agentCandidateIdentitySchema.optional(),
+  })
+  .strict()
+  .superRefine((audit, refinement) => {
+    if ((audit.terminalClass === "NO_ACTION") !==
+      (audit.noActionReasonCodes !== undefined)) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["noActionReasonCodes"],
+        message: "Only no-action results retain no-action reasons",
+      })
+    }
+    if (audit.terminalClass === "PROPOSE_TRADE" &&
+      audit.proposalCandidate === undefined) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["proposalCandidate"],
+        message: "Trade proposals require bounded candidate identity",
+      })
+    }
+    if (audit.terminalClass === "NO_ACTION" &&
+      audit.proposalCandidate !== undefined) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["proposalCandidate"],
+        message: "No-action results cannot retain candidate identity",
+      })
+    }
+  })
+
+export const agentResearchScreeningAuditV1Schema = z.discriminatedUnion(
+  "status",
+  [
+    availableAgentAuditSchema,
+    z
+      .object({
+        status: z.literal("MODEL_IDENTITY_DRIFT"),
+        reason: z.enum(["PROVIDER_DRIFT", "MODEL_DRIFT"]),
+        expected: identifier,
+        observed: identifier,
+      })
+      .strict(),
+    z
+      .object({
+        status: z.literal("UNAVAILABLE"),
+        reason: z.enum([
+          "INVOCATION_FAILED",
+          "REPORT_REJECTED",
+          "AUDIT_CANCELLED",
+          "UNEXPECTED_FAILURE",
+        ]),
+      })
+      .strict(),
+  ],
+)
+
+export type AgentResearchScreeningAuditV1 = Readonly<
+  z.infer<typeof agentResearchScreeningAuditV1Schema>
+>
+
+export const identicalInputParityChecksV1Schema = z
+  .object({
+    feature: z.enum(["MATCH", "MISMATCH", "UNAVAILABLE"]),
+    filter: z.enum(["MATCH", "MISMATCH", "UNAVAILABLE"]),
+    ranking: z.enum(["MATCH", "MISMATCH", "UNAVAILABLE"]),
+    candidate: z.enum(["MATCH", "MISMATCH", "UNAVAILABLE"]),
+  })
+  .strict()
+
+export type IdenticalInputParityChecksV1 = Readonly<
+  z.infer<typeof identicalInputParityChecksV1Schema>
+>
+export type ResearchScreeningComparisonClassV1 =
+  (typeof RESEARCH_SCREENING_COMPARISON_CLASSES)[number]
+
+export const researchScreeningComparisonV1Schema = z
+  .object({
+    comparisonVersion: z.literal(RESEARCH_SCREENING_COMPARISON_VERSION),
+    class: z.enum(RESEARCH_SCREENING_COMPARISON_CLASSES),
+    identicalInputChecks: identicalInputParityChecksV1Schema.optional(),
+  })
+  .strict()
+  .superRefine((comparison, refinement) => {
+    const identicalClass = comparison.class.startsWith("IDENTICAL_INPUT_")
+    if (identicalClass && comparison.identicalInputChecks === undefined) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["identicalInputChecks"],
+        message: "Identical-input classifications require parity checks",
+      })
+    }
+    if (
+      !identicalClass &&
+      comparison.class !== "COMPARISON_NOT_REPRESENTABLE" &&
+      comparison.identicalInputChecks !== undefined
+    ) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["identicalInputChecks"],
+        message: "Non-identical comparisons cannot retain parity checks",
+      })
+    }
+  })
+
+export type ResearchScreeningComparisonV1 = Readonly<
+  z.infer<typeof researchScreeningComparisonV1Schema>
+>
+
+export const researchScreeningAuditV1Schema = z
+  .object({
+    auditVersion: z.literal(RESEARCH_SCREENING_AUDIT_VERSION),
+    application: applicationResearchScreeningAuditV1Schema,
+    agent: agentResearchScreeningAuditV1Schema,
+    trustedAgentInputIdentity: researchScreeningAuditInputIdentityV1Schema.optional(),
+    comparison: researchScreeningComparisonV1Schema,
+  })
+  .strict()
+  .superRefine((audit, refinement) => {
+    if (audit.comparison.identicalInputChecks !== undefined) {
+      const applicationIdentity = audit.application.status === "SCREENED"
+        ? audit.application.inputIdentity
+        : undefined
+      const agentIdentity = audit.trustedAgentInputIdentity
+      if (
+        applicationIdentity === undefined ||
+        audit.agent.status !== "AVAILABLE" ||
+        agentIdentity === undefined ||
+        agentIdentity.evaluatedAt !== applicationIdentity.evaluatedAt ||
+        agentIdentity.optionUniverseMembershipId !==
+          applicationIdentity.optionUniverseMembershipId ||
+        agentIdentity.optionContractCount !== applicationIdentity.optionContractCount ||
+        agentIdentity.underlyingSnapshotId !== applicationIdentity.underlyingSnapshotId ||
+        agentIdentity.optionUniverseSnapshotId !==
+          applicationIdentity.optionUniverseSnapshotId
+      ) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["comparison", "identicalInputChecks"],
+          message: "Parity checks require identical application-owned input identity",
+        })
+      }
+    }
+    const expected = classifyResearchScreeningComparisonV1({
+      application: audit.application,
+      agent: audit.agent,
+      ...(audit.trustedAgentInputIdentity === undefined
+        ? {}
+        : { trustedAgentInputIdentity: audit.trustedAgentInputIdentity }),
+      ...(audit.comparison.identicalInputChecks === undefined
+        ? {}
+        : { identicalInputChecks: audit.comparison.identicalInputChecks }),
+    })
+    if (expected.class !== audit.comparison.class) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["comparison", "class"],
+        message: "Comparison class must match the retained audit evidence",
+      })
+    }
+  })
+
+export type ResearchScreeningAuditV1 = Readonly<
+  z.infer<typeof researchScreeningAuditV1Schema>
+>
+
+export const createResearchScreeningAuditInputIdentityV1 = (
+  pair: ValidatedResearchSnapshotPairV1,
+): ResearchScreeningAuditInputIdentityV1 =>
+  researchScreeningAuditInputIdentityV1Schema.parse({
+    authority: "APPLICATION",
+    evaluatedAt: pair.underlying.times.evaluatedAt,
+    underlyingSnapshotId: pair.underlying.snapshotId,
+    optionUniverseSnapshotId: pair.optionUniverse.snapshotId,
+    optionUniverseMembershipId: canonicalJsonSha256({
+      domain: "research-screening-option-membership-v1",
+      contractSymbols: pair.optionUniverse.contracts.map(
+        ({ contractSymbol }) => contractSymbol,
+      ),
+    }),
+    optionContractCount: pair.optionUniverse.contracts.length,
+  })
+
+const strategyIdentity = (pair: ValidatedResearchSnapshotPairV1) => ({
+  strategyId: pair.underlying.strategyManifest.strategyId,
+  strategyVersion: pair.underlying.strategyManifest.strategyVersion,
+  featureComponentId: DIRECTIONAL_TREND_FEATURE_COMPONENT_ID,
+  featureVersion: DIRECTIONAL_TREND_FEATURE_VERSION,
+  candidateComponentId: DEBIT_VERTICAL_CANDIDATE_COMPONENT_ID,
+  candidateVersion: DEBIT_VERTICAL_CANDIDATE_VERSION,
+})
+
+export function createApplicationResearchScreeningAuditV1(options: Readonly<{
+  pair: ValidatedResearchSnapshotPairV1
+  audited: SpyDebitVerticalAuditedScreeningResultV1
+  captureDurationMs: number
+  screeningDurationMs: number
+}>): ApplicationResearchScreeningAuditV1 {
+  const result = options.audited.result
+  if (
+    options.audited.diagnostics.underlyingSnapshotId !==
+      options.pair.underlying.snapshotId ||
+    options.audited.diagnostics.optionUniverseSnapshotId !==
+      options.pair.optionUniverse.snapshotId ||
+    (result.status === "SELECTED" && (
+      result.selectedCandidate.underlyingSnapshotId !==
+        options.pair.underlying.snapshotId ||
+      result.selectedCandidate.optionUniverseSnapshotId !==
+        options.pair.optionUniverse.snapshotId ||
+      result.selectedCandidate.candidateId !==
+        computeDebitVerticalCandidateIdV1(result.selectedCandidate)
+    ))
+  ) {
+    throw new Error("Audited screening result does not match its snapshot pair")
+  }
+  return applicationResearchScreeningAuditV1Schema.parse({
+    status: "SCREENED",
+    captureDurationMs: options.captureDurationMs,
+    screeningDurationMs: options.screeningDurationMs,
+    inputIdentity: createResearchScreeningAuditInputIdentityV1(options.pair),
+    strategy: strategyIdentity(options.pair),
+    result: result.status === "NO_ACTION"
+      ? { status: result.status, reason: result.reason }
+      : {
+          status: result.status,
+          candidateId: result.selectedCandidate.candidateId,
+          direction: result.selectedCandidate.direction,
+          structure: result.selectedCandidate.structure,
+          expirationDate: result.selectedCandidate.expirationDate,
+          dte: result.selectedCandidate.dte,
+          widthCentsPerShare: result.selectedCandidate.economics.widthCentsPerShare,
+          longContractSymbol: result.selectedCandidate.longLeg.contractSymbol,
+          shortContractSymbol: result.selectedCandidate.shortLeg.contractSymbol,
+          eligibleCandidateCount: result.eligibleCandidateCount,
+        },
+    diagnostics: options.audited.diagnostics,
+  })
+}
+
+export function createApplicationCaptureUnavailableAuditV1(
+  reasons: readonly (typeof APPLICATION_CAPTURE_AUDIT_FAILURE_REASONS)[number][],
+  captureDurationMs: number,
+): ApplicationResearchScreeningAuditV1 {
+  const ordered = APPLICATION_CAPTURE_AUDIT_FAILURE_REASONS.filter((reason) =>
+    reasons.includes(reason),
+  )
+  return applicationResearchScreeningAuditV1Schema.parse({
+    status: "CAPTURE_UNAVAILABLE",
+    captureDurationMs,
+    reasons: ordered,
+  })
+}
+
+export function createApplicationScreeningUnavailableAuditV1(options: Readonly<{
+  pair: ValidatedResearchSnapshotPairV1
+  captureDurationMs: number
+  screeningDurationMs: number
+  reason: "FEATURE_INPUT_INVALID" | "UNEXPECTED_FAILURE"
+}>): ApplicationResearchScreeningAuditV1 {
+  return applicationResearchScreeningAuditV1Schema.parse({
+    status: "SCREENING_UNAVAILABLE",
+    captureDurationMs: options.captureDurationMs,
+    screeningDurationMs: options.screeningDurationMs,
+    inputIdentity: createResearchScreeningAuditInputIdentityV1(options.pair),
+    strategy: strategyIdentity(options.pair),
+    reason: options.reason,
+  })
+}
+
+const candidateIdentity = (
+  result: ResearchReportV2["result"],
+) => {
+  const candidate = result.outcome === "PROPOSE_TRADE"
+    ? result.candidate
+    : result.outcome === "PRELIMINARY_RESEARCH"
+      ? result.candidate
+      : undefined
+  const direction = result.outcome === "PROPOSE_TRADE"
+    ? result.direction
+    : result.outcome === "PRELIMINARY_RESEARCH" &&
+        result.direction !== "UNDETERMINED"
+      ? result.direction
+      : undefined
+  return candidate === undefined || direction === undefined
+    ? undefined
+    : {
+        direction,
+        underlying: candidate.underlying,
+        structure: candidate.structure,
+        expiration: candidate.expiration,
+        longContractSymbol: candidate.longLeg.contractSymbol,
+        shortContractSymbol: candidate.shortLeg.contractSymbol,
+      }
+}
+
+export function projectResearchReportV2ForScreeningAudit(
+  report: ResearchReportV2,
+  invocation: ResearchInvocationV1,
+): AgentResearchScreeningAuditV1 {
+  const resultReferences: z.infer<typeof agentEvidenceReferenceSchema>[] = []
+  for (const claim of report.result.evidence) {
+    if (claim.kind !== "SOURCED_FACT") continue
+    resultReferences.push(
+      "snapshotRef" in claim
+        ? { kind: "SNAPSHOT", snapshotRef: claim.snapshotRef }
+        : {
+            kind: "OBSERVATION",
+            claimId: claim.claimId,
+            provider: claim.provider,
+            observedAt: claim.observedAt,
+          },
+    )
+  }
+  const externalReferences = report.analysis.externalContext.map((source) => ({
+    kind: "EXTERNAL" as const,
+    sourceId: source.sourceId,
+    provider: source.provider,
+    observedAt: source.provider === "EXA" ? source.publishedAt : source.observedAt,
+    retrievedAt: source.retrievedAt,
+  }))
+  return agentResearchScreeningAuditV1Schema.parse({
+    status: "AVAILABLE",
+    invocation: {
+      invocationVersion: invocation.invocationVersion,
+      providerId: invocation.providerId,
+      modelId: invocation.modelId,
+    },
+    reportVersion: report.reportVersion,
+    asOf: report.analysis.asOf,
+    terminalClass: report.result.outcome,
+    evidenceReferences: [...resultReferences, ...externalReferences],
+    ...(report.result.outcome === "NO_ACTION"
+      ? { noActionReasonCodes: report.result.reasonCodes }
+      : {}),
+    ...(candidateIdentity(report.result) === undefined
+      ? {}
+      : { proposalCandidate: candidateIdentity(report.result) }),
+  })
+}
+
+export function classifyResearchScreeningComparisonV1(options: Readonly<{
+  application: ApplicationResearchScreeningAuditV1
+  agent: AgentResearchScreeningAuditV1
+  trustedAgentInputIdentity?: ResearchScreeningAuditInputIdentityV1
+  identicalInputChecks?: IdenticalInputParityChecksV1
+}>): ResearchScreeningComparisonV1 {
+  const comparison = (
+    value: ResearchScreeningComparisonClassV1,
+    retainChecks = false,
+  ) => researchScreeningComparisonV1Schema.parse({
+    comparisonVersion: RESEARCH_SCREENING_COMPARISON_VERSION,
+    class: value,
+    ...(!retainChecks || options.identicalInputChecks === undefined
+      ? {}
+      : { identicalInputChecks: options.identicalInputChecks }),
+  })
+  if (options.application.status === "CAPTURE_UNAVAILABLE") {
+    return comparison("APPLICATION_CAPTURE_UNAVAILABLE")
+  }
+  if (options.application.status === "SCREENING_UNAVAILABLE") {
+    return comparison("APPLICATION_SCREENING_UNAVAILABLE")
+  }
+  if (options.agent.status === "MODEL_IDENTITY_DRIFT") {
+    return comparison("MODEL_IDENTITY_DRIFT")
+  }
+  if (options.agent.status === "UNAVAILABLE") {
+    return comparison("AGENT_RESULT_UNAVAILABLE")
+  }
+
+  const applicationIdentity = options.application.inputIdentity
+  const agentTime = options.trustedAgentInputIdentity?.evaluatedAt ?? options.agent.asOf
+  if (agentTime !== applicationIdentity.evaluatedAt) {
+    return comparison("DIFFERENT_SNAPSHOT_TIME")
+  }
+  const agentIdentity = options.trustedAgentInputIdentity
+  if (agentIdentity === undefined) return comparison("COMPARISON_NOT_REPRESENTABLE")
+  if (
+    agentIdentity.optionUniverseMembershipId !==
+      applicationIdentity.optionUniverseMembershipId ||
+    agentIdentity.optionContractCount !== applicationIdentity.optionContractCount
+  ) {
+    return comparison("DIFFERENT_SNAPSHOT_MEMBERSHIP")
+  }
+  if (
+    agentIdentity.underlyingSnapshotId !== applicationIdentity.underlyingSnapshotId ||
+    agentIdentity.optionUniverseSnapshotId !== applicationIdentity.optionUniverseSnapshotId
+  ) {
+    return comparison("COMPARISON_NOT_REPRESENTABLE")
+  }
+  const checks = options.identicalInputChecks
+  if (checks === undefined) return comparison("COMPARISON_NOT_REPRESENTABLE")
+  for (const [stage, mismatch] of [
+    ["feature", "IDENTICAL_INPUT_FEATURE_MISMATCH"],
+    ["filter", "IDENTICAL_INPUT_FILTER_MISMATCH"],
+    ["ranking", "IDENTICAL_INPUT_RANKING_MISMATCH"],
+    ["candidate", "IDENTICAL_INPUT_CANDIDATE_MISMATCH"],
+  ] as const) {
+    if (checks[stage] === "UNAVAILABLE") {
+      return comparison("COMPARISON_NOT_REPRESENTABLE", true)
+    }
+    if (checks[stage] === "MISMATCH") return comparison(mismatch, true)
+  }
+  return comparison("IDENTICAL_INPUT_MATCH", true)
+}
+
+export function createResearchScreeningAuditV1(options: Readonly<{
+  application: ApplicationResearchScreeningAuditV1
+  agent: AgentResearchScreeningAuditV1
+  trustedAgentInputIdentity?: ResearchScreeningAuditInputIdentityV1
+  identicalInputChecks?: IdenticalInputParityChecksV1
+}>): ResearchScreeningAuditV1 {
+  return researchScreeningAuditV1Schema.parse({
+    auditVersion: RESEARCH_SCREENING_AUDIT_VERSION,
+    application: options.application,
+    agent: options.agent,
+    ...(options.trustedAgentInputIdentity === undefined
+      ? {}
+      : { trustedAgentInputIdentity: options.trustedAgentInputIdentity }),
+    comparison: classifyResearchScreeningComparisonV1(options),
+  })
+}

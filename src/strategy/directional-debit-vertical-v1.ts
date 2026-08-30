@@ -18,6 +18,68 @@ export const DEBIT_VERTICAL_CANDIDATE_COMPONENT_ID =
   "screenSpyDirectionalDebitVerticalV1" as const
 export const DEBIT_VERTICAL_CANDIDATE_VERSION = "1.0.0" as const
 export const DEBIT_VERTICAL_CANDIDATE_CONTRACT_VERSION = "1.0.0" as const
+export const DEBIT_VERTICAL_SCREENING_DIAGNOSTICS_VERSION = "1.0.0" as const
+
+export const DEBIT_VERTICAL_FIRST_FAILURE_REASONS = Object.freeze([
+  "STRATEGY_MANIFEST_INCOMPATIBLE",
+  "FEATURE_SIGNAL_NOT_ACTIONABLE",
+  "UNDERLYING_QUOTE_STALE",
+  "LATEST_MINUTE_BAR_STALE",
+  "OPTION_TYPE_MISMATCH",
+  "DTE_INVALID",
+  "DTE_OUT_OF_RANGE",
+  "CONTRACT_INACTIVE",
+  "CONTRACT_NOT_TRADABLE",
+  "EXERCISE_STYLE_UNSUPPORTED",
+  "MULTIPLIER_UNSUPPORTED",
+  "DELTA_OUT_OF_RANGE",
+  "IMPLIED_VOLATILITY_INVALID",
+  "OPTION_QUOTE_NON_POSITIVE",
+  "OPTION_QUOTE_CROSSED",
+  "OPTION_QUOTE_WIDTH_EXCEEDED",
+  "OPTION_QUOTE_RELATIVE_WIDTH_EXCEEDED",
+  "OPTION_QUOTE_STALE",
+  "VOLUME_SESSION_MISMATCH",
+  "VOLUME_TOO_LOW",
+  "OPEN_INTEREST_TOO_LOW",
+  "EXPIRATION_MISMATCH",
+  "STRIKE_ORDER_INVALID",
+  "SPREAD_WIDTH_OUT_OF_RANGE",
+  "NON_POSITIVE_NET_DEBIT",
+  "ENTRY_LIMIT_NOT_BELOW_WIDTH",
+  "ARITHMETIC_OVERFLOW",
+  "DEBIT_RATIO_EXCEEDED",
+  "MAX_LOSS_EXCEEDED",
+  "NOT_RANK_ONE",
+] as const)
+
+export type DebitVerticalAuditStageV1 =
+  | "COMPATIBILITY"
+  | "FEATURE"
+  | "FRESHNESS"
+  | "ELIGIBILITY"
+  | "LIQUIDITY"
+  | "ECONOMICS"
+  | "RANKING"
+export type DebitVerticalFirstFailureReasonV1 =
+  (typeof DEBIT_VERTICAL_FIRST_FAILURE_REASONS)[number]
+export type DebitVerticalFirstFailureCountV1 = Readonly<{
+  stage: DebitVerticalAuditStageV1
+  reason: DebitVerticalFirstFailureReasonV1
+  count: number
+}>
+export type DebitVerticalScreeningDiagnosticsV1 = Readonly<{
+  diagnosticsVersion: typeof DEBIT_VERTICAL_SCREENING_DIAGNOSTICS_VERSION
+  underlyingSnapshotId: string
+  optionUniverseSnapshotId: string
+  inputContractCount: number
+  contractRoleEvaluationCount: number
+  eligibleLongContractCount: number
+  eligibleShortContractCount: number
+  spreadPairEvaluationCount: number
+  eligibleCandidateCount: number
+  firstFailureCounts: readonly DebitVerticalFirstFailureCountV1[]
+}>
 
 export type DirectionalSignalV1 = "BULLISH" | "BEARISH" | "NO_ACTION"
 
@@ -256,41 +318,103 @@ const quoteIsFreshAt = (
   return Number.isFinite(age) && age >= 0 && age <= maximumAgeMs
 }
 
-const contractIsEligibleForRole = (
+export const DEBIT_VERTICAL_FIRST_FAILURE_STAGE_BY_REASON: Readonly<
+  Record<DebitVerticalFirstFailureReasonV1, DebitVerticalAuditStageV1>
+> = Object.freeze({
+  STRATEGY_MANIFEST_INCOMPATIBLE: "COMPATIBILITY",
+  FEATURE_SIGNAL_NOT_ACTIONABLE: "FEATURE",
+  UNDERLYING_QUOTE_STALE: "FRESHNESS",
+  LATEST_MINUTE_BAR_STALE: "FRESHNESS",
+  OPTION_TYPE_MISMATCH: "ELIGIBILITY",
+  DTE_INVALID: "ELIGIBILITY",
+  DTE_OUT_OF_RANGE: "ELIGIBILITY",
+  CONTRACT_INACTIVE: "ELIGIBILITY",
+  CONTRACT_NOT_TRADABLE: "ELIGIBILITY",
+  EXERCISE_STYLE_UNSUPPORTED: "ELIGIBILITY",
+  MULTIPLIER_UNSUPPORTED: "ELIGIBILITY",
+  DELTA_OUT_OF_RANGE: "ELIGIBILITY",
+  IMPLIED_VOLATILITY_INVALID: "ELIGIBILITY",
+  OPTION_QUOTE_NON_POSITIVE: "LIQUIDITY",
+  OPTION_QUOTE_CROSSED: "LIQUIDITY",
+  OPTION_QUOTE_WIDTH_EXCEEDED: "LIQUIDITY",
+  OPTION_QUOTE_RELATIVE_WIDTH_EXCEEDED: "LIQUIDITY",
+  OPTION_QUOTE_STALE: "FRESHNESS",
+  VOLUME_SESSION_MISMATCH: "LIQUIDITY",
+  VOLUME_TOO_LOW: "LIQUIDITY",
+  OPEN_INTEREST_TOO_LOW: "LIQUIDITY",
+  EXPIRATION_MISMATCH: "ELIGIBILITY",
+  STRIKE_ORDER_INVALID: "ELIGIBILITY",
+  SPREAD_WIDTH_OUT_OF_RANGE: "ELIGIBILITY",
+  NON_POSITIVE_NET_DEBIT: "ECONOMICS",
+  ENTRY_LIMIT_NOT_BELOW_WIDTH: "ECONOMICS",
+  ARITHMETIC_OVERFLOW: "ECONOMICS",
+  DEBIT_RATIO_EXCEEDED: "ECONOMICS",
+  MAX_LOSS_EXCEEDED: "ECONOMICS",
+  NOT_RANK_ONE: "RANKING",
+})
+
+const contractRoleFirstFailure = (
   contract: OptionUniverseContractV1,
   role: "LONG" | "SHORT",
   optionType: "CALL" | "PUT",
   sessionDate: string,
   evaluatedAt: string,
-) => {
+): DebitVerticalFirstFailureReasonV1 | undefined => {
   const absoluteDelta = Math.abs(contract.greeks.deltaMillionths)
   const quoteWidth =
     contract.quote.askCentsPerShare - contract.quote.bidCentsPerShare
   const dte = calendarDte(sessionDate, contract.expirationDate)
-  return (
-    contract.optionType === optionType &&
-    Number.isSafeInteger(dte) &&
-    dte >= 14 &&
-    dte <= 30 &&
-    contract.active &&
-    contract.tradable &&
-    contract.exerciseStyle === "AMERICAN" &&
-    contract.multiplier === 100 &&
-    (role === "LONG"
-      ? absoluteDelta >= 450_000 && absoluteDelta <= 600_000
-      : absoluteDelta >= 200_000 && absoluteDelta <= 350_000) &&
-    contract.greeks.impliedVolatilityMillionths > 0 &&
-    contract.quote.bidCentsPerShare > 0 &&
-    contract.quote.askCentsPerShare > contract.quote.bidCentsPerShare &&
-    quoteWidth <= 20 &&
-    BigInt(quoteWidth) * 20n <=
+  if (contract.optionType !== optionType) return "OPTION_TYPE_MISMATCH"
+  if (!Number.isSafeInteger(dte)) return "DTE_INVALID"
+  if (dte < 14 || dte > 30) return "DTE_OUT_OF_RANGE"
+  if (!contract.active) return "CONTRACT_INACTIVE"
+  if (!contract.tradable) return "CONTRACT_NOT_TRADABLE"
+  if (contract.exerciseStyle !== "AMERICAN") return "EXERCISE_STYLE_UNSUPPORTED"
+  if (contract.multiplier !== 100) return "MULTIPLIER_UNSUPPORTED"
+  if (
+    role === "LONG"
+      ? absoluteDelta < 450_000 || absoluteDelta > 600_000
+      : absoluteDelta < 200_000 || absoluteDelta > 350_000
+  ) return "DELTA_OUT_OF_RANGE"
+  if (contract.greeks.impliedVolatilityMillionths <= 0) {
+    return "IMPLIED_VOLATILITY_INVALID"
+  }
+  if (contract.quote.bidCentsPerShare <= 0) return "OPTION_QUOTE_NON_POSITIVE"
+  if (contract.quote.askCentsPerShare <= contract.quote.bidCentsPerShare) {
+    return "OPTION_QUOTE_CROSSED"
+  }
+  if (quoteWidth > 20) return "OPTION_QUOTE_WIDTH_EXCEEDED"
+  if (
+    BigInt(quoteWidth) * 20n >
       BigInt(contract.quote.bidCentsPerShare) +
-        BigInt(contract.quote.askCentsPerShare) &&
-    quoteIsFreshAt(contract.quote.providerTimestamp, evaluatedAt, 60_000) &&
-    contract.currentSessionVolume.sessionDate === sessionDate &&
-    contract.currentSessionVolume.contracts >= 100 &&
-    contract.openInterest.contracts >= 500
-  )
+        BigInt(contract.quote.askCentsPerShare)
+  ) return "OPTION_QUOTE_RELATIVE_WIDTH_EXCEEDED"
+  if (!quoteIsFreshAt(contract.quote.providerTimestamp, evaluatedAt, 60_000)) {
+    return "OPTION_QUOTE_STALE"
+  }
+  if (contract.currentSessionVolume.sessionDate !== sessionDate) {
+    return "VOLUME_SESSION_MISMATCH"
+  }
+  if (contract.currentSessionVolume.contracts < 100) return "VOLUME_TOO_LOW"
+  if (contract.openInterest.contracts < 500) return "OPEN_INTEREST_TOO_LOW"
+  return undefined
+}
+
+const pairFirstFailure = (
+  long: OptionUniverseContractV1,
+  short: OptionUniverseContractV1,
+  optionType: "CALL" | "PUT",
+): DebitVerticalFirstFailureReasonV1 | undefined => {
+  if (long.expirationDate !== short.expirationDate) return "EXPIRATION_MISMATCH"
+  if (
+    optionType === "CALL"
+      ? long.strikeCentsPerShare >= short.strikeCentsPerShare
+      : long.strikeCentsPerShare <= short.strikeCentsPerShare
+  ) return "STRIKE_ORDER_INVALID"
+  const width = Math.abs(long.strikeCentsPerShare - short.strikeCentsPerShare)
+  return width < 100 || width > 1_000
+    ? "SPREAD_WIDTH_OUT_OF_RANGE"
+    : undefined
 }
 
 export type DebitVerticalCandidateIdentityInputV1 = Readonly<{
@@ -340,18 +464,58 @@ const withCandidateId = (
   candidateId: computeDebitVerticalCandidateIdV1(candidate),
 })
 
-/** Selects the frozen V1 rank-one SPY debit spread from one validated snapshot pair. */
-export function screenSpyDirectionalDebitVerticalV1(
+export type SpyDebitVerticalAuditedScreeningResultV1 = Readonly<{
+  result: SpyDebitVerticalScreeningResultV1
+  diagnostics: DebitVerticalScreeningDiagnosticsV1
+}>
+
+/** Screens one snapshot pair and retains bounded, first-failure audit counts. */
+export function screenSpyDirectionalDebitVerticalWithAuditV1(
   pair: ValidatedResearchSnapshotPairV1,
-): SpyDebitVerticalScreeningResultV1 {
+): SpyDebitVerticalAuditedScreeningResultV1 {
   const { underlying, optionUniverse } = pair
+  const failureCounts = new Map<DebitVerticalFirstFailureReasonV1, number>()
+  let contractRoleEvaluationCount = 0
+  let eligibleLongContractCount = 0
+  let eligibleShortContractCount = 0
+  let spreadPairEvaluationCount = 0
+  let eligibleCandidateCount = 0
+  const reject = (reason: DebitVerticalFirstFailureReasonV1, count = 1) => {
+    failureCounts.set(reason, (failureCounts.get(reason) ?? 0) + count)
+  }
+  const finish = (result: SpyDebitVerticalScreeningResultV1) => deepFreeze({
+    result,
+    diagnostics: {
+      diagnosticsVersion: DEBIT_VERTICAL_SCREENING_DIAGNOSTICS_VERSION,
+      underlyingSnapshotId: underlying.snapshotId,
+      optionUniverseSnapshotId: optionUniverse.snapshotId,
+      inputContractCount: optionUniverse.contracts.length,
+      contractRoleEvaluationCount,
+      eligibleLongContractCount,
+      eligibleShortContractCount,
+      spreadPairEvaluationCount,
+      eligibleCandidateCount,
+      firstFailureCounts: DEBIT_VERTICAL_FIRST_FAILURE_REASONS.flatMap((reason) => {
+        const count = failureCounts.get(reason)
+        return count === undefined
+          ? []
+          : [{
+              stage: DEBIT_VERTICAL_FIRST_FAILURE_STAGE_BY_REASON[reason],
+              reason,
+              count,
+            }]
+      }),
+    },
+  })
+
   const compatibility = checkStrategyManifestCompatibility(
     underlying.strategyManifest,
   )
   if (!compatibility.success) {
-    return Object.freeze({
-      status: "NO_ACTION" as const,
-      reason: "STRATEGY_MANIFEST_INCOMPATIBLE" as const,
+    reject("STRATEGY_MANIFEST_INCOMPATIBLE")
+    return finish({
+      status: "NO_ACTION",
+      reason: "STRATEGY_MANIFEST_INCOMPATIBLE",
     })
   }
   const featureResult = calculateDirectionalTrendFeaturesV1({
@@ -371,91 +535,92 @@ export function screenSpyDirectionalDebitVerticalV1(
   }
   const { features } = featureResult
   if (features.direction === "NO_ACTION") {
-    return deepFreeze({
-      status: "NO_ACTION" as const,
-      reason: "SIGNAL_NOT_ACTIONABLE" as const,
-      features,
-    })
+    reject("FEATURE_SIGNAL_NOT_ACTIONABLE")
+    return finish({ status: "NO_ACTION", reason: "SIGNAL_NOT_ACTIONABLE", features })
   }
 
   const evaluatedAt = underlying.times.evaluatedAt
   const latestMinute = underlying.minuteBars.at(-1)!
+  if (!quoteIsFreshAt(
+    underlying.underlyingQuote.providerTimestamp,
+    evaluatedAt,
+    60_000,
+  )) {
+    reject("UNDERLYING_QUOTE_STALE")
+    return finish({ status: "NO_ACTION", reason: "MARKET_DATA_STALE", features })
+  }
   if (
-    !quoteIsFreshAt(
-      underlying.underlyingQuote.providerTimestamp,
-      evaluatedAt,
-      60_000,
-    ) ||
     Date.parse(evaluatedAt) - (Date.parse(latestMinute.startedAt) + 60_000) >
       120_000
   ) {
-    return deepFreeze({
-      status: "NO_ACTION" as const,
-      reason: "MARKET_DATA_STALE" as const,
-      features,
-    })
+    reject("LATEST_MINUTE_BAR_STALE")
+    return finish({ status: "NO_ACTION", reason: "MARKET_DATA_STALE", features })
   }
 
   const direction = features.direction
   const optionType = direction === "BULLISH" ? "CALL" : "PUT"
   const structure =
     direction === "BULLISH" ? "BULL_CALL_SPREAD" : "BEAR_PUT_SPREAD"
-  const longs = optionUniverse.contracts.filter((contract) =>
-    contractIsEligibleForRole(
-      contract,
-      "LONG",
-      optionType,
-      underlying.session.date,
-      evaluatedAt,
-    ),
-  )
-  const shorts = optionUniverse.contracts.filter((contract) =>
-    contractIsEligibleForRole(
-      contract,
-      "SHORT",
-      optionType,
-      underlying.session.date,
-      evaluatedAt,
-    ),
-  )
+  const longs: OptionUniverseContractV1[] = []
+  const shorts: OptionUniverseContractV1[] = []
+  for (const contract of optionUniverse.contracts) {
+    for (const role of ["LONG", "SHORT"] as const) {
+      contractRoleEvaluationCount += 1
+      const reason = contractRoleFirstFailure(
+        contract,
+        role,
+        optionType,
+        underlying.session.date,
+        evaluatedAt,
+      )
+      if (reason !== undefined) {
+        reject(reason)
+      } else if (role === "LONG") {
+        longs.push(contract)
+        eligibleLongContractCount += 1
+      } else {
+        shorts.push(contract)
+        eligibleShortContractCount += 1
+      }
+    }
+  }
 
-  let eligibleCandidateCount = 0
   let selected: CandidateWithoutId | undefined
   // ponytail: bounded quadratic scan; index by expiration/strike only if measured chains make it material.
   for (const long of longs) {
     for (const short of shorts) {
-      if (
-        long.expirationDate !== short.expirationDate ||
-        (optionType === "CALL"
-          ? long.strikeCentsPerShare >= short.strikeCentsPerShare
-          : long.strikeCentsPerShare <= short.strikeCentsPerShare)
-      ) {
+      spreadPairEvaluationCount += 1
+      const pairFailure = pairFirstFailure(long, short, optionType)
+      if (pairFailure !== undefined) {
+        reject(pairFailure)
         continue
       }
       const widthCentsPerShare = Math.abs(
         long.strikeCentsPerShare - short.strikeCentsPerShare,
       )
-      if (widthCentsPerShare < 100 || widthCentsPerShare > 1_000) continue
-
       const calculation = calculateDebitSpreadEconomicsV1(
         long.quote,
         short.quote,
         long.strikeCentsPerShare,
         short.strikeCentsPerShare,
       )
+      if (!calculation.success) {
+        reject(calculation.reason)
+        continue
+      }
       if (
-        !calculation.success ||
         calculation.economics.entryLimitCentsPerShare * 5 >
-          widthCentsPerShare * 3 ||
-        calculation.economics.maxLossCentsPerContract > 50_000
+          widthCentsPerShare * 3
       ) {
+        reject("DEBIT_RATIO_EXCEEDED")
+        continue
+      }
+      if (calculation.economics.maxLossCentsPerContract > 50_000) {
+        reject("MAX_LOSS_EXCEEDED")
         continue
       }
 
-      const dte = calendarDte(
-        underlying.session.date,
-        long.expirationDate,
-      )
+      const dte = calendarDte(underlying.session.date, long.expirationDate)
       const rank = createDebitVerticalCandidateRankV1({
         dte,
         longDeltaMillionths: long.greeks.deltaMillionths,
@@ -499,24 +664,26 @@ export function screenSpyDirectionalDebitVerticalV1(
       if (
         selected === undefined ||
         compareDebitVerticalCandidateRanksV1(candidate.rank, selected.rank) < 0
-      ) {
-        selected = candidate
-      }
+      ) selected = candidate
     }
   }
 
-  return deepFreeze(
+  if (eligibleCandidateCount > 1) reject("NOT_RANK_ONE", eligibleCandidateCount - 1)
+  return finish(
     selected === undefined
-      ? {
-          status: "NO_ACTION" as const,
-          reason: "NO_ELIGIBLE_SPREAD" as const,
-          features,
-        }
+      ? { status: "NO_ACTION", reason: "NO_ELIGIBLE_SPREAD", features }
       : {
-          status: "SELECTED" as const,
+          status: "SELECTED",
           features,
           selectedCandidate: withCandidateId(selected),
           eligibleCandidateCount,
         },
   )
+}
+
+/** Selects the frozen V1 rank-one SPY debit spread from one validated snapshot pair. */
+export function screenSpyDirectionalDebitVerticalV1(
+  pair: ValidatedResearchSnapshotPairV1,
+): SpyDebitVerticalScreeningResultV1 {
+  return screenSpyDirectionalDebitVerticalWithAuditV1(pair).result
 }
