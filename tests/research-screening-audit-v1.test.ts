@@ -12,6 +12,7 @@ import {
   debitVerticalScreeningDiagnosticsV1Schema,
   projectResearchReportV2ForScreeningAudit,
   RESEARCH_SCREENING_COMPARISON_CLASSES,
+  researchScreeningAuditInputIdentityV1Schema,
   researchScreeningAuditV1Schema,
   type AgentResearchScreeningAuditV1,
   type IdenticalInputParityChecksV1,
@@ -244,6 +245,33 @@ describe("research screening audit V1", () => {
     }).success).toBe(false)
   })
 
+  it("caps retained option counts at the snapshot contract limit", () => {
+    expect(researchScreeningAuditInputIdentityV1Schema.safeParse({
+      authority: "APPLICATION",
+      evaluatedAt: "2026-08-28T14:01:00.000Z",
+      underlyingSnapshotId: "a".repeat(64),
+      optionUniverseSnapshotId: "b".repeat(64),
+      optionUniverseMembershipId: "c".repeat(64),
+      optionContractCount: 10_001,
+    }).success).toBe(false)
+    expect(debitVerticalScreeningDiagnosticsV1Schema.safeParse({
+      diagnosticsVersion: "1.0.0",
+      underlyingSnapshotId: "a".repeat(64),
+      optionUniverseSnapshotId: "b".repeat(64),
+      inputContractCount: 10_001,
+      contractRoleEvaluationCount: 20_002,
+      eligibleLongContractCount: 0,
+      eligibleShortContractCount: 0,
+      spreadPairEvaluationCount: 0,
+      eligibleCandidateCount: 0,
+      firstFailureCounts: [{
+        stage: "ELIGIBILITY",
+        reason: "OPTION_TYPE_MISMATCH",
+        count: 20_002,
+      }],
+    }).success).toBe(false)
+  })
+
   it("makes diagnostics independent of provider contract ordering", () => {
     const contracts = createEligibleAuditContractsV1()
     const baseline = screenSpyDirectionalDebitVerticalWithAuditV1(
@@ -305,6 +333,10 @@ describe("research screening audit V1", () => {
         direction: "BEARISH",
         structure: "BEAR_PUT_SPREAD",
       },
+    }).success).toBe(false)
+    expect(agentResearchScreeningAuditV1Schema.safeParse({
+      ...projected,
+      invocation: { ...projected.invocation, modelId: "drifted-model" },
     }).success).toBe(false)
     expect(agentResearchScreeningAuditV1Schema.safeParse({
       ...projected,
@@ -411,6 +443,29 @@ describe("research screening audit V1", () => {
         result,
       }).success).toBe(false)
     }
+    const incompatibleStrategy = {
+      ...application.strategy,
+      strategyVersion: "9.9.9",
+    }
+    expect(applicationResearchScreeningAuditV1Schema.safeParse({
+      ...application,
+      strategy: incompatibleStrategy,
+      result: {
+        ...application.result,
+        candidateId: computeDebitVerticalCandidateIdV1({
+          underlyingSnapshotId: application.inputIdentity.underlyingSnapshotId,
+          optionUniverseSnapshotId:
+            application.inputIdentity.optionUniverseSnapshotId,
+          ...incompatibleStrategy,
+          underlying: "SPY",
+          direction: application.result.direction,
+          structure: application.result.structure,
+          expirationDate: application.result.expirationDate,
+          longLeg: { contractSymbol: application.result.longContractSymbol },
+          shortLeg: { contractSymbol: application.result.shortContractSymbol },
+        }),
+      },
+    }).success).toBe(false)
     expect(applicationResearchScreeningAuditV1Schema.safeParse({
       ...application,
       diagnostics: {

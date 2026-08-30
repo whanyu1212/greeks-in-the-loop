@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { NO_ACTION_REASON_CODES } from "./research-decision-v1.js"
+import { MAX_OPTION_UNIVERSE_CONTRACTS } from "./research-market-snapshot-v1.js"
 import type { ResearchReportV2 } from "./research-report-v2.js"
 import type {
   DebitVerticalFirstFailureReasonV1,
@@ -18,7 +19,14 @@ import {
   DIRECTIONAL_TREND_FEATURE_VERSION,
 } from "../strategy/directional-debit-vertical-v1.js"
 import type { ResearchInvocationV1 } from "../research/research-invocation-v1.js"
-import { SUPPORTED_RESEARCH_INVOCATION_VERSIONS } from "../research/research-invocation-v1.js"
+import {
+  RESEARCH_INVOCATION_PROVENANCE_BY_VERSION,
+  SUPPORTED_RESEARCH_INVOCATION_VERSIONS,
+} from "../research/research-invocation-v1.js"
+import {
+  SPY_DIRECTIONAL_DEBIT_VERTICAL_STRATEGY_ID,
+  STRATEGY_VERSION,
+} from "../strategy/strategy-identity.js"
 import { canonicalJsonSha256 } from "../shared/canonical-json.js"
 import {
   alpacaOptionStrikeCents,
@@ -102,7 +110,7 @@ export const researchScreeningAuditInputIdentityV1Schema = z
     underlyingSnapshotId: digest,
     optionUniverseSnapshotId: digest,
     optionUniverseMembershipId: digest,
-    optionContractCount: safeCount,
+    optionContractCount: safeCount.max(MAX_OPTION_UNIVERSE_CONTRACTS),
   })
   .strict()
 
@@ -183,7 +191,7 @@ export const debitVerticalScreeningDiagnosticsV1Schema = z
     diagnosticsVersion: z.literal(DEBIT_VERTICAL_SCREENING_DIAGNOSTICS_VERSION),
     underlyingSnapshotId: digest,
     optionUniverseSnapshotId: digest,
-    inputContractCount: safeCount,
+    inputContractCount: safeCount.max(MAX_OPTION_UNIVERSE_CONTRACTS),
     contractRoleEvaluationCount: safeCount,
     eligibleLongContractCount: safeCount,
     eligibleShortContractCount: safeCount,
@@ -414,6 +422,20 @@ export const applicationResearchScreeningAuditV1Schema = z.discriminatedUnion(
             message: "Diagnostics must identify the captured snapshot pair",
           })
         }
+        const requiresCompatibleStrategy = audit.result.status === "SELECTED" ||
+          audit.result.reason !== "STRATEGY_MANIFEST_INCOMPATIBLE"
+        if (
+          requiresCompatibleStrategy &&
+          (audit.strategy.strategyId !==
+              SPY_DIRECTIONAL_DEBIT_VERTICAL_STRATEGY_ID ||
+            audit.strategy.strategyVersion !== STRATEGY_VERSION)
+        ) {
+          refinement.addIssue({
+            code: "custom",
+            path: ["strategy"],
+            message: "Completed screening requires the compatible V1 strategy",
+          })
+        }
         const expectedCandidates = audit.result.status === "SELECTED"
           ? audit.result.eligibleCandidateCount
           : 0
@@ -566,6 +588,21 @@ const availableAgentAuditSchema = z
   })
   .strict()
   .superRefine((audit, refinement) => {
+    const expectedInvocation =
+      RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[
+        audit.invocation.invocationVersion
+      ]
+    if (
+      "providerId" in expectedInvocation &&
+      (audit.invocation.providerId !== expectedInvocation.providerId ||
+        audit.invocation.modelId !== expectedInvocation.modelId)
+    ) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["invocation"],
+        message: "Available result must match its pinned model identity",
+      })
+    }
     if ((audit.terminalClass === "NO_ACTION") !==
       (audit.noActionReasonCodes !== undefined)) {
       refinement.addIssue({
