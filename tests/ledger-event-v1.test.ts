@@ -105,6 +105,14 @@ describe("LedgerEventV1", () => {
     expect(ledgerEventV1Schema.parse(cycleScoped)).toMatchObject({
       eventType: "RESEARCH_INVOCATION_IDENTITY_REJECTED",
     })
+    expect(
+      ledgerEventV1Schema.parse({
+        ...cycleScoped,
+        payload: { ...cycleScoped.payload, invocationVersion: "1.2.0" },
+      }),
+    ).toMatchObject({
+      payload: { invocationVersion: "1.2.0" },
+    })
 
     // Unlike the breaker events, drift happens inside a live cycle.
     const { cycleId, sessionId, ...cycleless } = cycleScoped
