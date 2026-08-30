@@ -270,6 +270,14 @@ describe("research screening audit V1", () => {
       terminalClass: "NO_ACTION",
       noActionReasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
     }).success).toBe(false)
+    for (const noActionReasonCodes of [[], ["UNBOUNDED_REASON"]]) {
+      expect(agentResearchScreeningAuditV1Schema.safeParse({
+        ...projected,
+        terminalClass: "NO_ACTION",
+        noActionReasonCodes,
+        proposalCandidate: undefined,
+      }).success).toBe(false)
+    }
   })
 
   it("binds application results and deterministic components to one snapshot pair", () => {

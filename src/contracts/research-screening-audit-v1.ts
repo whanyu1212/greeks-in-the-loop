@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { NO_ACTION_REASON_CODES } from "./research-decision-v1.js"
 import type { ResearchReportV2 } from "./research-report-v2.js"
 import type {
   ValidatedResearchSnapshotPairV1,
@@ -328,7 +329,11 @@ const availableAgentAuditSchema = z
       "PROPOSE_TRADE",
     ]),
     evidenceReferences: z.array(agentEvidenceReferenceSchema).max(72),
-    noActionReasonCodes: z.array(identifier).max(16).optional(),
+    noActionReasonCodes: z
+      .array(z.enum(NO_ACTION_REASON_CODES))
+      .min(1)
+      .max(NO_ACTION_REASON_CODES.length)
+      .optional(),
     proposalCandidate: agentCandidateIdentitySchema.optional(),
   })
   .strict()
