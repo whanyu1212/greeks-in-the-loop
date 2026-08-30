@@ -508,6 +508,40 @@ describe("backtest replay v2", () => {
     })).toThrow("Replay market session is invalid")
   })
 
+  it("preserves a retained window after start grace and through expiry", () => {
+    const underlying = createSelectedSnapshots(true).pair.underlying
+    const eligibilityAtSevenMinutes = deriveBacktestReplayEligibilityV2({
+      ...underlying,
+      times: {
+        ...underlying.times,
+        evaluatedAt: "2026-08-28T14:07:00.000Z",
+      },
+    })
+    const eligibilityAtExpiry = deriveBacktestReplayEligibilityV2({
+      ...underlying,
+      times: {
+        ...underlying.times,
+        evaluatedAt: "2026-08-28T14:10:00.000Z",
+      },
+    })
+
+    expect(eligibilityAtSevenMinutes).toMatchObject({
+      tradeIntentEligible: true,
+      tradeIntentWindow: {
+        slotStartedAt: "2026-08-28T14:00:00.000Z",
+        deadline: "2026-08-28T14:10:00.000Z",
+      },
+    })
+    expect(eligibilityAtExpiry).toMatchObject({
+      tradeIntentEligible: false,
+      tradeIntentWindow: {
+        slotStartedAt: "2026-08-28T14:00:00.000Z",
+        deadline: "2026-08-28T14:10:00.000Z",
+      },
+      reason: "OUTSIDE_TRADE_INTENT_WINDOW",
+    })
+  })
+
   it("returns no entry for a risk rejection without falling back", () => {
     const definition = createBacktestDatasetDefinitionV2Fixture()
     const selected = createSelectedSnapshots(true)

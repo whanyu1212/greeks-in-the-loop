@@ -318,6 +318,7 @@ export const deriveBacktestReplayEligibilityV2 = (
     throw new Error("Replay eligibility strategy version is unsupported")
   }
   const evaluatedAt = Date.parse(underlying.times.evaluatedAt)
+  const captureStartedAt = Date.parse(underlying.times.captureStartedAt)
   const open = Date.parse(underlying.session.openAt)
   const close = Date.parse(underlying.session.closeAt)
   const sessionDate = underlying.session.date
@@ -330,6 +331,7 @@ export const deriveBacktestReplayEligibilityV2 = (
   const premarketStart = newYorkLocalTime(sessionDate, "08:00").getTime()
   if (
     !Number.isFinite(evaluatedAt) ||
+    !Number.isFinite(captureStartedAt) ||
     !Number.isFinite(open) ||
     !Number.isFinite(close) ||
     open >= close ||
@@ -356,20 +358,24 @@ export const deriveBacktestReplayEligibilityV2 = (
   )
   const entryStart = newYorkLocalTime(sessionDate, "10:00").getTime()
   const timing = compatibility.compatibility.tradeIntentTiming
-  const tradeIntentEligible =
-    evaluatedAt >= open &&
-    evaluatedAt - slot.getTime() >= 0 &&
-    evaluatedAt - slot.getTime() < timing.startGraceMs &&
+  const tradeIntentWindow =
+    captureStartedAt >= open &&
+    captureStartedAt - slot.getTime() >= 0 &&
+    captureStartedAt - slot.getTime() < timing.startGraceMs &&
     slot.getTime() >= entryStart &&
     slot.getTime() < entryCutoff
-  const tradeIntentWindow = tradeIntentEligible
-    ? {
-        slotStartedAt: slot.toISOString(),
-        deadline: new Date(
-          Math.min(slot.getTime() + timing.windowDurationMs, entryCutoff),
-        ).toISOString(),
-      }
-    : undefined
+      ? {
+          slotStartedAt: slot.toISOString(),
+          deadline: new Date(
+            Math.min(slot.getTime() + timing.windowDurationMs, entryCutoff),
+          ).toISOString(),
+        }
+      : undefined
+  const tradeIntentEligible =
+    tradeIntentWindow !== undefined &&
+    evaluatedAt >= slot.getTime() &&
+    evaluatedAt < Date.parse(tradeIntentWindow.deadline) &&
+    evaluatedAt < entryCutoff
   return {
     ...base,
     researchEligible: true,
