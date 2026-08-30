@@ -18,6 +18,10 @@ import {
   createDebitVerticalCandidateRankV1,
 } from "../strategy/directional-debit-vertical-v1.js"
 import {
+  BACKTEST_DATASET_VERSION,
+  BACKTEST_NORMALIZATION_VERSION,
+} from "./dataset-v1.js"
+import {
   BACKTEST_EXECUTION_MODEL_VERSION,
   BACKTEST_REPLAY_VERSION,
 } from "./replay-identity.js"
@@ -605,6 +609,9 @@ export function runBacktestReplayV1(
   const replay = backtestReplayInputV1Schema.parse(replayInput)
   if (isBacktestDatasetDefinitionV2(manifest.definition)) {
     if (
+      manifest.definition.datasetVersion !== BACKTEST_DATASET_VERSION ||
+      manifest.definition.normalizationVersion !==
+        BACKTEST_NORMALIZATION_VERSION ||
       replay.replayVersion !==
         manifest.definition.strategyManifest.replayCompatibility.replayVersion ||
       replay.execution.modelVersion !==

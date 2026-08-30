@@ -299,6 +299,38 @@ describe("backtest replay v1", () => {
     ).toThrow("replay identity is incompatible")
   })
 
+  it("rejects internally consistent but unsupported V2 data versions", () => {
+    const strategyManifest = {
+      ...createSyntheticStrategyManifest("SPY"),
+      replayCompatibility: {
+        ...createSyntheticStrategyManifest("SPY").replayCompatibility,
+        datasetVersion: "9.9.9",
+        normalizationVersion: "9.9.9",
+      },
+    }
+    const definition = createBacktestDatasetDefinitionV2Fixture({
+      strategyManifest,
+      optionSymbols: [],
+    })
+
+    expect(() =>
+      runReplay({
+        ...manifest,
+        definition,
+        checksum: "b".repeat(64),
+      }, {
+        replayVersion: "1.0.0",
+        execution,
+        scenarios: [{
+          scenarioId: "unsupported-data-proxy",
+          fidelity: "HISTORICAL_BAR_PROXY",
+          retainedIntent: intent,
+          monitorCycles: [monitorCycle],
+        }],
+      }, replayCalendar)
+    ).toThrow("replay identity is incompatible")
+  })
+
   it("rejects V1 scenario identity that disagrees with a V2 dataset symbol", () => {
     const definition = createBacktestDatasetDefinitionV2Fixture({
       strategyManifest: createSyntheticStrategyManifest("QQQ"),
