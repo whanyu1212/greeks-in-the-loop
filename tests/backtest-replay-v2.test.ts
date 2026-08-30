@@ -12,6 +12,7 @@ import {
 import {
   backtestReplayInputV2Schema,
   computeBacktestReplayScenarioIdV2,
+  deriveBacktestReplayEligibilityV2,
   runBacktestReplayV2,
 } from "../src/backtest/replay-v2.js"
 import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
@@ -496,6 +497,17 @@ describe("backtest replay v2", () => {
     ))], exactRecords)).toThrow()
   })
 
+  it("rejects sessions that open before the frozen replay premarket boundary", () => {
+    const selected = createSelectedSnapshots(true)
+    expect(() => deriveBacktestReplayEligibilityV2({
+      ...selected.pair.underlying,
+      session: {
+        ...selected.pair.underlying.session,
+        openAt: "2026-08-28T11:00:00.000Z",
+      },
+    })).toThrow("Replay market session is invalid")
+  })
+
   it("returns no entry for a risk rejection without falling back", () => {
     const definition = createBacktestDatasetDefinitionV2Fixture()
     const selected = createSelectedSnapshots(true)
@@ -649,6 +661,11 @@ describe("backtest replay v2", () => {
       vwapMicros: lowMicros,
       tradeCount: 1,
     })
+    expect(() => run(definition, [scenario({
+      ...content,
+      retainedIntent: { ...content.retainedIntent, strategyVersion: "1.0.0" },
+    })], exactRecords)).toThrow("intent identity is incompatible")
+
     const report = run(definition, [scenario(content)], [
       ...exactRecords,
       optionBar(riskInput.intent.longContractSymbol, 4_000_000, 4_000_000),

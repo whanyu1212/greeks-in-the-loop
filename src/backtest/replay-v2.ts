@@ -29,7 +29,7 @@ import {
 } from "../risk/risk-evaluation-v1.js"
 import { parseAlpacaOptionSymbol } from "../shared/alpaca-option-identity.js"
 import { canonicalJson, canonicalJsonSha256 } from "../shared/canonical-json.js"
-import { evaluateResearchEligibility } from "../scheduling/research-eligibility.js"
+import { newYorkLocalTime } from "../scheduling/research-eligibility.js"
 import {
   DEBIT_VERTICAL_CANDIDATE_COMPONENT_ID,
   DEBIT_VERTICAL_CANDIDATE_VERSION,
@@ -38,6 +38,7 @@ import {
   screenSpyDirectionalDebitVerticalForManifestV1,
   type DebitVerticalCandidateV1,
 } from "../strategy/directional-debit-vertical-v1.js"
+import { resolveV1StrategyVersionCompatibility } from "../strategy/strategy-v1-compatibility.js"
 import {
   decodeBacktestDatasetManifest,
   isBacktestDatasetDefinitionV2,
@@ -307,6 +308,80 @@ const exactOptionContract = (
   return contract
 }
 
+export const deriveBacktestReplayEligibilityV2 = (
+  underlying: UnderlyingSessionSnapshotV1,
+) => {
+  const compatibility = resolveV1StrategyVersionCompatibility(
+    underlying.strategyManifest.strategyVersion,
+  )
+  if (!compatibility.success) {
+    throw new Error("Replay eligibility strategy version is unsupported")
+  }
+  const evaluatedAt = Date.parse(underlying.times.evaluatedAt)
+  const open = Date.parse(underlying.session.openAt)
+  const close = Date.parse(underlying.session.closeAt)
+  const sessionDate = underlying.session.date
+  const base = {
+    evaluatedAt: new Date(evaluatedAt).toISOString(),
+    sessionDate,
+    sessionOpen: new Date(open).toISOString(),
+    sessionClose: new Date(close).toISOString(),
+  }
+  const premarketStart = newYorkLocalTime(sessionDate, "08:00").getTime()
+  if (
+    !Number.isFinite(evaluatedAt) ||
+    !Number.isFinite(open) ||
+    !Number.isFinite(close) ||
+    open >= close ||
+    premarketStart >= open
+  ) {
+    throw new Error("Replay market session is invalid")
+  }
+  if (evaluatedAt < premarketStart || evaluatedAt >= close) {
+    return {
+      ...base,
+      researchEligible: false,
+      tradeIntentEligible: false,
+      reason: "OUTSIDE_RESEARCH_WINDOW" as const,
+    }
+  }
+  const slot = new Date(evaluatedAt)
+  slot.setUTCMinutes(Math.floor(slot.getUTCMinutes() / 15) * 15, 0, 0)
+  if (slot.toISOString() !== underlying.times.slotStartedAt) {
+    throw new Error("Risk eligibility timing does not match the selected snapshot")
+  }
+  const entryCutoff = Math.min(
+    newYorkLocalTime(sessionDate, "15:00").getTime(),
+    close - 60 * 60 * 1_000,
+  )
+  const entryStart = newYorkLocalTime(sessionDate, "10:00").getTime()
+  const timing = compatibility.compatibility.tradeIntentTiming
+  const tradeIntentEligible =
+    evaluatedAt >= open &&
+    evaluatedAt - slot.getTime() >= 0 &&
+    evaluatedAt - slot.getTime() < timing.startGraceMs &&
+    slot.getTime() >= entryStart &&
+    slot.getTime() < entryCutoff
+  const tradeIntentWindow = tradeIntentEligible
+    ? {
+        slotStartedAt: slot.toISOString(),
+        deadline: new Date(
+          Math.min(slot.getTime() + timing.windowDurationMs, entryCutoff),
+        ).toISOString(),
+      }
+    : undefined
+  return {
+    ...base,
+    researchEligible: true,
+    tradeIntentEligible,
+    ...(tradeIntentWindow === undefined ? {} : { tradeIntentWindow }),
+    previousSessionDates: underlying.session.previousSessionDates.slice(-2),
+    ...(tradeIntentEligible
+      ? {}
+      : { reason: "OUTSIDE_TRADE_INTENT_WINDOW" as const }),
+  }
+}
+
 const boundRiskEvaluationInput = (
   candidate: DebitVerticalCandidateV1,
   underlying: UnderlyingSessionSnapshotV1,
@@ -335,18 +410,7 @@ const boundRiskEvaluationInput = (
     openInterest: contract.openInterest.contracts,
     openInterestDate: contract.openInterest.asOfDate,
   })
-  const eligibility = evaluateResearchEligibility({
-    evaluatedAt: new Date(underlying.times.evaluatedAt),
-    session: {
-      date: underlying.session.date,
-      open: underlying.session.openAt,
-      close: underlying.session.closeAt,
-      previousSessionDates: underlying.session.previousSessionDates.slice(-2),
-    },
-  })
-  if (eligibility.tradeIntentWindow?.slotStartedAt !== underlying.times.slotStartedAt) {
-    throw new Error("Risk eligibility timing does not match the selected snapshot")
-  }
+  const eligibility = deriveBacktestReplayEligibilityV2(underlying)
   if (canonicalJson(input.context.eligibility) !== canonicalJson(eligibility)) {
     throw new Error("Risk eligibility does not match the selected snapshot")
   }
@@ -412,12 +476,13 @@ const assertIntentSymbol = (
   const long = parseAlpacaOptionSymbol(intent.longContractSymbol)
   const short = parseAlpacaOptionSymbol(intent.shortContractSymbol)
   if (
+    intent.strategyVersion !== definition.strategyManifest.strategyVersion ||
     !long.success ||
     !short.success ||
     long.identity.root !== definition.symbol ||
     short.identity.root !== definition.symbol
   ) {
-    throw new Error(`Scenario ${scenarioId} intent does not match the dataset symbol`)
+    throw new Error(`Scenario ${scenarioId} intent identity is incompatible with the dataset`)
   }
 }
 
