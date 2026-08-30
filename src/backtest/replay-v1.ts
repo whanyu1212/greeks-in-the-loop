@@ -508,23 +508,56 @@ export function deriveHistoricalBarProxyCyclesV1(
     .sort((left, right) => instant(left.decidedAt) - instant(right.decidedAt))
 
   let previousCycle: ReplayMonitorCycle | undefined
-  const observedCycles = cycles.map((cycle) => {
+  const observedCycles: ReplayMonitorCycle[] = []
+  for (const cycle of cycles) {
     const session = sessionForTimestamp(sessions, cycle.decidedAt)!
+    const sessionIndex = sessions.indexOf(session)
     const previousSession = previousCycle === undefined
-      ? undefined
-      : sessionForTimestamp(sessions, previousCycle.decidedAt)
-    const unavailableSince = previousSession?.date === session.date
-      ? previousCycle!.decidedAt
-      : session.date === sessions[entrySessionIndex]!.date
-        ? intent.evaluatedAt
-        : session.open
-    const staleMinutes = Math.max(
-      0,
-      Math.floor((Date.parse(cycle.decidedAt) - Date.parse(unavailableSince)) / 60_000),
-    )
+      ? sessions[entrySessionIndex]!
+      : sessionForTimestamp(sessions, previousCycle.decidedAt)!
+    const previousSessionIndex = sessions.indexOf(previousSession)
+    const firstUnavailableAt = previousCycle?.decidedAt ?? intent.evaluatedAt
+    for (
+      let staleSessionIndex = previousSessionIndex;
+      staleSessionIndex <= sessionIndex;
+      staleSessionIndex += 1
+    ) {
+      const staleSession = sessions[staleSessionIndex]!
+      const unavailableSince = staleSessionIndex === previousSessionIndex
+        ? firstUnavailableAt
+        : staleSession.open
+      const staleAt = instant(unavailableSince) + 5 * 60_000
+      const observedUntil = staleSessionIndex === sessionIndex
+        ? instant(cycle.decidedAt)
+        : instant(staleSession.close)
+      if (staleAt > Math.min(instant(staleSession.close), observedUntil)) continue
+      return [...observedCycles, {
+        decidedAt: new Date(staleAt).toISOString(),
+        marketOpen: true,
+        lateFill: false,
+        dte: daysBetween(staleSession.date, intent.expiration),
+        minutesToClose: Math.floor(
+          (instant(staleSession.close) - staleAt) / 60_000,
+        ),
+        staleMinutes: 5,
+        markHalfCentsPerShare: undefined,
+        holdingSessionIndex: staleSessionIndex - entrySessionIndex + 1,
+      }]
+    }
+    const unavailableSince = previousSessionIndex === sessionIndex
+      ? firstUnavailableAt
+      : session.open
+    observedCycles.push({
+      ...cycle,
+      staleMinutes: Math.max(
+        0,
+        Math.floor(
+          (Date.parse(cycle.decidedAt) - Date.parse(unavailableSince)) / 60_000,
+        ),
+      ),
+    })
     previousCycle = cycle
-    return { ...cycle, staleMinutes }
-  })
+  }
   const lastCycle = observedCycles.at(-1)
   const lastSessionIndex = lastCycle === undefined
     ? entrySessionIndex

@@ -1087,7 +1087,7 @@ describe("backtest replay v1", () => {
     })
   })
 
-  it("carries synchronized-mark gaps into proxy stale-data exits", () => {
+  it("inserts an unpriced stale boundary before a recovered proxy mark", () => {
     const optionBar = (contractSymbol: string, timestamp: string, lowMicros: number, highMicros: number) => ({
       recordType: "OPTION_BAR" as const,
       contractSymbol,
@@ -1116,9 +1116,53 @@ describe("backtest replay v1", () => {
     ]
     const cycles = deriveHistoricalBarProxyCyclesV1(records, intent)
 
-    expect(cycles.slice(0, 2).map(({ staleMinutes }) => staleMinutes)).toEqual([1, 10])
-    expect(deriveHistoricalBarProxyCyclesV1(records.slice(0, 1).concat(records.slice(3)), intent)[0])
-      .toMatchObject({ staleMinutes: 11 })
+    expect(cycles).toMatchObject([
+      { decidedAt: "2026-08-27T14:31:00.000Z", staleMinutes: 1 },
+      {
+        decidedAt: "2026-08-27T14:36:00.000Z",
+        staleMinutes: 5,
+        markHalfCentsPerShare: undefined,
+      },
+    ])
+    expect(
+      deriveHistoricalBarProxyCyclesV1(
+        records.slice(0, 1).concat(records.slice(3)),
+        intent,
+      )[0],
+    ).toMatchObject({
+      decidedAt: "2026-08-27T14:35:00.000Z",
+      staleMinutes: 5,
+      markHalfCentsPerShare: undefined,
+    })
+    const crossSessionRecords = [
+      session,
+      {
+        ...session,
+        date: "2026-08-28",
+        open: "2026-08-28T13:30:00.000Z",
+        close: "2026-08-28T20:00:00.000Z",
+      },
+      ...records.slice(1, 3),
+      optionBar(
+        intent.longContractSymbol,
+        "2026-08-28T13:30:00.000Z",
+        1_000_000,
+        1_000_000,
+      ),
+      optionBar(
+        intent.shortContractSymbol,
+        "2026-08-28T13:30:00.000Z",
+        1_000_000,
+        1_000_000,
+      ),
+    ]
+    expect(deriveHistoricalBarProxyCyclesV1(crossSessionRecords, intent).at(-1))
+      .toMatchObject({
+        decidedAt: "2026-08-27T14:36:00.000Z",
+        staleMinutes: 5,
+        markHalfCentsPerShare: undefined,
+        holdingSessionIndex: 1,
+      })
 
     const report = runReplay(
       proxyManifest,
@@ -1134,8 +1178,10 @@ describe("backtest replay v1", () => {
       records,
     )
     expect(report.results[0]).toMatchObject({
+      outcome: "EXIT_UNPRICED",
       exitReason: "STALE_DATA",
-      exitDecidedAt: "2026-08-27T14:41:00.000Z",
+      exitDecidedAt: "2026-08-27T14:36:00.000Z",
+      pnlCents: null,
     })
   })
 
@@ -1221,7 +1267,7 @@ describe("backtest replay v1", () => {
       volume: 10,
       vwapMicros: 100_000_000,
     }))
-    const timestamp = `${sessionDates[20]}T15:00:00.000Z`
+    const timestamp = `${sessionDates[20]}T14:30:00.000Z`
     const cycles = deriveHistoricalBarProxyCyclesV1(
       [
         ...sessions,
