@@ -384,6 +384,33 @@ describe("backtest replay v1", () => {
     })).toThrow(/share one application approval context/u)
   })
 
+  it("rejects exact candidate deltas beyond snapshot normalization precision", () => {
+    const long = riskInput.context.contracts.legs[0]
+    expect(() => runReplay(manifest, {
+      replayVersion: "1.0.0",
+      execution,
+      scenarios: [{
+        scenarioId: "fractional-millionth-delta",
+        fidelity: "EXACT_SNAPSHOT",
+        signal: signalSnapshot(),
+        candidates: [{
+          ...riskInput,
+          context: {
+            ...riskInput.context,
+            contracts: {
+              ...riskInput.context.contracts,
+              legs: [
+                { ...long, delta: 0.5000001 },
+                riskInput.context.contracts.legs[1],
+              ],
+            },
+          },
+        }],
+        monitorCycles: [monitorCycle],
+      }],
+    })).toThrow(/six-decimal precision/u)
+  })
+
   it("runs exact snapshots through production risk and a deterministic profit exit", () => {
     const report = runReplay(manifest, {
       replayVersion: "1.0.0",

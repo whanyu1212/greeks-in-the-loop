@@ -3,10 +3,11 @@
 ## Status and scope
 
 This document defines the normalized, application-owned market-data identity used
-by future deterministic SPY screening. Contract version `1.0.0` and
-normalization version `1.0.0` define data only. Provider capture is implemented
-separately by issue #65, and feature calculation, eligibility, candidate
-construction, and ranking are implemented by issue #55.
+by deterministic SPY screening. Contract version `1.0.0` and normalization
+version `1.0.0` define data only. Provider capture is implemented separately by
+issue #65. The pure `directional-debit-vertical-v1` strategy component consumes a
+validated snapshot pair to calculate exact features and select the deterministic
+rank-one SPY candidate; runtime authority remains unchanged until #67.
 
 The contract contains no provider client, model output, account state, risk
 result, runtime callback, credential, URL, page token, or raw provider payload.
@@ -75,7 +76,8 @@ the application timestamp captured after the final snapshot-forming response.
 Later approval must recheck freshness independently.
 
 The contract records normalized evidence only. It does not calculate SMA20,
-SMA50, session VWAP, midpoint, regime, or direction.
+SMA50, session VWAP, midpoint, regime, or direction. The symbol-neutral feature
+calculator performs that arithmetic after snapshot-pair validation.
 
 ## Option-universe snapshot
 
@@ -95,8 +97,8 @@ and cent-denominated strike consistency are validated independently.
 
 A complete snapshot may retain a non-tradable contract, a zero-bid quote with a
 positive ask, an unsupported exercise style or multiplier, or metrics below
-strategy eligibility thresholds. Those are valid observations for #55 to
-reject. Snapshot construction rejects missing,
+strategy eligibility thresholds. Those are valid observations for the pure
+strategy component to reject. Snapshot construction rejects missing,
 malformed, duplicate, cross-symbol, out-of-scope, stale, future-dated, or
 incompletely covered records; it does not apply delta bands, liquidity
 thresholds, quote-width limits, spread construction, or ranking.
@@ -140,7 +142,7 @@ values never cross this boundary.
 
 ## Explicit non-goals
 
-V1 does not implement:
+The snapshot contract and builders do not implement:
 
 - Alpaca requests, pagination loops, retries, timeouts, or credentials;
 - runtime, research-agent, ledger, artifact, or SQLite integration;

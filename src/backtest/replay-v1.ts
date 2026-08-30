@@ -12,6 +12,11 @@ import {
 import { newYorkDate, newYorkLocalTime } from "../scheduling/research-eligibility.js"
 import { canonicalJson, canonicalJsonSha256 } from "../shared/canonical-json.js"
 import {
+  calculateDirectionalTrendFeaturesV1,
+  compareDebitVerticalCandidateRanksV1,
+  createDebitVerticalCandidateRankV1,
+} from "../strategy/directional-debit-vertical-v1.js"
+import {
   backtestDatasetManifestV1Schema,
   type BacktestDatasetRecordV1,
   type MarketSessionRecordV1,
@@ -302,48 +307,36 @@ export const evaluateBacktestSignalV1 = (
   spotMidpointMicros: number
 }> => {
   const parsed = signalSnapshotSchema.parse(input)
-  const dailyClosesMicros = parsed.completedDailyBars.map(({ closeMicros }) => closeMicros)
-  const dailyCloseMicros = dailyClosesMicros.at(-1)!
-  const last20 = dailyClosesMicros.slice(-20)
-  const sma20Micros = mean(last20)
-  const sma50Micros = mean(dailyClosesMicros)
-  const volume = parsed.completedMinuteBars.reduce((total, bar) => total + bar.volume, 0)
-  const weightedVwap = parsed.completedMinuteBars.reduce(
-    (total, bar) => total + BigInt(bar.vwapMicros) * BigInt(bar.volume),
-    0n,
-  )
-  const exactVolume = parsed.completedMinuteBars.reduce(
-    (total, bar) => total + BigInt(bar.volume),
-    0n,
-  )
-  const sessionVwapMicros = Number(weightedVwap) / volume
-  const spotMidpointMicros =
-    (parsed.underlyingQuote.bidMicros + parsed.underlyingQuote.askMicros) / 2
-  const close = BigInt(dailyCloseMicros)
-  const sum20 = last20.reduce((total, value) => total + BigInt(value), 0n)
-  const sum50 = dailyClosesMicros.reduce(
-    (total, value) => total + BigInt(value),
-    0n,
-  )
-  const spotTwice = BigInt(parsed.underlyingQuote.bidMicros) +
-    BigInt(parsed.underlyingQuote.askMicros)
-  const direction =
-    close * 20n > sum20 &&
-    sum20 * 50n > sum50 * 20n &&
-    spotTwice * exactVolume > weightedVwap * 2n
-      ? "BULLISH"
-      : close * 20n < sum20 &&
-          sum20 * 50n < sum50 * 20n &&
-          spotTwice * exactVolume < weightedVwap * 2n
-        ? "BEARISH"
-        : "NO_ACTION"
+  const result = calculateDirectionalTrendFeaturesV1({
+    completedDailyClosesMicrosPerShare: parsed.completedDailyBars.map(
+      ({ closeMicros }) => closeMicros,
+    ),
+    completedMinuteBars: parsed.completedMinuteBars.map(
+      ({ vwapMicros, volume }) => ({
+        vwapMicrosPerShare: vwapMicros,
+        volume,
+      }),
+    ),
+    underlyingBidMicrosPerShare: parsed.underlyingQuote.bidMicros,
+    underlyingAskMicrosPerShare: parsed.underlyingQuote.askMicros,
+  })
+  if (!result.success) throw new Error("Backtest signal input is invalid")
+  const { features } = result
   return {
-    direction,
-    dailyCloseMicros,
-    sma20Micros,
-    sma50Micros,
-    sessionVwapMicros,
-    spotMidpointMicros,
+    direction: features.direction,
+    dailyCloseMicros: features.dailyCloseMicrosPerShare,
+    sma20Micros:
+      Number(features.sma20.numeratorMicrosPerShare) /
+      features.sma20.denominator,
+    sma50Micros:
+      Number(features.sma50.numeratorMicrosPerShare) /
+      features.sma50.denominator,
+    sessionVwapMicros:
+      Number(features.sessionVwap.numeratorMicrosVolume) /
+      Number(features.sessionVwap.denominatorVolume),
+    spotMidpointMicros:
+      Number(features.underlyingMidpoint.numeratorMicrosPerShare) /
+      features.underlyingMidpoint.denominator,
   }
 }
 
@@ -351,28 +344,31 @@ const daysBetween = (from: string, to: string) =>
   (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) /
   86_400_000
 
+const exactReplayDeltaMillionths = (delta: number) => {
+  const scaled = delta * 1_000_000
+  const normalized = Math.round(scaled)
+  if (
+    !Number.isSafeInteger(normalized) ||
+    Math.abs(scaled - normalized) > 1e-6
+  ) {
+    throw new Error("Exact replay candidate deltas require six-decimal precision")
+  }
+  return normalized
+}
+
 const candidateTuple = (input: z.infer<typeof riskEvaluationInputV1Schema>) => {
   const { intent, context } = input
   const long = context.contracts.legs.find(({ role }) => role === "LONG")!
   const short = context.contracts.legs.find(({ role }) => role === "SHORT")!
-  return [
-    Math.abs(daysBetween(context.eligibility.sessionDate!, intent.expiration) - 21),
-    Math.abs(Math.abs(long.delta) - 0.5) + Math.abs(Math.abs(short.delta) - 0.3),
-    intent.widthCentsPerShare,
-    intent.expiration,
-    intent.longContractSymbol,
-    intent.shortContractSymbol,
-  ] as const
-}
-
-const compareTuples = (left: readonly (number | string)[], right: readonly (number | string)[]) => {
-  for (let index = 0; index < left.length; index += 1) {
-    const a = left[index]!
-    const b = right[index]!
-    if (a < b) return -1
-    if (a > b) return 1
-  }
-  return 0
+  return createDebitVerticalCandidateRankV1({
+    dte: daysBetween(context.eligibility.sessionDate!, intent.expiration),
+    longDeltaMillionths: exactReplayDeltaMillionths(long.delta),
+    shortDeltaMillionths: exactReplayDeltaMillionths(short.delta),
+    widthCentsPerShare: intent.widthCentsPerShare,
+    expirationDate: intent.expiration,
+    longContractSymbol: intent.longContractSymbol,
+    shortContractSymbol: intent.shortContractSymbol,
+  })
 }
 
 const exitReason = (
@@ -566,6 +562,7 @@ const selectIntent = (
   const evaluated = scenario.candidates.map((input) => ({
     input,
     evaluation: evaluateTradeIntentRiskV1(input),
+    rank: candidateTuple(input),
   }))
   const approved = evaluated
     .filter(
@@ -574,7 +571,9 @@ const selectIntent = (
         candidate.input.intent.direction === signal.direction &&
         candidate.evaluation.outcome === "APPROVED",
     )
-    .sort((left, right) => compareTuples(candidateTuple(left.input), candidateTuple(right.input)))
+    .sort((left, right) =>
+      compareDebitVerticalCandidateRanksV1(left.rank, right.rank),
+    )
   return {
     ...(approved[0] === undefined ? {} : { intent: approved[0].input.intent }),
     riskStatus: approved.length > 0 ? "APPROVED" : "REJECTED",
