@@ -373,6 +373,7 @@ export const deriveBacktestReplayEligibilityV2 = (
   const timing = compatibility.compatibility.tradeIntentTiming
   const tradeIntentWindow =
     retainedTradeIntentWindow &&
+    evaluatedAt >= open &&
     slot.getTime() >= entryStart &&
     slot.getTime() < entryCutoff
       ? {

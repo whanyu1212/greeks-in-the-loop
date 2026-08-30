@@ -535,6 +535,13 @@ describe("backtest replay v2", () => {
         evaluatedAt: "2026-08-28T14:10:00.000Z",
       },
     })
+    const eligibilityBeforeDelayedOpen = deriveBacktestReplayEligibilityV2({
+      ...underlying,
+      session: {
+        ...underlying.session,
+        openAt: "2026-08-28T14:05:00.000Z",
+      },
+    })
 
     expect(eligibilityAtSevenMinutes).toMatchObject({
       tradeIntentEligible: true,
@@ -558,6 +565,13 @@ describe("backtest replay v2", () => {
       },
       reason: "OUTSIDE_TRADE_INTENT_WINDOW",
     })
+    expect(eligibilityBeforeDelayedOpen).toMatchObject({
+      tradeIntentEligible: false,
+      reason: "OUTSIDE_TRADE_INTENT_WINDOW",
+    })
+    expect(eligibilityBeforeDelayedOpen).not.toHaveProperty(
+      "tradeIntentWindow",
+    )
   })
 
   it("returns no entry for a risk rejection without falling back", () => {
