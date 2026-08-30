@@ -85,6 +85,25 @@ describe("Backtest Dataset V2", () => {
     ])
   })
 
+  it("admits retained option records at both sorted-scope boundaries", () => {
+    const definition = createBacktestDatasetDefinitionV2Fixture()
+    for (const contractSymbol of [
+      definition.optionSymbols[0]!,
+      definition.optionSymbols.at(-1)!,
+    ]) {
+      expect(
+        parseBacktestDatasetRecordV2(definition, {
+          recordType: "OPTION_TRADE",
+          contractSymbol,
+          timestamp: "2024-06-03T13:30:00.000Z",
+          priceMicros: 1,
+          size: 1,
+          conditions: [],
+        }),
+      ).toMatchObject({ contractSymbol })
+    }
+  })
+
   it("context-validates underlying and redundant OCC contract identity", () => {
     const definition = createBacktestDatasetDefinitionV2Fixture()
     expect(() =>

@@ -234,6 +234,22 @@ export type BacktestDatasetRecordV2 = Readonly<
   z.infer<typeof backtestDatasetRecordV2Schema>
 >
 
+const sortedIncludes = (
+  values: readonly string[],
+  target: string,
+): boolean => {
+  let low = 0
+  let high = values.length - 1
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2)
+    const value = values[middle]!
+    if (value === target) return true
+    if (value < target) low = middle + 1
+    else high = middle - 1
+  }
+  return false
+}
+
 export function parseBacktestDatasetRecordV2(
   definition: BacktestDatasetDefinitionV2,
   input: unknown,
@@ -257,7 +273,7 @@ export function parseBacktestDatasetRecordV2(
     if (
       (record.recordType === "OPTION_BAR" ||
         record.recordType === "OPTION_TRADE") &&
-      !definition.optionSymbols.includes(record.contractSymbol)
+      !sortedIncludes(definition.optionSymbols, record.contractSymbol)
     ) {
       throw new Error("Backtest option record is outside the retained scope")
     }
