@@ -3,6 +3,7 @@ import { z } from "zod"
 import { NO_ACTION_REASON_CODES } from "./research-decision-v1.js"
 import type { ResearchReportV2 } from "./research-report-v2.js"
 import type {
+  DebitVerticalFirstFailureReasonV1,
   ValidatedResearchSnapshotPairV1,
   SpyDebitVerticalAuditedScreeningResultV1,
 } from "../strategy/directional-debit-vertical-v1.js"
@@ -137,6 +138,42 @@ const firstFailureCountSchema = z
     { path: ["stage"], message: "Failure stage must match its bounded reason" },
   )
 
+const CYCLE_FAILURE_REASONS = new Set<DebitVerticalFirstFailureReasonV1>([
+  "STRATEGY_MANIFEST_INCOMPATIBLE",
+  "FEATURE_SIGNAL_NOT_ACTIONABLE",
+  "UNDERLYING_QUOTE_STALE",
+  "LATEST_MINUTE_BAR_STALE",
+])
+const CONTRACT_FAILURE_REASONS = new Set<DebitVerticalFirstFailureReasonV1>([
+  "OPTION_TYPE_MISMATCH",
+  "DTE_INVALID",
+  "DTE_OUT_OF_RANGE",
+  "CONTRACT_INACTIVE",
+  "CONTRACT_NOT_TRADABLE",
+  "EXERCISE_STYLE_UNSUPPORTED",
+  "MULTIPLIER_UNSUPPORTED",
+  "DELTA_OUT_OF_RANGE",
+  "IMPLIED_VOLATILITY_INVALID",
+  "OPTION_QUOTE_NON_POSITIVE",
+  "OPTION_QUOTE_CROSSED",
+  "OPTION_QUOTE_WIDTH_EXCEEDED",
+  "OPTION_QUOTE_RELATIVE_WIDTH_EXCEEDED",
+  "OPTION_QUOTE_STALE",
+  "VOLUME_SESSION_MISMATCH",
+  "VOLUME_TOO_LOW",
+  "OPEN_INTEREST_TOO_LOW",
+])
+const PAIR_FAILURE_REASONS = new Set<DebitVerticalFirstFailureReasonV1>([
+  "EXPIRATION_MISMATCH",
+  "STRIKE_ORDER_INVALID",
+  "SPREAD_WIDTH_OUT_OF_RANGE",
+  "NON_POSITIVE_NET_DEBIT",
+  "ENTRY_LIMIT_NOT_BELOW_WIDTH",
+  "ARITHMETIC_OVERFLOW",
+  "DEBIT_RATIO_EXCEEDED",
+  "MAX_LOSS_EXCEEDED",
+])
+
 export const debitVerticalScreeningDiagnosticsV1Schema = z
   .object({
     diagnosticsVersion: z.literal(DEBIT_VERTICAL_SCREENING_DIAGNOSTICS_VERSION),
@@ -154,15 +191,85 @@ export const debitVerticalScreeningDiagnosticsV1Schema = z
   })
   .strict()
   .superRefine((diagnostics, refinement) => {
+    const counts = new Map(
+      diagnostics.firstFailureCounts.map(({ reason, count }) => [reason, count]),
+    )
+    const countFor = (reasons: ReadonlySet<DebitVerticalFirstFailureReasonV1>) =>
+      [...reasons].reduce((total, reason) => total + (counts.get(reason) ?? 0), 0)
+    const reachedContractScreening = diagnostics.contractRoleEvaluationCount > 0
+    const expectedRoleEvaluations = diagnostics.inputContractCount * 2
+    const expectedPairEvaluations =
+      diagnostics.eligibleLongContractCount *
+      diagnostics.eligibleShortContractCount
     if (
-      diagnostics.eligibleLongContractCount +
-        diagnostics.eligibleShortContractCount >
-      diagnostics.contractRoleEvaluationCount
+      diagnostics.contractRoleEvaluationCount !== 0 &&
+      diagnostics.contractRoleEvaluationCount !== expectedRoleEvaluations
     ) {
       refinement.addIssue({
         code: "custom",
         path: ["contractRoleEvaluationCount"],
-        message: "Eligible role counts cannot exceed role evaluations",
+        message: "Contract screening must evaluate both roles exactly once",
+      })
+    }
+    if (
+      diagnostics.eligibleLongContractCount +
+        diagnostics.eligibleShortContractCount >
+      diagnostics.inputContractCount
+    ) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["eligibleLongContractCount"],
+        message: "One contract cannot be eligible for both leg roles",
+      })
+    }
+    if (diagnostics.spreadPairEvaluationCount !== expectedPairEvaluations) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["spreadPairEvaluationCount"],
+        message: "Every eligible long/short pair must be evaluated exactly once",
+      })
+    }
+    if (diagnostics.eligibleCandidateCount > diagnostics.spreadPairEvaluationCount) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["eligibleCandidateCount"],
+        message: "Eligible candidates cannot exceed evaluated spread pairs",
+      })
+    }
+    const contractFailureCount = countFor(CONTRACT_FAILURE_REASONS)
+    const pairFailureCount = countFor(PAIR_FAILURE_REASONS)
+    const cycleFailureCount = countFor(CYCLE_FAILURE_REASONS)
+    const rankingFailureCount = counts.get("NOT_RANK_ONE") ?? 0
+    if (
+      reachedContractScreening
+        ? contractFailureCount !==
+            diagnostics.contractRoleEvaluationCount -
+              diagnostics.eligibleLongContractCount -
+              diagnostics.eligibleShortContractCount ||
+          pairFailureCount !==
+            diagnostics.spreadPairEvaluationCount -
+              diagnostics.eligibleCandidateCount ||
+          cycleFailureCount !== 0
+        : diagnostics.eligibleLongContractCount !== 0 ||
+          diagnostics.eligibleShortContractCount !== 0 ||
+          diagnostics.spreadPairEvaluationCount !== 0 ||
+          diagnostics.eligibleCandidateCount !== 0 ||
+          contractFailureCount !== 0 ||
+          pairFailureCount !== 0 ||
+          cycleFailureCount > 1 ||
+          (diagnostics.inputContractCount > 0 && cycleFailureCount !== 1)
+    ) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["firstFailureCounts"],
+        message: "First-failure counts must reconcile with funnel evaluations",
+      })
+    }
+    if (rankingFailureCount !== Math.max(diagnostics.eligibleCandidateCount - 1, 0)) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["firstFailureCounts"],
+        message: "Ranking failures must contain every eligible non-winner",
       })
     }
     const indexes = diagnostics.firstFailureCounts.map(({ reason }) =>
@@ -265,6 +372,27 @@ export const applicationResearchScreeningAuditV1Schema = z.discriminatedUnion(
             path: ["diagnostics", "eligibleCandidateCount"],
             message: "Diagnostic and screening candidate counts must match",
           })
+        }
+        if (audit.result.status === "SELECTED") {
+          const expectedCandidateId = computeDebitVerticalCandidateIdV1({
+            underlyingSnapshotId: audit.inputIdentity.underlyingSnapshotId,
+            optionUniverseSnapshotId:
+              audit.inputIdentity.optionUniverseSnapshotId,
+            ...audit.strategy,
+            underlying: "SPY",
+            direction: audit.result.direction,
+            structure: audit.result.structure,
+            expirationDate: audit.result.expirationDate,
+            longLeg: { contractSymbol: audit.result.longContractSymbol },
+            shortLeg: { contractSymbol: audit.result.shortContractSymbol },
+          })
+          if (audit.result.candidateId !== expectedCandidateId) {
+            refinement.addIssue({
+              code: "custom",
+              path: ["result", "candidateId"],
+              message: "Selected candidate ID must bind its retained identity",
+            })
+          }
         }
       }),
   ],

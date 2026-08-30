@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest"
 
 import {
   agentResearchScreeningAuditV1Schema,
+  applicationResearchScreeningAuditV1Schema,
   classifyResearchScreeningComparisonV1,
   createApplicationCaptureUnavailableAuditV1,
   createApplicationResearchScreeningAuditV1,
   createApplicationScreeningUnavailableAuditV1,
   createResearchScreeningAuditInputIdentityV1,
   createResearchScreeningAuditV1,
+  debitVerticalScreeningDiagnosticsV1Schema,
   projectResearchReportV2ForScreeningAudit,
   RESEARCH_SCREENING_COMPARISON_CLASSES,
   researchScreeningAuditV1Schema,
@@ -157,6 +159,12 @@ describe("research screening audit V1", () => {
     expect(audited.result).toEqual(screenSpyDirectionalDebitVerticalV1(pair))
     expect(audited.result.status).toBe("NO_ACTION")
     expect(failureCount(audited, reason)).toBeGreaterThan(0)
+    expect(createApplicationResearchScreeningAuditV1({
+      pair,
+      audited,
+      captureDurationMs: 1,
+      screeningDurationMs: 1,
+    }).status).toBe("SCREENED")
   })
 
   it.each([
@@ -210,6 +218,21 @@ describe("research screening audit V1", () => {
     expect(audited.diagnostics.firstFailureCounts).toContainEqual(
       expect.objectContaining({ stage }),
     )
+  })
+
+  it("rejects a contract claimed eligible for both disjoint leg roles", () => {
+    expect(debitVerticalScreeningDiagnosticsV1Schema.safeParse({
+      diagnosticsVersion: "1.0.0",
+      underlyingSnapshotId: "a".repeat(64),
+      optionUniverseSnapshotId: "b".repeat(64),
+      inputContractCount: 1,
+      contractRoleEvaluationCount: 2,
+      eligibleLongContractCount: 1,
+      eligibleShortContractCount: 1,
+      spreadPairEvaluationCount: 1,
+      eligibleCandidateCount: 1,
+      firstFailureCounts: [],
+    }).success).toBe(false)
   })
 
   it("makes diagnostics independent of provider contract ordering", () => {
@@ -322,6 +345,24 @@ describe("research screening audit V1", () => {
       longLeg: { contractSymbol: application.result.longContractSymbol },
       shortLeg: { contractSymbol: application.result.shortContractSymbol },
     })).toBe(application.result.candidateId)
+    expect(applicationResearchScreeningAuditV1Schema.safeParse({
+      ...application,
+      result: {
+        ...application.result,
+        expirationDate: "2026-09-19",
+      },
+    }).success).toBe(false)
+    expect(applicationResearchScreeningAuditV1Schema.safeParse({
+      ...application,
+      diagnostics: {
+        ...application.diagnostics,
+        contractRoleEvaluationCount: 0,
+        eligibleLongContractCount: 0,
+        eligibleShortContractCount: 0,
+        spreadPairEvaluationCount: 0,
+        firstFailureCounts: [],
+      },
+    }).success).toBe(false)
   })
 
   it("classifies every comparison class with fail-closed precedence", () => {
