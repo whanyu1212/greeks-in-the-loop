@@ -643,8 +643,7 @@ export function createAlpacaResearchSnapshotProvider(
     const seenSymbols = new Set<string>()
     let nextPageToken: string | undefined
     let retrievedAt = applicationTime()
-    const maximumPages = Math.ceil(MAX_OPTION_UNIVERSE_CONTRACTS / CONTRACT_PAGE_SIZE)
-    for (let page = 0; page < maximumPages; page += 1) {
+    for (let page = 0; page < MAX_OPTION_UNIVERSE_CONTRACTS; page += 1) {
       const url = new URL("/v2/options/contracts", tradingBaseUrl)
       url.searchParams.set("underlying_symbols", "SPY")
       url.searchParams.set(

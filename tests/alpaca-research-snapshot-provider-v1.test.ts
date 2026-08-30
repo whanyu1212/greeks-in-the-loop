@@ -401,7 +401,7 @@ describe("Alpaca research snapshot provider V1", () => {
       .toEqual({ success: false, reasons: ["DUPLICATE_RECORD"] })
   })
 
-  it("rejects contract pagination that exceeds its bounded page count", async () => {
+  it("continues partial contract pages until the record bound", async () => {
     const responses = createSuccessfulAlpacaResearchResponses()
     let contractPage = 0
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
@@ -418,17 +418,20 @@ describe("Alpaca research snapshot provider V1", () => {
             symbol,
             strike_price: String(strike),
           }],
-          next_page_token: `page-${contractPage}`,
+          next_page_token: contractPage < 11 ? `page-${contractPage}` : null,
         })
+      }
+      if (url.pathname === "/v1beta1/options/snapshots") {
+        return jsonResponse({ snapshots: {}, next_page_token: null })
       }
       return jsonResponse({}, 500)
     })
 
     await expect(capture(createProvider(fetchMock))).resolves.toEqual({
       success: false,
-      reasons: ["PAGINATION_INCOMPLETE"],
+      reasons: ["DATA_INCOMPLETE"],
     })
-    expect(contractPage).toBe(10)
+    expect(contractPage).toBe(11)
   })
 
   it.each([
