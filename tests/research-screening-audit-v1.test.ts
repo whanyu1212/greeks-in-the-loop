@@ -245,6 +245,28 @@ describe("research screening audit V1", () => {
     }).success).toBe(false)
   })
 
+  it("canonicalizes capture failure reasons", () => {
+    const audit = createApplicationCaptureUnavailableAuditV1([
+      "PROVIDER_RATE_LIMITED",
+      "REQUEST_TIMED_OUT",
+      "REQUEST_TIMED_OUT",
+    ], 1)
+    expect(audit).toMatchObject({
+      status: "CAPTURE_UNAVAILABLE",
+      reasons: ["REQUEST_TIMED_OUT", "PROVIDER_RATE_LIMITED"],
+    })
+    if (audit.status !== "CAPTURE_UNAVAILABLE") return
+    for (const reasons of [
+      ["REQUEST_TIMED_OUT", "REQUEST_TIMED_OUT"],
+      [...audit.reasons].reverse(),
+    ]) {
+      expect(applicationResearchScreeningAuditV1Schema.safeParse({
+        ...audit,
+        reasons,
+      }).success).toBe(false)
+    }
+  })
+
   it("caps retained option counts at the snapshot contract limit", () => {
     expect(researchScreeningAuditInputIdentityV1Schema.safeParse({
       authority: "APPLICATION",
@@ -491,10 +513,17 @@ describe("research screening audit V1", () => {
     ): IdenticalInputParityChecksV1 => ({ ...MATCHES, [field]: "MISMATCH" })
     const drift: AgentResearchScreeningAuditV1 = {
       status: "MODEL_IDENTITY_DRIFT",
+      invocationVersion: "1.3.0",
       reason: "MODEL_DRIFT",
       expected: "gpt-5.6-sol",
       observed: "different-model",
     }
+    expect(agentResearchScreeningAuditV1Schema.safeParse(drift).success).toBe(true)
+    for (const invalid of [
+      { ...drift, expected: "invented-model" },
+      { ...drift, observed: drift.expected },
+      { ...drift, invocationVersion: "1.1.0" },
+    ]) expect(agentResearchScreeningAuditV1Schema.safeParse(invalid).success).toBe(false)
     const unavailable: AgentResearchScreeningAuditV1 = {
       status: "UNAVAILABLE",
       reason: "INVOCATION_FAILED",

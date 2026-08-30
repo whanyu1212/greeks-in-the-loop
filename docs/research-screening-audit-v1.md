@@ -28,8 +28,8 @@ Diagnostics count the first failed predicate for each evaluation unit:
 Predicates retain their existing short-circuit order. Failure counts are emitted
 once per nonzero reason in the canonical reason order. This prevents provider
 response order and traversal-time winner changes from changing the funnel.
-Capture failures are outside the strategy engine and use their own bounded
-application-audit reasons.
+Capture failures are outside the strategy engine and use their own bounded,
+unique, canonically ordered application-audit reasons.
 
 The diagnostics do not retain quotes, Greeks, feature values, provider payloads,
 or errors. Candidate IDs, component versions, thresholds, financial arithmetic,
@@ -55,6 +55,11 @@ The bounded projection retains:
 - terminal class and bounded no-action reasons; and
 - direction, structure, expiration, and exact leg symbols when a candidate is
   available.
+
+Available projections must match the provider/model identity pinned by their
+invocation version. Model-identity-drift records retain that invocation version,
+name the registered expected provider or model, and require a different observed
+value.
 
 It excludes thesis, summaries, claims, URLs, locators, prices, strikes, Greeks,
 liquidity values, and economics.

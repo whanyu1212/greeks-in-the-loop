@@ -382,7 +382,21 @@ export const applicationResearchScreeningAuditV1Schema = z.discriminatedUnion(
           .min(1)
           .max(APPLICATION_CAPTURE_AUDIT_FAILURE_REASONS.length),
       })
-      .strict(),
+      .strict()
+      .superRefine((audit, refinement) => {
+        const indexes = audit.reasons.map((reason) =>
+          APPLICATION_CAPTURE_AUDIT_FAILURE_REASONS.indexOf(reason),
+        )
+        if (indexes.some(
+          (value, index) => index > 0 && indexes[index - 1]! >= value,
+        )) {
+          refinement.addIssue({
+            code: "custom",
+            path: ["reasons"],
+            message: "Capture failure reasons must be unique and ordered",
+          })
+        }
+      }),
     z
       .object({
         status: z.literal("SCREENING_UNAVAILABLE"),
@@ -636,11 +650,29 @@ export const agentResearchScreeningAuditV1Schema = z.discriminatedUnion(
     z
       .object({
         status: z.literal("MODEL_IDENTITY_DRIFT"),
+        invocationVersion: z.enum(SUPPORTED_RESEARCH_INVOCATION_VERSIONS),
         reason: z.enum(["PROVIDER_DRIFT", "MODEL_DRIFT"]),
         expected: identifier,
         observed: identifier,
       })
-      .strict(),
+      .strict()
+      .superRefine((drift, refinement) => {
+        const provenance =
+          RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[drift.invocationVersion]
+        const expected = "providerId" in provenance
+          ? drift.reason === "PROVIDER_DRIFT"
+            ? provenance.providerId
+            : provenance.modelId
+          : undefined
+        if (expected === undefined || drift.expected !== expected ||
+          drift.observed === expected) {
+          refinement.addIssue({
+            code: "custom",
+            path: ["expected"],
+            message: "Drift must identify a changed pinned provider or model",
+          })
+        }
+      }),
     z
       .object({
         status: z.literal("UNAVAILABLE"),
