@@ -61,6 +61,36 @@ const baseAnalysis = () => ({
   conflicts: [] as string[],
 })
 
+const symbolIndicators = [
+  {
+    underlying: "SPY",
+    throughSessionDate: "2026-08-25",
+    return5d: 0.0021,
+    return20d: 0.0084,
+    relativeStrengthRank20d: 1,
+    realizedVolatility20: 0.01,
+    completedSessionVolumeRatio20: 1,
+  },
+  {
+    underlying: "QQQ",
+    throughSessionDate: "2026-08-25",
+    return5d: -0.001,
+    return20d: -0.004,
+    relativeStrengthRank20d: 3,
+    realizedVolatility20: 0.005,
+    completedSessionVolumeRatio20: 1,
+  },
+  {
+    underlying: "IWM",
+    throughSessionDate: "2026-08-25",
+    return5d: 0,
+    return20d: 0.0072,
+    relativeStrengthRank20d: 2,
+    realizedVolatility20: 0.08,
+    completedSessionVolumeRatio20: 1,
+  },
+] as const
+
 type NoActionReasonCode = (typeof NO_ACTION_REASON_CODES)[number]
 
 const noActionReport = (
@@ -183,6 +213,7 @@ const proposalReport = (externalContext = [
       dailySessionCount: 50,
       intradayBarCount: 60,
     },
+    symbolIndicators,
     candidateEvaluation: {
       verification: "AGENT_REPORTED",
       observedAt: "2026-08-26T14:30:00.000Z",

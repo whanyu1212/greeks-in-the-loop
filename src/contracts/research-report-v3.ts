@@ -343,6 +343,13 @@ export const researchReportV3Schema = z
         message: "A proposal requires completed intraday bars",
       })
     }
+    if (report.analysis.symbolIndicators === undefined) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["analysis", "symbolIndicators"],
+        message: "A proposal requires comparison indicators for every underlying",
+      })
+    }
     for (const metric of [
       "dailyClose",
       "sma20",

@@ -160,6 +160,35 @@ const researchReport = <T extends ReportFixtureResult>(result: T) => ({
     },
     ...(result.outcome === "PROPOSE_TRADE"
       ? {
+          symbolIndicators: [
+            {
+              underlying: "SPY" as const,
+              throughSessionDate: "2026-08-24",
+              return5d: 0.01,
+              return20d: 0.03,
+              relativeStrengthRank20d: 1,
+              realizedVolatility20: 0.16,
+              completedSessionVolumeRatio20: 1.1,
+            },
+            {
+              underlying: "QQQ" as const,
+              throughSessionDate: "2026-08-24",
+              return5d: -0.01,
+              return20d: 0.01,
+              relativeStrengthRank20d: 2,
+              realizedVolatility20: 0.21,
+              completedSessionVolumeRatio20: 0.9,
+            },
+            {
+              underlying: "IWM" as const,
+              throughSessionDate: "2026-08-24",
+              return5d: -0.02,
+              return20d: -0.04,
+              relativeStrengthRank20d: 3,
+              realizedVolatility20: 0.24,
+              completedSessionVolumeRatio20: 1.2,
+            },
+          ],
           candidateEvaluation: {
             verification: "AGENT_REPORTED" as const,
             observedAt: "2026-08-25T14:30:30.000Z",

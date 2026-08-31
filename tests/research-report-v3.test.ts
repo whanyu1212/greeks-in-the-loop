@@ -129,6 +129,49 @@ const symbolIndicators = [
   },
 ] as const
 
+const proposalReport = {
+  ...noAction,
+  result: {
+    contractVersion: "2.0.0",
+    outcome: "PROPOSE_TRADE",
+    direction: "BULLISH",
+    thesis: "The selected ETF has aligned daily and intraday evidence.",
+    candidate: {
+      underlying: "SPY",
+      structure: "BULL_CALL_SPREAD",
+      expiration: "2026-09-18",
+      longLeg: { contractSymbol: "SPY260918C00650000", strike: 650 },
+      shortLeg: { contractSymbol: "SPY260918C00655000", strike: 655 },
+    },
+    invalidation: ["Reject if refreshed evidence changes the candidate."],
+    evidence: [{
+      claimId: "quote-fact",
+      kind: "SOURCED_FACT",
+      claim: "The exact proposal legs were confirmed.",
+      snapshotRef: "alpaca-proposal-quotes-v1",
+    }],
+  },
+  analysis: {
+    ...noAction.analysis,
+    marketRegime: {
+      ...noAction.analysis.marketRegime,
+      signal: "BULLISH",
+      dailyClose: 650,
+      sma20: 645,
+      sma50: 640,
+      sessionVwap: 648,
+      spotMidpoint: 651,
+    },
+    symbolIndicators,
+    candidateEvaluation: {
+      ...candidateEvaluation(),
+      legs: candidateEvaluation().legs.map((leg) =>
+        leg.role === "SHORT" ? { ...leg, delta: 0.3 } : leg
+      ),
+    },
+  },
+} as const
+
 describe("ResearchReportV3", () => {
   it("retains a bounded normalized dossier with timestamped Exa context", () => {
     expect(researchReportV3Schema.parse(noAction)).toMatchObject(noAction)
@@ -159,6 +202,20 @@ describe("ResearchReportV3", () => {
         analysis: { ...noAction.analysis, symbolIndicators },
       }).success,
     ).toBe(true)
+  })
+
+  it("requires complete ETF comparison indicators for proposals", () => {
+    expect(researchReportV3Schema.safeParse(proposalReport).success).toBe(true)
+    const { symbolIndicators: _indicators, ...analysis } = proposalReport.analysis
+    const result = researchReportV3Schema.safeParse({
+      ...proposalReport,
+      analysis,
+    })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error("Expected proposal rejection")
+    expect(result.error.issues).toContainEqual(expect.objectContaining({
+      path: ["analysis", "symbolIndicators"],
+    }))
   })
 
   it("rejects duplicate relative-strength ranks", () => {
