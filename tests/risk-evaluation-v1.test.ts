@@ -499,14 +499,25 @@ describe("backtest replay input validation", () => {
     monitorCycles: [monitorCycle],
   }
   const replay = (scenarios: readonly unknown[]) => ({
-    replayVersion: "4.0.0",
+    replayVersion: "5.0.0",
     initialEquityCents: 10_000_000,
     execution: {
       entrySlippageHalfCentsPerShare: 0,
       exitSlippageHalfCentsPerShare: 0,
       commissionCentsPerContract: 0,
     },
-    sessionDates: ["2026-08-27", "2026-08-28"],
+    sessions: [
+      {
+        date: "2026-08-27",
+        open: "2026-08-27T13:30:00.000Z",
+        close: "2026-08-27T20:00:00.000Z",
+      },
+      {
+        date: "2026-08-28",
+        open: "2026-08-28T13:30:00.000Z",
+        close: "2026-08-28T20:00:00.000Z",
+      },
+    ],
     scenarios,
   })
 
@@ -514,6 +525,7 @@ describe("backtest replay input validation", () => {
     expect(runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
       ...monitorCycle,
       decidedAt: scenario.riskInput.intent.evaluatedAt,
+      minutesToClose: 330,
       markHalfCentsPerShare:
         scenario.riskInput.intent.widthCentsPerShare * 2,
     }] }])).aggregate).toMatchObject({ status: "COMPLETE" })
@@ -559,5 +571,16 @@ describe("backtest replay input validation", () => {
       dte: 14,
       holdingSessionIndex: 2,
     }] }])).aggregate).toMatchObject({ status: "COMPLETE" })
+  })
+
+  it("cross-checks monitor timing against replay session hours", () => {
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      marketOpen: false,
+    }] }]))).toThrow(/market state must match/u)
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      minutesToClose: 0,
+    }] }]))).toThrow(/minutes to close must match/u)
   })
 })

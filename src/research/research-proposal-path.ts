@@ -135,6 +135,19 @@ export const proposalHistoryIssuePath = (
   if (previousSessionDates === undefined || previousSessionDates.length < 2) {
     return ["analysis", "candidateEvaluation", "legs", 0, "openInterestDate"]
   }
+  const indicators = report.analysis.symbolIndicators
+  if (indicators === undefined) return ["analysis", "symbolIndicators"]
+  const indicatorCutoffIssue = indicators.findIndex(
+    ({ throughSessionDate }) => throughSessionDate !== previousSessionDates.at(-1),
+  )
+  if (indicatorCutoffIssue >= 0) {
+    return [
+      "analysis",
+      "symbolIndicators",
+      indicatorCutoffIssue,
+      "throughSessionDate",
+    ]
+  }
   const eligibleOpenInterestDates = new Set([
     sessionDate,
     ...previousSessionDates.slice(-2),

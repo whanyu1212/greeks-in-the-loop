@@ -618,6 +618,34 @@ describe("processResearchCycle", () => {
     expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
   })
 
+  it("requires indicator cutoffs at the latest completed session", async () => {
+    const dependencies = setup()
+    const report = researchReport(proposal)
+    const result = await processResearchCycle({
+      rawResponse: JSON.stringify({
+        ...report,
+        analysis: {
+          ...report.analysis,
+          symbolIndicators: report.analysis.symbolIndicators?.map((indicator) => ({
+            ...indicator,
+            throughSessionDate: "2026-08-25",
+          })),
+        },
+      }),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toMatchObject({
+      status: "DECISION_REJECTED",
+      issues: [{
+        code: "CONTEXT_INVALID",
+        path: ["analysis", "symbolIndicators", 0, "throughSessionDate"],
+      }],
+    })
+    expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
+  })
+
   it.each(["2026-08-20", "2026-08-26"])(
     "rejects open interest dated outside the current or two prior sessions: %s",
     async (openInterestDate) => {

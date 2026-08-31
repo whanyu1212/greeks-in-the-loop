@@ -5,7 +5,7 @@ pnpm backtest -- --scenarios workspace/scenarios.json
 pnpm backtest -- --scenarios workspace/scenarios.json --output workspace/report.json
 ```
 
-The input is one JSON object with `replayVersion`, initial equity, execution assumptions, the ordered market-session dates covering every scenario, and one or more scenarios. Each scenario contains an exact `RiskEvaluationInputV1` and ordered monitor cycles. Replay rejects any cycle whose `holdingSessionIndex` does not match its position in that calendar relative to the intent's entry session.
+The input is one JSON object with `replayVersion`, initial equity, execution assumptions, ordered market sessions with exact open and close instants covering every scenario, and one or more scenarios. Each scenario contains an exact `RiskEvaluationInputV1` and ordered monitor cycles. Replay rejects any cycle whose `holdingSessionIndex`, `marketOpen`, or `minutesToClose` does not match that calendar.
 
 Replay calls `evaluateTradeIntentRiskV1`. Rejected inputs are not simulated; approved inputs use the deterministic monitor and execution model in `src/backtest/replay-core.ts`.
 

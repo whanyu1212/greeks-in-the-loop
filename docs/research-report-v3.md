@@ -9,7 +9,7 @@
 - timestamped Exa and optional FMP context;
 - supporting, contradicting, and unresolved factors.
 
-Substantive research requires a thesis-relevant Exa source. A proposal additionally requires live regime data, fresh account observations, 50 completed daily sessions, the complete three-ETF indicator set, completed intraday bars, and bounded candidate liquidity/Greeks.
+Substantive research requires a thesis-relevant Exa source. A proposal additionally requires live regime data, fresh account observations, 50 completed daily sessions, the complete three-ETF indicator set through the latest application-provided completed session, completed intraday bars, and bounded candidate liquidity/Greeks.
 
 The extra indicators are advisory. They help the agent compare opportunities and explain conflicting signals; deterministic code still owns schema validation, refreshed quotes, trade economics, and risk approval. Candidate diagnostics may retain IV-to-realized-volatility and bid-ask-spread ratios without retaining model-authored prices.
 
