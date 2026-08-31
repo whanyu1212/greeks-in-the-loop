@@ -16,7 +16,7 @@ import {
 // Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
 // when grader semantics change, so stored artifacts stay attributable to the
 // revision that produced them.
-export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "1.0.0" as const
+export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "2.0.0" as const
 
 export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "MALFORMED_JSON",
@@ -489,6 +489,10 @@ export function evaluateResearchBehavior({
 
   const externalSources = report?.analysis.externalContext ?? []
   if (report !== undefined) {
+    const marketSymbol =
+      "candidate" in report.result && report.result.candidate !== undefined
+        ? report.result.candidate.underlying
+        : "SPY"
     const hasCompletedBars = (input: Readonly<Record<string, unknown>>) =>
       completedToolCalls.some((call) =>
         call.name === "alpaca_get_stock_bars" &&
@@ -496,12 +500,12 @@ export function evaluateResearchBehavior({
       )
     const completedUnderlyingSnapshot =
       hasCompletedBars({
-        symbol: "SPY",
+        symbol: marketSymbol,
         timeframe: "1Day",
         adjustment: "all",
         feed: "iex",
       }) &&
-      hasCompletedBars({ symbol: "SPY", timeframe: "1Min", feed: "iex" })
+      hasCompletedBars({ symbol: marketSymbol, timeframe: "1Min", feed: "iex" })
     const marketRegime = report.analysis.marketRegime
     if (
       !completedUnderlyingSnapshot &&

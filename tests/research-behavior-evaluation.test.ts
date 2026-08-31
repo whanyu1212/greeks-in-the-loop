@@ -253,6 +253,64 @@ describe("research behavior evaluation", () => {
     }
   })
 
+  it("grounds proposal metrics in the proposed underlying's bars", () => {
+    const source = researchBehaviorScenarios.find(
+      ({ id }) => id === "valid-adversarial-proposal",
+    )!
+    const report = JSON.parse(source.rawResponse) as {
+      result: {
+        candidate: {
+          underlying: string
+          longLeg: { contractSymbol: string; strike: number }
+          shortLeg: { contractSymbol: string; strike: number }
+        }
+      }
+      analysis: {
+        candidateEvaluation: {
+          legs: Array<{ contractSymbol: string }>
+        }
+      }
+    }
+    report.result.candidate.underlying = "QQQ"
+    report.result.candidate.longLeg = {
+      contractSymbol: "QQQ260916C00500000",
+      strike: 500,
+    }
+    report.result.candidate.shortLeg = {
+      contractSymbol: "QQQ260916C00505000",
+      strike: 505,
+    }
+    report.analysis.candidateEvaluation.legs[0]!.contractSymbol =
+      report.result.candidate.longLeg.contractSymbol
+    report.analysis.candidateEvaluation.legs[1]!.contractSymbol =
+      report.result.candidate.shortLeg.contractSymbol
+    const bars = (symbol: string) => [
+      {
+        ...completed("alpaca_get_stock_bars"),
+        input: { symbol, timeframe: "1Day", adjustment: "all", feed: "iex" },
+      },
+      {
+        ...completed("alpaca_get_stock_bars"),
+        input: { symbol, timeframe: "1Min", feed: "iex" },
+      },
+    ]
+    const evaluate = (symbol: string) => evaluateResearchBehavior({
+      scenarioId: `proposal-${symbol.toLowerCase()}-bars`,
+      rawResponse: JSON.stringify(report),
+      toolCalls: bars(symbol),
+      expected: {},
+    })
+
+    const ownBars = evaluate("QQQ")
+    expect(ownBars.dimensions.contractCompliance.status).toBe("PASS")
+    expect(ownBars.dimensions.evidenceDiscipline.issueCodes).not.toContain(
+      "EXPECTED_MARKET_METRIC_MISMATCH",
+    )
+    expect(evaluate("SPY").dimensions.evidenceDiscipline.issueCodes).toContain(
+      "EXPECTED_MARKET_METRIC_MISMATCH",
+    )
+  })
+
   it("forbids every tool after an ineligible account hard gate", () => {
     const source = researchBehaviorScenarios[0]!
     const evaluation = evaluateResearchBehavior({
