@@ -11,7 +11,7 @@ import {
   simulateReplayScenario,
 } from "./replay-core.js"
 
-export const BACKTEST_REPLAY_VERSION = "1.0.0" as const
+export const BACKTEST_REPLAY_VERSION = "3.0.0" as const
 
 const scenarioSchema = z
   .object({
