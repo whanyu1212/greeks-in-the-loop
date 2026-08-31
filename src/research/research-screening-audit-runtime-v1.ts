@@ -6,6 +6,7 @@ import {
 } from "../contracts/research-screening-audit-v1.js"
 import { validateResearchSnapshotPairV1 } from "../contracts/research-market-snapshot-builders-v1.js"
 import type { ResearchSnapshotProviderV1 } from "../market-data/alpaca-research-snapshot-provider-v1.js"
+import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
 import {
   screenSpyDirectionalDebitVerticalWithAuditV1,
   type SpyDebitVerticalAuditedScreeningResultV1,
@@ -41,6 +42,16 @@ const cancellationReason = (signal: AbortSignal) =>
   signal.reason instanceof DOMException && signal.reason.name === "TimeoutError"
     ? "AUDIT_DEADLINE_EXCEEDED" as const
     : "AUDIT_CANCELLED" as const
+
+/** Returns only real scheduled windows admitted to the production audit sidecar. */
+export const researchScreeningAuditWindowV1 = (
+  eligibility: Pick<
+    ResearchEligibilityV1,
+    "researchMode" | "tradeIntentEligible" | "tradeIntentWindow"
+  >,
+) => eligibility.researchMode === undefined && eligibility.tradeIntentEligible
+  ? eligibility.tradeIntentWindow
+  : undefined
 
 /** Captures and screens one audit-only SPY snapshot without exposing it to runtime authority. */
 export async function runApplicationResearchScreeningAuditV1({

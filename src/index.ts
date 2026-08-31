@@ -62,7 +62,10 @@ import {
   reconstructResearchContextV1,
 } from "./research/research-context-v1.js"
 import { processResearchCycle } from "./research/research-cycle.js"
-import { runApplicationResearchScreeningAuditV1 } from "./research/research-screening-audit-runtime-v1.js"
+import {
+  researchScreeningAuditWindowV1,
+  runApplicationResearchScreeningAuditV1,
+} from "./research/research-screening-audit-runtime-v1.js"
 import { createAlpacaRiskStateProvider } from "./risk/alpaca-risk-state-provider.js"
 import {
   createLedgerDurableRiskControlStateLoader,
@@ -490,9 +493,7 @@ try {
         const tools = Object.fromEntries(
           MUTATING_ALPACA_TOOLS.map((tool) => [tool, false]),
         )
-        const auditWindow = initialEligibility.tradeIntentEligible
-          ? initialEligibility.tradeIntentWindow
-          : undefined
+        const auditWindow = researchScreeningAuditWindowV1(initialEligibility)
         const applicationAudit = auditWindow === undefined
           ? undefined
           : (() => {

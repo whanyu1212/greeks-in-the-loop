@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest"
 
 import type { ResearchSnapshotProviderV1 } from "../src/market-data/alpaca-research-snapshot-provider-v1.js"
-import { runApplicationResearchScreeningAuditV1 } from "../src/research/research-screening-audit-runtime-v1.js"
+import {
+  researchScreeningAuditWindowV1,
+  runApplicationResearchScreeningAuditV1,
+} from "../src/research/research-screening-audit-runtime-v1.js"
 import { createAuditSnapshotPairV1 } from "./fixtures/research-screening-audit-v1.js"
 
 const SESSION_DATE = "2026-08-28"
@@ -25,6 +28,22 @@ const successfulProvider = (): ResearchSnapshotProviderV1 => {
 }
 
 describe("application research screening audit runtime V1", () => {
+  it("admits real scheduled windows and skips synthetic shadow-anytime windows", () => {
+    const tradeIntentWindow = {
+      slotStartedAt: SLOT_STARTED_AT,
+      deadline: "2026-08-28T14:10:00.000Z",
+    }
+    expect(researchScreeningAuditWindowV1({
+      tradeIntentEligible: true,
+      tradeIntentWindow,
+    })).toEqual(tradeIntentWindow)
+    expect(researchScreeningAuditWindowV1({
+      researchMode: "DRY_RUN_SHADOW_ANYTIME",
+      tradeIntentEligible: true,
+      tradeIntentWindow,
+    })).toBeUndefined()
+  })
+
   it("captures and screens one validated snapshot pair with bounded durations", async () => {
     const audit = await runApplicationResearchScreeningAuditV1({
       provider: successfulProvider(),
