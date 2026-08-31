@@ -1,10 +1,9 @@
 import { z } from "zod"
 
-import { researchDecisionV1Schema } from "../contracts/research-decision-v1.js"
-import { preliminaryResearchV1Schema } from "../contracts/preliminary-research-v1.js"
-import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
-import { researchReportV2Schema } from "../contracts/research-report-v2.js"
-import { researchScreeningAuditV1Schema } from "../contracts/research-screening-audit-v1.js"
+import { researchDecisionV2Schema } from "../contracts/research-decision-v2.js"
+import { preliminaryResearchV2Schema } from "../contracts/preliminary-research-v2.js"
+import { tradeIntentV2Schema } from "../contracts/trade-intent-v2.js"
+import { researchReportV3Schema } from "../contracts/research-report-v3.js"
 import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
 import {
   RESEARCH_MODEL_DRIFT_CODES,
@@ -33,7 +32,6 @@ export const LEDGER_EVENT_TYPES = [
   "TRADE_INTENT_DERIVATION_REJECTED",
   "RESEARCH_CYCLE_COMPLETED",
   "RESEARCH_CYCLE_INTERRUPTED",
-  "RESEARCH_SCREENING_AUDIT_RECORDED",
   "RESEARCH_INVOCATION_IDENTITY_REJECTED",
   "RESEARCH_LOOP_BREAKER_LATCHED",
   "RESEARCH_LOOP_BREAKER_RESET",
@@ -111,17 +109,17 @@ const payloadSchemas = {
     ),
   PRELIMINARY_RESEARCH_RECORDED: z
     .object({
-      research: preliminaryResearchV1Schema,
+      research: preliminaryResearchV2Schema,
     })
     .strict(),
   RESEARCH_REPORT_RECORDED: z
     .object({
-      report: researchReportV2Schema,
+      report: researchReportV3Schema,
     })
     .strict(),
   RESEARCH_DECISION_VALIDATED: z
     .object({
-      decision: researchDecisionV1Schema,
+      decision: researchDecisionV2Schema,
     })
     .strict(),
   RESEARCH_DECISION_REJECTED: z
@@ -142,7 +140,7 @@ const payloadSchemas = {
     .strict(),
   TRADE_INTENT_DERIVED: z
     .object({
-      intent: tradeIntentV1Schema,
+      intent: tradeIntentV2Schema,
     })
     .strict(),
   TRADE_INTENT_DERIVATION_REJECTED: z
@@ -171,11 +169,6 @@ const payloadSchemas = {
         "PROCESS_RESTART",
         "FAILED",
       ]),
-    })
-    .strict(),
-  RESEARCH_SCREENING_AUDIT_RECORDED: z
-    .object({
-      audit: researchScreeningAuditV1Schema,
     })
     .strict(),
   RESEARCH_INVOCATION_IDENTITY_REJECTED: z

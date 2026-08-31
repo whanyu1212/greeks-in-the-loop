@@ -11,12 +11,7 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import type { ResearchReportV2 } from "../src/contracts/research-report-v2.js"
-import {
-  createAgentResearchScreeningUnavailableAuditV1,
-  createApplicationCaptureUnavailableAuditV1,
-  createResearchScreeningAuditV1,
-} from "../src/contracts/research-screening-audit-v1.js"
+import type { ResearchReportV3 } from "../src/contracts/research-report-v3.js"
 import {
   projectResearchRunV1,
   type ResearchRunV1,
@@ -26,15 +21,12 @@ import type { StoredLedgerEventV1 } from "../src/event-ledger/ledger-event-v1.js
 import type { ResearchCycleOutcomeV1 } from "../src/research/research-cycle-outcome-v1.js"
 
 const researchInvocation = {
-  invocationVersion: "1.0.0" as const,
+  invocationVersion: "3.0.0" as const,
   agentName: "research",
-  cycleMode: "DRY_RUN_ANYTIME" as const,
+  cycleMode: "DRY_RUN" as const,
   promptVersion: "1.3.0",
-  skillName: "spy-debit-spread-research",
-  skillVersion: "1.1.0",
-  strategyVersion: "1.1.0",
-  decisionContractVersion: "1.0.0",
-  reportVersion: "2.0.0",
+  decisionContractVersion: "2.0.0",
+  reportVersion: "3.0.0",
   providerId: "test-provider",
   modelId: "test-model",
   responseError: false,
@@ -88,7 +80,7 @@ describe("research cycle artifact", () => {
         eventId: "risk-intent",
         causationEventId: "risk-decision-source",
         eventType: "TRADE_INTENT_DERIVED",
-        payload: { intent: { contractVersion: "1.0.0" } },
+        payload: { intent: { contractVersion: "2.0.0" } },
       },
       {
         ...base,
@@ -133,7 +125,7 @@ describe("research cycle artifact", () => {
     ] as unknown as StoredLedgerEventV1[]
 
     expect(projectResearchRunV1(events)).toMatchObject({
-      runVersion: "1.1.0",
+      runVersion: "3.0.0",
       shadowRisk: {
         decision: {
           stage: "STATE_CAPTURE_FAILED",
@@ -147,11 +139,17 @@ describe("research cycle artifact", () => {
 
   it("projects the complete run from the committed ledger timeline", () => {
     const decision = {
-      contractVersion: "1.0.0" as const,
-      strategyVersion: "1.1.0" as const,
+      contractVersion: "2.0.0" as const,
       outcome: "NO_ACTION" as const,
       reasonCodes: ["SIGNAL_NOT_ACTIONABLE" as const],
-      evidence: [],
+      evidence: [{
+        claimId: "mixed-regime",
+        kind: "SOURCED_FACT" as const,
+        claim: "The retained market regime signal was mixed.",
+        provider: "ALPACA" as const,
+        temporalClass: "LIVE" as const,
+        observedAt: "2026-08-26T12:00:00.000Z",
+      }],
     }
     const base = {
       eventVersion: "1.0.0" as const,
@@ -175,7 +173,7 @@ describe("research cycle artifact", () => {
             sessionDate: "2026-08-26",
             researchEligible: true,
             tradeIntentEligible: false,
-            researchMode: "DRY_RUN_ANYTIME",
+            researchMode: "DRY_RUN",
             reason: "DRY_RUN_RESEARCH_ONLY",
           },
         },
@@ -199,7 +197,7 @@ describe("research cycle artifact", () => {
     ]
 
     expect(projectResearchRunV1(events)).toMatchObject({
-      runVersion: "1.0.0",
+      runVersion: "3.0.0",
       cycle: {
         cycleId: "cycle-1",
         cycleNumber: 1,
@@ -207,7 +205,7 @@ describe("research cycle artifact", () => {
       },
       initialEligibility: {
         researchEligible: true,
-        researchMode: "DRY_RUN_ANYTIME",
+        researchMode: "DRY_RUN",
         reason: "DRY_RUN_RESEARCH_ONLY",
       },
       validatedDecision: decision,
@@ -243,40 +241,13 @@ describe("research cycle artifact", () => {
     ) as StoredLedgerEventV1[]
     const currentRun = projectResearchRunV1(currentEvents)
     expect(currentRun).toMatchObject({
-      runVersion: "1.2.0",
+      runVersion: "3.0.0",
       researchInvocation,
     })
-    const completion = currentEvents.at(-1)
-    if (completion?.eventType !== "RESEARCH_CYCLE_COMPLETED") {
-      throw new Error("Expected completed cycle fixture")
-    }
-    expect(projectResearchRunV1([
-      ...currentEvents,
-      {
-        ...completion,
-        sequence: completion.sequence + 1,
-        eventId: "event-screening-audit",
-        causationEventId: completion.eventId,
-        eventType: "RESEARCH_SCREENING_AUDIT_RECORDED",
-        payload: {
-          audit: createResearchScreeningAuditV1({
-            application: createApplicationCaptureUnavailableAuditV1(
-              ["REQUEST_TIMED_OUT"],
-              25,
-            ),
-            agent: createAgentResearchScreeningUnavailableAuditV1(
-              "INVOCATION_FAILED",
-            ),
-          }),
-        },
-      },
-    ])).toEqual(currentRun)
-
     const latestInvocation = {
       ...researchInvocation,
-      invocationVersion: "1.1.0" as const,
+      invocationVersion: "3.0.0" as const,
       promptVersion: "1.4.0",
-      skillVersion: "1.2.0",
     }
     const latestEvents = events.map((event) =>
       event.eventType === "RESEARCH_CYCLE_COMPLETED"
@@ -287,7 +258,7 @@ describe("research cycle artifact", () => {
         : event,
     ) as StoredLedgerEventV1[]
     expect(projectResearchRunV1(latestEvents)).toMatchObject({
-      runVersion: "1.3.0",
+      runVersion: "3.0.0",
       researchInvocation: latestInvocation,
     })
   })
@@ -299,8 +270,7 @@ describe("research cycle artifact", () => {
       outcomeVersion: "1.0.0",
       status: "PRELIMINARY_RESEARCH_RETAINED",
       research: {
-        contractVersion: "1.0.0",
-        strategyVersion: "1.1.0",
+        contractVersion: "2.0.0",
         outcome: "PRELIMINARY_RESEARCH",
         targetSessionDate: "2026-08-26",
         direction: "UNDETERMINED",
@@ -319,8 +289,8 @@ describe("research cycle artifact", () => {
         requiresRefresh: true,
       },
     }
-    const researchReport: ResearchReportV2 = {
-      reportVersion: "2.0.0",
+    const researchReport: ResearchReportV3 = {
+      reportVersion: "3.0.0",
       result: outcome.research,
       analysis: {
         provenance: "AGENT_REPORTED",
@@ -360,7 +330,7 @@ describe("research cycle artifact", () => {
     }
 
     const run: ResearchRunV1 = {
-      runVersion: "1.0.0",
+      runVersion: "3.0.0",
       cycle: {
         cycleId: "cycle-1",
         cycleNumber: 1,
@@ -391,7 +361,7 @@ describe("research cycle artifact", () => {
     })
     expect(
       createHash("sha256").update(readFileSync(path)).digest("hex"),
-    ).toBe("7561d64543b2e229174db726c19183a0fb21be5939b7788dc74b48dd426f3686")
+    ).toBe("06ae170cb818ee700eb3e7f87e2a9a3c0a0032ee5e064b636ecf096675812082")
     expect(statSync(path).mode & 0o777).toBe(0o600)
 
     chmodSync(path, 0o644)
@@ -406,15 +376,21 @@ describe("research cycle artifact", () => {
       outcomeVersion: "1.0.0",
       status: "VALIDATED_NO_ACTION",
       decision: {
-        contractVersion: "1.0.0",
-        strategyVersion: "1.1.0",
+        contractVersion: "2.0.0",
         outcome: "NO_ACTION",
         reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
-        evidence: [],
+        evidence: [{
+          claimId: "mixed-regime",
+          kind: "SOURCED_FACT",
+          claim: "The retained market regime signal was mixed.",
+          provider: "ALPACA",
+          temporalClass: "LIVE",
+          observedAt: "2026-08-26T12:00:00.000Z",
+        }],
       },
     }
     const run: ResearchRunV1 = {
-      runVersion: "1.0.0",
+      runVersion: "3.0.0",
       cycle: {
         cycleId: "cycle-1",
         cycleNumber: 1,

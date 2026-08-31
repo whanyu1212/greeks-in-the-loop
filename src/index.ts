@@ -30,7 +30,6 @@ import {
 import { createSqliteLedgerStore } from "./event-ledger/sqlite-ledger-store.js"
 import { createAlpacaOptionQuoteProvider } from "./market-data/alpaca-option-quotes.js"
 import { createAlpacaCalendarClient } from "./market-data/alpaca-calendar-client.js"
-import { createAlpacaResearchSnapshotProvider } from "./market-data/alpaca-research-snapshot-provider-v1.js"
 import { summarizeOpenCodeInvocation } from "./observability/opencode-telemetry-summary.js"
 import { startResearchTelemetry } from "./observability/research-telemetry.js"
 import {
@@ -38,20 +37,17 @@ import {
   resolveTerminalLogFormat,
 } from "./observability/terminal-stage-reporter.js"
 import {
-  createAgentResearchScreeningModelDriftAuditV1,
-  createAgentResearchScreeningUnavailableAuditV1,
-  createApplicationCaptureUnavailableAuditV1,
-  createResearchScreeningAuditV1,
-  projectResearchReportV2ForScreeningAudit,
-} from "./contracts/research-screening-audit-v1.js"
-import {
   assertResearchModelIdentityV1,
   createResearchInvocationV1,
+  RESEARCH_INVOCATION_PROVENANCE_BY_VERSION,
   RESEARCH_INVOCATION_VERSION,
   type ResearchInvocationV1,
 } from "./research/research-invocation-v1.js"
 import { startOpencode } from "./opencode-runtime.js"
-import { buildResearchCyclePrompt } from "./research/research-agent.js"
+import {
+  buildResearchCyclePrompt,
+  buildResearchReportRepairPrompt,
+} from "./research/research-agent.js"
 import { loadResearchRunV1 } from "./research/research-artifact.js"
 import {
   buildResearchRunPresentation,
@@ -61,21 +57,18 @@ import {
   loadResearchContextV1,
   reconstructResearchContextV1,
 } from "./research/research-context-v1.js"
-import { processResearchCycle } from "./research/research-cycle.js"
 import {
-  researchScreeningAuditWindowV1,
-  runApplicationResearchScreeningAuditV1,
-} from "./research/research-screening-audit-runtime-v1.js"
+  processResearchCycle,
+  repairResearchReportV3ResponseOnce,
+} from "./research/research-cycle.js"
 import { createAlpacaRiskStateProvider } from "./risk/alpaca-risk-state-provider.js"
 import {
   createLedgerDurableRiskControlStateLoader,
   createShadowRiskEvaluator,
 } from "./risk/shadow-risk-service.js"
-import { CURRENT_STRATEGY_MANIFEST } from "./strategy/strategy-registry.js"
 import {
   DEFAULT_PREMARKET_RESEARCH_START_ET,
-  DRY_RUN_ANYTIME_RESEARCH_MODE,
-  DRY_RUN_ANYTIME_SHADOW_MODE,
+  DRY_RUN_MODE,
   evaluateResearchEligibility,
   newYorkDate,
 } from "./scheduling/research-eligibility.js"
@@ -191,14 +184,10 @@ const agentOptions = parseAgentOptions(
   process.argv.slice(2),
   readSetting("RESEARCH_LEDGER_PATH"),
 )
-const { once, researchAnytime, shadowAnytime, ledgerPath } = agentOptions
+const { once, dryRun, ledgerPath } = agentOptions
 const breakerResetInstruction =
   `run pnpm agent:reset-breaker -- --ledger <ledger-path> for ${JSON.stringify(ledgerPath)}`
-const researchMode = researchAnytime
-  ? DRY_RUN_ANYTIME_RESEARCH_MODE
-  : shadowAnytime
-    ? DRY_RUN_ANYTIME_SHADOW_MODE
-    : undefined
+const researchMode = dryRun ? DRY_RUN_MODE : undefined
 const intervalMs = readPositiveInteger("AGENT_INTERVAL_MS", 5 * 60 * 1000)
 const maxBackoffMs = readPositiveInteger(
   "AGENT_MAX_BACKOFF_MS",
@@ -250,16 +239,6 @@ const riskStateProvider = createAlpacaRiskStateProvider({
     readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
     "https://paper-api.alpaca.markets",
 })
-const researchSnapshotProvider = createAlpacaResearchSnapshotProvider({
-  apiKey: alpacaApiKey,
-  secretKey: alpacaSecretKey,
-  dataBaseUrl:
-    readSetting("ALPACA_MARKET_DATA_BASE_URL")?.trim() ||
-    "https://data.alpaca.markets",
-  tradingBaseUrl:
-    readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
-    "https://paper-api.alpaca.markets",
-})
 const calendar = createAlpacaCalendarClient({
   apiKey: alpacaApiKey,
   secretKey: alpacaSecretKey,
@@ -276,14 +255,11 @@ evaluateResearchEligibility({
   premarketStartEt,
 })
 const researchCompatibility =
-  CURRENT_STRATEGY_MANIFEST.researchPlanCompatibility
+  RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[RESEARCH_INVOCATION_VERSION]
 const traceVersions = {
   agentName: researchCompatibility.agentName,
-  cycleMode: researchMode ?? "STANDARD",
+  cycleMode: researchMode === undefined ? "STANDARD" : "DRY_RUN",
   promptVersion: researchCompatibility.promptVersion,
-  skillName: researchCompatibility.skillName,
-  skillVersion: researchCompatibility.skillVersion,
-  strategyVersion: CURRENT_STRATEGY_MANIFEST.strategyVersion,
   decisionContractVersion: researchCompatibility.decisionContractVersion,
   reportVersion: researchCompatibility.reportVersion,
 } as const
@@ -349,9 +325,12 @@ try {
               abortController.signal,
               AbortSignal.timeout(cycleTimeoutMs),
             ])
+            const requestedSessionDate =
+              agentOptions.sessionDate ?? newYorkDate(eligibilityEvaluatedAt)
             const session = await calendar.getSession(
-              newYorkDate(eligibilityEvaluatedAt),
+              requestedSessionDate,
               calendarSignal,
+              dryRun && agentOptions.sessionDate === undefined,
             )
             return {
               session,
@@ -468,8 +447,6 @@ try {
         stageReporter.report("research.agent", "STARTED", {
           agent: researchCompatibility.agentName,
           promptVersion: researchCompatibility.promptVersion,
-          skillVersion: researchCompatibility.skillVersion,
-          strategyVersion: CURRENT_STRATEGY_MANIFEST.strategyVersion,
         })
         cycleTrace.identify({
           cycleId: cycle.cycleId,
@@ -493,54 +470,7 @@ try {
         const tools = Object.fromEntries(
           MUTATING_ALPACA_TOOLS.map((tool) => [tool, false]),
         )
-        const auditWindow = researchScreeningAuditWindowV1(initialEligibility)
-        const applicationAudit = auditWindow === undefined
-          ? undefined
-          : (() => {
-              const controller = new AbortController()
-              return {
-                controller,
-                result: runApplicationResearchScreeningAuditV1({
-                  provider: researchSnapshotProvider,
-                  sessionDate,
-                  slotStartedAt: auditWindow.slotStartedAt,
-                  signal: AbortSignal.any([
-                    controller.signal,
-                    abortController.signal,
-                    AbortSignal.timeout(cycleTimeoutMs),
-                  ]),
-                }).catch(() => createApplicationCaptureUnavailableAuditV1(
-                  ["UNEXPECTED_FAILURE"],
-                  0,
-                )),
-              }
-            })()
-        let agentAudit = createAgentResearchScreeningUnavailableAuditV1(
-          "INVOCATION_FAILED",
-        )
         let researchInvocation: ResearchInvocationV1 | undefined
-        const recordScreeningAudit = async (cancelApplication: boolean) => {
-          if (applicationAudit === undefined) return
-          if (cancelApplication && !applicationAudit.controller.signal.aborted) {
-            applicationAudit.controller.abort(
-              new DOMException("Research screening audit cancelled", "AbortError"),
-            )
-          }
-          try {
-            await lifecycleRecorder.recordResearchScreeningAudit(
-              cycle.cycleId,
-              createResearchScreeningAuditV1({
-                application: await applicationAudit.result,
-                agent: agentAudit,
-              }),
-              AbortSignal.timeout(cycleAbortTimeoutMs),
-            )
-          } catch {
-            console.error(
-              `[cycle ${cycleNumber}] research screening audit unavailable`,
-            )
-          }
-        }
         let timedOut = false
 
         try {
@@ -551,74 +481,119 @@ try {
               const response = await cycleTrace.run(
                 "opencode.session.prompt",
                 async () => {
-                  const response = await runtime.client.session.prompt({
-                    path: { id: sessionId },
-                    signal,
-                    body: {
-                      agent: researchCompatibility.agentName,
-                      tools,
-                      parts: [
-                        {
-                          type: "text",
-                          text: buildResearchCyclePrompt(
-                            cycleNumber,
-                            new Date(cycle.startedAt),
-                            task,
-                            researchContext,
-                            initialEligibility,
-                          ),
-                        },
-                      ],
-                    },
-                  })
-                  if (!response.data) {
-                    throw formatApiError(
-                      "Prompting OpenCode session",
-                      response.error,
-                    )
-                  }
-                  const invocation = summarizeOpenCodeInvocation(
-                    response.data.info,
-                    response.data.parts,
-                  )
-                  cycleTrace.recordOpenCodeResult(invocation)
-                  // Assert the pinned model before any of this response is
-                  // parsed. Compares the raw summary, not the durable
-                  // projection, which rewrites unsafe labels to "unknown".
-                  const identity = assertResearchModelIdentityV1(invocation)
-                  if (!identity.ok) {
-                    stageReporter.report("research.agent", "REJECTED", {
-                      reason: identity.reason,
-                      expected: identity.expected,
-                      observed: identity.observed,
+                  const prompt = async (text: string) => {
+                    const response = await runtime.client.session.prompt({
+                      path: { id: sessionId },
+                      signal,
+                      body: {
+                        agent: researchCompatibility.agentName,
+                        tools,
+                        parts: [{ type: "text", text }],
+                      },
                     })
-                    try {
-                      agentAudit = createAgentResearchScreeningModelDriftAuditV1({
-                        invocationVersion: RESEARCH_INVOCATION_VERSION,
+                    if (!response.data) {
+                      throw formatApiError(
+                        "Prompting OpenCode session",
+                        response.error,
+                      )
+                    }
+                    const identity = assertResearchModelIdentityV1(
+                      summarizeOpenCodeInvocation(
+                        response.data.info,
+                        response.data.parts,
+                      ),
+                    )
+                    if (!identity.ok) {
+                      stageReporter.report("research.agent", "REJECTED", {
                         reason: identity.reason,
                         expected: identity.expected,
                         observed: identity.observed,
                       })
-                    } catch {
-                      agentAudit = createAgentResearchScreeningUnavailableAuditV1(
-                        "UNEXPECTED_FAILURE",
+                      await cycle.recordInvocationIdentityRejected(
+                        {
+                          reason: identity.reason,
+                          expected: identity.expected,
+                          observed: identity.observed,
+                        },
+                        signal,
+                      )
+                      throw new Error(
+                        `Research model identity rejected: ${identity.reason} (expected ${identity.expected}, observed ${identity.observed})`,
                       )
                     }
+                    return response.data
+                  }
+                  const textResponse = (parts: readonly { type: string; text?: string }[]) =>
+                    parts
+                      .flatMap((part) =>
+                        part.type === "text" && typeof part.text === "string"
+                          ? [part.text.trim()]
+                          : [],
+                      )
+                      .filter(Boolean)
+                      .join("\n")
+
+                  const initialResponse = await prompt(
+                    buildResearchCyclePrompt(
+                      cycleNumber,
+                      new Date(cycle.startedAt),
+                      task,
+                      researchContext,
+                      initialEligibility,
+                    ),
+                  )
+                  const resolvedResponse = await repairResearchReportV3ResponseOnce(
+                    textResponse(initialResponse.parts),
+                    async (issues) =>
+                      textResponse(
+                        (await prompt(buildResearchReportRepairPrompt(issues))).parts,
+                      ),
+                  )
+                  const text = resolvedResponse.rawResponse
+                  const schemaRepairAttempted =
+                    resolvedResponse.schemaRepairAttempted
+
+                  const messages = await runtime.client.session.messages({
+                    path: { id: sessionId },
+                  })
+                  if (!messages.data) {
+                    throw formatApiError(
+                      "Reading OpenCode session messages",
+                      messages.error,
+                    )
+                  }
+                  const cycleStartedAt = Date.parse(cycle.startedAt)
+                  const cycleMessages = messages.data.filter(
+                    ({ info }) => info.time.created >= cycleStartedAt,
+                  )
+                  const invocationParts = cycleMessages.flatMap(({ parts }) => parts)
+                  const assistantMessages = cycleMessages.flatMap(({ info }) =>
+                    info.role === "assistant" ? [info] : [],
+                  )
+                  const invocation = summarizeOpenCodeInvocation(
+                    assistantMessages,
+                    invocationParts,
+                  )
+                  const aggregateIdentity = assertResearchModelIdentityV1(invocation)
+                  if (!aggregateIdentity.ok) {
+                    stageReporter.report("research.agent", "REJECTED", {
+                      reason: aggregateIdentity.reason,
+                      expected: aggregateIdentity.expected,
+                      observed: aggregateIdentity.observed,
+                    })
                     await cycle.recordInvocationIdentityRejected(
                       {
-                        reason: identity.reason,
-                        expected: identity.expected,
-                        observed: identity.observed,
+                        reason: aggregateIdentity.reason,
+                        expected: aggregateIdentity.expected,
+                        observed: aggregateIdentity.observed,
                       },
                       signal,
                     )
-                    // Non-fatal: this counts toward the consecutive-failure
-                    // breaker, so a sustained provider swap halts the worker
-                    // rather than looping.
                     throw new Error(
-                      `Research model identity rejected: ${identity.reason} (expected ${identity.expected}, observed ${identity.observed})`,
+                      `Research model identity rejected: ${aggregateIdentity.reason} (expected ${aggregateIdentity.expected}, observed ${aggregateIdentity.observed})`,
                     )
                   }
+                  cycleTrace.recordOpenCodeResult(invocation)
                   stageReporter.report("research.agent", "COMPLETED", {
                     providerId: invocation.providerId,
                     modelId: invocation.modelId,
@@ -631,23 +606,19 @@ try {
                     toolCalls: invocation.toolCalls.map(
                       ({ name, outcome }) => `${name}:${outcome}`,
                     ),
+                    schemaRepairAttempted,
                   })
-                  return { response, invocation }
+                  return { text, invocation, schemaRepairAttempted }
                 },
               )
-
-              const text = response.response.data.parts
-                .filter((part) => part.type === "text")
-                .map((part) => part.text.trim())
-                .filter(Boolean)
-                .join("\n")
 
               researchInvocation = createResearchInvocationV1(
                 traceVersions,
                 response.invocation,
+                { schemaRepairAttempted: response.schemaRepairAttempted },
               )
               return processResearchCycle({
-                rawResponse: text,
+                rawResponse: response.text,
                 cycleStartedAt: cycle.startedAt,
                 signal,
                 quoteProvider,
@@ -676,22 +647,6 @@ try {
             },
           })
           cycleTrace.setOutcome(processed.outcome.status)
-          try {
-            agentAudit = processed.researchReport === undefined ||
-                researchInvocation === undefined
-              ? createAgentResearchScreeningUnavailableAuditV1(
-                  "REPORT_REJECTED",
-                )
-              : projectResearchReportV2ForScreeningAudit(
-                  processed.researchReport,
-                  researchInvocation,
-                )
-          } catch {
-            agentAudit = createAgentResearchScreeningUnavailableAuditV1(
-              "UNEXPECTED_FAILURE",
-            )
-          }
-          await recordScreeningAudit(false)
           try {
             const artifacts = await cycleTrace.run(
               "research.artifact.project",
@@ -746,28 +701,12 @@ try {
           } else if (abortController.signal.aborted) {
             cycleTrace.setOutcome(timedOut ? "TIMEOUT" : "SHUTDOWN")
             await interruptCycle(timedOut ? "TIMEOUT" : "SHUTDOWN")
-            if (agentAudit.status === "UNAVAILABLE") {
-              agentAudit = createAgentResearchScreeningUnavailableAuditV1(
-                "AUDIT_CANCELLED",
-              )
-            }
-            await recordScreeningAudit(true)
           } else if (!timedOut) {
             cycleTrace.setOutcome("FAILED")
             const abortFailure = await synchronizeSessionAbort(
               "Aborting failed OpenCode session",
             )
             await interruptCycle("FAILED")
-            if (
-              researchInvocation !== undefined &&
-              agentAudit.status === "UNAVAILABLE" &&
-              agentAudit.reason === "INVOCATION_FAILED"
-            ) {
-              agentAudit = createAgentResearchScreeningUnavailableAuditV1(
-                "UNEXPECTED_FAILURE",
-              )
-            }
-            await recordScreeningAudit(true)
             if (abortFailure) {
               const fatal = new WorkerFatalError(
                 abortFailure.message,
@@ -776,13 +715,6 @@ try {
               abortController.abort(fatal)
               throw fatal
             }
-          } else {
-            if (agentAudit.status === "UNAVAILABLE") {
-              agentAudit = createAgentResearchScreeningUnavailableAuditV1(
-                "AUDIT_CANCELLED",
-              )
-            }
-            await recordScreeningAudit(true)
           }
           throw error
         } finally {

@@ -87,11 +87,8 @@ const versions = {
   agentName: "research",
   cycleMode: "STANDARD" as const,
   promptVersion: "1.0.0",
-  skillName: "spy-debit-spread-research",
-  skillVersion: "1.0.0",
-  strategyVersion: "1.1.0",
-  decisionContractVersion: "1.0.0",
-  reportVersion: "2.0.0",
+  decisionContractVersion: "2.0.0",
+  reportVersion: "3.0.0",
 }
 
 describe("startResearchTelemetry", () => {
@@ -122,13 +119,13 @@ describe("startResearchTelemetry", () => {
 
     await telemetry.runCycle(
       1,
-      { ...versions, cycleMode: "DRY_RUN_ANYTIME" },
+      { ...versions, cycleMode: "DRY_RUN" },
       async () => undefined,
     )
     await telemetry.shutdown()
 
     expect(spans[0]?.attributes).toMatchObject({
-      [RESEARCH_TRACE_ATTRIBUTE_KEYS.cycleMode]: "DRY_RUN_ANYTIME",
+      [RESEARCH_TRACE_ATTRIBUTE_KEYS.cycleMode]: "DRY_RUN",
     })
   })
 
@@ -265,9 +262,6 @@ describe("startResearchTelemetry", () => {
       [RESEARCH_TRACE_ATTRIBUTE_KEYS.cycleMode]: "STANDARD",
       [RESEARCH_TRACE_ATTRIBUTE_KEYS.cycleId]: "cycle-3",
       [RESEARCH_TRACE_ATTRIBUTE_KEYS.promptVersion]: "1.0.0",
-      [RESEARCH_TRACE_ATTRIBUTE_KEYS.skillName]:
-        "spy-debit-spread-research",
-      [RESEARCH_TRACE_ATTRIBUTE_KEYS.skillVersion]: "1.0.0",
       [RESEARCH_TRACE_ATTRIBUTE_KEYS.outcome]: "VALIDATED_NO_ACTION",
     })
     expect(spans[1]?.attributes).toMatchObject({

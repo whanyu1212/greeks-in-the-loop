@@ -1,12 +1,12 @@
 import type {
-  ResearchDecisionV1,
-} from "../contracts/research-decision-v1.js"
-import type { PreliminaryResearchV1 } from "../contracts/preliminary-research-v1.js"
-import type { ResearchReportV2 } from "../contracts/research-report-v2.js"
+  ResearchDecisionV2,
+} from "../contracts/research-decision-v2.js"
+import type { PreliminaryResearchV2 } from "../contracts/preliminary-research-v2.js"
+import type { ResearchReportV3 } from "../contracts/research-report-v3.js"
 import type {
   TradeIntentDerivationReason,
-  TradeIntentV1,
-} from "../contracts/trade-intent-v1.js"
+  TradeIntentV2,
+} from "../contracts/trade-intent-v2.js"
 import type {
   ConfirmedOptionQuoteSnapshotV1,
   OptionQuoteConfirmationFailureCode,
@@ -24,15 +24,15 @@ import type {
 
 export type ResearchCycleStageReports = Readonly<{
   researchReportRejected(issues: readonly DecisionRejectionIssue[]): void
-  researchReportCompleted(report: ResearchReportV2): void
-  preliminaryValidated(research: PreliminaryResearchV1): void
-  decisionValidated(decision: ResearchDecisionV1): void
+  researchReportCompleted(report: ResearchReportV3): void
+  preliminaryValidated(research: PreliminaryResearchV2): void
+  decisionValidated(decision: ResearchDecisionV2): void
   quotesRejected(
     reasons: readonly OptionQuoteConfirmationFailureCode[],
   ): void
   quotesConfirmed(snapshot: ConfirmedOptionQuoteSnapshotV1): void
   intentRejected(reasons: readonly TradeIntentDerivationReason[]): void
-  intentDerived(intent: TradeIntentV1): void
+  intentDerived(intent: TradeIntentV2): void
   riskEvaluated(result: ShadowRiskResultV1): void
   ledgerCommitted(record: ResearchCycleTerminalRecordV1): void
   cycleOutcomeRecorded(record: ResearchCycleTerminalRecordV1): void
@@ -56,7 +56,6 @@ export function createResearchCycleStageReports(
       const result = report.result
       reporter.report("research.report", "COMPLETED", {
         reportVersion: report.reportVersion,
-        strategyVersion: result.strategyVersion,
         resultOutcome: result.outcome,
         externalSourceCount: report.analysis.externalContext.length,
         hasCandidate:

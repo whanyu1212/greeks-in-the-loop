@@ -1,6 +1,6 @@
-import type { ResearchDecisionV1 } from "../contracts/research-decision-v1.js"
-import type { PreliminaryResearchV1 } from "../contracts/preliminary-research-v1.js"
-import type { ResearchReportV2 } from "../contracts/research-report-v2.js"
+import type { ResearchDecisionV2 } from "../contracts/research-decision-v2.js"
+import type { PreliminaryResearchV2 } from "../contracts/preliminary-research-v2.js"
+import type { ResearchReportV3 } from "../contracts/research-report-v3.js"
 import type { ResearchCycleTrace } from "../observability/research-telemetry.js"
 import type { ShadowRiskResultV1 } from "../risk/shadow-risk-v1.js"
 import type {
@@ -15,8 +15,8 @@ export const MAX_TERMINAL_REJECTION_DETAILS = 64
 
 type CommonTerminalMetadata = Readonly<{
   evidenceSnapshots?: ResearchCycleTerminalRecordV1["evidenceSnapshots"]
-  validatedDecision?: ResearchDecisionV1
-  preliminaryResearch?: PreliminaryResearchV1
+  validatedDecision?: ResearchDecisionV2
+  preliminaryResearch?: PreliminaryResearchV2
 }>
 
 export type ResearchCycleTerminalResolution =
@@ -35,7 +35,7 @@ export type RecordResearchCycleOutcomeContext = Readonly<{
   sink: ResearchCycleOutcomeSink
   signal: AbortSignal
   researchInvocation: ResearchInvocationV1
-  researchReport?: ResearchReportV2
+  researchReport?: ResearchReportV3
   trace: ResearchCycleTrace
   stages: ResearchCycleStageReports
 }>
@@ -43,7 +43,7 @@ export type RecordResearchCycleOutcomeContext = Readonly<{
 export type ProcessedResearchCycle = Readonly<{
   outcome: ResearchCycleOutcomeV1
   report: string
-  researchReport?: ResearchReportV2
+  researchReport?: ResearchReportV3
   shadowRisk?: ShadowRiskResultV1
 }>
 

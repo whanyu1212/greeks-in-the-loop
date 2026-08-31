@@ -251,6 +251,8 @@ export const LEDGER_MIGRATIONS: readonly LedgerMigration[] = [
       END;
     `,
   },
+  // Historical migrations are immutable: keep 004 so existing ledgers retain
+  // their checksum, then 005 removes the retired audit append exception.
   {
     id: "004_research_screening_audit",
     sql: `
@@ -283,6 +285,30 @@ export const LEDGER_MIGRATIONS: readonly LedgerMigration[] = [
       BEFORE INSERT ON ledger_events
       WHEN NEW.cycle_id IS NOT NULL
         AND NEW.event_type <> 'RESEARCH_SCREENING_AUDIT_RECORDED'
+        AND EXISTS (
+          SELECT 1
+          FROM ledger_events
+          WHERE cycle_id = NEW.cycle_id
+            AND event_type IN (
+              'RESEARCH_CYCLE_COMPLETED',
+              'RESEARCH_CYCLE_INTERRUPTED'
+            )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'cannot append after a cycle terminal event');
+      END;
+    `,
+  },
+  {
+    id: "005_remove_research_screening_audit",
+    sql: `
+      DROP TRIGGER ledger_events_screening_audit_requires_terminal;
+      DROP TRIGGER ledger_events_no_post_terminal;
+      DROP INDEX ledger_events_one_research_screening_audit;
+
+      CREATE TRIGGER ledger_events_no_post_terminal
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.cycle_id IS NOT NULL
         AND EXISTS (
           SELECT 1
           FROM ledger_events

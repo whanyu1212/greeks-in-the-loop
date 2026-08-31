@@ -1,16 +1,20 @@
 import { z } from "zod"
 
-import { spyAlpacaOptionSymbolV1Schema } from "../shared/alpaca-option-identity.js"
 import {
-  researchDecisionV1Schema,
-  type ResearchDecisionV1,
-} from "./research-decision-v1.js"
+  ALLOWED_OPTION_UNDERLYINGS_V1,
+  allowedAlpacaOptionSymbolV1Schema,
+} from "../shared/alpaca-option-identity.js"
 import {
-  preliminaryResearchV1Schema,
-  type PreliminaryResearchV1,
-} from "./preliminary-research-v1.js"
+  noActionDecisionV2Schema,
+  proposedTradeDecisionV2Schema,
+  type ResearchDecisionV2,
+} from "./research-decision-v2.js"
+import {
+  preliminaryResearchV2Schema,
+  type PreliminaryResearchV2,
+} from "./preliminary-research-v2.js"
 
-export const RESEARCH_REPORT_VERSION = "2.0.0" as const
+export const RESEARCH_REPORT_VERSION = "3.0.0" as const
 
 const timestamp = z.iso.datetime({ offset: true, precision: 3 })
 const boundedText = z.string().trim().min(1).max(2_000)
@@ -20,6 +24,7 @@ const boundedIdentifier = z
   .max(128)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u)
 const positiveMetric = z.number().finite().positive()
+const returnMetric = z.number().finite().min(-1).max(10)
 const httpUrl = z
   .url()
   .max(2_048)
@@ -54,10 +59,69 @@ const marketRegimeSchema = z
   })
   .strict()
 
+const symbolIndicatorSchema = z
+  .object({
+    underlying: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1),
+    throughSessionDate: z.iso.date(),
+    return5d: returnMetric,
+    return20d: returnMetric,
+    relativeStrengthRank20d: z.number().int().min(1).max(3),
+    realizedVolatility20: positiveMetric,
+    completedSessionVolumeRatio20: positiveMetric,
+  })
+  .strict()
+
+const symbolIndicatorsSchema = z
+  .array(symbolIndicatorSchema)
+  .length(ALLOWED_OPTION_UNDERLYINGS_V1.length)
+  .superRefine((indicators, refinement) => {
+    const underlyings = new Set(indicators.map(({ underlying }) => underlying))
+    const ranks = new Set(indicators.map(({ relativeStrengthRank20d }) => relativeStrengthRank20d))
+    const throughDates = new Set(indicators.map(({ throughSessionDate }) => throughSessionDate))
+    if (underlyings.size !== ALLOWED_OPTION_UNDERLYINGS_V1.length) {
+      refinement.addIssue({
+        code: "custom",
+        path: [],
+        message: "Symbol indicators must cover every allowed underlying exactly once",
+      })
+    }
+    if (ranks.size !== ALLOWED_OPTION_UNDERLYINGS_V1.length) {
+      refinement.addIssue({
+        code: "custom",
+        path: [],
+        message: "Relative-strength ranks must be unique",
+      })
+    }
+    if (throughDates.size !== 1) {
+      refinement.addIssue({
+        code: "custom",
+        path: [],
+        message: "Symbol indicators must use one completed-session cutoff",
+      })
+    }
+    const ranked = [...indicators].sort((left, right) =>
+      right.return20d - left.return20d ||
+      (left.underlying === right.underlying
+        ? 0
+        : left.underlying < right.underlying
+          ? -1
+          : 1),
+    )
+    ranked.forEach((indicator, index) => {
+      if (indicator.relativeStrengthRank20d !== index + 1) {
+        refinement.addIssue({
+          code: "custom",
+          path: [indicators.indexOf(indicator), "relativeStrengthRank20d"],
+          message: "Relative-strength rank must follow descending 20-day return",
+        })
+      }
+    })
+  })
+
 const candidateLegAnalysisSchema = z
   .object({
     role: z.enum(["LONG", "SHORT"]),
-    contractSymbol: spyAlpacaOptionSymbolV1Schema,
+    contractSymbol: allowedAlpacaOptionSymbolV1Schema,
     delta: z.number().finite().min(-1).max(1),
     impliedVolatility: positiveMetric,
     gamma: z.number().finite(),
@@ -66,6 +130,8 @@ const candidateLegAnalysisSchema = z
     volume: z.number().int().nonnegative(),
     openInterest: z.number().int().nonnegative(),
     openInterestDate: z.iso.date(),
+    ivToRealizedVolatility: positiveMetric.optional(),
+    bidAskSpreadPercent: z.number().finite().nonnegative().max(2).optional(),
   })
   .strict()
 
@@ -143,6 +209,7 @@ const analysisSchema = z
     asOf: timestamp,
     accountChecks: accountChecksSchema,
     marketRegime: marketRegimeSchema,
+    symbolIndicators: symbolIndicatorsSchema.optional(),
     candidateEvaluation: candidateEvaluationSchema.optional(),
     externalContext: z.array(externalContextSchema).max(8),
     supportingFactors: z.array(boundedText).max(12),
@@ -151,9 +218,10 @@ const analysisSchema = z
   })
   .strict()
 
-const resultSchema = z.union([
-  researchDecisionV1Schema,
-  preliminaryResearchV1Schema,
+const resultSchema = z.discriminatedUnion("outcome", [
+  noActionDecisionV2Schema,
+  proposedTradeDecisionV2Schema,
+  preliminaryResearchV2Schema,
 ])
 
 const EXA_EXEMPT_NO_ACTION_REASONS = new Set([
@@ -164,7 +232,7 @@ const EXA_EXEMPT_NO_ACTION_REASONS = new Set([
   "CONTRACT_UNREPRESENTABLE",
 ])
 
-export const researchReportV2Schema = z
+export const researchReportV3Schema = z
   .object({
     reportVersion: z.literal(RESEARCH_REPORT_VERSION),
     result: resultSchema,
@@ -194,7 +262,7 @@ export const researchReportV2Schema = z
         ["analysis", "externalContext", index, "retrievedAt"] as const,
         source.retrievedAt,
       ] as const),
-      ...(report.result.outcome === "PRELIMINARY_RESEARCH"
+      ...(report.result.outcome !== "PROPOSE_TRADE"
         ? report.result.evidence.flatMap((claim, index) =>
             claim.kind === "SOURCED_FACT"
               ? [[
@@ -386,5 +454,5 @@ export const researchReportV2Schema = z
     })
   })
 
-export type ResearchReportV2 = Readonly<z.infer<typeof researchReportV2Schema>>
-export type ResearchReportResultV2 = ResearchDecisionV1 | PreliminaryResearchV1
+export type ResearchReportV3 = Readonly<z.infer<typeof researchReportV3Schema>>
+export type ResearchReportResultV2 = ResearchDecisionV2 | PreliminaryResearchV2

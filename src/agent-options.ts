@@ -8,15 +8,12 @@ import { basename, dirname, isAbsolute, resolve } from "node:path"
 
 export const DEFAULT_RESEARCH_LEDGER_PATH =
   ".state/research-ledger.sqlite" as const
-export const DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH =
-  ".state/research-anytime.sqlite" as const
-export const DEFAULT_ANYTIME_SHADOW_LEDGER_PATH =
-  ".state/shadow-anytime.sqlite" as const
+export const DEFAULT_DRY_RUN_LEDGER_PATH = ".state/dry-run.sqlite" as const
 
 export type AgentOptions = Readonly<{
   once: boolean
-  researchAnytime: boolean
-  shadowAnytime: boolean
+  dryRun: boolean
+  sessionDate?: string
   ledgerPath: string
 }>
 
@@ -139,8 +136,8 @@ export function parseAgentOptions(
   configuredLedgerPath?: string,
 ): AgentOptions {
   let once = false
-  let researchAnytime = false
-  let shadowAnytime = false
+  let dryRun = false
+  let sessionDate: string | undefined
   let cliLedgerPath: string | undefined
 
   for (let index = 0; index < args.length; index += 1) {
@@ -150,12 +147,23 @@ export function parseAgentOptions(
       once = true
       continue
     }
-    if (argument === "--research-anytime") {
-      researchAnytime = true
+    if (argument === "--dry-run") {
+      dryRun = true
       continue
     }
-    if (argument === "--shadow-anytime") {
-      shadowAnytime = true
+    if (argument === "--session") {
+      if (sessionDate !== undefined) {
+        throw new Error("--session may be provided only once")
+      }
+      const value = args[++index]?.trim()
+      if (!value || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+        throw new Error("--session requires YYYY-MM-DD")
+      }
+      const parsed = Date.parse(`${value}T00:00:00.000Z`)
+      if (!Number.isFinite(parsed) || new Date(parsed).toISOString().slice(0, 10) !== value) {
+        throw new Error("--session requires a valid calendar date")
+      }
+      sessionDate = value
       continue
     }
     if (argument === "--ledger") {
@@ -170,45 +178,29 @@ export function parseAgentOptions(
     throw new Error(`Unknown option: ${argument ?? ""}`)
   }
 
-  if (researchAnytime && !once) {
-    throw new Error("--research-anytime requires --once")
-  }
-  if (shadowAnytime && !once) {
-    throw new Error("--shadow-anytime requires --once")
-  }
-  if (researchAnytime && shadowAnytime) {
-    throw new Error("--research-anytime and --shadow-anytime are mutually exclusive")
+  if (dryRun && !once) throw new Error("--dry-run requires --once")
+  if (sessionDate !== undefined && !dryRun) {
+    throw new Error("--session requires --dry-run")
   }
 
   const normalLedgerPath =
     configuredLedgerPath?.trim() || DEFAULT_RESEARCH_LEDGER_PATH
   const ledgerPath =
-    cliLedgerPath ??
-    (researchAnytime
-      ? DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH
-      : shadowAnytime
-        ? DEFAULT_ANYTIME_SHADOW_LEDGER_PATH
-      : normalLedgerPath)
-  if (
-    (researchAnytime || shadowAnytime) &&
-    ledgerTargetsMatch(ledgerPath, normalLedgerPath)
-  ) {
-    throw new Error(
-      "Anytime dry runs cannot use the configured production ledger",
-    )
+    cliLedgerPath ?? (dryRun ? DEFAULT_DRY_RUN_LEDGER_PATH : normalLedgerPath)
+  if (dryRun && ledgerTargetsMatch(ledgerPath, normalLedgerPath)) {
+    throw new Error("Dry runs cannot use the configured production ledger")
   }
   if (
-    !researchAnytime &&
-    !shadowAnytime &&
-    [
-      DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH,
-      DEFAULT_ANYTIME_SHADOW_LEDGER_PATH,
-    ].some((reservedPath) => ledgerTargetsMatch(ledgerPath, reservedPath))
+    !dryRun &&
+    ledgerTargetsMatch(ledgerPath, DEFAULT_DRY_RUN_LEDGER_PATH)
   ) {
-    throw new Error(
-      "Standard agent runs cannot use the reserved anytime dry-run ledger",
-    )
+    throw new Error("Standard agent runs cannot use the dry-run ledger")
   }
 
-  return { once, researchAnytime, shadowAnytime, ledgerPath }
+  return {
+    once,
+    dryRun,
+    ...(sessionDate === undefined ? {} : { sessionDate }),
+    ledgerPath,
+  }
 }

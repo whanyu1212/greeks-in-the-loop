@@ -4,8 +4,8 @@ import {
   alpacaOptionStrikeCents,
   alpacaOptionSymbolSchema,
   parseAlpacaOptionSymbol,
-  spyAlpacaOptionSymbolV1Schema,
-  validateSpyOptionUniverseV1,
+  allowedAlpacaOptionSymbolV1Schema,
+  validateOptionUniverseV1,
 } from "../src/shared/alpaca-option-identity.js"
 
 const parseIdentity = (symbol: string) => {
@@ -29,7 +29,7 @@ describe("parseAlpacaOptionSymbol", () => {
     })
   })
 
-  it("parses a valid non-SPY identity before universe authorization", () => {
+  it("parses and authorizes a valid QQQ identity", () => {
     const parsed = parseAlpacaOptionSymbol("QQQ260918P00650000")
 
     expect(parsed).toEqual({
@@ -44,10 +44,7 @@ describe("parseAlpacaOptionSymbol", () => {
       },
     })
     if (!parsed.success) throw new Error("Expected QQQ identity to parse")
-    expect(validateSpyOptionUniverseV1(parsed.identity)).toEqual({
-      success: false,
-      reason: "UNDERLYING_NOT_SUPPORTED",
-    })
+    expect(validateOptionUniverseV1(parsed.identity)).toEqual({ success: true })
   })
 
   it.each([
@@ -97,12 +94,16 @@ describe("parseAlpacaOptionSymbol", () => {
 })
 
 describe("Alpaca option identity policies", () => {
-  it("admits SPY through the V1 universe policy", () => {
-    expect(
-      validateSpyOptionUniverseV1(
-        parseIdentity("SPY260918C00650000"),
-      ),
-    ).toEqual({ success: true })
+  it("admits the ETF allowlist and rejects other roots", () => {
+    for (const root of ["SPY", "QQQ", "IWM"]) {
+      expect(
+        validateOptionUniverseV1(parseIdentity(`${root}260918C00650000`)),
+      ).toEqual({ success: true })
+    }
+    expect(validateOptionUniverseV1(parseIdentity("DIA260918C00650000"))).toEqual({
+      success: false,
+      reason: "UNDERLYING_NOT_SUPPORTED",
+    })
   })
 
   it("projects exact thousandths into integer cents", () => {
@@ -124,15 +125,15 @@ describe("Alpaca option identity policies", () => {
     })
   })
 
-  it("keeps syntax-only and SPY-authorized schemas distinct", () => {
-    expect(alpacaOptionSymbolSchema.safeParse("QQQ260918C00650000").success).toBe(
+  it("keeps syntax-only and allowlisted schemas distinct", () => {
+    expect(alpacaOptionSymbolSchema.safeParse("DIA260918C00650000").success).toBe(
       true,
     )
     expect(
-      spyAlpacaOptionSymbolV1Schema.safeParse("QQQ260918C00650000").success,
+      allowedAlpacaOptionSymbolV1Schema.safeParse("DIA260918C00650000").success,
     ).toBe(false)
     expect(
-      spyAlpacaOptionSymbolV1Schema.safeParse("SPY260918C00650000").success,
+      allowedAlpacaOptionSymbolV1Schema.safeParse("QQQ260918C00650000").success,
     ).toBe(true)
   })
 
@@ -141,7 +142,7 @@ describe("Alpaca option identity policies", () => {
       alpacaOptionSymbolSchema.safeParse("SPY260431C00650000").success,
     ).toBe(false)
     expect(
-      spyAlpacaOptionSymbolV1Schema.safeParse("SPY260431C00650000").success,
+      allowedAlpacaOptionSymbolV1Schema.safeParse("SPY260431C00650000").success,
     ).toBe(false)
   })
 })

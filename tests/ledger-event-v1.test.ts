@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest"
 
-import {
-  createAgentResearchScreeningUnavailableAuditV1,
-  createApplicationCaptureUnavailableAuditV1,
-  createResearchScreeningAuditV1,
-} from "../src/contracts/research-screening-audit-v1.js"
 import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 import {
   ledgerEventV1Schema,
@@ -49,36 +44,12 @@ describe("LedgerEventV1", () => {
       "TRADE_INTENT_DERIVATION_REJECTED",
       "RESEARCH_CYCLE_COMPLETED",
       "RESEARCH_CYCLE_INTERRUPTED",
-      "RESEARCH_SCREENING_AUDIT_RECORDED",
       "RESEARCH_INVOCATION_IDENTITY_REJECTED",
       "RESEARCH_LOOP_BREAKER_LATCHED",
       "RESEARCH_LOOP_BREAKER_RESET",
       "RISK_SHADOW_DECISION_RECORDED",
       "RISK_BREAKER_LATCHED",
     ])
-  })
-
-  it("accepts only bounded screening audit payloads", () => {
-    const audit = createResearchScreeningAuditV1({
-      application: createApplicationCaptureUnavailableAuditV1(
-        ["REQUEST_TIMED_OUT"],
-        25,
-      ),
-      agent: createAgentResearchScreeningUnavailableAuditV1(
-        "INVOCATION_FAILED",
-      ),
-    })
-    const event = {
-      ...baseEvent,
-      eventType: "RESEARCH_SCREENING_AUDIT_RECORDED",
-      payload: { audit },
-    } as const
-
-    expect(ledgerEventV1Schema.parse(event)).toEqual(event)
-    expect(ledgerEventV1Schema.safeParse({
-      ...event,
-      payload: { audit, rawProviderPayload: "untrusted" },
-    }).success).toBe(false)
   })
 
   it("accepts strict cycleless research-loop breaker transitions", () => {
@@ -125,7 +96,7 @@ describe("LedgerEventV1", () => {
       cycleId: "cycle-1",
       sessionId: "session-1",
       payload: {
-        invocationVersion: "1.3.0",
+        invocationVersion: "3.0.0",
         reason: "MODEL_DRIFT",
         expected: "gpt-5.6-sol",
         observed: "gpt-5.6-sol-fast",
@@ -137,10 +108,10 @@ describe("LedgerEventV1", () => {
     expect(
       ledgerEventV1Schema.parse({
         ...cycleScoped,
-        payload: { ...cycleScoped.payload, invocationVersion: "1.2.0" },
+        payload: { ...cycleScoped.payload, invocationVersion: "3.0.0" },
       }),
     ).toMatchObject({
-      payload: { invocationVersion: "1.2.0" },
+      payload: { invocationVersion: "3.0.0" },
     })
 
     // Unlike the breaker events, drift happens inside a live cycle.

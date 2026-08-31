@@ -1,9 +1,9 @@
 import type { ResearchContextV1 } from "./research-context-v1.js"
 import {
-  DRY_RUN_ANYTIME_RESEARCH_MODE,
-  DRY_RUN_ANYTIME_SHADOW_MODE,
+  DRY_RUN_MODE,
   type ResearchEligibilityV1,
 } from "../scheduling/research-eligibility.js"
+import { ALLOWED_OPTION_UNDERLYINGS_V1 } from "../shared/alpaca-option-identity.js"
 
 /**
  * Fixed identity and request construction for the unattended research agent.
@@ -15,11 +15,7 @@ import {
 /** Checked-in OpenCode primary agent used by every unattended cycle. */
 export const RESEARCH_AGENT_NAME = "research" as const
 /** Increment when the system prompt or cycle-request behavior changes. */
-export const RESEARCH_PROMPT_VERSION = "1.4.1" as const
-/** Checked-in skill selected by the research agent policy. */
-export const RESEARCH_SKILL_NAME = "spy-debit-spread-research" as const
-/** Increment when the selected skill's research behavior changes. */
-export const RESEARCH_SKILL_VERSION = "1.2.0" as const
+export const RESEARCH_PROMPT_VERSION = "3.0.3" as const
 
 /** Hard OpenCode turn bound mirrored by the checked-in agent configuration. */
 export const RESEARCH_MAX_AGENT_STEPS = 24
@@ -31,6 +27,23 @@ export const RESEARCH_MAX_EXA_CALLS = 4
 export const RESEARCH_MAX_FMP_CALLS = 3
 /** A stale snapshot may be rebuilt completely at most once. */
 export const RESEARCH_MAX_SNAPSHOT_REBUILDS = 1
+
+/** Builds one bounded correction request after deterministic schema rejection. */
+export function buildResearchReportRepairPrompt(
+  issues: readonly Readonly<{
+    code: string
+    path: readonly (string | number)[]
+    schemaCategory?: string
+  }>[],
+) {
+  return [
+    "Your prior response failed deterministic ResearchReportV3 validation.",
+    "Do not call tools or add new research. Correct the complete existing report using only facts already gathered, then return exactly one bare JSON object with no Markdown or commentary.",
+    "Every invalidation field is an array of strings. Every date-time uses UTC ISO 8601 with exactly three fractional digits, for example 2026-08-31T07:43:13.082Z.",
+    "NO_ACTION evidence is a non-empty array of timestamped ALPACA, EXA, or FMP sourced facts and optional inferences grounded in those fact claim IDs.",
+    `Safe validation diagnostics: ${JSON.stringify(issues)}`,
+  ].join("\n")
+}
 
 /**
  * Builds the user-authored portion of one structured research cycle.
@@ -54,14 +67,14 @@ export function buildResearchCyclePrompt(
 ) {
   return [
     `Run structured research cycle ${cycle} at ${startedAt.toISOString()}.`,
-    "Inspect observable paper-account state first without claiming reconciliation or risk approval, then inspect only the evidence needed to identify the highest-ranked eligible defined-risk options candidate or conclude NO_ACTION.",
+    `Compare ${ALLOWED_OPTION_UNDERLYINGS_V1.join(", ")} using current regime evidence, select at most one underlying, then research one eligible BULL_CALL_SPREAD or BEAR_PUT_SPREAD candidate or conclude NO_ACTION.`,
     eligibility
       ? [
           "Application-authoritative research and trade-intent eligibility follows. Do not override it with model reasoning or provider prose.",
-          eligibility.researchMode === DRY_RUN_ANYTIME_RESEARCH_MODE
-            ? "This is a research-only anytime dry run. Never return PROPOSE_TRADE; return PRELIMINARY_RESEARCH or NO_ACTION."
-            : eligibility.researchMode === DRY_RUN_ANYTIME_SHADOW_MODE
-              ? "This is a non-executing shadow anytime dry run. A fresh PROPOSE_TRADE may be returned for deterministic shadow-risk evaluation if every strategy requirement other than the production time window passes."
+          eligibility.researchMode === DRY_RUN_MODE
+            ? eligibility.tradeIntentEligible
+              ? "This is a non-executing dry run. A fresh PROPOSE_TRADE may be returned for deterministic shadow-risk evaluation."
+              : "This is a research-only dry run. Never return PROPOSE_TRADE; return PRELIMINARY_RESEARCH or NO_ACTION."
             : undefined,
           JSON.stringify(eligibility),
           eligibility.tradeIntentEligible

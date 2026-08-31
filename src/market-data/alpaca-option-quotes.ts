@@ -1,14 +1,14 @@
 import { z } from "zod"
 
 import type {
-  ConfirmedOptionQuoteV1,
-} from "../contracts/trade-intent-v1.js"
+  ConfirmedOptionQuoteV2,
+} from "../contracts/trade-intent-v2.js"
 import type {
   EvidenceSnapshotMetadata,
-} from "../contracts/research-decision-v1.js"
+} from "../contracts/research-decision-v2.js"
 import {
   parseAlpacaOptionSymbol,
-  validateSpyOptionUniverseV1,
+  validateOptionUniverseV1,
 } from "../shared/alpaca-option-identity.js"
 import {
   floorNanosecondsToIsoMilliseconds,
@@ -53,8 +53,8 @@ export type OptionQuoteConfirmationFailureCode =
 export type ConfirmedOptionQuoteSnapshotV1 = Readonly<{
   evaluatedAt: string
   snapshotMetadata: EvidenceSnapshotMetadata
-  longQuote: ConfirmedOptionQuoteV1
-  shortQuote: ConfirmedOptionQuoteV1
+  longQuote: ConfirmedOptionQuoteV2
+  shortQuote: ConfirmedOptionQuoteV2
 }>
 
 export type OptionQuoteConfirmationResult =
@@ -140,7 +140,7 @@ export const normalizeAlpacaOptionQuote = (
 ):
   | {
       success: true
-      quote: ConfirmedOptionQuoteV1
+      quote: ConfirmedOptionQuoteV2
       freshUntilNanoseconds: bigint
     }
   | {
@@ -216,8 +216,9 @@ export function createAlpacaOptionQuoteProvider(
       if (
         !longIdentity.success ||
         !shortIdentity.success ||
-        !validateSpyOptionUniverseV1(longIdentity.identity).success ||
-        !validateSpyOptionUniverseV1(shortIdentity.identity).success
+        !validateOptionUniverseV1(longIdentity.identity).success ||
+        !validateOptionUniverseV1(shortIdentity.identity).success ||
+        longIdentity.identity.root !== shortIdentity.identity.root
       ) {
         return failure("QUOTE_SYMBOL_MISSING")
       }

@@ -11,7 +11,7 @@ export default withMermaid(defineConfig({
   themeConfig: {
     nav: [
       { text: 'Overview', link: '/' },
-      { text: 'Strategy', link: '/strategy-v1' },
+      { text: 'Dry run', link: '/dry-run-research' },
       { text: 'Risk engine', link: '/risk-engine-v1' },
       { text: 'GitHub', link: 'https://github.com/whanyu1212/greeks-in-the-loop' },
     ],
@@ -22,10 +22,10 @@ export default withMermaid(defineConfig({
         items: [{ text: 'Overview', link: '/' }],
       },
       {
-        text: 'Strategy',
+        text: 'Research',
         items: [
-          { text: 'Strategy V1', link: '/strategy-v1' },
-          { text: 'Pre-Market Research V1', link: '/pre-market-research-v1' },
+          { text: 'Dry-run Research', link: '/dry-run-research' },
+          { text: 'Research Source Policy', link: '/research-source-policy' },
         ],
       },
       {
@@ -33,18 +33,15 @@ export default withMermaid(defineConfig({
         collapsed: false,
         items: [
           { text: 'Risk Engine V1', link: '/risk-engine-v1' },
-          { text: 'Trade Intent V1', link: '/trade-intent-v1' },
+          { text: 'Trade Intent V2', link: '/trade-intent-v2' },
         ],
       },
       {
         text: 'The trust boundary',
         collapsed: false,
         items: [
-          { text: 'Research Decision V1', link: '/research-decision-v1' },
-          { text: 'Research Report V2', link: '/research-report-v2' },
-          { text: 'Research Plan V1', link: '/research-plan-v1' },
-          { text: 'Research Source Policy', link: '/research-source-policy' },
-          { text: 'Research Market Snapshots V1', link: '/research-market-snapshots-v1' },
+          { text: 'Research Decision V2', link: '/research-decision-v2' },
+          { text: 'Research Report V3', link: '/research-report-v3' },
         ],
       },
       {
@@ -53,7 +50,7 @@ export default withMermaid(defineConfig({
         items: [
           { text: 'Offline Research Evaluation', link: '/research-evaluation' },
           { text: 'Research Behavior Evaluation', link: '/research-behavior-evaluation' },
-          { text: 'Backtest Replay V1', link: '/backtest-replay-v1' },
+          { text: 'Deterministic Replay', link: '/backtest-replay-v1' },
         ],
       },
       {

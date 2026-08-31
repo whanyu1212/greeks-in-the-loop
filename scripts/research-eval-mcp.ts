@@ -3,7 +3,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 
 import { researchEvalBarRequestMatchesFixture } from "../src/evaluation/research-eval-bar-window.js"
-import { spyAlpacaOptionSymbolV1Schema } from "../src/shared/alpaca-option-identity.js"
+import {
+  ALLOWED_OPTION_UNDERLYINGS_V1,
+  allowedAlpacaOptionSymbolV1Schema,
+} from "../src/shared/alpaca-option-identity.js"
 
 const scenarioId = process.argv[2]?.trim()
 const serverKind = process.argv[3]?.trim()
@@ -29,8 +32,8 @@ const result = (value: unknown) => ({
 })
 
 const commonInput = {
-  symbol: z.literal("SPY").optional(),
-  symbols: z.array(spyAlpacaOptionSymbolV1Schema).optional(),
+  symbol: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1).optional(),
+  symbols: z.array(allowedAlpacaOptionSymbolV1Schema).optional(),
   query: z.string().optional(),
   start: z.string().optional(),
   end: z.string().optional(),
@@ -44,7 +47,7 @@ const commonInput = {
 const inputSchemaFor = (name: string) => {
   if (name === "alpaca_get_stock_bars") {
     return z.object({
-      symbol: z.literal("SPY"),
+      symbol: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1),
       timeframe: z.enum(["1Day", "1Min"]),
       adjustment: z.literal("all"),
       feed: z.literal("iex"),
@@ -62,23 +65,26 @@ const inputSchemaFor = (name: string) => {
   if (name === "alpaca_get_stock_latest_quote") {
     return z.object({
       ...commonInput,
-      symbol: z.literal("SPY"),
+      symbol: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1),
       feed: z.literal("iex"),
     })
   }
   if (name === "alpaca_get_option_chain") {
     return z.object({
       ...commonInput,
-      symbol: z.literal("SPY").optional(),
-      symbols: z.array(spyAlpacaOptionSymbolV1Schema).min(1).optional(),
+      symbol: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1).optional(),
+      symbols: z.array(allowedAlpacaOptionSymbolV1Schema).min(1).optional(),
       feed: z.literal("indicative"),
     }).refine(
-      (input) => input.symbol === "SPY" || input.symbols !== undefined,
-      { message: "Option-chain fixture calls require SPY or SPY OCC symbols" },
+      (input) => input.symbol !== undefined || input.symbols !== undefined,
+      { message: "Option-chain fixture calls require an allowed ETF or OCC symbols" },
     )
   }
   if (name === "alpaca_get_option_contracts") {
-    return z.object({ ...commonInput, symbol: z.literal("SPY") })
+    return z.object({
+      ...commonInput,
+      symbol: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1),
+    })
   }
   return z.object(commonInput)
 }

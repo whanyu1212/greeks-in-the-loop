@@ -1,17 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
 
 import type {
-  NoActionDecisionV1,
-  ProposedTradeDecisionV1,
-} from "../src/contracts/research-decision-v1.js"
-import {
-  createAgentResearchScreeningUnavailableAuditV1,
-  createApplicationCaptureUnavailableAuditV1,
-  createResearchScreeningAuditV1,
-} from "../src/contracts/research-screening-audit-v1.js"
-import type { PreliminaryResearchV1 } from "../src/contracts/preliminary-research-v1.js"
-import type { ResearchReportV2 } from "../src/contracts/research-report-v2.js"
-import type { TradeIntentV1 } from "../src/contracts/trade-intent-v1.js"
+  NoActionDecisionV2,
+  ProposedTradeDecisionV2,
+} from "../src/contracts/research-decision-v2.js"
+import type { PreliminaryResearchV2 } from "../src/contracts/preliminary-research-v2.js"
+import type { ResearchReportV3 } from "../src/contracts/research-report-v3.js"
+import type { TradeIntentV2 } from "../src/contracts/trade-intent-v2.js"
 import type {
   LedgerEventV1,
   StoredLedgerEventV1,
@@ -26,15 +21,12 @@ const TIMESTAMP = "2026-08-26T10:00:00.000Z"
 const signal = new AbortController().signal
 
 const researchInvocation: ResearchInvocationV1 = {
-  invocationVersion: "1.0.0",
+  invocationVersion: "3.0.0",
   agentName: "research",
   cycleMode: "STANDARD",
   promptVersion: "1.3.0",
-  skillName: "spy-debit-spread-research",
-  skillVersion: "1.1.0",
-  strategyVersion: "1.1.0",
-  decisionContractVersion: "1.0.0",
-  reportVersion: "2.0.0",
+  decisionContractVersion: "2.0.0",
+  reportVersion: "3.0.0",
   providerId: "test-provider",
   modelId: "test-model",
   responseError: false,
@@ -48,16 +40,22 @@ const researchInvocation: ResearchInvocationV1 = {
   },
 }
 
-const noActionDecision: NoActionDecisionV1 = {
-  contractVersion: "1.0.0",
-  strategyVersion: "1.1.0",
+const noActionDecision: NoActionDecisionV2 = {
+  contractVersion: "2.0.0",
   outcome: "NO_ACTION",
   reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
-  evidence: [],
+  evidence: [{
+    claimId: "mixed-regime",
+    kind: "SOURCED_FACT",
+    claim: "The retained market regime signal was mixed.",
+    provider: "ALPACA",
+    temporalClass: "LIVE",
+    observedAt: TIMESTAMP,
+  }],
 }
 
-const researchReport: ResearchReportV2 = {
-  reportVersion: "2.0.0",
+const researchReport: ResearchReportV3 = {
+  reportVersion: "3.0.0",
   result: noActionDecision,
   analysis: {
     provenance: "AGENT_REPORTED",
@@ -96,9 +94,8 @@ const researchReport: ResearchReportV2 = {
   },
 }
 
-const preliminaryResearch: PreliminaryResearchV1 = {
-  contractVersion: "1.0.0",
-  strategyVersion: "1.1.0",
+const preliminaryResearch: PreliminaryResearchV2 = {
+  contractVersion: "2.0.0",
   outcome: "PRELIMINARY_RESEARCH",
   targetSessionDate: "2026-08-26",
   direction: "UNDETERMINED",
@@ -117,9 +114,8 @@ const preliminaryResearch: PreliminaryResearchV1 = {
   requiresRefresh: true,
 }
 
-const proposedDecision: ProposedTradeDecisionV1 = {
-  contractVersion: "1.0.0",
-  strategyVersion: "1.1.0",
+const proposedDecision: ProposedTradeDecisionV2 = {
+  contractVersion: "2.0.0",
   outcome: "PROPOSE_TRADE",
   direction: "BULLISH",
   thesis: "Daily and intraday direction agree.",
@@ -147,10 +143,9 @@ const proposedDecision: ProposedTradeDecisionV1 = {
   ],
 }
 
-const intent: TradeIntentV1 = {
-  contractVersion: "1.0.0",
-  decisionContractVersion: "1.0.0",
-  strategyVersion: "1.1.0",
+const intent: TradeIntentV2 = {
+  contractVersion: "2.0.0",
+  decisionContractVersion: "2.0.0",
   direction: "BULLISH",
   structure: "BULL_CALL_SPREAD",
   expiration: "2026-09-18",
@@ -487,7 +482,7 @@ describe("createResearchLifecycleRecorder", () => {
         cycleId: "id-1",
         sessionId: "session-1",
         payload: {
-          invocationVersion: "1.3.0",
+          invocationVersion: "3.0.0",
           reason: "MODEL_DRIFT",
           expected: "gpt-5.6-sol",
           observed: "gpt-5.6-sol-fast",
@@ -516,65 +511,6 @@ describe("createResearchLifecycleRecorder", () => {
     ])
   })
 
-  it("records a screening audit caused by the committed cycle terminal", async () => {
-    const state = setup()
-    const cycle = await startCycle(state)
-    await cycle.interrupt("FAILED")
-    const terminal = state.events.at(-1)
-    if (terminal?.eventType !== "RESEARCH_CYCLE_INTERRUPTED") {
-      throw new Error("Expected interrupted terminal fixture")
-    }
-    state.list.mockResolvedValueOnce([asStored(terminal, 2)])
-    const audit = createResearchScreeningAuditV1({
-      application: createApplicationCaptureUnavailableAuditV1(
-        ["REQUEST_TIMED_OUT"],
-        25,
-      ),
-      agent: createAgentResearchScreeningUnavailableAuditV1(
-        "INVOCATION_FAILED",
-      ),
-    })
-
-    await state.recorder.recordResearchScreeningAudit(cycle.cycleId, audit)
-
-    expect(state.list).toHaveBeenCalledWith({
-      cycleId: cycle.cycleId,
-      direction: "DESC",
-      eventTypes: [
-        "RESEARCH_CYCLE_COMPLETED",
-        "RESEARCH_CYCLE_INTERRUPTED",
-      ],
-      limit: 1,
-    })
-    expect(state.events.at(-1)).toEqual({
-      eventId: "id-5",
-      eventVersion: "1.0.0",
-      eventType: "RESEARCH_SCREENING_AUDIT_RECORDED",
-      occurredAt: TIMESTAMP,
-      correlationId: cycle.correlationId,
-      causationEventId: terminal.eventId,
-      cycleId: cycle.cycleId,
-      sessionId: cycle.sessionId,
-      payload: { audit },
-    })
-  })
-
-  it("rejects a screening audit when the cycle terminal is missing", async () => {
-    const state = setup()
-    await expect(state.recorder.recordResearchScreeningAudit(
-      "missing-cycle",
-      createResearchScreeningAuditV1({
-        application: createApplicationCaptureUnavailableAuditV1(
-          ["REQUEST_TIMED_OUT"],
-          25,
-        ),
-        agent: createAgentResearchScreeningUnavailableAuditV1(
-          "INVOCATION_FAILED",
-        ),
-      }),
-    )).rejects.toThrow("Ledger screening-audit append failed")
-  })
-
   it("records the session date and initial eligibility with a new cycle", async () => {
     const state = setup()
     await state.recorder.startCycle({
@@ -587,7 +523,7 @@ describe("createResearchLifecycleRecorder", () => {
         researchEligible: true,
         tradeIntentEligible: false,
         previousSessionDates: ["2026-08-25"],
-        researchMode: "DRY_RUN_ANYTIME",
+        researchMode: "DRY_RUN",
         reason: "DRY_RUN_RESEARCH_ONLY",
       },
       signal,
@@ -602,7 +538,7 @@ describe("createResearchLifecycleRecorder", () => {
           evaluatedAt: TIMESTAMP,
           researchEligible: true,
           previousSessionDates: ["2026-08-25"],
-          researchMode: "DRY_RUN_ANYTIME",
+          researchMode: "DRY_RUN",
           reason: "DRY_RUN_RESEARCH_ONLY",
         },
       },

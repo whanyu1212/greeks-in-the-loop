@@ -6,7 +6,8 @@ import {
   type StoredLedgerEventV1,
 } from "../event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
-import type { PreliminaryResearchV1 } from "../contracts/preliminary-research-v1.js"
+import type { PreliminaryResearchV2 } from "../contracts/preliminary-research-v2.js"
+import type { AllowedOptionUnderlyingV1 } from "../shared/alpaca-option-identity.js"
 
 /** Ledger query window: how much history is read, not how much survives. */
 export const MAX_RESEARCH_CONTEXT_EVENTS = 500
@@ -19,9 +20,7 @@ const TERMINAL_EVENT_TYPES = [
   "RESEARCH_CYCLE_COMPLETED",
   "RESEARCH_CYCLE_INTERRUPTED",
 ] as const
-const RESEARCH_CONTEXT_EVENT_TYPES = LEDGER_EVENT_TYPES.filter(
-  (eventType) => eventType !== "RESEARCH_SCREENING_AUDIT_RECORDED",
-)
+const RESEARCH_CONTEXT_EVENT_TYPES = LEDGER_EVENT_TYPES
 
 type TerminalStatus = Extract<
   LedgerEventV1,
@@ -46,7 +45,7 @@ export type ResearchContextTerminalOutcomeV1 = Readonly<{
 export type ResearchContextProposalV1 = Readonly<{
   cycleId: string
   direction: "BULLISH" | "BEARISH"
-  underlying: "SPY"
+  underlying: AllowedOptionUnderlyingV1
   structure: "BULL_CALL_SPREAD" | "BEAR_PUT_SPREAD"
   expiration: string
   longContractSymbol: string
@@ -82,12 +81,12 @@ export type ResearchContextRefreshMarkerV1 = Readonly<{
   snapshotRef?: string
 }>
 
-export type ResearchContextPreliminaryResearchV1 = Readonly<{
+export type ResearchContextPreliminaryResearchV2 = Readonly<{
   cycleId: string
   occurredAt: string
   targetSessionDate: string
-  direction: PreliminaryResearchV1["direction"]
-  candidate?: PreliminaryResearchV1["candidate"]
+  direction: PreliminaryResearchV2["direction"]
+  candidate?: PreliminaryResearchV2["candidate"]
   /**
    * Counts and provenance only. The model authors `claimId`, and this payload
    * re-enters a later prompt, so the identifier string is deliberately not
@@ -106,7 +105,7 @@ export type ResearchContextV1 = Readonly<{
   generatedAt: string
   nextCycleNumber: number
   latestValidatedProposal?: ResearchContextProposalV1
-  latestPreliminaryResearch?: ResearchContextPreliminaryResearchV1
+  latestPreliminaryResearch?: ResearchContextPreliminaryResearchV2
   recentTerminalOutcomes: readonly ResearchContextTerminalOutcomeV1[]
   recurringRejectionCounts: readonly ResearchContextRejectionCountV1[]
   evidenceReferences: Readonly<
@@ -162,9 +161,9 @@ export function projectResearchContextV1(
     throw new Error("Research context generation time is invalid")
   }
 
-  const orderedInput = inputEvents
-    .filter((event) => event.eventType !== "RESEARCH_SCREENING_AUDIT_RECORDED")
-    .sort((left, right) => left.sequence - right.sequence)
+  const orderedInput = [...inputEvents].sort(
+    (left, right) => left.sequence - right.sequence,
+  )
   const events = orderedInput.slice(-MAX_RESEARCH_CONTEXT_EVENTS)
   let truncatedBefore =
     options.truncatedBefore === true ||
@@ -175,7 +174,7 @@ export function projectResearchContextV1(
     | (ResearchContextProposalV1 & { sequence: number })
     | undefined
   let latestPreliminaryResearch:
-    | (ResearchContextPreliminaryResearchV1 & { sequence: number })
+    | (ResearchContextPreliminaryResearchV2 & { sequence: number })
     | undefined
   const terminalOutcomes: Array<ResearchContextTerminalOutcomeV1 & {
     sequence: number

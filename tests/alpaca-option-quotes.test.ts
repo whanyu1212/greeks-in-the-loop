@@ -159,7 +159,8 @@ describe("Alpaca option quote provider", () => {
 
   it.each([
     ["malformed", "not-a-symbol"],
-    ["unsupported", "QQQ260918C00650000"],
+    ["mixed-underlying", "QQQ260918C00650000"],
+    ["unsupported", "DIA260918C00650000"],
     ["impossible-date", "SPY260431C00650000"],
   ])(
     "rejects a %s requested symbol before provider I/O",
@@ -180,6 +181,25 @@ describe("Alpaca option quote provider", () => {
       expect(fetchMock).not.toHaveBeenCalled()
     },
   )
+
+  it("accepts two exact QQQ legs", async () => {
+    const qqqLong = "QQQ260918C00650000"
+    const qqqShort = "QQQ260918C00655000"
+    const provider = createProvider(
+      vi.fn<typeof fetch>().mockResolvedValue(response({
+        snapshots: {
+          [qqqLong]: { latestQuote: { bp: 2.2, ap: 2.23, t: "2026-08-25T14:30:30.000Z" } },
+          [qqqShort]: { latestQuote: { bp: 1.2, ap: 1.21, t: "2026-08-25T14:30:31.000Z" } },
+        },
+      })),
+    )
+
+    await expect(provider.confirmQuotes({
+      longContractSymbol: qqqLong,
+      shortContractSymbol: qqqShort,
+      signal: new AbortController().signal,
+    })).resolves.toMatchObject({ success: true })
+  })
 
   it("matches quotes by symbol rather than response order", async () => {
     const provider = createProvider(

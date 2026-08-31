@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import { preliminaryResearchV1Schema } from "../src/contracts/preliminary-research-v1.js"
+import { preliminaryResearchV2Schema } from "../src/contracts/preliminary-research-v2.js"
 
 const preliminary = {
-  contractVersion: "1.0.0",
-  strategyVersion: "1.1.0",
+  contractVersion: "2.0.0",
   outcome: "PRELIMINARY_RESEARCH",
   targetSessionDate: "2026-08-26",
   direction: "BULLISH",
@@ -29,16 +28,15 @@ const preliminary = {
   requiresRefresh: true,
 } as const
 
-describe("PreliminaryResearchV1", () => {
+describe("PreliminaryResearchV2", () => {
   it("accepts bounded research with explicit temporal labels", () => {
-    expect(preliminaryResearchV1Schema.parse(preliminary)).toEqual(preliminary)
+    expect(preliminaryResearchV2Schema.parse(preliminary)).toEqual(preliminary)
   })
 
   it("keeps legacy strategy research readable", () => {
     expect(
-      preliminaryResearchV1Schema.safeParse({
+      preliminaryResearchV2Schema.safeParse({
         ...preliminary,
-        strategyVersion: "1.0.0",
       }).success,
     ).toBe(true)
   })
@@ -46,12 +44,12 @@ describe("PreliminaryResearchV1", () => {
   it("requires every sourced observation to identify its temporal class", () => {
     const input = structuredClone(preliminary) as Record<string, any>
     delete input.evidence[0].temporalClass
-    expect(preliminaryResearchV1Schema.safeParse(input).success).toBe(false)
+    expect(preliminaryResearchV2Schema.safeParse(input).success).toBe(false)
   })
 
   it("rejects executable pricing fields", () => {
     expect(
-      preliminaryResearchV1Schema.safeParse({
+      preliminaryResearchV2Schema.safeParse({
         ...preliminary,
         entryLimitCentsPerShare: 101,
       }).success,
@@ -60,7 +58,7 @@ describe("PreliminaryResearchV1", () => {
 
   it("requires inferences to reference sourced facts", () => {
     expect(
-      preliminaryResearchV1Schema.safeParse({
+      preliminaryResearchV2Schema.safeParse({
         ...preliminary,
         evidence: [
           preliminary.evidence[0],
@@ -85,7 +83,7 @@ describe("PreliminaryResearchV1", () => {
     },
   ])("rejects an internally inconsistent candidate identity", (legs) => {
     expect(
-      preliminaryResearchV1Schema.safeParse({
+      preliminaryResearchV2Schema.safeParse({
         ...preliminary,
         candidate: {
           underlying: "SPY",

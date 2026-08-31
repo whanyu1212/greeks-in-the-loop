@@ -17,6 +17,16 @@ const proposalEvidence = [
   },
 ] as const
 
+const noActionEvidence = [{
+  claimId: "mixed-regime",
+  kind: "SOURCED_FACT",
+  claim: "Alpaca market observations did not provide an actionable signal.",
+  provider: "ALPACA",
+  temporalClass: "LIVE",
+  observedAt: "2026-08-26T14:30:00.000Z",
+  locator: "analysis.marketRegime",
+}] as const
+
 export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
   {
     name: "valid bullish proposal",
@@ -24,8 +34,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedSchema: "VALID",
     expectedOutcome: "PROPOSE_TRADE",
     response: {
-      contractVersion: "1.0.0",
-      strategyVersion: "1.1.0",
+      contractVersion: "2.0.0",
       outcome: "PROPOSE_TRADE",
       direction: "BULLISH",
       thesis: "Completed daily and intraday Alpaca observations agree on a bullish direction.",
@@ -52,8 +61,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedSchema: "VALID",
     expectedOutcome: "PROPOSE_TRADE",
     response: {
-      contractVersion: "1.0.0",
-      strategyVersion: "1.1.0",
+      contractVersion: "2.0.0",
       outcome: "PROPOSE_TRADE",
       direction: "BEARISH",
       thesis: "Completed daily and intraday Alpaca observations agree on a bearish direction.",
@@ -81,10 +89,10 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedOutcome: "NO_ACTION",
     expectedReasonCode: "SIGNAL_NOT_ACTIONABLE",
     response: {
-      contractVersion: "1.0.0",
-      strategyVersion: "1.1.0",
+      contractVersion: "2.0.0",
       outcome: "NO_ACTION",
       reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
+      evidence: noActionEvidence,
     },
   },
   {
@@ -94,10 +102,10 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedOutcome: "NO_ACTION",
     expectedReasonCode: "INSUFFICIENT_UNDERLYING_DATA",
     response: {
-      contractVersion: "1.0.0",
-      strategyVersion: "1.1.0",
+      contractVersion: "2.0.0",
       outcome: "NO_ACTION",
       reasonCodes: ["INSUFFICIENT_UNDERLYING_DATA"],
+      evidence: noActionEvidence,
     },
   },
   {
@@ -107,10 +115,10 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedOutcome: "NO_ACTION",
     expectedReasonCode: "SIGNAL_NOT_ACTIONABLE",
     response: {
-      contractVersion: "1.0.0",
-      strategyVersion: "1.1.0",
+      contractVersion: "2.0.0",
       outcome: "NO_ACTION",
       reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
+      evidence: noActionEvidence,
     },
   },
   {
@@ -119,8 +127,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedSchema: "VALID",
     expectedOutcome: "PROPOSE_TRADE",
     response: {
-      contractVersion: "1.0.0",
-      strategyVersion: "1.1.0",
+      contractVersion: "2.0.0",
       outcome: "PROPOSE_TRADE",
       direction: "BULLISH",
       thesis: "The untrusted instruction was discarded; the candidate relies only on current Alpaca facts.",
@@ -148,10 +155,10 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedOutcome: "NO_ACTION",
     expectedReasonCode: "CONTRACT_UNREPRESENTABLE",
     response: {
-      contractVersion: "1.0.0",
-      strategyVersion: "1.1.0",
+      contractVersion: "2.0.0",
       outcome: "NO_ACTION",
       reasonCodes: ["CONTRACT_UNREPRESENTABLE"],
+      evidence: noActionEvidence,
     },
   },
   {
@@ -159,8 +166,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     scenario: "A proposal includes quantity and a model-authored limit price.",
     expectedSchema: "INVALID",
     response: {
-      contractVersion: "1.0.0",
-      strategyVersion: "1.1.0",
+      contractVersion: "2.0.0",
       outcome: "PROPOSE_TRADE",
       direction: "BULLISH",
       thesis: "A proposal with forbidden execution fields must fail schema validation.",
@@ -185,13 +191,13 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
   },
   {
     name: "unsupported reason code",
-    scenario: "A no-action response invents a reason outside ResearchDecisionV1.",
+    scenario: "A no-action response invents a reason outside ResearchDecisionV2.",
     expectedSchema: "INVALID",
     response: {
-      contractVersion: "1.0.0",
-      strategyVersion: "1.1.0",
+      contractVersion: "2.0.0",
       outcome: "NO_ACTION",
       reasonCodes: ["NEWS_CONFLICT"],
+      evidence: noActionEvidence,
     },
   },
 ] as const

@@ -5,12 +5,6 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
-  createAgentResearchScreeningUnavailableAuditV1,
-  createApplicationCaptureUnavailableAuditV1,
-  createResearchScreeningAuditV1,
-} from "../src/contracts/research-screening-audit-v1.js"
-import {
-  LEDGER_EVENT_TYPES,
   type LedgerEventV1,
   type StoredLedgerEventV1,
 } from "../src/event-ledger/ledger-event-v1.js"
@@ -75,8 +69,7 @@ const validatedProposal = (): LedgerEventV1 => ({
   sessionId: "session-cycle-1",
   payload: {
     decision: {
-      contractVersion: "1.0.0",
-      strategyVersion: "1.1.0",
+      contractVersion: "2.0.0",
       outcome: "PROPOSE_TRADE",
       direction: "BULLISH",
       thesis: "PROSE_THESIS_MUST_NOT_SURVIVE",
@@ -131,8 +124,7 @@ const preliminaryRecorded = (): LedgerEventV1 => ({
   sessionId: "session-cycle-1",
   payload: {
     research: {
-      contractVersion: "1.0.0",
-      strategyVersion: "1.1.0",
+      contractVersion: "2.0.0",
       outcome: "PRELIMINARY_RESEARCH",
       targetSessionDate: "2026-08-26",
       direction: "UNDETERMINED",
@@ -160,53 +152,6 @@ afterEach(() => {
 })
 
 describe("ResearchContextV1", () => {
-  it("excludes screening audits before applying the bounded prompt window", async () => {
-    const authoritativeEvents = Array.from(
-      { length: MAX_RESEARCH_CONTEXT_EVENTS },
-      (_, index) => stored(cycleStarted(index + 1), index + 1),
-    )
-    const terminal = authoritativeEvents.at(-1)!
-    const audit = stored({
-      ...terminal,
-      eventId: "screening-audit",
-      eventType: "RESEARCH_SCREENING_AUDIT_RECORDED",
-      causationEventId: terminal.eventId,
-      payload: {
-        audit: createResearchScreeningAuditV1({
-          application: createApplicationCaptureUnavailableAuditV1(
-            ["REQUEST_TIMED_OUT"],
-            25,
-          ),
-          agent: createAgentResearchScreeningUnavailableAuditV1(
-            "INVOCATION_FAILED",
-          ),
-        }),
-      },
-    }, MAX_RESEARCH_CONTEXT_EVENTS + 1)
-
-    expect(projectResearchContextV1(
-      [...authoritativeEvents, audit],
-      { generatedAt: recordedAt },
-    )).toEqual(projectResearchContextV1(
-      authoritativeEvents,
-      { generatedAt: recordedAt },
-    ))
-
-    const queries: Parameters<LedgerStore["list"]>[0][] = []
-    const store = {
-      list: vi.fn<LedgerStore["list"]>(async (query) => {
-        queries.push(query)
-        return []
-      }),
-    } as unknown as LedgerStore
-    await loadResearchContextV1(store, { generatedAt: recordedAt })
-    expect(queries[0]?.eventTypes).toEqual(
-      LEDGER_EVENT_TYPES.filter(
-        (eventType) => eventType !== "RESEARCH_SCREENING_AUDIT_RECORDED",
-      ),
-    )
-  })
-
   it("carries the latest preliminary finding forward with mandatory refresh", () => {
     const context = projectResearchContextV1(
       [
@@ -302,11 +247,17 @@ describe("ResearchContextV1", () => {
           cycleId: "cycle-2",
           payload: {
             decision: {
-              contractVersion: "1.0.0",
-              strategyVersion: "1.1.0",
+              contractVersion: "2.0.0",
               outcome: "NO_ACTION",
               reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
-              evidence: [],
+              evidence: [{
+                claimId: "mixed-regime",
+                kind: "SOURCED_FACT",
+                claim: "The retained market regime signal was mixed.",
+                provider: "ALPACA",
+                temporalClass: "LIVE",
+                observedAt: "2026-08-26T13:02:00.000Z",
+              }],
             },
           },
         },

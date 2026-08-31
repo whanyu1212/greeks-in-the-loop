@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import { researchDecisionV1Schema } from "../src/contracts/research-decision-v1.js"
+import { researchDecisionV2Schema } from "../src/contracts/research-decision-v2.js"
 import { researchDecisionScenarios } from "./fixtures/research-decision-scenarios.js"
 
 describe("research decision scenarios", () => {
   for (const fixture of researchDecisionScenarios) {
     it(fixture.name, () => {
-      const parsed = researchDecisionV1Schema.safeParse(fixture.response)
+      const parsed = researchDecisionV2Schema.safeParse(fixture.response)
 
       expect(parsed.success).toBe(fixture.expectedSchema === "VALID")
       if (!parsed.success) return

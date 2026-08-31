@@ -1,4 +1,4 @@
-import { NO_ACTION_REASON_CODES } from "../contracts/research-decision-v1.js"
+import { NO_ACTION_REASON_CODES } from "../contracts/research-decision-v2.js"
 import type {
   ResearchBehaviorExpectation,
   ResearchBehaviorIssueCode,
@@ -84,29 +84,45 @@ const noActionReport = (
 ) => {
   const analysis = baseAnalysis()
   const inactiveAccount = options.accountStatus === "INACTIVE"
+  const accountChecks = {
+    ...analysis.accountChecks,
+    accountStatus: options.accountStatus ?? analysis.accountChecks.accountStatus,
+    optionsTradingApproved: inactiveAccount
+      ? false
+      : analysis.accountChecks.optionsTradingApproved,
+  }
+  const marketRegime = options.marketRegime === undefined
+    ? analysis.marketRegime
+    : {
+        verification: "AGENT_REPORTED" as const,
+        ...options.marketRegime,
+      }
   return {
-    reportVersion: "2.0.0",
+    reportVersion: "3.0.0",
     result: {
-      contractVersion: "1.0.0",
-      strategyVersion: "1.1.0",
+      contractVersion: "2.0.0",
       outcome: "NO_ACTION",
       reasonCodes: [reasonCode],
+      evidence: [{
+        claimId: "decisive-no-action-fact",
+        kind: "SOURCED_FACT",
+        claim: inactiveAccount
+          ? `Alpaca reported account status ${accountChecks.accountStatus} with options approval ${String(accountChecks.optionsTradingApproved)}.`
+          : `The retained market signal was ${marketRegime.signal} with ${marketRegime.intradayBarCount} intraday bars.`,
+        provider: "ALPACA",
+        temporalClass: marketRegime.temporalClass,
+        observedAt: inactiveAccount
+          ? accountChecks.observedAt
+          : marketRegime.observedAt,
+        locator: inactiveAccount
+          ? "analysis.accountChecks"
+          : "analysis.marketRegime",
+      }],
     },
     analysis: {
       ...analysis,
-      accountChecks: {
-        ...analysis.accountChecks,
-        accountStatus: options.accountStatus ?? analysis.accountChecks.accountStatus,
-        optionsTradingApproved: inactiveAccount
-          ? false
-          : analysis.accountChecks.optionsTradingApproved,
-      },
-      marketRegime: options.marketRegime === undefined
-        ? analysis.marketRegime
-        : {
-            verification: "AGENT_REPORTED",
-            ...options.marketRegime,
-          },
+      accountChecks,
+      marketRegime,
       externalContext: options.externalContext ?? analysis.externalContext,
       conflicts: options.conflicts ?? analysis.conflicts,
     },
@@ -117,10 +133,9 @@ const proposalReport = (externalContext = [
   exaSource("exa-support", "SUPPORTS"),
   exaSource("exa-challenge", "CONTRADICTS"),
 ]) => ({
-  reportVersion: "2.0.0",
+  reportVersion: "3.0.0",
   result: {
-    contractVersion: "1.0.0",
-    strategyVersion: "1.1.0",
+    contractVersion: "2.0.0",
     outcome: "PROPOSE_TRADE",
     direction: "BULLISH",
     thesis: "Current completed-session and intraday evidence support a bullish setup.",
@@ -223,7 +238,6 @@ const completed = (
 const completeProposalToolCalls = (
   exaCallCount: number,
 ): readonly ResearchBehaviorToolCall[] => [
-  completed("skill"),
   completed("alpaca_get_account"),
   completed("trusted_time"),
   completed("alpaca_get_account_configurations"),
@@ -318,7 +332,6 @@ const completeProposalToolExpectation = {
     },
   ],
   requiredCompletedToolPrefix: [
-    "skill",
     "alpaca_get_account",
     "trusted_time",
     "alpaca_get_account_configurations",
@@ -326,7 +339,6 @@ const completeProposalToolExpectation = {
     "alpaca_get_orders",
   ],
   requiredCompletedToolSequence: [
-    "skill",
     "alpaca_get_account",
     "trusted_time",
     "alpaca_get_account_configurations",
@@ -448,16 +460,14 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       accountStatus: "INACTIVE",
     })),
     toolCalls: [
-      completed("skill"),
       completed("alpaca_get_account"),
       completed("trusted_time"),
     ],
     expected: {
       outcome: "NO_ACTION",
       reasonCode: "ACCOUNT_STATE_INELIGIBLE",
-      requiredTools: ["skill", "alpaca_get_account", "trusted_time"],
+      requiredTools: ["alpaca_get_account", "trusted_time"],
       requiredCompletedToolPrefix: [
-        "skill",
         "alpaca_get_account",
         "trusted_time",
       ],
@@ -481,7 +491,6 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     description: "A recent but neutral Exa citation does not establish directional relevance.",
     rawResponse: json(noActionReport("SIGNAL_NOT_ACTIONABLE")),
     toolCalls: [
-      completed("skill"),
       completed("alpaca_get_account"),
       completed("trusted_time"),
       completed("alpaca_get_account_configurations"),
@@ -500,9 +509,8 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         "alpaca_get_orders",
         "exa_*",
       ],
-      requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
+      requiredCompletedToolPrefix: ["alpaca_get_account"],
       requiredCompletedToolSequence: [
-        "skill",
         "alpaca_get_account",
         "trusted_time",
         "alpaca_get_account_configurations",
@@ -526,7 +534,6 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       ],
     })),
     toolCalls: [
-      completed("skill"),
       completed("alpaca_get_account"),
       completed("trusted_time"),
       completed("alpaca_get_account_configurations"),
@@ -545,9 +552,8 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         "alpaca_get_orders",
         "exa_*",
       ],
-      requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
+      requiredCompletedToolPrefix: ["alpaca_get_account"],
       requiredCompletedToolSequence: [
-        "skill",
         "alpaca_get_account",
         "trusted_time",
         "alpaca_get_account_configurations",
@@ -571,7 +577,6 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       conflicts: ["Current sources materially disagree on the catalyst impact."],
     })),
     toolCalls: [
-      completed("skill"),
       completed("alpaca_get_account"),
       completed("trusted_time"),
       completed("alpaca_get_account_configurations"),
@@ -591,9 +596,8 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         "alpaca_get_orders",
         "exa_*",
       ],
-      requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
+      requiredCompletedToolPrefix: ["alpaca_get_account"],
       requiredCompletedToolSequence: [
-        "skill",
         "alpaca_get_account",
         "trusted_time",
         "alpaca_get_account_configurations",
@@ -633,7 +637,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     rawResponse: json(noActionReport("CONTRACT_UNREPRESENTABLE", {
       externalContext: [],
     })),
-    toolCalls: [completed("skill")],
+    toolCalls: [],
     expected: {
       outcome: "NO_ACTION",
       reasonCode: "CONTRACT_UNREPRESENTABLE",
@@ -647,7 +651,6 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       externalContext: [exaSource("stale-context", "CONTRADICTS")],
     })),
     toolCalls: [
-      completed("skill"),
       completed("alpaca_get_account"),
       completed("trusted_time"),
       completed("alpaca_get_account_configurations"),
@@ -696,7 +699,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         "alpaca_get_orders",
         "exa_*",
       ],
-      requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
+      requiredCompletedToolPrefix: ["alpaca_get_account"],
       expectedAccountObservedAt: "2026-08-26T14:30:00.000Z",
       completedToolCounts: [
         { pattern: "alpaca_get_stock_bars", minimum: 4, maximum: 4 },
@@ -743,7 +746,6 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         },
       ],
       requiredCompletedToolSequence: [
-        "skill",
         "alpaca_get_account",
         "trusted_time",
         "alpaca_get_account_configurations",
@@ -834,7 +836,6 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       externalContext: [exaSource("candidate-context", "CONTRADICTS")],
     })),
     toolCalls: [
-      completed("skill"),
       completed("alpaca_get_account"),
       completed("trusted_time"),
       completed("alpaca_get_account_configurations"),
@@ -862,7 +863,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         "alpaca_get_orders",
         "exa_*",
       ],
-      requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
+      requiredCompletedToolPrefix: ["alpaca_get_account"],
       requiredAdjacentToolPairs: [["alpaca_get_account", "trusted_time"]],
       expectedAccountObservedAt: "2026-08-26T14:30:00.000Z",
       completedToolCounts: [
@@ -877,7 +878,6 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         },
       ],
       requiredCompletedToolSequence: [
-        "skill",
         "alpaca_get_account",
         "trusted_time",
         "alpaca_get_account_configurations",
@@ -948,7 +948,6 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       },
     })),
     toolCalls: [
-      completed("skill"),
       completed("alpaca_get_account"),
       completed("trusted_time"),
       completed("alpaca_get_account_configurations"),
@@ -1012,9 +1011,8 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
           maximum: 2,
         },
       ],
-      requiredCompletedToolPrefix: ["skill", "alpaca_get_account"],
+      requiredCompletedToolPrefix: ["alpaca_get_account"],
       requiredCompletedToolSequence: [
-        "skill",
         "alpaca_get_account",
         "trusted_time",
         "alpaca_get_account_configurations",
@@ -1096,7 +1094,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     id: "malformed-json-output",
     description: "A truncated response is rejected before any grader runs.",
     rawResponse: '{"reportVersion":"2.0.0","result":{"contractVersion"',
-    toolCalls: [completed("skill"), completed("trusted_time")],
+    toolCalls: [completed("trusted_time")],
     expected: {},
     graderOnly: true,
     expectedIssues: ["MALFORMED_JSON"],
@@ -1108,7 +1106,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       ...noActionReport("SIGNAL_NOT_ACTIONABLE"),
       reportVersion: "1.0.0",
     }),
-    toolCalls: [completed("skill"), completed("trusted_time")],
+    toolCalls: [completed("trusted_time")],
     expected: {},
     graderOnly: true,
     expectedIssues: ["REPORT_SCHEMA_INVALID"],
@@ -1117,7 +1115,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     id: "outcome-and-reason-mismatch",
     description: "A no-action report cannot satisfy a proposal expectation.",
     rawResponse: json(noActionReport("SIGNAL_NOT_ACTIONABLE")),
-    toolCalls: [completed("skill"), completed("trusted_time")],
+    toolCalls: [completed("trusted_time")],
     expected: {
       outcome: "PROPOSE_TRADE",
       reasonCode: "NO_ELIGIBLE_SPREAD",
@@ -1130,7 +1128,6 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     description: "Shell access and reads outside the research paths are refused.",
     rawResponse: json(noActionReport("SIGNAL_NOT_ACTIONABLE")),
     toolCalls: [
-      completed("skill"),
       completed("bash", { command: "ls" }),
       completed("read", { path: "../../.env" }),
     ],
@@ -1140,7 +1137,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
   },
   {
     id: "skill-substitution-rejected",
-    description: "Loading a skill other than the strategy skill is refused.",
+    description: "Loading any skill is refused.",
     rawResponse: json(noActionReport("SIGNAL_NOT_ACTIONABLE")),
     toolCalls: [
       completed("skill", { name: "some-other-skill" }),
@@ -1155,7 +1152,6 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     description: "Retrieval before the account gate leaves the order unsatisfied.",
     rawResponse: json(noActionReport("SIGNAL_NOT_ACTIONABLE")),
     toolCalls: [
-      completed("skill"),
       completed("exa_search", { query: "SPY outlook" }),
       completed("alpaca_get_account"),
     ],
@@ -1171,7 +1167,6 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     description: "Extra retrieval and an unapproved bar feed break the budgets.",
     rawResponse: json(noActionReport("SIGNAL_NOT_ACTIONABLE")),
     toolCalls: [
-      completed("skill"),
       completed("exa_search", { query: "one" }),
       completed("exa_search", { query: "two" }),
       completed("exa_search", { query: "three" }),
@@ -1204,14 +1199,13 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     description: "Retrieval continues past an account gate that should stop it.",
     rawResponse: json(noActionReport("SIGNAL_NOT_ACTIONABLE")),
     toolCalls: [
-      completed("skill"),
       completed("alpaca_get_account"),
       completed("alpaca_get_all_positions"),
       completed("trusted_time"),
       completed("exa_search", { query: "SPY outlook" }),
     ],
     expected: {
-      requiredCompletedToolPrefix: ["skill", "alpaca_get_account", "trusted_time"],
+      requiredCompletedToolPrefix: ["alpaca_get_account", "trusted_time"],
       requiredAdjacentToolPairs: [["alpaca_get_account", "trusted_time"]],
       forbiddenAfter: [{
         anchor: "alpaca_get_all_positions",
@@ -1242,7 +1236,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         },
       }),
     ),
-    toolCalls: [completed("skill"), completed("trusted_time")],
+    toolCalls: [completed("trusted_time")],
     expected: {},
     graderOnly: true,
     expectedIssues: ["EXPECTED_MARKET_METRIC_MISMATCH"],
@@ -1255,7 +1249,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         externalContext: [exaSource("kept-source", "NEUTRAL")],
       }),
     ),
-    toolCalls: [completed("skill"), completed("exa_search", { query: "SPY" })],
+    toolCalls: [completed("exa_search", { query: "SPY" })],
     expected: {
       requiredExternalSourceIds: ["dropped-source"],
       requiredExternalSourceRelevances: ["CONTRADICTS"],
@@ -1274,7 +1268,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         ],
       }),
     ),
-    toolCalls: [completed("skill"), completed("exa_search", { query: "SPY" })],
+    toolCalls: [completed("exa_search", { query: "SPY" })],
     expected: { forbiddenExternalSourceIds: ["retracted-story"] },
     graderOnly: true,
     expectedIssues: ["FORBIDDEN_SOURCE_RETAINED"],
@@ -1291,7 +1285,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         conflicts: [],
       }),
     ),
-    toolCalls: [completed("skill"), completed("exa_search", { query: "SPY" })],
+    toolCalls: [completed("exa_search", { query: "SPY" })],
     expected: { requireMaterialConflict: true },
     graderOnly: true,
     expectedIssues: ["MATERIAL_CONFLICT_NOT_RETAINED"],
@@ -1304,7 +1298,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         externalContext: [exaSource("exa-support", "SUPPORTS")],
       }),
     ),
-    toolCalls: [completed("skill"), completed("exa_search", { query: "SPY" })],
+    toolCalls: [completed("exa_search", { query: "SPY" })],
     expected: {
       requiredExternalSources: [{
         url: "https://example.com/exa-support",

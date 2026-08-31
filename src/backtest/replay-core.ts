@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import type { TradeIntentV1 } from "../contracts/trade-intent-v1.js"
+import type { TradeIntentV2 } from "../contracts/trade-intent-v2.js"
 
 const nonnegativeSafeInteger = z
   .number()
@@ -86,8 +86,16 @@ export type ReplayExecution = Readonly<{
   commissionCentsPerContract: number
 }>
 
+export const replayExecutionSchema = z
+  .object({
+    entrySlippageHalfCentsPerShare: nonnegativeSafeInteger,
+    exitSlippageHalfCentsPerShare: nonnegativeSafeInteger,
+    commissionCentsPerContract: nonnegativeSafeInteger,
+  })
+  .strict()
+
 const exitReason = (
-  intent: TradeIntentV1,
+  intent: TradeIntentV2,
   cycle: ReplayMonitorCycle,
 ): ReplayExitReason | undefined => {
   if (!cycle.marketOpen) return undefined
@@ -145,7 +153,7 @@ export type ReplayScenarioSimulation =
 
 /** Applies the frozen monitor priority and execution model to one entered spread. */
 export function simulateReplayScenario(
-  intent: TradeIntentV1,
+  intent: TradeIntentV2,
   monitorCycles: readonly ReplayMonitorCycle[],
   execution: ReplayExecution,
 ): ReplayScenarioSimulation {

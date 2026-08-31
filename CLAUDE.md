@@ -1,135 +1,68 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Commands
 
 ```bash
-pnpm typecheck                  # tsc -p tsconfig.json
-pnpm test                       # vitest run (189 test files under tests/)
-pnpm build                      # tsc -p tsconfig.build.json
-pnpm agent                      # long-running scheduler (tsx src/index.ts)
-pnpm agent:once                 # single cycle
-pnpm agent:once -- --research-anytime   # bypass the market-window gate for research
-pnpm agent:once -- --shadow-anytime     # bypass the window gate for shadow risk
-pnpm risk:report                # aggregate shadow decisions from the ledger
-pnpm research:audit:report -- --ledger <path> --from <date> --to <date>  # read-only audit baseline
-pnpm research:run               # replay a stored research run
-pnpm research:evaluate          # offline research-run evaluation
-pnpm backtest:data -- --from <date> --to <date> --option <OCC>   # acquire dataset
-pnpm backtest -- --dataset <path> --scenarios <path> --output <path>
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm agent
+pnpm agent:once
+pnpm agent:once -- --dry-run [--session YYYY-MM-DD]
+pnpm research:run
+pnpm research:evaluate
+pnpm risk:report
+pnpm backtest -- --scenarios <json> [--output <json>]
 ```
 
-Run one test file: `pnpm vitest run tests/risk-state-v1.test.ts`
-Run by name: `pnpm vitest run -t "rejects stale quotes"`
+Run one test with `pnpm vitest run tests/<file>.test.ts`. Node 22 and pnpm 10 are enforced.
 
-There is no lint step. `pnpm typecheck && pnpm test` is the gate — the README's "Verify" section adds `pnpm build`.
+## Central invariant
 
-Node 22 (`>=22 <23`) and pnpm 10 are enforced by `engines`.
+The agent proposes; deterministic code disposes.
 
-## Architecture
+- One research agent selects among `SPY`, `QQQ`, and `IWM`, performs strategy-driven research, and returns at most one directional debit vertical.
+- `evaluateTradeIntentRiskV1` in `src/risk/risk-evaluation-v1.ts` is pure: no I/O, history, database access, or ambient state.
+- Only candidate identity crosses from research into risk. Application code refreshes quotes, contracts, account state, portfolio state, and clock data.
+- Money is integer cents; exit marks are half-cents per share.
+- No order-submission code exists. Runtime ends with a shadow decision in the ledger.
 
-A non-executing research agent. An LLM proposes SPY debit spreads; deterministic
-application code validates, prices, and risk-gates them. **No order-submission
-code exists anywhere in the repo** — the pipeline ends by recording a shadow
-decision to an event ledger.
+## Pipeline
 
-### The central invariant
-
-The agent proposes; deterministic code disposes. Concretely:
-
-- `evaluateTradeIntentRiskV1` (`src/risk/risk-evaluation-v1.ts`) is a **pure function** — no I/O, no history, no ambient state. It takes one intent plus currently captured state and returns APPROVED/REJECTED. It is versioned (`RISK_RULE_VERSION`) and must stay pure; anything that would make its output depend on database contents or past results is a design error.
-- Only the proposed spread's *identity* crosses from research into risk (direction, structure, expiration, two OCC leg symbols). Every financial input — equity, buying power, positions, quotes, greeks, volume/OI, market clock — is **re-fetched by the risk layer itself**. Research's numbers are never trusted for the gate.
-- All money is integer cents; exit marks are half-cents per share so the strategy's 50% thresholds stay exact. No floats in financial paths.
-
-### Pipeline
-
-```
-research agent (OpenCode)
-  → validateResearchDecisionV1     src/contracts/research-decision-v1.ts
-  → confirm quotes (app-owned)     src/market-data/alpaca-option-quotes.ts
-  → deriveTradeIntentV1            src/contracts/trade-intent-v1.ts
-  → shadowRiskEvaluator.evaluate   src/risk/shadow-risk-service.ts
-      ├ durable control state (breakers, entry counts) from ledger
-      ├ provider.capture()         src/risk/alpaca-risk-state-provider.ts
-      ├ deriveTradeIntentV1 again with freshly captured quotes
-      └ evaluateTradeIntentRiskV1  src/risk/risk-evaluation-v1.ts
-  → ledger events                  src/event-ledger/
+```text
+ResearchReportV3
+  -> validateResearchDecisionV2
+  -> confirm exact-leg quotes
+  -> deriveTradeIntentV2
+  -> capture application-owned risk state
+  -> evaluateTradeIntentRiskV1
+  -> append ledger events
 ```
 
-`src/index.ts` is the composition root — it wires the SQLite ledger store, the
-Alpaca risk-state provider, and the shadow risk evaluator, then runs the
-scheduler. `src/research/research-cycle.ts` orchestrates one cycle.
+`src/index.ts` is the composition root. `src/research/research-cycle.ts` orchestrates one cycle.
 
-### Directory roles
+## Boundaries
 
-| Path | Role |
-|---|---|
-| `src/contracts/` | Zod schemas + pure derivation. The trust boundary; agent output is untrusted until it passes here |
-| `src/risk/` | State capture, reconciliation, the pure gate, shadow decision assembly |
-| `src/research/` | Cycle orchestration, agent invocation, durable context reconstruction |
-| `src/market-data/` | Alpaca quote normalization and freshness |
-| `src/event-ledger/` | Append-only SQLite audit record; migrations enforce invariants in SQL |
-| `src/scheduling/` | Market-window eligibility (`ResearchEligibilityV1`) |
-| `src/backtest/` | Offline deterministic replay — see below |
-| `src/evaluation/` | Offline research-run scoring |
-| `src/strategy/` | Strategy identity and the component/version registry |
-| `src/shared/` | Cross-cutting policy shared by risk, contracts, and replay (OCC option identity) |
-| `src/observability/` | Tracing spans and telemetry |
+- `src/contracts/`: strict Zod trust boundaries and pure derivation.
+- `src/research/`: generic agent prompt, orchestration, retained context.
+- `src/market-data/`: read-only Alpaca normalization and freshness.
+- `src/risk/`: state capture, reconciliation, pure risk gate, shadow result.
+- `src/scheduling/`: standard and dry-run eligibility.
+- `src/event-ledger/`: append-only SQLite lifecycle.
+- `src/backtest/`: self-contained deterministic replay.
 
-### Contract versioning
+`opencode.json` is deny-by-default. The research agent has no shell, subagent, skill, arbitrary web, or broker-mutation authority. It can write only under `workspace/`.
 
-Contracts are versioned and schemas are `.strict()` on trusted paths (unknown
-fields on a proposal could be mistaken for trusted data). Additive fields take a
-`minor` bump per `docs/strategy-v1.md`. `NO_ACTION` decisions use `.strip()`
-deliberately so irrelevant prose cannot block the safe branch.
+## Contract rules
 
-Failures return **bounded reason codes**, never raw model input. See
-`RISK_REJECTION_CODES`, `RISK_STATE_CAPTURE_FAILURE_CODES`,
-`NO_ACTION_REASON_CODES`.
+Current breaking contracts are `ResearchDecisionV2`, `PreliminaryResearchV2`, `TradeIntentV2`, and `ResearchReportV3`. Schemas are strict on proposal paths; safe `NO_ACTION` strips irrelevant prose. Do not add compatibility parsers without an explicit requirement.
 
-### Backtest replay
+Failures expose bounded reason codes, never raw model or provider input.
 
-`pnpm backtest` is a separate offline entry point, not a pipeline stage. It
-feeds `EXACT_SNAPSHOT` scenarios into the *same* `evaluateTradeIntentRiskV1`
-with no agent in the loop; it never invokes a model or prompt. Its report file is never read back by runtime code — no backtest result
-influences a live decision, by design.
+## Dry run
 
-Two fidelities: `EXACT_SNAPSHOT` (reruns signal + risk) and
-`HISTORICAL_BAR_PROXY` (`riskStatus: "NOT_EVALUABLE"`, exit mechanics only —
-cannot claim historical risk approval). The acquired dataset holds sessions,
-underlying bars, option bars, trades, and contracts; Alpaca's free tier serves
-no historical greeks or IV (open interest is retained on contracts but dated
-independently of the decision instant), so contract-quality thresholds are only
-testable against `EXACT_SNAPSHOT` scenarios. These are hand-authored today — no
-runtime code forward-captures them.
+`--dry-run` requires `--once` and uses an isolated ledger. Current-session dry runs may reach shadow risk; historical sessions are research-only. Dry run never weakens validation, freshness, risk, or permissions.
 
-Only the dataset is checksummed into the report (`datasetChecksum`); the
-scenarios file is not. Comparing two runs to attribute a difference to a rule
-change requires holding that file fixed as well.
+## Before changing rules
 
-## Agent boundary
-
-`opencode.json` is deny-by-default. The `research` agent may call
-`alpaca_get_*`, `fmp_*`, `exa_*`, and `trusted_time`; read `docs/**` (except
-`docs/.vitepress/**`, the docs-site build config) and `workspace/**`; write only
-`workspace/**`. Bash, task/subagents, webfetch, websearch, and external
-directories are denied. Only the
-`spy-debit-spread-research` skill is allowed.
-
-Prompt instructions describe desired behavior but are **not** an authorization
-control — permissions and application-side validation are. Generated artifacts
-belong only under `workspace/` (gitignored, along with `.state/`).
-
-## Docs
-
-`docs/` holds the authoritative specs: `strategy-v1.md` (frozen MVP strategy),
-`risk-engine-v1.md`, `trade-intent-v1.md`, `research-decision-v1.md`,
-`research-report-v2.md`, `event-ledger-v1.md`, `backtest-replay-v1.md`,
-`pre-market-research-v1.md`, `research-market-snapshots-v1.md` (contracts,
-provider capture, and non-authoritative runtime audit wiring),
-`research-screening-audit-v1.md` (comparison, aggregate reporting, and forward
-observation), `research-source-policy.md`, `research-evaluation.md`,
-`research-behavior-evaluation.md`, `observability.md`.
-Consult these before changing contract or rule behavior. The README's Strategy
-section indexes the same set with one-line descriptions.
+Read the relevant schema and every caller. Preserve the pure risk function and agent/application ownership boundary. Update contract versions on breaking changes. Verify with `pnpm typecheck && pnpm test && pnpm build`.

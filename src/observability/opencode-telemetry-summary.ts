@@ -30,6 +30,17 @@ export type OpenCodeInvocationSummary = Readonly<{
 const safeCount = (value: number) =>
   Number.isSafeInteger(value) && value >= 0 ? value : undefined
 
+const sumSafeCounts = (values: readonly number[]) => {
+  let total = 0
+  for (const value of values) {
+    const count = safeCount(value)
+    if (count === undefined) return undefined
+    total += count
+    if (!Number.isSafeInteger(total)) return undefined
+  }
+  return total
+}
+
 export const configuredToolName = (name: string) => {
   if (["trusted_time", "read", "skill"].includes(name)) return name
   return /^(?:alpaca_get_|fmp_|exa_)[A-Za-z0-9_]+$/.test(name)
@@ -54,26 +65,39 @@ const toolTiming = (part: Extract<Part, { type: "tool" }>) => {
  * deliberately absent from the returned type.
  */
 export function summarizeOpenCodeInvocation(
-  info: AssistantMessage,
+  info: AssistantMessage | readonly AssistantMessage[],
   parts: readonly Part[],
 ): OpenCodeInvocationSummary {
-  const inputTokenCount = safeCount(info.tokens.input)
-  const outputTokenCount = safeCount(info.tokens.output)
-  const reasoningTokenCount = safeCount(info.tokens.reasoning)
-  const cacheReadTokenCount = safeCount(info.tokens.cache.read)
-  const cacheWriteTokenCount = safeCount(info.tokens.cache.write)
+  const messages: readonly AssistantMessage[] = Array.isArray(info) ? info : [info]
+  const finalMessage = messages.at(-1)
+  if (finalMessage === undefined) {
+    throw new Error("At least one assistant message is required")
+  }
+  const inputTokenCount = sumSafeCounts(messages.map(({ tokens }) => tokens.input))
+  const outputTokenCount = sumSafeCounts(messages.map(({ tokens }) => tokens.output))
+  const reasoningTokenCount = sumSafeCounts(messages.map(({ tokens }) => tokens.reasoning))
+  const cacheReadTokenCount = sumSafeCounts(messages.map(({ tokens }) => tokens.cache.read))
+  const cacheWriteTokenCount = sumSafeCounts(messages.map(({ tokens }) => tokens.cache.write))
   const toolParts = parts.filter(
     (part): part is Extract<Part, { type: "tool" }> => part.type === "tool",
   )
+  const providerId = messages.every(
+    ({ providerID }) => providerID === finalMessage.providerID,
+  )
+    ? finalMessage.providerID
+    : "multiple"
+  const modelId = messages.every(({ modelID }) => modelID === finalMessage.modelID)
+    ? finalMessage.modelID
+    : "multiple"
   return {
-    providerId: info.providerID,
-    modelId: info.modelID,
+    providerId,
+    modelId,
     ...(inputTokenCount === undefined ? {} : { inputTokenCount }),
     ...(outputTokenCount === undefined ? {} : { outputTokenCount }),
     ...(reasoningTokenCount === undefined ? {} : { reasoningTokenCount }),
     ...(cacheReadTokenCount === undefined ? {} : { cacheReadTokenCount }),
     ...(cacheWriteTokenCount === undefined ? {} : { cacheWriteTokenCount }),
-    responseError: info.error !== undefined,
+    responseError: messages.some(({ error }) => error !== undefined),
     toolCallCount: toolParts.length,
     toolErrorCount: toolParts.filter(({ state }) => state.status === "error")
       .length,

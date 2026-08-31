@@ -144,8 +144,8 @@ describe("research behavior evaluation", () => {
       ],
       expected: {
         ...source.expected,
-        requiredTools: ["skill"],
-        requiredOrder: [["skill", "alpaca_get_account"]],
+        requiredTools: ["alpaca_get_clock"],
+        requiredOrder: [["alpaca_get_clock", "alpaca_get_account"]],
       },
     })
 
@@ -169,7 +169,6 @@ describe("research behavior evaluation", () => {
       ...source,
       scenarioId: "research-before-account-gate",
       toolCalls: [
-        completed("skill"),
         completed("exa_search"),
         completed("alpaca_get_account"),
         completed("trusted_time"),
@@ -260,7 +259,6 @@ describe("research behavior evaluation", () => {
       ...source,
       scenarioId: "account-gate-continued-research",
       toolCalls: [
-        completed("skill"),
         completed("alpaca_get_account"),
         completed("trusted_time"),
         completed("alpaca_get_account_configurations"),
@@ -299,7 +297,7 @@ describe("research behavior evaluation", () => {
   })
 
   it.each([
-    "docs/research-report-v2.md",
+    "docs/research-report-v3.md",
     "workspace/research/brief.json",
     "/project/docs/research-source-policy.md",
   ])("accepts an authorized research read path %j", (filePath) => {
@@ -325,7 +323,6 @@ describe("research behavior evaluation", () => {
       ...source,
       scenarioId: "failed-required-call",
       toolCalls: [
-        { name: "skill", outcome: "completed", input: { name: "spy-debit-spread-research" } },
         { name: "alpaca_get_account", outcome: "error" },
       ],
       expected: {
@@ -464,7 +461,7 @@ describe("research behavior evaluation", () => {
       ...candidate,
       scenarioId: "candidate-not-refreshed",
       toolCalls: candidate.toolCalls.filter(
-        ({ name }, index) => name !== "alpaca_get_option_chain" || index <= 7,
+        ({ name }, index) => name !== "alpaca_get_option_chain" || index <= 6,
       ),
     })
     const extraRefresh = evaluateResearchBehavior({
@@ -479,18 +476,18 @@ describe("research behavior evaluation", () => {
       ...candidate,
       scenarioId: "candidate-refresh-input-invalid",
       toolCalls: candidate.toolCalls.map((call, index) =>
-        index === 9 ? { ...call, input: { symbol: "SPY" } } : call
+        index === 8 ? { ...call, input: { symbol: "SPY" } } : call
       ),
     })
     const wrongRefreshOrder = evaluateResearchBehavior({
       ...candidate,
       scenarioId: "candidate-refresh-order-invalid",
       toolCalls: [
-        ...candidate.toolCalls.slice(0, 6),
-        candidate.toolCalls[7]!,
+        ...candidate.toolCalls.slice(0, 5),
         candidate.toolCalls[6]!,
+        candidate.toolCalls[5]!,
+        candidate.toolCalls[7]!,
         candidate.toolCalls[8]!,
-        candidate.toolCalls[9]!,
       ],
     })
     const withoutCandidateAccount = evaluateResearchBehavior({
@@ -625,19 +622,6 @@ describe("research behavior evaluation", () => {
           ? { ...call, input: { status: "closed" } }
           : call
       ),
-      expected: validExpectation,
-    })
-    const orderIndex = valid.toolCalls.findIndex(
-      ({ name }) => name === "alpaca_get_orders",
-    )
-    const proposalWithDuplicateSkillLoad = evaluateResearchBehavior({
-      ...valid,
-      scenarioId: "proposal-with-duplicate-skill-load",
-      toolCalls: [
-        ...valid.toolCalls.slice(0, orderIndex + 1),
-        completed("skill"),
-        ...valid.toolCalls.slice(orderIndex + 1),
-      ],
       expected: validExpectation,
     })
     const validWithoutChallengeSearch = evaluateResearchBehavior({
@@ -944,7 +928,6 @@ describe("research behavior evaluation", () => {
     ).toMatchObject({
       completedToolCounts: expect.arrayContaining([
         { pattern: "exa_*", minimum: 2, maximum: 2 },
-        { pattern: "skill", minimum: 1, maximum: 1 },
       ]),
       requiredExternalSources: [
         {
@@ -971,9 +954,6 @@ describe("research behavior evaluation", () => {
     expect(
       proposalWithClosedOrderQuery.dimensions.toolDiscipline.issueCodes,
     ).toEqual(["TOOL_INPUT_COUNT_INVALID"])
-    expect(
-      proposalWithDuplicateSkillLoad.dimensions.toolDiscipline.issueCodes,
-    ).toEqual(["TOOL_COUNT_INVALID"])
     expect(validWithoutChallengeSearch.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_COUNT_INVALID",
     ])
@@ -1252,9 +1232,8 @@ describe("research behavior evaluation", () => {
       ...weak,
       scenarioId: "weak-evidence-account-after-research",
       toolCalls: [
+        ...weak.toolCalls.slice(1),
         weak.toolCalls[0]!,
-        ...weak.toolCalls.slice(2),
-        weak.toolCalls[1]!,
       ],
     })
 

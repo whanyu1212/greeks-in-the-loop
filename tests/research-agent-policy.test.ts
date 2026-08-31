@@ -2,15 +2,8 @@ import { readFileSync } from "node:fs"
 
 import { describe, expect, it } from "vitest"
 
-import {
-  NO_ACTION_REASON_CODES,
-  STRATEGY_VERSION,
-} from "../src/contracts/research-decision-v1.js"
-import {
-  RESEARCH_MAX_AGENT_STEPS,
-  RESEARCH_SKILL_NAME,
-  RESEARCH_SKILL_VERSION,
-} from "../src/research/research-agent.js"
+import { NO_ACTION_REASON_CODES } from "../src/contracts/research-decision-v2.js"
+import { RESEARCH_MAX_AGENT_STEPS } from "../src/research/research-agent.js"
 
 type PermissionAction = "allow" | "ask" | "deny"
 type Permission = PermissionAction | Record<string, PermissionAction>
@@ -43,11 +36,6 @@ const systemPrompt = readFileSync(
   "src/research/research-agent-system.md",
   "utf8",
 )
-const researchSkill = readFileSync(
-  ".opencode/skills/spy-debit-spread-research/SKILL.md",
-  "utf8",
-)
-const sourcePolicy = readFileSync("docs/research-source-policy.md", "utf8")
 const mcpLauncher = readFileSync("scripts/run-research-mcp.mjs", "utf8")
 const evalMcp = readFileSync("scripts/research-eval-mcp.ts", "utf8")
 const evalCli = readFileSync(
@@ -76,7 +64,7 @@ describe("research agent policy", () => {
     expect(config.permission?.["alpaca_*"]).toBe("deny")
   })
 
-  it("denies authority-expanding tools and permits only the strategy skill", () => {
+  it("denies authority-expanding tools", () => {
     for (const name of [
       "bash",
       "external_directory",
@@ -87,23 +75,13 @@ describe("research agent policy", () => {
     ]) {
       expect(permission[name]).toBe("deny")
     }
-    expect(permission.skill).toEqual({
-      "*": "deny",
-      [RESEARCH_SKILL_NAME]: "allow",
-    })
-    expect(researchSkill).toContain(`name: ${RESEARCH_SKILL_NAME}`)
-    expect(researchSkill).toContain(
-      `skill-version: "${RESEARCH_SKILL_VERSION}"`,
-    )
+    expect(permission.skill).toBe("deny")
   })
 
-  it("keeps checked-in research versions aligned", () => {
-    expect(researchSkill).toContain(
-      `skill-version: "${RESEARCH_SKILL_VERSION}"`,
-    )
-    expect(researchSkill).toContain(`strategy-version: "${STRATEGY_VERSION}"`)
-    expect(sourcePolicy).toContain(`| Strategy version | \`${STRATEGY_VERSION}\` |`)
-    expect(sourcePolicy).not.toContain("Future risk engine")
+  it("keeps strategy selection inside the generic research prompt", () => {
+    expect(systemPrompt).toContain("Compare SPY, QQQ, and IWM")
+    expect(systemPrompt).toContain("select at most one underlying")
+    expect(systemPrompt).not.toContain("spy-debit-spread-research")
   })
 
   it("limits file reads and edits to reviewed project paths", () => {
@@ -126,13 +104,17 @@ describe("research agent policy", () => {
   it("provides every canonical no-action code without exposing source files", () => {
     for (const reasonCode of NO_ACTION_REASON_CODES) {
       expect(systemPrompt).toContain(`\`${reasonCode}\``)
-      expect(researchSkill).toContain(`\`${reasonCode}\``)
     }
   })
 
+  it("requires concrete provider-attributed no-action evidence", () => {
+    expect(systemPrompt).toContain("a non-empty `evidence` array")
+    expect(systemPrompt).toContain("`NO_ACTION` evidence never uses `snapshotRef`")
+    expect(systemPrompt).toContain("exact condition or measured value")
+  })
+
   it("spells out the strict candidate-leg role enum", () => {
-    expect(systemPrompt).toContain("`LONG` or `SHORT` only")
-    expect(systemPrompt).toContain("never `LONG_CALL`, `SHORT_CALL`")
+    expect(systemPrompt).toContain("role (`LONG` or `SHORT`)")
   })
 
   it("runs policy, MCP, and behavior diagnostics through reviewed entrypoints", () => {
@@ -193,7 +175,7 @@ describe("research agent policy", () => {
     expect(evalMcp).toContain('start: z.string().datetime({ offset: true })')
     expect(evalMcp).toContain('end: z.string().datetime({ offset: true })')
     expect(evalMcp).toContain("Stock-bar start must precede end")
-    expect(evalMcp).toContain("spyAlpacaOptionSymbolV1Schema")
+    expect(evalMcp).toContain("allowedAlpacaOptionSymbolV1Schema")
     expect(evalMcp).not.toContain('.startsWith("SPY")')
     expect(evalMcp).not.toContain("/^SPY\\d{6}")
     expect(evalMcp).toContain("withinRequestedWindow")

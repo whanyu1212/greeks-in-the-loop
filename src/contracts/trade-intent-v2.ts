@@ -3,21 +3,17 @@ import { z } from "zod"
 import {
   alpacaOptionStrikeCents,
   parseAlpacaOptionSymbol,
-  spyAlpacaOptionSymbolV1Schema,
-  validateSpyOptionUniverseV1,
+  allowedAlpacaOptionSymbolV1Schema,
+  validateOptionUniverseV1,
 } from "../shared/alpaca-option-identity.js"
 import { parseRfc3339Nanoseconds } from "../shared/value-normalization.js"
-import {
-  STRATEGY_VERSION,
-  strategyVersionSchema,
-} from "../strategy/strategy-identity.js"
 import { calculateDebitSpreadEconomicsV1 } from "./debit-spread-economics-v1.js"
 import {
   RESEARCH_DECISION_CONTRACT_VERSION,
-  type ProposedTradeDecisionV1,
-} from "./research-decision-v1.js"
+  type ProposedTradeDecisionV2,
+} from "./research-decision-v2.js"
 
-export const TRADE_INTENT_CONTRACT_VERSION = "1.0.0" as const
+export const TRADE_INTENT_CONTRACT_VERSION = "2.0.0" as const
 
 const MAX_QUOTE_AGE_NANOSECONDS = 60_000_000_000n
 const timestamp = z.iso.datetime({ offset: true })
@@ -32,9 +28,9 @@ const positiveSafeInteger = z
   .positive()
   .max(Number.MAX_SAFE_INTEGER)
 
-export const confirmedOptionQuoteV1Schema = z
+export const confirmedOptionQuoteV2Schema = z
   .object({
-    contractSymbol: spyAlpacaOptionSymbolV1Schema,
+    contractSymbol: allowedAlpacaOptionSymbolV1Schema,
     feed: z.literal("INDICATIVE"),
     bidCentsPerShare: positiveSafeInteger,
     askCentsPerShare: positiveSafeInteger,
@@ -51,24 +47,23 @@ export const confirmedOptionQuoteV1Schema = z
     }
   })
 
-export type ConfirmedOptionQuoteV1 = Readonly<
-  z.infer<typeof confirmedOptionQuoteV1Schema>
+export type ConfirmedOptionQuoteV2 = Readonly<
+  z.infer<typeof confirmedOptionQuoteV2Schema>
 >
 
-export const tradeIntentV1Schema = z
+export const tradeIntentV2Schema = z
   .object({
     contractVersion: z.literal(TRADE_INTENT_CONTRACT_VERSION),
     decisionContractVersion: z.literal(RESEARCH_DECISION_CONTRACT_VERSION),
-    strategyVersion: strategyVersionSchema,
     direction: z.enum(["BULLISH", "BEARISH"]),
     structure: z.enum(["BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"]),
     expiration: expirationDate,
-    longContractSymbol: spyAlpacaOptionSymbolV1Schema,
-    shortContractSymbol: spyAlpacaOptionSymbolV1Schema,
+    longContractSymbol: allowedAlpacaOptionSymbolV1Schema,
+    shortContractSymbol: allowedAlpacaOptionSymbolV1Schema,
     quoteSnapshotRef: z.string().min(1).max(128),
     evaluatedAt: evaluatedAtTimestamp,
-    longQuote: confirmedOptionQuoteV1Schema,
-    shortQuote: confirmedOptionQuoteV1Schema,
+    longQuote: confirmedOptionQuoteV2Schema,
+    shortQuote: confirmedOptionQuoteV2Schema,
     entryLimitCentsPerShare: positiveSafeInteger,
     widthCentsPerShare: positiveSafeInteger,
     maxLossCentsPerContract: positiveSafeInteger,
@@ -105,8 +100,9 @@ export const tradeIntentV1Schema = z
     if (
       !longSymbol.success ||
       !shortSymbol.success ||
-      !validateSpyOptionUniverseV1(longSymbol.identity).success ||
-      !validateSpyOptionUniverseV1(shortSymbol.identity).success ||
+      !validateOptionUniverseV1(longSymbol.identity).success ||
+      !validateOptionUniverseV1(shortSymbol.identity).success ||
+      longSymbol.identity.root !== shortSymbol.identity.root ||
       longSymbol.identity.expiration !== intent.expiration ||
       shortSymbol.identity.expiration !== intent.expiration ||
       longSymbol.identity.optionType !== expectedOptionType ||
@@ -198,13 +194,13 @@ export const tradeIntentV1Schema = z
     }
   })
 
-export type TradeIntentV1 = Readonly<z.infer<typeof tradeIntentV1Schema>>
+export type TradeIntentV2 = Readonly<z.infer<typeof tradeIntentV2Schema>>
 
 export type TradeIntentDerivationContext = Readonly<{
   quoteSnapshotRef: string
   evaluatedAt: string
-  longQuote: ConfirmedOptionQuoteV1
-  shortQuote: ConfirmedOptionQuoteV1
+  longQuote: ConfirmedOptionQuoteV2
+  shortQuote: ConfirmedOptionQuoteV2
 }>
 
 export type TradeIntentDerivationReason =
@@ -218,7 +214,7 @@ export type TradeIntentDerivationReason =
 export type TradeIntentDerivationResult =
   | {
       success: true
-      intent: TradeIntentV1
+      intent: TradeIntentV2
     }
   | {
       success: false
@@ -229,8 +225,8 @@ const derivationContextSchema = z
   .object({
     quoteSnapshotRef: z.string().min(1).max(128),
     evaluatedAt: evaluatedAtTimestamp,
-    longQuote: confirmedOptionQuoteV1Schema,
-    shortQuote: confirmedOptionQuoteV1Schema,
+    longQuote: confirmedOptionQuoteV2Schema,
+    shortQuote: confirmedOptionQuoteV2Schema,
   })
   .strict()
 
@@ -246,13 +242,10 @@ const derivationContextSchema = z
  * @param context Application-owned exact-leg quote context.
  * @returns A deterministic intent or bounded derivation reasons.
  */
-export function deriveTradeIntentV1(
-  decision: ProposedTradeDecisionV1,
+export function deriveTradeIntentV2(
+  decision: ProposedTradeDecisionV2,
   context: TradeIntentDerivationContext,
 ): TradeIntentDerivationResult {
-  if (decision.strategyVersion !== STRATEGY_VERSION) {
-    return { success: false, reasons: ["DERIVATION_INPUT_INVALID"] }
-  }
   const parsedContext = derivationContextSchema.safeParse(context)
   if (!parsedContext.success) {
     return { success: false, reasons: ["DERIVATION_INPUT_INVALID"] }
@@ -276,8 +269,8 @@ export function deriveTradeIntentV1(
   if (
     !longSymbol.success ||
     !shortSymbol.success ||
-    !validateSpyOptionUniverseV1(longSymbol.identity).success ||
-    !validateSpyOptionUniverseV1(shortSymbol.identity).success
+    !validateOptionUniverseV1(longSymbol.identity).success ||
+    !validateOptionUniverseV1(shortSymbol.identity).success
   ) {
     return { success: false, reasons: ["DERIVATION_INPUT_INVALID"] }
   }
@@ -298,10 +291,9 @@ export function deriveTradeIntentV1(
     return { success: false, reasons: [calculation.reason] }
   }
 
-  const parsedIntent = tradeIntentV1Schema.safeParse({
+  const parsedIntent = tradeIntentV2Schema.safeParse({
     contractVersion: TRADE_INTENT_CONTRACT_VERSION,
     decisionContractVersion: RESEARCH_DECISION_CONTRACT_VERSION,
-    strategyVersion: STRATEGY_VERSION,
     direction: decision.direction,
     structure: decision.candidate.structure,
     expiration: decision.candidate.expiration,

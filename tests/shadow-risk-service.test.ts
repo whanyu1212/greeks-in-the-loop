@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
-import type { ProposedTradeDecisionV1 } from "../src/contracts/research-decision-v1.js"
-import { deriveTradeIntentV1 } from "../src/contracts/trade-intent-v1.js"
+import type { ProposedTradeDecisionV2 } from "../src/contracts/research-decision-v2.js"
+import { deriveTradeIntentV2 } from "../src/contracts/trade-intent-v2.js"
 import type { RiskStateProvider } from "../src/risk/alpaca-risk-state-provider.js"
 import type { StoredLedgerEventV1 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
@@ -20,9 +20,8 @@ const evaluatedAt = "2026-08-27T14:30:30.000Z"
 const longSymbol = "SPY260918C00600000"
 const shortSymbol = "SPY260918C00605000"
 
-const decision: ProposedTradeDecisionV1 = {
-  contractVersion: "1.0.0",
-  strategyVersion: "1.1.0",
+const decision: ProposedTradeDecisionV2 = {
+  contractVersion: "2.0.0",
   outcome: "PROPOSE_TRADE",
   direction: "BULLISH",
   thesis: "Daily and intraday direction agree.",
@@ -60,7 +59,7 @@ const quotes = (timestamp: string) => ({
 })
 
 const sourceIntent = (() => {
-  const result = deriveTradeIntentV1(decision, {
+  const result = deriveTradeIntentV2(decision, {
     quoteSnapshotRef: "alpaca-proposal-quotes-v1",
     evaluatedAt: "2026-08-27T14:30:10.000Z",
     ...quotes("2026-08-27T14:30:00.000000000Z"),

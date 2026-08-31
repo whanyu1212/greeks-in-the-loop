@@ -59,9 +59,6 @@ export const RESEARCH_TRACE_ATTRIBUTE_KEYS = {
   agentName: "research.agent.name",
   cycleMode: "research.cycle.mode",
   promptVersion: "research.prompt.version",
-  skillName: "research.skill.name",
-  skillVersion: "research.skill.version",
-  strategyVersion: "research.strategy.version",
   decisionContractVersion: "research.decision.contract.version",
   reportVersion: "research.report.version",
   outcome: "research.cycle.outcome",
@@ -86,11 +83,8 @@ export type ResearchTelemetrySettings = Readonly<{
 
 export type ResearchTraceVersions = Readonly<{
   agentName: string
-  cycleMode: "STANDARD" | "DRY_RUN_ANYTIME" | "DRY_RUN_SHADOW_ANYTIME"
+  cycleMode: "STANDARD" | "DRY_RUN"
   promptVersion: string
-  skillName: string
-  skillVersion: string
-  strategyVersion: string
   decisionContractVersion: string
   reportVersion: string
 }>
@@ -333,9 +327,6 @@ export function startResearchTelemetry(
           [RESEARCH_TRACE_ATTRIBUTE_KEYS.agentName]: versions.agentName,
           [RESEARCH_TRACE_ATTRIBUTE_KEYS.cycleMode]: versions.cycleMode,
           [RESEARCH_TRACE_ATTRIBUTE_KEYS.promptVersion]: versions.promptVersion,
-          [RESEARCH_TRACE_ATTRIBUTE_KEYS.skillName]: versions.skillName,
-          [RESEARCH_TRACE_ATTRIBUTE_KEYS.skillVersion]: versions.skillVersion,
-          [RESEARCH_TRACE_ATTRIBUTE_KEYS.strategyVersion]: versions.strategyVersion,
           [RESEARCH_TRACE_ATTRIBUTE_KEYS.decisionContractVersion]:
             versions.decisionContractVersion,
           [RESEARCH_TRACE_ATTRIBUTE_KEYS.reportVersion]: versions.reportVersion,

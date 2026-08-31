@@ -183,8 +183,7 @@ describe("createSqliteLedgerStore", () => {
       cycleId: "cycle-1",
       payload: {
         decision: {
-          contractVersion: "1.0.0",
-          strategyVersion: "1.1.0",
+          contractVersion: "2.0.0",
           outcome: "NO_ACTION",
           reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
           evidence: [
@@ -192,7 +191,9 @@ describe("createSqliteLedgerStore", () => {
               claimId: "fact-1",
               kind: "SOURCED_FACT",
               claim: "Unsafe locator should reject the complete batch.",
-              snapshotRef: "snapshot-1",
+              provider: "ALPACA",
+              temporalClass: "LIVE",
+              observedAt: "2026-08-25T14:30:00.000Z",
               locator: "https://example.com/data?apikey=secret-value",
             },
           ],

@@ -4,14 +4,14 @@ import {
   aggregateReplayCents,
   simulateReplayScenario,
 } from "../src/backtest/replay-core.js"
-import type { TradeIntentV1 } from "../src/contracts/trade-intent-v1.js"
+import type { TradeIntentV2 } from "../src/contracts/trade-intent-v2.js"
 
 const intent = {
   direction: "BULLISH",
   entryLimitCentsPerShare: 100,
   stopLossMarkHalfCentsPerShare: 1,
   profitTargetMarkHalfCentsPerShare: 3,
-} as TradeIntentV1
+} as TradeIntentV2
 
 const cycle = {
   decidedAt: "2026-08-28T14:02:00.000Z",
