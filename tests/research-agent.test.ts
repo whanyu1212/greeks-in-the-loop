@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   buildResearchCyclePrompt,
+  buildResearchReportRepairPrompt,
   RESEARCH_AGENT_NAME,
   RESEARCH_MAX_AGENT_STEPS,
   RESEARCH_MAX_EXA_CALLS,
@@ -9,17 +10,14 @@ import {
   RESEARCH_MAX_SNAPSHOT_REBUILDS,
   RESEARCH_MAX_TOOL_CALLS,
   RESEARCH_PROMPT_VERSION,
-  RESEARCH_SKILL_NAME,
-  RESEARCH_SKILL_VERSION,
+  researchToolBudgetViolation,
 } from "../src/research/research-agent.js"
 import { projectResearchContextV1 } from "../src/research/research-context-v1.js"
 
 describe("research agent request construction", () => {
   it("uses the fixed checked-in agent identity", () => {
     expect(RESEARCH_AGENT_NAME).toBe("research")
-    expect(RESEARCH_PROMPT_VERSION).toBe("1.4.1")
-    expect(RESEARCH_SKILL_NAME).toBe("spy-debit-spread-research")
-    expect(RESEARCH_SKILL_VERSION).toBe("1.2.0")
+    expect(RESEARCH_PROMPT_VERSION).toBe("3.0.3")
   })
 
   it("publishes bounded research budgets", () => {
@@ -28,6 +26,25 @@ describe("research agent request construction", () => {
     expect(RESEARCH_MAX_EXA_CALLS).toBe(4)
     expect(RESEARCH_MAX_FMP_CALLS).toBe(3)
     expect(RESEARCH_MAX_SNAPSHOT_REBUILDS).toBe(1)
+  })
+
+  it("rejects aggregate tool usage above any research budget", () => {
+    const usage = (names: readonly string[], toolCallCount = names.length) => ({
+      toolCallCount,
+      toolCalls: names.map((name) => ({ name })),
+    })
+    expect(researchToolBudgetViolation(usage([], RESEARCH_MAX_TOOL_CALLS + 1)))
+      .toBe("TOTAL_TOOL_BUDGET_EXCEEDED")
+    expect(researchToolBudgetViolation(usage(
+      Array.from({ length: RESEARCH_MAX_EXA_CALLS + 1 }, () => "exa_search"),
+    ))).toBe("EXA_TOOL_BUDGET_EXCEEDED")
+    expect(researchToolBudgetViolation(usage(
+      Array.from({ length: RESEARCH_MAX_FMP_CALLS + 1 }, () => "fmp_quote"),
+    ))).toBe("FMP_TOOL_BUDGET_EXCEEDED")
+    expect(researchToolBudgetViolation(usage([
+      ...Array.from({ length: RESEARCH_MAX_EXA_CALLS }, () => "exa_search"),
+      ...Array.from({ length: RESEARCH_MAX_FMP_CALLS }, () => "fmp_quote"),
+    ]))).toBeUndefined()
   })
 
   it("builds a bounded cycle request with an optional operator objective", () => {
@@ -40,7 +57,7 @@ describe("research agent request construction", () => {
     ).toBe(
       [
         "Run structured research cycle 3 at 2026-08-25T13:30:00.000Z.",
-        "Inspect observable paper-account state first without claiming reconciliation or risk approval, then inspect only the evidence needed to identify the highest-ranked eligible defined-risk options candidate or conclude NO_ACTION.",
+        "Compare SPY, QQQ, IWM using current regime evidence, select at most one underlying, then research one eligible BULL_CALL_SPREAD or BEAR_PUT_SPREAD candidate or conclude NO_ACTION.",
         "Current operator objective: Compare downside catalysts.",
       ].join("\n"),
     )
@@ -50,6 +67,21 @@ describe("research agent request construction", () => {
     expect(
       buildResearchCyclePrompt(1, new Date("2026-08-25T13:30:00.000Z")),
     ).not.toContain("Current operator objective")
+  })
+
+  it("builds a bounded schema-only correction request", () => {
+    const prompt = buildResearchReportRepairPrompt([
+      {
+        code: "SCHEMA_INVALID",
+        path: ["result", "invalidation"],
+        schemaCategory: "TYPE_MISMATCH",
+      },
+    ])
+
+    expect(prompt).toContain("Do not call tools or add new research")
+    expect(prompt).toContain('"path":["result","invalidation"]')
+    expect(prompt).toContain("exactly three fractional digits")
+    expect(prompt).toContain("NO_ACTION evidence is a non-empty array")
   })
 
   it("labels ledger context as historical and requires current facts to be refreshed", () => {
@@ -103,14 +135,14 @@ describe("research agent request construction", () => {
         sessionDate: "2026-08-25",
         researchEligible: true,
         tradeIntentEligible: false,
-        researchMode: "DRY_RUN_ANYTIME",
+        researchMode: "DRY_RUN",
         reason: "DRY_RUN_RESEARCH_ONLY",
       },
     )
 
-    expect(prompt).toContain("research-only anytime dry run")
+    expect(prompt).toContain("research-only dry run")
     expect(prompt).toContain("Never return PROPOSE_TRADE")
-    expect(prompt).toContain('"researchMode":"DRY_RUN_ANYTIME"')
+    expect(prompt).toContain('"researchMode":"DRY_RUN"')
   })
 
   it("allows proposals only for non-executing shadow anytime evaluation", () => {
@@ -128,13 +160,13 @@ describe("research agent request construction", () => {
           slotStartedAt: "2026-08-25T23:00:00.000Z",
           deadline: "2026-08-26T23:00:00.000Z",
         },
-        researchMode: "DRY_RUN_SHADOW_ANYTIME",
+        researchMode: "DRY_RUN",
       },
     )
 
-    expect(prompt).toContain("non-executing shadow anytime dry run")
+    expect(prompt).toContain("non-executing dry run")
     expect(prompt).toContain("A fresh PROPOSE_TRADE may be returned")
-    expect(prompt).toContain('"researchMode":"DRY_RUN_SHADOW_ANYTIME"')
+    expect(prompt).toContain('"researchMode":"DRY_RUN"')
     expect(prompt).not.toContain("Never return PROPOSE_TRADE")
   })
 })

@@ -112,10 +112,7 @@ const prettySummary = (
     case "research.agent": {
       const model = detail(details, "modelId")
       if (model === undefined) {
-        return [
-          detail(details, "agent"),
-          `strategy ${String(detail(details, "strategyVersion"))}`,
-        ].filter(Boolean).join(" | ")
+        return String(detail(details, "agent"))
       }
       return [
         model,
@@ -124,7 +121,7 @@ const prettySummary = (
       ].join(" | ")
     }
     case "research.report":
-      return `${String(detail(details, "resultOutcome"))} | strategy ${String(detail(details, "strategyVersion"))} | ${String(detail(details, "externalSourceCount"))} external sources`
+      return `${String(detail(details, "resultOutcome"))} | ${String(detail(details, "externalSourceCount"))} external sources`
     case "decision.validate":
       return [
         detail(details, "outcome"),

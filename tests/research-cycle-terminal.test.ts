@@ -11,15 +11,12 @@ import {
 import type { ResearchInvocationV1 } from "../src/research/research-invocation-v1.js"
 
 const researchInvocation: ResearchInvocationV1 = {
-  invocationVersion: "1.0.0",
+  invocationVersion: "3.0.0",
   agentName: "research",
   cycleMode: "STANDARD",
   promptVersion: "1.3.0",
-  skillName: "spy-debit-spread-research",
-  skillVersion: "1.1.0",
-  strategyVersion: "1.1.0",
-  decisionContractVersion: "1.0.0",
-  reportVersion: "2.0.0",
+  decisionContractVersion: "2.0.0",
+  reportVersion: "3.0.0",
   providerId: "test-provider",
   modelId: "test-model",
   responseError: false,
@@ -67,8 +64,7 @@ describe("recordResearchCycleOutcome", () => {
         outcomeVersion: "1.0.0",
         status: "VALIDATED_NO_ACTION",
         decision: {
-          contractVersion: "1.0.0",
-          strategyVersion: "1.1.0",
+          contractVersion: "2.0.0",
           outcome: "NO_ACTION",
           reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
         },

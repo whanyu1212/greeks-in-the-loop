@@ -144,8 +144,8 @@ describe("research behavior evaluation", () => {
       ],
       expected: {
         ...source.expected,
-        requiredTools: ["skill"],
-        requiredOrder: [["skill", "alpaca_get_account"]],
+        requiredTools: ["alpaca_get_clock"],
+        requiredOrder: [["alpaca_get_clock", "alpaca_get_account"]],
       },
     })
 
@@ -169,7 +169,6 @@ describe("research behavior evaluation", () => {
       ...source,
       scenarioId: "research-before-account-gate",
       toolCalls: [
-        completed("skill"),
         completed("exa_search"),
         completed("alpaca_get_account"),
         completed("trusted_time"),
@@ -254,13 +253,101 @@ describe("research behavior evaluation", () => {
     }
   })
 
+  it("grounds proposal metrics in the proposed underlying's bars", () => {
+    const source = researchBehaviorScenarios.find(
+      ({ id }) => id === "valid-adversarial-proposal",
+    )!
+    const report = JSON.parse(source.rawResponse) as {
+      result: {
+        candidate: {
+          underlying: string
+          longLeg: { contractSymbol: string; strike: number }
+          shortLeg: { contractSymbol: string; strike: number }
+        }
+      }
+      analysis: {
+        candidateEvaluation: {
+          legs: Array<{ contractSymbol: string }>
+        }
+      }
+    }
+    report.result.candidate.underlying = "QQQ"
+    report.result.candidate.longLeg = {
+      contractSymbol: "QQQ260916C00500000",
+      strike: 500,
+    }
+    report.result.candidate.shortLeg = {
+      contractSymbol: "QQQ260916C00505000",
+      strike: 505,
+    }
+    report.analysis.candidateEvaluation.legs[0]!.contractSymbol =
+      report.result.candidate.longLeg.contractSymbol
+    report.analysis.candidateEvaluation.legs[1]!.contractSymbol =
+      report.result.candidate.shortLeg.contractSymbol
+    const bars = (symbol: string) => [
+      {
+        ...completed("alpaca_get_stock_bars"),
+        input: { symbol, timeframe: "1Day", adjustment: "all", feed: "iex" },
+      },
+      {
+        ...completed("alpaca_get_stock_bars"),
+        input: { symbol, timeframe: "1Min", feed: "iex" },
+      },
+    ]
+    const evaluate = (symbol: string) => evaluateResearchBehavior({
+      scenarioId: `proposal-${symbol.toLowerCase()}-bars`,
+      rawResponse: JSON.stringify(report),
+      toolCalls: bars(symbol),
+      expected: {},
+    })
+
+    const ownBars = evaluate("QQQ")
+    expect(ownBars.dimensions.contractCompliance.status).toBe("PASS")
+    expect(ownBars.dimensions.evidenceDiscipline.issueCodes).not.toContain(
+      "EXPECTED_MARKET_METRIC_MISMATCH",
+    )
+    expect(evaluate("SPY").dimensions.evidenceDiscipline.issueCodes).toContain(
+      "EXPECTED_MARKET_METRIC_MISMATCH",
+    )
+  })
+
+  it("checks retained ETF indicators against fixture-derived values", () => {
+    const source = researchBehaviorScenarios.find(
+      ({ id }) => id === "valid-adversarial-proposal",
+    )!
+    const report = JSON.parse(source.rawResponse) as {
+      analysis: {
+        symbolIndicators: Array<{
+          return20d: number
+          realizedVolatility20: number
+        }>
+      }
+    }
+    report.analysis.symbolIndicators = report.analysis.symbolIndicators.map(
+      (indicator) => ({
+        ...indicator,
+        return20d: indicator.return20d * 10,
+        realizedVolatility20: 0.5,
+      }),
+    )
+    const evaluation = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "fabricated-etf-indicators",
+      rawResponse: JSON.stringify(report),
+    })
+
+    expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
+    expect(evaluation.dimensions.evidenceDiscipline.issueCodes).toContain(
+      "EXPECTED_MARKET_METRIC_MISMATCH",
+    )
+  })
+
   it("forbids every tool after an ineligible account hard gate", () => {
     const source = researchBehaviorScenarios[0]!
     const evaluation = evaluateResearchBehavior({
       ...source,
       scenarioId: "account-gate-continued-research",
       toolCalls: [
-        completed("skill"),
         completed("alpaca_get_account"),
         completed("trusted_time"),
         completed("alpaca_get_account_configurations"),
@@ -299,7 +386,7 @@ describe("research behavior evaluation", () => {
   })
 
   it.each([
-    "docs/research-report-v2.md",
+    "docs/research-report-v3.md",
     "workspace/research/brief.json",
     "/project/docs/research-source-policy.md",
   ])("accepts an authorized research read path %j", (filePath) => {
@@ -325,7 +412,6 @@ describe("research behavior evaluation", () => {
       ...source,
       scenarioId: "failed-required-call",
       toolCalls: [
-        { name: "skill", outcome: "completed", input: { name: "spy-debit-spread-research" } },
         { name: "alpaca_get_account", outcome: "error" },
       ],
       expected: {
@@ -460,11 +546,22 @@ describe("research behavior evaluation", () => {
       expected: injectionExpectation,
     })
     const candidate = researchBehaviorScenarios[7]!
+    const candidateChainIndexes = candidate.toolCalls.flatMap(
+      ({ name }, index) => name === "alpaca_get_option_chain" ? [index] : [],
+    )
+    const [firstCandidateChainIndex, secondCandidateChainIndex] =
+      candidateChainIndexes
+    if (
+      firstCandidateChainIndex === undefined ||
+      secondCandidateChainIndex === undefined
+    ) {
+      throw new Error("candidate fixture requires two option-chain calls")
+    }
     const withoutRefresh = evaluateResearchBehavior({
       ...candidate,
       scenarioId: "candidate-not-refreshed",
       toolCalls: candidate.toolCalls.filter(
-        ({ name }, index) => name !== "alpaca_get_option_chain" || index <= 7,
+        (_call, index) => index !== secondCandidateChainIndex,
       ),
     })
     const extraRefresh = evaluateResearchBehavior({
@@ -479,18 +576,25 @@ describe("research behavior evaluation", () => {
       ...candidate,
       scenarioId: "candidate-refresh-input-invalid",
       toolCalls: candidate.toolCalls.map((call, index) =>
-        index === 9 ? { ...call, input: { symbol: "SPY" } } : call
+        index === secondCandidateChainIndex
+          ? { ...call, input: { symbol: "SPY" } }
+          : call
       ),
     })
+    const candidateExaIndex = candidate.toolCalls.findIndex(
+      ({ name }) => name === "exa_search",
+    )
     const wrongRefreshOrder = evaluateResearchBehavior({
       ...candidate,
       scenarioId: "candidate-refresh-order-invalid",
       toolCalls: [
-        ...candidate.toolCalls.slice(0, 6),
-        candidate.toolCalls[7]!,
-        candidate.toolCalls[6]!,
-        candidate.toolCalls[8]!,
-        candidate.toolCalls[9]!,
+        ...candidate.toolCalls.slice(0, candidateExaIndex),
+        ...candidate.toolCalls.slice(
+          candidateExaIndex + 1,
+          firstCandidateChainIndex + 1,
+        ),
+        candidate.toolCalls[candidateExaIndex]!,
+        ...candidate.toolCalls.slice(firstCandidateChainIndex + 1),
       ],
     })
     const withoutCandidateAccount = evaluateResearchBehavior({
@@ -625,19 +729,6 @@ describe("research behavior evaluation", () => {
           ? { ...call, input: { status: "closed" } }
           : call
       ),
-      expected: validExpectation,
-    })
-    const orderIndex = valid.toolCalls.findIndex(
-      ({ name }) => name === "alpaca_get_orders",
-    )
-    const proposalWithDuplicateSkillLoad = evaluateResearchBehavior({
-      ...valid,
-      scenarioId: "proposal-with-duplicate-skill-load",
-      toolCalls: [
-        ...valid.toolCalls.slice(0, orderIndex + 1),
-        completed("skill"),
-        ...valid.toolCalls.slice(orderIndex + 1),
-      ],
       expected: validExpectation,
     })
     const validWithoutChallengeSearch = evaluateResearchBehavior({
@@ -944,7 +1035,6 @@ describe("research behavior evaluation", () => {
     ).toMatchObject({
       completedToolCounts: expect.arrayContaining([
         { pattern: "exa_*", minimum: 2, maximum: 2 },
-        { pattern: "skill", minimum: 1, maximum: 1 },
       ]),
       requiredExternalSources: [
         {
@@ -971,9 +1061,6 @@ describe("research behavior evaluation", () => {
     expect(
       proposalWithClosedOrderQuery.dimensions.toolDiscipline.issueCodes,
     ).toEqual(["TOOL_INPUT_COUNT_INVALID"])
-    expect(
-      proposalWithDuplicateSkillLoad.dimensions.toolDiscipline.issueCodes,
-    ).toEqual(["TOOL_COUNT_INVALID"])
     expect(validWithoutChallengeSearch.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_COUNT_INVALID",
     ])
@@ -1252,9 +1339,8 @@ describe("research behavior evaluation", () => {
       ...weak,
       scenarioId: "weak-evidence-account-after-research",
       toolCalls: [
+        ...weak.toolCalls.slice(1),
         weak.toolCalls[0]!,
-        ...weak.toolCalls.slice(2),
-        weak.toolCalls[1]!,
       ],
     })
 
@@ -1337,25 +1423,24 @@ describe("research behavior evaluation", () => {
           : call
       ),
     })
-    let stockBarIndex = 0
+    const stockBarIndexes = source.toolCalls.flatMap(
+      ({ name }, index) => name === "alpaca_get_stock_bars" ? [index] : [],
+    )
+    const rebuildDailyIndex = stockBarIndexes.at(-2)
+    const rebuildIntradayIndex = stockBarIndexes.at(-1)
+    if (rebuildDailyIndex === undefined || rebuildIntradayIndex === undefined) {
+      throw new Error("stale fixture requires a two-call bar rebuild")
+    }
     const splitBarTimeframes = evaluateResearchBehavior({
       ...source,
       scenarioId: "split-bar-timeframes",
-      toolCalls: source.toolCalls.map((call) => {
-        if (call.name !== "alpaca_get_stock_bars") return call
-        const timeframe = stockBarIndex < 2 ? "1Day" : "1Min"
-        stockBarIndex += 1
-        const { adjustment: _adjustment, ...input } =
-          call.input as Record<string, unknown>
-        return {
-          ...call,
-          input: {
-            ...input,
-            timeframe,
-            ...(timeframe === "1Day" ? { adjustment: "all" } : {}),
-          },
-        }
-      }),
+      toolCalls: source.toolCalls.map((call, index) =>
+        index === rebuildDailyIndex
+          ? source.toolCalls[rebuildIntradayIndex]!
+          : index === rebuildIntradayIndex
+            ? source.toolCalls[rebuildDailyIndex]!
+            : call
+      ),
     })
     const firstStaleBarIndex = source.toolCalls.findIndex(
       ({ name }) => name === "alpaca_get_stock_bars",

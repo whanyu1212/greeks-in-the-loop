@@ -1,8 +1,8 @@
-import type { ProposedTradeDecisionV1 } from "../contracts/research-decision-v1.js"
+import type { ProposedTradeDecisionV2 } from "../contracts/research-decision-v2.js"
 import {
-  deriveTradeIntentV1,
-  type TradeIntentV1,
-} from "../contracts/trade-intent-v1.js"
+  deriveTradeIntentV2,
+  type TradeIntentV2,
+} from "../contracts/trade-intent-v2.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import { LedgerPersistenceError } from "../event-ledger/research-lifecycle-recorder.js"
 import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
@@ -11,8 +11,11 @@ import {
   type TerminalStageReporter,
 } from "../observability/terminal-stage-reporter.js"
 import type { RiskStateProvider } from "./alpaca-risk-state-provider.js"
-import { CURRENT_STRATEGY_MANIFEST } from "../strategy/strategy-registry.js"
-import { evaluateTradeIntentRiskV1 } from "./risk-evaluation-v1.js"
+import {
+  evaluateTradeIntentRiskV1,
+  RISK_EVALUATION_VERSION,
+  RISK_RULE_VERSION,
+} from "./risk-evaluation-v1.js"
 import {
   DURABLE_RISK_CONTROL_STATE_VERSION,
   type DurableRiskControlStateV1,
@@ -28,16 +31,14 @@ import {
 export const SHADOW_RISK_QUOTE_SNAPSHOT_REF =
   "alpaca-shadow-risk-quotes-v1" as const
 
-const currentRiskIdentity = CURRENT_STRATEGY_MANIFEST.components.riskRule
-
 export type DurableRiskControlStateLoader = Readonly<{
   load(tradingDate: string, signal: AbortSignal): Promise<DurableRiskControlStateV1>
 }>
 
 export type ShadowRiskEvaluator = Readonly<{
   evaluate(input: Readonly<{
-    decision: ProposedTradeDecisionV1
-    sourceIntent: TradeIntentV1
+    decision: ProposedTradeDecisionV2
+    sourceIntent: TradeIntentV2
     captureEligibility: ResearchEligibilityV1 & Readonly<{
       sessionDate: string
       tradeIntentWindow: NonNullable<ResearchEligibilityV1["tradeIntentWindow"]>
@@ -160,10 +161,10 @@ const breakerTransitionsFor = (
 export function createShadowRiskEvaluator(options: Readonly<{
   provider: RiskStateProvider
   durableControl: DurableRiskControlStateLoader
-  deriveIntent?: typeof deriveTradeIntentV1
+  deriveIntent?: typeof deriveTradeIntentV2
   evaluateRisk?: typeof evaluateTradeIntentRiskV1
 }>): ShadowRiskEvaluator {
-  const deriveIntent = options.deriveIntent ?? deriveTradeIntentV1
+  const deriveIntent = options.deriveIntent ?? deriveTradeIntentV2
   const evaluateRisk = options.evaluateRisk ?? evaluateTradeIntentRiskV1
   return {
     async evaluate(input) {
@@ -198,8 +199,8 @@ export function createShadowRiskEvaluator(options: Readonly<{
           decision: shadowRiskDecisionV1Schema.parse({
             decisionVersion: SHADOW_RISK_DECISION_VERSION,
             mode: "SHADOW",
-            evaluationVersion: currentRiskIdentity.evaluationVersion,
-            ruleVersion: currentRiskIdentity.componentVersion,
+            evaluationVersion: RISK_EVALUATION_VERSION,
+            ruleVersion: RISK_RULE_VERSION,
             stage: "STATE_CAPTURE_FAILED",
             outcome: "REJECTED",
             evaluatedAt: null,
@@ -237,8 +238,8 @@ export function createShadowRiskEvaluator(options: Readonly<{
           decision: shadowRiskDecisionV1Schema.parse({
             decisionVersion: SHADOW_RISK_DECISION_VERSION,
             mode: "SHADOW",
-            evaluationVersion: currentRiskIdentity.evaluationVersion,
-            ruleVersion: currentRiskIdentity.componentVersion,
+            evaluationVersion: RISK_EVALUATION_VERSION,
+            ruleVersion: RISK_RULE_VERSION,
             stage: "INTENT_REFRESH_FAILED",
             outcome: "REJECTED",
             evaluatedAt: capture.snapshot.evaluatedAt,

@@ -2,13 +2,13 @@ import { isDeepStrictEqual } from "node:util"
 
 import { z } from "zod"
 
-import { preliminaryResearchV1Schema } from "../contracts/preliminary-research-v1.js"
+import { preliminaryResearchV2Schema } from "../contracts/preliminary-research-v2.js"
 import {
-  researchDecisionV1Schema,
-  validateResearchDecisionV1,
-} from "../contracts/research-decision-v1.js"
-import { researchReportV2Schema } from "../contracts/research-report-v2.js"
-import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
+  researchDecisionV2Schema,
+  validateResearchDecisionV2,
+} from "../contracts/research-decision-v2.js"
+import { researchReportV3Schema } from "../contracts/research-report-v3.js"
+import { tradeIntentV2Schema } from "../contracts/trade-intent-v2.js"
 import {
   SUPPORTED_RESEARCH_RUN_VERSIONS,
   type ResearchRunV1,
@@ -28,8 +28,9 @@ import {
 } from "../research/research-proposal-path.js"
 import { MAX_TERMINAL_REJECTION_DETAILS } from "../research/research-cycle-terminal.js"
 import {
-  DRY_RUN_ANYTIME_RESEARCH_MODE,
-  DRY_RUN_ANYTIME_SHADOW_MODE,
+  DRY_RUN_MODE,
+  TRADE_INTENT_START_GRACE_MS,
+  TRADE_INTENT_WINDOW_DURATION_MS,
   newYorkDate,
   newYorkLocalTime,
 } from "../scheduling/research-eligibility.js"
@@ -37,7 +38,6 @@ import {
   floorNanosecondsToIsoMilliseconds,
   parseRfc3339Nanoseconds,
 } from "../shared/value-normalization.js"
-import { resolveV1StrategyVersionCompatibility } from "../strategy/strategy-v1-compatibility.js"
 
 // 1.1.0 narrowed the graded checks to failures the model can cause; checks only
 // application code could fail were removed. Bump when grader semantics change,
@@ -104,7 +104,6 @@ export const researchRunEvaluationV1Schema = z
         runVersion: z.string().min(1).max(32),
         reportVersion: z.string().min(1).max(32).optional(),
         contractVersion: z.string().min(1).max(32).optional(),
-        strategyVersion: z.string().min(1).max(32).optional(),
       })
       .strict(),
     dimensions: z
@@ -184,7 +183,6 @@ const isEvaluableEvidenceClaim = (
 const retainedTradeWindowContextIsValid = (
   eligibility: NonNullable<ResearchRunV1["initialEligibility"]>,
   cycle: ResearchRunV1["cycle"],
-  strategyVersion: string | undefined,
 ) => {
   const window = eligibility.tradeIntentWindow
   if (
@@ -202,7 +200,7 @@ const retainedTradeWindowContextIsValid = (
   const sessionOpen = Date.parse(eligibility.sessionOpen)
   const sessionClose = Date.parse(eligibility.sessionClose)
   const sessionDate = eligibility.sessionDate
-  if (eligibility.researchMode === DRY_RUN_ANYTIME_SHADOW_MODE) {
+  if (eligibility.researchMode === DRY_RUN_MODE) {
     return (
       eligibility.researchEligible &&
       eligibility.tradeIntentEligible &&
@@ -221,11 +219,6 @@ const retainedTradeWindowContextIsValid = (
     )
   }
   const slotDate = new Date(slotStartedAt)
-  const strategyCompatibility =
-    resolveV1StrategyVersionCompatibility(strategyVersion)
-  const tradeIntentTiming = strategyCompatibility.success
-    ? strategyCompatibility.compatibility.tradeIntentTiming
-    : undefined
   const slotIsQuarterHour =
     Number.isFinite(slotStartedAt) &&
     slotDate.getUTCMinutes() % 15 === 0 &&
@@ -260,11 +253,10 @@ const retainedTradeWindowContextIsValid = (
     Number.isFinite(deadline) &&
     slotIsQuarterHour &&
     slotMatchesSession &&
-    tradeIntentTiming !== undefined &&
     deadline ===
-      Math.min(slotStartedAt + tradeIntentTiming.windowDurationMs, entryCutoff) &&
+      Math.min(slotStartedAt + TRADE_INTENT_WINDOW_DURATION_MS, entryCutoff) &&
     eligibilityEvaluatedAt >= slotStartedAt &&
-    eligibilityEvaluatedAt - slotStartedAt < tradeIntentTiming.startGraceMs &&
+    eligibilityEvaluatedAt - slotStartedAt < TRADE_INTENT_START_GRACE_MS &&
     eligibilityEvaluatedAt <= cycleStartedAt &&
     cycleStartedAt < deadline
   )
@@ -347,13 +339,12 @@ export function evaluateResearchRunV1(
     ? parsedInvocation.data
     : undefined
 
-  const isAnytimeDryRun =
-    run.initialEligibility?.researchMode === DRY_RUN_ANYTIME_RESEARCH_MODE
+  const isAnytimeDryRun = run.initialEligibility?.researchMode === DRY_RUN_MODE
 
   const parsedReport =
     run.researchReport === undefined
       ? undefined
-      : researchReportV2Schema.safeParse(run.researchReport)
+      : researchReportV3Schema.safeParse(run.researchReport)
   if (
     run.researchReport === undefined &&
     [
@@ -368,37 +359,21 @@ export function evaluateResearchRunV1(
   const parsedPreliminaryResearch =
     run.preliminaryResearch === undefined
       ? undefined
-      : preliminaryResearchV1Schema.safeParse(run.preliminaryResearch)
+      : preliminaryResearchV2Schema.safeParse(run.preliminaryResearch)
   const parsedValidatedDecision =
     run.validatedDecision === undefined
       ? undefined
-      : researchDecisionV1Schema.safeParse(run.validatedDecision)
+      : researchDecisionV2Schema.safeParse(run.validatedDecision)
 
   const validReport =
     parsedReport?.success === true ? parsedReport.data : undefined
   const reportResult = validReport?.result
-  const expectedStrategyVersionRejection =
-    invocation !== undefined &&
-    reportResult !== undefined &&
-    invocation.strategyVersion !== reportResult.strategyVersion &&
-    run.evidenceSnapshots.length === 0 &&
-    run.outcome.status === "DECISION_REJECTED" &&
-    isDeepStrictEqual(run.outcome.issues, [
-      {
-        code: "SCHEMA_INVALID",
-        schemaCategory: "VALUE_NOT_ALLOWED",
-        path: ["result", "strategyVersion"],
-      },
-    ])
   // Model-caused: the report's own declared versions must match what the
-  // invocation authorized. The agent writes reportResult/validReport, so this
-  // catches a report claiming a strategy or contract version it was not given.
+  // invocation authorized.
   if (
     invocation !== undefined &&
     reportResult !== undefined &&
-    ((invocation.strategyVersion !== reportResult.strategyVersion &&
-      !expectedStrategyVersionRejection) ||
-      invocation.decisionContractVersion !== reportResult.contractVersion ||
+    (invocation.decisionContractVersion !== reportResult.contractVersion ||
       invocation.reportVersion !== validReport?.reportVersion)
   ) {
     contractIssues.push("RUN_METADATA_INVALID")
@@ -537,7 +512,6 @@ export function evaluateResearchRunV1(
     retainedTradeWindowContextIsValid(
       run.initialEligibility,
       run.cycle,
-      versionedResult?.strategyVersion,
     )
   const quoteConfirmationRejection =
     run.outcome.status === "INTENT_DERIVATION_REJECTED" &&
@@ -549,7 +523,7 @@ export function evaluateResearchRunV1(
     run.outcome.status === "DECISION_REJECTED" &&
     !retainedCommonReportRejectionMatches &&
     reportResult?.outcome === "PROPOSE_TRADE"
-      ? validateResearchDecisionV1(
+      ? validateResearchDecisionV2(
           reportResult,
           PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
         )
@@ -635,7 +609,7 @@ export function evaluateResearchRunV1(
         },
       ]
     }
-    const validation = validateResearchDecisionV1(reportResult, {
+    const validation = validateResearchDecisionV2(reportResult, {
       evaluatedAt: canonicalRetainedQuoteSnapshot.retrievedAt,
       snapshots: {
         [PROPOSAL_QUOTE_SNAPSHOT_REF]: {
@@ -817,7 +791,7 @@ export function evaluateResearchRunV1(
       const noActionValidation =
         !retainedCommonReportRejectionMatches &&
         parsedRejectedResult?.outcome === "NO_ACTION"
-          ? validateResearchDecisionV1(parsedRejectedResult, {
+          ? validateResearchDecisionV2(parsedRejectedResult, {
               evaluatedAt: run.cycle.completedAt,
               snapshots: {},
             })
@@ -951,8 +925,7 @@ export function evaluateResearchRunV1(
       if (
         run.preliminaryResearch !== undefined ||
         run.validatedDecision !== undefined ||
-        (!expectedStrategyVersionRejection &&
-          ((run.evidenceSnapshots.length === 0 &&
+        ((run.evidenceSnapshots.length === 0 &&
             ((preliminaryCouldBeRetained &&
               !plausibleLaterPreliminaryEligibilityRejection &&
               !plausiblePreliminaryObservationRejectionMatches) ||
@@ -978,7 +951,7 @@ export function evaluateResearchRunV1(
             (canonicalRetainedQuoteSnapshot !== undefined &&
               (!hasRetainedEligibleTradeWindow ||
                 expectedSnapshotDecisionRejectionIssues === undefined ||
-                !rejectionIssuesMatch(expectedSnapshotDecisionRejectionIssues)))))
+                !rejectionIssuesMatch(expectedSnapshotDecisionRejectionIssues))))
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
       }
@@ -1197,7 +1170,7 @@ export function evaluateResearchRunV1(
   }
   if (
     run.outcome.status === "VALIDATED_NO_ACTION" &&
-    sourcedFacts.length > 0
+    sourcedFacts.some((claim) => "snapshotRef" in claim)
   ) {
     groundingIssues.push("NO_ACTION_SOURCED_EVIDENCE")
   }
@@ -1287,7 +1260,7 @@ export function evaluateResearchRunV1(
   }
   if (run.outcome.status === "INTENT_DERIVED") {
     const intentEvaluatedAt = Date.parse(run.outcome.intent.evaluatedAt)
-    const parsedIntent = tradeIntentV1Schema.safeParse(run.outcome.intent)
+    const parsedIntent = tradeIntentV2Schema.safeParse(run.outcome.intent)
     const longQuoteTimestamp = parsedIntent.success
       ? parseRfc3339Nanoseconds(
           parsedIntent.data.longQuote.providerTimestamp,
@@ -1508,7 +1481,6 @@ export function evaluateResearchRunV1(
         ? {}
         : {
             contractVersion: versionedResult.contractVersion,
-            strategyVersion: versionedResult.strategyVersion,
           }),
     },
     dimensions: {

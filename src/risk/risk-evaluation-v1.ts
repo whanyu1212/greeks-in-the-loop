@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
+import { tradeIntentV2Schema } from "../contracts/trade-intent-v2.js"
 import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
 import { parseRfc3339Nanoseconds } from "../shared/value-normalization.js"
 
@@ -140,7 +140,7 @@ export type ContractSnapshotV1 = Readonly<
 
 export const riskEvaluationInputV1Schema = z
   .object({
-    intent: tradeIntentV1Schema,
+    intent: tradeIntentV2Schema,
     context: z
       .object({
         provenance: z.literal("APPLICATION_VERIFIED"),

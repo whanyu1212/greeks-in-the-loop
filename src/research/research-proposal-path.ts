@@ -1,12 +1,12 @@
 import {
-  validateResearchDecisionV1,
-  type ProposedTradeDecisionV1,
-} from "../contracts/research-decision-v1.js"
-import type { ResearchReportV2 } from "../contracts/research-report-v2.js"
+  validateResearchDecisionV2,
+  type ProposedTradeDecisionV2,
+} from "../contracts/research-decision-v2.js"
+import type { ResearchReportV3 } from "../contracts/research-report-v3.js"
 import type {
   TradeIntentDerivationContext,
   TradeIntentDerivationResult,
-} from "../contracts/trade-intent-v1.js"
+} from "../contracts/trade-intent-v2.js"
 import type { OptionQuoteProvider } from "../market-data/alpaca-option-quotes.js"
 import type { ResearchCycleTrace } from "../observability/research-telemetry.js"
 import type { TerminalStageReporter } from "../observability/terminal-stage-reporter.js"
@@ -61,26 +61,26 @@ const observationIsFresh = (
 /**
  * A schema-validated report whose result is a proposed trade.
  *
- * Obtain one only by narrowing a parsed `ResearchReportV2` through
+ * Obtain one only by narrowing a parsed `ResearchReportV3` through
  * {@link isProposedTradeReport}. Never assemble one by spreading a report over
  * a different result: the decision that gets validated and the analysis that
  * gets freshness-checked would then come from different proposals, silently
- * bypassing the result/analysis cross-checks `researchReportV2Schema` enforces
+ * bypassing the result/analysis cross-checks `researchReportV3Schema` enforces
  * in its `superRefine`.
  */
 export type ProposedTradeReportV2 = Readonly<
-  Omit<ResearchReportV2, "result"> & {
-    result: Extract<ResearchReportV2["result"], { outcome: "PROPOSE_TRADE" }>
+  Omit<ResearchReportV3, "result"> & {
+    result: Extract<ResearchReportV3["result"], { outcome: "PROPOSE_TRADE" }>
   }
 >
 
 /** Narrows a parsed report in place, preserving its validated result/analysis pairing. */
 export const isProposedTradeReport = (
-  report: ResearchReportV2,
+  report: ResearchReportV3,
 ): report is ProposedTradeReportV2 => report.result.outcome === "PROPOSE_TRADE"
 
 export const proposalMarketRegimeIsFresh = (
-  report: ResearchReportV2,
+  report: ResearchReportV3,
   evaluatedAt: string,
 ) =>
   observationIsFresh(
@@ -90,7 +90,7 @@ export const proposalMarketRegimeIsFresh = (
   )
 
 export const proposalAccountChecksAreFresh = (
-  report: ResearchReportV2,
+  report: ResearchReportV3,
   evaluatedAt: string,
 ) =>
   observationIsFresh(
@@ -135,6 +135,19 @@ export const proposalHistoryIssuePath = (
   if (previousSessionDates === undefined || previousSessionDates.length < 2) {
     return ["analysis", "candidateEvaluation", "legs", 0, "openInterestDate"]
   }
+  const indicators = report.analysis.symbolIndicators
+  if (indicators === undefined) return ["analysis", "symbolIndicators"]
+  const indicatorCutoffIssue = indicators.findIndex(
+    ({ throughSessionDate }) => throughSessionDate !== previousSessionDates.at(-1),
+  )
+  if (indicatorCutoffIssue >= 0) {
+    return [
+      "analysis",
+      "symbolIndicators",
+      indicatorCutoffIssue,
+      "throughSessionDate",
+    ]
+  }
   const eligibleOpenInterestDates = new Set([
     sessionDate,
     ...previousSessionDates.slice(-2),
@@ -156,7 +169,7 @@ export const proposalHistoryIssuePath = (
 }
 
 export type ProposalIntentDeriver = (
-  decision: ProposedTradeDecisionV1,
+  decision: ProposedTradeDecisionV2,
   context: TradeIntentDerivationContext,
 ) => TradeIntentDerivationResult
 
@@ -191,7 +204,7 @@ export async function processResearchProposalPath({
   const result = report.result
   const evidencePreflight = await trace.run(
     "research.decision.validate",
-    () => validateResearchDecisionV1(result, PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT),
+    () => validateResearchDecisionV2(result, PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT),
   )
   if (!evidencePreflight.success) {
     return {
@@ -328,7 +341,7 @@ export async function processResearchProposalPath({
   }
 
   const validation = await trace.run("research.decision.validate", () =>
-    validateResearchDecisionV1(result, {
+    validateResearchDecisionV2(result, {
       evaluatedAt: quoteConfirmation.snapshot.evaluatedAt,
       snapshots: {
         [PROPOSAL_QUOTE_SNAPSHOT_REF]:

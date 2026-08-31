@@ -6,7 +6,10 @@ import {
   normalizeAlpacaOptionQuote,
 } from "../market-data/alpaca-option-quotes.js"
 import { newYorkLocalTime } from "../scheduling/research-eligibility.js"
-import { spyAlpacaOptionSymbolV1Schema } from "../shared/alpaca-option-identity.js"
+import {
+  allowedAlpacaOptionSymbolV1Schema,
+  parseAlpacaOptionSymbol,
+} from "../shared/alpaca-option-identity.js"
 import {
   floorNanosecondsToIsoMilliseconds,
   parseExactCents,
@@ -37,17 +40,30 @@ const captureInputSchema = z
   .object({
     sessionDate: z.iso.date(),
     slotStartedAt: z.iso.datetime({ offset: true, precision: 3 }),
-    longContractSymbol: spyAlpacaOptionSymbolV1Schema,
-    shortContractSymbol: spyAlpacaOptionSymbolV1Schema,
+    longContractSymbol: allowedAlpacaOptionSymbolV1Schema,
+    shortContractSymbol: allowedAlpacaOptionSymbolV1Schema,
     durableControl: durableRiskControlStateV1Schema,
   })
   .strict()
   .superRefine((input, refinement) => {
+    const longIdentity = parseAlpacaOptionSymbol(input.longContractSymbol)
+    const shortIdentity = parseAlpacaOptionSymbol(input.shortContractSymbol)
     if (input.longContractSymbol === input.shortContractSymbol) {
       refinement.addIssue({
         code: "custom",
         path: ["shortContractSymbol"],
         message: "Risk capture requires two different option symbols",
+      })
+    }
+    if (
+      !longIdentity.success ||
+      !shortIdentity.success ||
+      longIdentity.identity.root !== shortIdentity.identity.root
+    ) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["shortContractSymbol"],
+        message: "Risk capture requires option symbols for one underlying",
       })
     }
     if (input.durableControl.tradingDate !== input.sessionDate) {

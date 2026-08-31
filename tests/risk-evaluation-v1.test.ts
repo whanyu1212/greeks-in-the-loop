@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 
 import { describe, expect, it } from "vitest"
 
+import { runBacktestReplay } from "../src/backtest/replay.js"
 import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 import {
   evaluateTradeIntentRiskV1,
@@ -46,9 +47,8 @@ const makeIntent = ({
   )
   const widthCentsPerShare = Math.abs(longStrikeCents - shortStrikeCents)
   return {
-    contractVersion: "1.0.0",
-    decisionContractVersion: "1.0.0",
-    strategyVersion: "1.1.0",
+    contractVersion: "2.0.0",
+    decisionContractVersion: "2.0.0",
     direction: "BULLISH",
     structure: "BULL_CALL_SPREAD",
     expiration,
@@ -479,5 +479,154 @@ describe("evaluateTradeIntentRiskV1", () => {
       "utf8",
     )
     expect(source).not.toContain("SPY")
+  })
+})
+
+describe("backtest replay input validation", () => {
+  const monitorCycle = {
+    decidedAt: "2026-08-27T14:31:00.000Z",
+    marketOpen: true,
+    lateFill: false,
+    dte: 15,
+    minutesToClose: 329,
+    staleMinutes: 0,
+    markHalfCentsPerShare: 700,
+    holdingSessionIndex: 1,
+  } as const
+  const scenario = {
+    scenarioId: "scenario-1",
+    riskInput: makeInput(),
+    monitorCycles: [monitorCycle],
+  }
+  const replay = (scenarios: readonly unknown[]) => ({
+    replayVersion: "7.0.0",
+    initialEquityCents: 10_000_000,
+    execution: {
+      entrySlippageHalfCentsPerShare: 0,
+      exitSlippageHalfCentsPerShare: 0,
+      commissionCentsPerContract: 0,
+    },
+    sessions: [
+      {
+        date: "2026-08-27",
+        open: "2026-08-27T13:30:00.000Z",
+        close: "2026-08-27T20:00:00.000Z",
+      },
+      {
+        date: "2026-08-28",
+        open: "2026-08-28T13:30:00.000Z",
+        close: "2026-08-28T20:00:00.000Z",
+      },
+    ],
+    scenarios,
+  })
+
+  it("rejects pre-entry cycles, impossible marks, and duplicate scenario IDs", () => {
+    expect(runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      decidedAt: scenario.riskInput.intent.evaluatedAt,
+      minutesToClose: 330,
+      markHalfCentsPerShare:
+        scenario.riskInput.intent.widthCentsPerShare * 2,
+    }] }])).aggregate).toMatchObject({ status: "COMPLETE" })
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      decidedAt: "2026-08-27T14:29:59.999Z",
+    }] }]))).toThrow(/cannot predate intent evaluation/u)
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      markHalfCentsPerShare:
+        scenario.riskInput.intent.widthCentsPerShare * 2 + 1,
+    }] }]))).toThrow(/cannot exceed the spread width/u)
+    expect(() => runBacktestReplay(replay([scenario, scenario]))).toThrow(
+      /scenario IDs must be unique/u,
+    )
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      dte: monitorCycle.dte - 1,
+    }] }]))).toThrow(/DTE must match/u)
+    expect(runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      markHalfCentsPerShare: undefined,
+    }] }])).aggregate).toEqual({
+      status: "INCOMPLETE",
+      reason: "UNPRICED_EXIT",
+    })
+  })
+
+  it("cross-checks holding-session indexes against the replay calendar", () => {
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      holdingSessionIndex: 5,
+    }] }]))).toThrow(/holding-session index must match/u)
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      decidedAt: "2026-08-28T14:31:00.000Z",
+      dte: 14,
+      holdingSessionIndex: 1,
+    }] }]))).toThrow(/holding-session index must match/u)
+    expect(runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      decidedAt: "2026-08-28T14:31:00.000Z",
+      dte: 14,
+      holdingSessionIndex: 2,
+    }] }])).aggregate).toMatchObject({ status: "COMPLETE" })
+  })
+
+  it("cross-checks monitor timing against replay session hours", () => {
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      marketOpen: false,
+    }] }]))).toThrow(/market state must match/u)
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      minutesToClose: 0,
+    }] }]))).toThrow(/minutes to close must match/u)
+  })
+
+  it("requires intent evaluation during its retained entry session", () => {
+    expect(() => runBacktestReplay(replay([{
+      ...scenario,
+      riskInput: {
+        ...scenario.riskInput,
+        intent: {
+          ...scenario.riskInput.intent,
+          evaluatedAt: "2026-08-27T12:30:00.000Z",
+        },
+      },
+    }]))).toThrow(/evaluated during its entry session/u)
+  })
+
+  it("derives trend evidence from the prior 20 retained daily closes", () => {
+    const dates = Array.from({ length: 21 }, (_, index) =>
+      new Date(Date.UTC(2026, 7, 7 + index)).toISOString().slice(0, 10)
+    )
+    const sessions = dates.map((date) => ({
+      date,
+      open: `${date}T13:30:00.000Z`,
+      close: `${date}T20:00:00.000Z`,
+    }))
+    const dailyCloses = dates.slice(0, -1).map((sessionDate) => ({
+      sessionDate,
+      closeMicros: 600_000_000,
+    }))
+    dailyCloses.at(-1)!.closeMicros = 600_000_011
+    const replayWithTrend = (completedDailyCloseMicros: number) => ({
+      ...replay([{
+        ...scenario,
+        dailyCloses,
+        monitorCycles: [{
+          ...monitorCycle,
+          completedDailyCloseMicros,
+          sma20Micros: 600_000_001,
+        }],
+      }]),
+      sessions,
+    })
+
+    expect(runBacktestReplay(replayWithTrend(600_000_011)).aggregate)
+      .toMatchObject({ status: "COMPLETE" })
+    expect(() => runBacktestReplay(replayWithTrend(600_000_012)))
+      .toThrow(/trend evidence must match/u)
   })
 })

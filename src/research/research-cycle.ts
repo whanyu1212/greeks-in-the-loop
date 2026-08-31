@@ -1,6 +1,9 @@
-import { deriveTradeIntentV1 } from "../contracts/trade-intent-v1.js"
-import { validateResearchDecisionV1 } from "../contracts/research-decision-v1.js"
-import { researchReportV2Schema } from "../contracts/research-report-v2.js"
+import { deriveTradeIntentV2 } from "../contracts/trade-intent-v2.js"
+import { validateResearchDecisionV2 } from "../contracts/research-decision-v2.js"
+import {
+  researchReportV3Schema,
+  type ResearchReportV3,
+} from "../contracts/research-report-v3.js"
 import { MAX_LEDGER_EVENT_PAYLOAD_BYTES } from "../event-ledger/ledger-event-v1.js"
 import type {
   OptionQuoteProvider,
@@ -16,10 +19,9 @@ import {
 import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
 import type { ShadowRiskEvaluator } from "../risk/shadow-risk-service.js"
 import { safeSchemaDiagnostics } from "../shared/schema-diagnostics.js"
-import { SPY_DIRECTIONAL_DEBIT_VERTICAL_STRATEGY_ID } from "../strategy/strategy-identity.js"
-import { resolveStrategyManifest } from "../strategy/strategy-registry.js"
 import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
+  type DecisionRejectionIssue,
   type ResearchCycleOutcomeSink,
 } from "./research-cycle-outcome-v1.js"
 import {
@@ -48,6 +50,63 @@ export {
 } from "./research-cycle-terminal.js"
 
 export const MAX_RESEARCH_RESPONSE_BYTES = 64 * 1024
+
+export type ResearchReportResponseParseResult =
+  | Readonly<{ success: true; report: ResearchReportV3 }>
+  | Readonly<{ success: false; issues: readonly DecisionRejectionIssue[] }>
+
+/** Parses an untrusted response without retaining rejected model content. */
+export function parseResearchReportV3Response(
+  rawResponse: string,
+): ResearchReportResponseParseResult {
+  if (Buffer.byteLength(rawResponse, "utf8") > MAX_RESEARCH_RESPONSE_BYTES) {
+    return {
+      success: false,
+      issues: [{ code: "RESPONSE_TOO_LARGE", path: [] }],
+    }
+  }
+  let input: unknown
+  try {
+    input = JSON.parse(rawResponse)
+  } catch {
+    return {
+      success: false,
+      issues: [{ code: "MALFORMED_JSON", path: [] }],
+    }
+  }
+  const report = researchReportV3Schema.safeParse(input)
+  if (!report.success) {
+    return {
+      success: false,
+      issues: safeSchemaDiagnostics(report.error.issues, input),
+    }
+  }
+  if (
+    Buffer.byteLength(JSON.stringify({ researchReport: report.data }), "utf8") >
+    MAX_LEDGER_EVENT_PAYLOAD_BYTES
+  ) {
+    return {
+      success: false,
+      issues: [{ code: "RESPONSE_TOO_LARGE", path: [] }],
+    }
+  }
+  return { success: true, report: report.data }
+}
+
+/** Allows at most one model correction before the normal trust boundary runs. */
+export async function repairResearchReportV3ResponseOnce(
+  rawResponse: string,
+  repair: (issues: readonly DecisionRejectionIssue[]) => Promise<string>,
+) {
+  const parsed = parseResearchReportV3Response(rawResponse)
+  if (parsed.success) {
+    return { rawResponse, schemaRepairAttempted: false } as const
+  }
+  return {
+    rawResponse: await repair(parsed.issues),
+    schemaRepairAttempted: true,
+  } as const
+}
 
 export type ProcessResearchCycleOptions = Readonly<{
   rawResponse: string
@@ -84,46 +143,15 @@ export async function processResearchCycle({
   getEligibility,
   researchInvocation,
   now = () => new Date(),
-  deriveIntent = deriveTradeIntentV1,
+  deriveIntent = deriveTradeIntentV2,
   trace = NOOP_RESEARCH_CYCLE_TRACE,
   stageReporter = NOOP_TERMINAL_STAGE_REPORTER,
 }: ProcessResearchCycleOptions): Promise<ProcessedResearchCycle> {
   signal.throwIfAborted()
   const stages = createResearchCycleStageReports(stageReporter)
-  const parsed = await trace.run("research.report.parse", () => {
-    if (Buffer.byteLength(rawResponse, "utf8") > MAX_RESEARCH_RESPONSE_BYTES) {
-      return {
-        success: false as const,
-        issues: [{ code: "RESPONSE_TOO_LARGE" as const, path: [] as const }],
-      }
-    }
-    let input: unknown
-    try {
-      input = JSON.parse(rawResponse)
-    } catch {
-      return {
-        success: false as const,
-        issues: [{ code: "MALFORMED_JSON" as const, path: [] as const }],
-      }
-    }
-    const report = researchReportV2Schema.safeParse(input)
-    if (!report.success) {
-      return {
-        success: false as const,
-        issues: safeSchemaDiagnostics(report.error.issues, input),
-      }
-    }
-    if (
-      Buffer.byteLength(JSON.stringify({ researchReport: report.data }), "utf8") >
-      MAX_LEDGER_EVENT_PAYLOAD_BYTES
-    ) {
-      return {
-        success: false as const,
-        issues: [{ code: "RESPONSE_TOO_LARGE" as const, path: [] as const }],
-      }
-    }
-    return { success: true as const, report: report.data }
-  })
+  const parsed = await trace.run("research.report.parse", () =>
+    parseResearchReportV3Response(rawResponse),
+  )
   if (!parsed.success) {
     stages.researchReportRejected(parsed.issues)
     return recordResearchCycleOutcome(
@@ -158,23 +186,6 @@ export async function processResearchCycle({
       stages,
     })
   stages.researchReportCompleted(researchReport)
-  const strategy = resolveStrategyManifest({
-    strategyId: SPY_DIRECTIONAL_DEBIT_VERTICAL_STRATEGY_ID,
-    strategyVersion: result.strategyVersion,
-  })
-  if (!strategy.success) {
-    return recordReportResolution({
-      outcome: {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "DECISION_REJECTED",
-        issues: [{
-          code: "SCHEMA_INVALID",
-          schemaCategory: "VALUE_NOT_ALLOWED",
-          path: ["result", "strategyVersion"],
-        }],
-      },
-    })
-  }
   const processingEvaluatedAt = now()
   const cycleStartTime = Date.parse(cycleStartedAt)
   if (
@@ -270,7 +281,7 @@ export async function processResearchCycle({
 
   if (result.outcome === "NO_ACTION") {
     const validation = await trace.run("research.decision.validate", () =>
-      validateResearchDecisionV1(result, {
+      validateResearchDecisionV2(result, {
         evaluatedAt: processingEvaluatedAt.toISOString(),
         snapshots: {},
       }),

@@ -5,73 +5,20 @@ import {
   type OpenCodeInvocationSummary,
 } from "../observability/opencode-telemetry-summary.js"
 import type { ResearchTraceVersions } from "../observability/research-telemetry.js"
-export const RESEARCH_INVOCATION_VERSION = "1.3.0" as const
+export const RESEARCH_INVOCATION_VERSION = "3.0.0" as const
 export const SUPPORTED_RESEARCH_INVOCATION_VERSIONS = Object.freeze([
-  "1.0.0",
-  "1.1.0",
-  "1.2.0",
   RESEARCH_INVOCATION_VERSION,
 ] as const)
 export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = Object.freeze({
-  "1.0.0": Object.freeze({
+  [RESEARCH_INVOCATION_VERSION]: Object.freeze({
     agentName: "research",
-    promptVersion: "1.3.0",
-    skillName: "spy-debit-spread-research",
-    skillVersion: "1.1.0",
-    strategyVersion: "1.1.0",
-    decisionContractVersion: "1.0.0",
-    reportVersion: "2.0.0",
-  }),
-  "1.1.0": Object.freeze({
-    agentName: "research",
-    promptVersion: "1.4.0",
-    skillName: "spy-debit-spread-research",
-    skillVersion: "1.2.0",
-    strategyVersion: "1.1.0",
-    decisionContractVersion: "1.0.0",
-    reportVersion: "2.0.0",
-  }),
-  /**
-   * Adds the pinned model identity. Earlier versions deliberately omit it:
-   * they ran against whatever OpenCode resolved, and back-filling a pin would
-   * claim an assertion those runs never made.
-   */
-  "1.2.0": Object.freeze({
-    agentName: "research",
-    promptVersion: "1.4.0",
-    skillName: "spy-debit-spread-research",
-    skillVersion: "1.2.0",
-    strategyVersion: "1.1.0",
-    decisionContractVersion: "1.0.0",
-    reportVersion: "2.0.0",
+    promptVersion: "3.0.3",
+    decisionContractVersion: "2.0.0",
+    reportVersion: "3.0.0",
     providerId: "openai",
     modelId: "gpt-5.6-sol",
   }),
-  "1.3.0": Object.freeze({
-    agentName: "research",
-    promptVersion: "1.4.1",
-    skillName: "spy-debit-spread-research",
-    skillVersion: "1.2.0",
-    strategyVersion: "1.1.0",
-    decisionContractVersion: "1.0.0",
-    reportVersion: "2.0.0",
-    providerId: "openai",
-    modelId: "gpt-5.6-sol",
-  }),
-} as const satisfies Record<
-  (typeof SUPPORTED_RESEARCH_INVOCATION_VERSIONS)[number],
-  Readonly<{
-    agentName: string
-    promptVersion: string
-    skillName: string
-    skillVersion: string
-    strategyVersion: string
-    decisionContractVersion: string
-    reportVersion: string
-    providerId?: string
-    modelId?: string
-  }>
->)
+})
 
 /**
  * The provider and model the research agent must run against.
@@ -79,7 +26,7 @@ export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = Object.freeze({
  * `opencode.json` selects the model; this constant is what the application
  * asserts the observed invocation against. Changing the model therefore
  * requires editing both and bumping `RESEARCH_INVOCATION_VERSION`, matching how
- * prompt and skill versions are already pinned. Reasoning effort is configured
+ * prompt versions are already pinned. Reasoning effort is configured
  * alongside the model but is deliberately not asserted — it is a tuning knob,
  * not part of model identity.
  */
@@ -170,20 +117,14 @@ export const researchInvocationV1Schema = z
   .object({
     invocationVersion: z.enum(SUPPORTED_RESEARCH_INVOCATION_VERSIONS),
     agentName: safeLabel,
-    cycleMode: z.enum([
-      "STANDARD",
-      "DRY_RUN_ANYTIME",
-      "DRY_RUN_SHADOW_ANYTIME",
-    ]),
+    cycleMode: z.enum(["STANDARD", "DRY_RUN"]),
     promptVersion: safeLabel,
-    skillName: safeLabel,
-    skillVersion: safeLabel,
-    strategyVersion: safeLabel,
     decisionContractVersion: safeLabel,
     reportVersion: safeLabel,
     providerId: safeLabel,
     modelId: safeLabel,
     responseError: z.boolean(),
+    schemaRepairAttempted: z.boolean().optional(),
     tokens: z
       .object({
         input: safeCount.optional(),
@@ -268,20 +209,21 @@ const toolDuration = (startedAt?: number, endedAt?: number) => {
 export function createResearchInvocationV1(
   versions: ResearchTraceVersions,
   invocation: OpenCodeInvocationSummary,
+  options: Readonly<{ schemaRepairAttempted?: boolean }> = {},
 ): ResearchInvocationV1 {
   return researchInvocationV1Schema.parse({
     invocationVersion: RESEARCH_INVOCATION_VERSION,
     agentName: durableLabel(versions.agentName),
     cycleMode: versions.cycleMode,
     promptVersion: durableLabel(versions.promptVersion),
-    skillName: durableLabel(versions.skillName),
-    skillVersion: durableLabel(versions.skillVersion),
-    strategyVersion: durableLabel(versions.strategyVersion),
     decisionContractVersion: durableLabel(versions.decisionContractVersion),
     reportVersion: durableLabel(versions.reportVersion),
     providerId: durableLabel(invocation.providerId),
     modelId: durableLabel(invocation.modelId),
     responseError: invocation.responseError,
+    ...(options.schemaRepairAttempted === undefined
+      ? {}
+      : { schemaRepairAttempted: options.schemaRepairAttempted }),
     tokens: {
       ...(invocation.inputTokenCount === undefined
         ? {}

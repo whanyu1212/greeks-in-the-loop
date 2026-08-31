@@ -5,7 +5,8 @@ import { join } from "node:path"
 import Database from "better-sqlite3"
 import { afterEach, describe, expect, it } from "vitest"
 
-import type { LedgerEventV1 } from "../src/event-ledger/ledger-event-v1.js"
+import type { LedgerEventV2 } from "../src/event-ledger/ledger-event-v1.js"
+import { loadResearchContextV1 } from "../src/research/research-context-v1.js"
 import {
   createSqliteLedgerStore as createConfiguredSqliteLedgerStore,
   type CreateSqliteLedgerStoreOptions,
@@ -29,11 +30,11 @@ const createTemporaryPath = () => {
 
 const cycleStarted = (
   eventId: string,
-  overrides: Partial<LedgerEventV1> = {},
-): LedgerEventV1 =>
+  overrides: Partial<LedgerEventV2> = {},
+): LedgerEventV2 =>
   ({
     eventId,
-    eventVersion: "1.0.0",
+    eventVersion: "2.0.0",
     eventType: "RESEARCH_CYCLE_STARTED",
     occurredAt: "2026-08-25T14:30:00.000Z",
     correlationId: "correlation-1",
@@ -43,14 +44,14 @@ const cycleStarted = (
       cycleNumber: 1,
     },
     ...overrides,
-  }) as LedgerEventV1
+  }) as LedgerEventV2
 
 const cycleCompleted = (
   eventId: string,
   causationEventId: string,
-): LedgerEventV1 => ({
+): LedgerEventV2 => ({
   eventId,
-  eventVersion: "1.0.0",
+  eventVersion: "2.0.0",
   eventType: "RESEARCH_CYCLE_COMPLETED",
   occurredAt: "2026-08-25T14:31:00.000Z",
   correlationId: "correlation-1",
@@ -176,15 +177,14 @@ describe("createSqliteLedgerStore", () => {
 
     const unsafeDecision = {
       eventId: "event-2",
-      eventVersion: "1.0.0",
+      eventVersion: "2.0.0",
       eventType: "RESEARCH_DECISION_VALIDATED",
       occurredAt: "2026-08-25T14:30:10.000Z",
       correlationId: "correlation-1",
       cycleId: "cycle-1",
       payload: {
         decision: {
-          contractVersion: "1.0.0",
-          strategyVersion: "1.1.0",
+          contractVersion: "2.0.0",
           outcome: "NO_ACTION",
           reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
           evidence: [
@@ -192,13 +192,15 @@ describe("createSqliteLedgerStore", () => {
               claimId: "fact-1",
               kind: "SOURCED_FACT",
               claim: "Unsafe locator should reject the complete batch.",
-              snapshotRef: "snapshot-1",
+              provider: "ALPACA",
+              temporalClass: "LIVE",
+              observedAt: "2026-08-25T14:30:00.000Z",
               locator: "https://example.com/data?apikey=secret-value",
             },
           ],
         },
       },
-    } as LedgerEventV1
+    } as LedgerEventV2
 
     await expect(
       store.appendBatch([
@@ -220,7 +222,7 @@ describe("createSqliteLedgerStore", () => {
         cycleNumber: 1,
         refreshToken: "secret-value",
       },
-    } as unknown as LedgerEventV1
+    } as unknown as LedgerEventV2
 
     await expect(store.append(unsafeEvent)).rejects.toThrow(
       "Unsafe persistence payload",
@@ -247,7 +249,7 @@ describe("createSqliteLedgerStore", () => {
         retrievedAt: "2026-08-25T14:30:00.000Z",
         freshUntil: "2026-08-25T14:31:00.000Z",
       },
-    } as LedgerEventV1
+    } as LedgerEventV2
 
     await expect(store.append(credentialBearingEvent)).rejects.toThrow(
       "Unsafe persistence payload",
@@ -264,7 +266,7 @@ describe("createSqliteLedgerStore", () => {
     const invalidEvent = {
       ...cycleStarted("event-1"),
       [unsafeProperty]: true,
-    } as unknown as LedgerEventV1
+    } as unknown as LedgerEventV2
 
     let error: unknown
     try {
@@ -283,7 +285,7 @@ describe("createSqliteLedgerStore", () => {
     await store.migrate()
     const oversizedEvent = {
       eventId: "event-oversized",
-      eventVersion: "1.0.0",
+      eventVersion: "2.0.0",
       eventType: "RESEARCH_DECISION_REJECTED",
       occurredAt: "2026-08-25T14:30:10.000Z",
       correlationId: "correlation-1",
@@ -298,7 +300,7 @@ describe("createSqliteLedgerStore", () => {
           ),
         })),
       },
-    } as LedgerEventV1
+    } as LedgerEventV2
 
     await expect(store.append(oversizedEvent)).rejects.toThrow(
       "Ledger event payload cannot exceed 65536 bytes",
@@ -372,6 +374,60 @@ describe("createSqliteLedgerStore", () => {
       sequence: 1,
     })
     await secondStore.close()
+  })
+
+  it("decodes historical V1 research reports while loading context", async () => {
+    const path = createTemporaryPath()
+    const migrated = createSqliteLedgerStore({ path })
+    await migrated.migrate()
+    await migrated.close()
+
+    const database = new Database(path)
+    const insert = database.prepare(`
+      INSERT INTO ledger_events (
+        event_id, event_version, event_type, occurred_at, recorded_at,
+        correlation_id, causation_event_id, cycle_id, session_id, payload_json
+      ) VALUES (?, '1.0.0', ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    insert.run(
+      "legacy-start",
+      "RESEARCH_CYCLE_STARTED",
+      "2026-08-25T14:30:00.000Z",
+      "2026-08-25T14:30:00.000Z",
+      "legacy-correlation",
+      null,
+      "legacy-cycle",
+      "legacy-session",
+      JSON.stringify({ cycleNumber: 7 }),
+    )
+    insert.run(
+      "legacy-report",
+      "RESEARCH_REPORT_RECORDED",
+      "2026-08-25T14:31:00.000Z",
+      "2026-08-25T14:31:00.000Z",
+      "legacy-correlation",
+      "legacy-start",
+      "legacy-cycle",
+      "legacy-session",
+      JSON.stringify({ report: { reportVersion: "2.0.0" } }),
+    )
+    database.close()
+
+    const store = createSqliteLedgerStore({ path, readonly: true })
+    await expect(
+      loadResearchContextV1(store, {
+        generatedAt: "2026-08-25T14:32:00.000Z",
+      }),
+    ).resolves.toMatchObject({ nextCycleNumber: 8 })
+    await expect(
+      store.list({ eventTypes: ["RESEARCH_REPORT_RECORDED"], limit: 1 }),
+    ).resolves.toMatchObject([
+      {
+        eventVersion: "1.0.0",
+        payload: { report: { reportVersion: "2.0.0" } },
+      },
+    ])
+    await store.close()
   })
 
   it("rejects direct updates and deletes through durable triggers", async () => {

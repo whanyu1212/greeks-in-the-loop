@@ -3,11 +3,15 @@ import { join } from "node:path"
 
 import { z } from "zod"
 
-import type { PreliminaryResearchV1 } from "../contracts/preliminary-research-v1.js"
-import type { ResearchDecisionV1 } from "../contracts/research-decision-v1.js"
-import type { ResearchReportV2 } from "../contracts/research-report-v2.js"
-import type { TradeIntentV1 } from "../contracts/trade-intent-v1.js"
-import type { StoredLedgerEventV1 } from "../event-ledger/ledger-event-v1.js"
+import type { PreliminaryResearchV2 } from "../contracts/preliminary-research-v2.js"
+import type { ResearchDecisionV2 } from "../contracts/research-decision-v2.js"
+import type { ResearchReportV3 } from "../contracts/research-report-v3.js"
+import type { TradeIntentV2 } from "../contracts/trade-intent-v2.js"
+import {
+  LEDGER_EVENT_VERSION,
+  type StoredLedgerEvent,
+  type StoredLedgerEventV2,
+} from "../event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import type { SchemaViolationCategory } from "../shared/schema-diagnostics.js"
 import type {
@@ -20,16 +24,8 @@ import {
 } from "../scheduling/research-eligibility.js"
 import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
 
-export const LEGACY_RESEARCH_RUN_VERSION = "1.0.0" as const
-export const SHADOW_RESEARCH_RUN_VERSION = "1.1.0" as const
-export const INVOCATION_RESEARCH_RUN_VERSION = "1.2.0" as const
-export const RESEARCH_RUN_VERSION = "1.3.0" as const
-export const SUPPORTED_RESEARCH_RUN_VERSIONS = [
-  LEGACY_RESEARCH_RUN_VERSION,
-  SHADOW_RESEARCH_RUN_VERSION,
-  INVOCATION_RESEARCH_RUN_VERSION,
-  RESEARCH_RUN_VERSION,
-] as const
+export const RESEARCH_RUN_VERSION = "3.0.0" as const
+export const SUPPORTED_RESEARCH_RUN_VERSIONS = [RESEARCH_RUN_VERSION] as const
 export const DEFAULT_RESEARCH_ARTIFACT_ROOT = "workspace/research" as const
 
 type RejectionIssue = Readonly<{
@@ -42,12 +38,12 @@ export type ResearchRunOutcomeV1 =
   | Readonly<{
       outcomeVersion: "1.0.0"
       status: "PRELIMINARY_RESEARCH_RETAINED"
-      research: PreliminaryResearchV1
+      research: PreliminaryResearchV2
     }>
   | Readonly<{
       outcomeVersion: "1.0.0"
       status: "VALIDATED_NO_ACTION"
-      decision: Extract<ResearchDecisionV1, { outcome: "NO_ACTION" }>
+      decision: Extract<ResearchDecisionV2, { outcome: "NO_ACTION" }>
     }>
   | Readonly<{
       outcomeVersion: "1.0.0"
@@ -62,8 +58,8 @@ export type ResearchRunOutcomeV1 =
   | Readonly<{
       outcomeVersion: "1.0.0"
       status: "INTENT_DERIVED"
-      decision: Extract<ResearchDecisionV1, { outcome: "PROPOSE_TRADE" }>
-      intent: TradeIntentV1
+      decision: Extract<ResearchDecisionV2, { outcome: "PROPOSE_TRADE" }>
+      intent: TradeIntentV2
     }>
 
 export type ResearchRunV1 = Readonly<{
@@ -87,9 +83,9 @@ export type ResearchRunV1 = Readonly<{
     freshUntil: string
     temporalClass?: "LIVE" | "DELAYED" | "PRIOR_CLOSE" | undefined
   }>[]
-  preliminaryResearch?: PreliminaryResearchV1
-  researchReport?: ResearchReportV2
-  validatedDecision?: ResearchDecisionV1
+  preliminaryResearch?: PreliminaryResearchV2
+  researchReport?: ResearchReportV3
+  validatedDecision?: ResearchDecisionV2
   shadowRisk?: Readonly<{
     decision: ShadowRiskDecisionV1
     breakerTransitions: readonly RiskBreakerTransitionV1[]
@@ -118,12 +114,19 @@ const optionalOne = <T>(values: readonly T[], label: string): T | undefined => {
 
 /** Rebuilds the complete bounded research run from its authoritative events. */
 export function projectResearchRunV1(
-  inputEvents: readonly StoredLedgerEventV1[],
+  inputEvents: readonly StoredLedgerEvent[],
 ): ResearchRunV1 {
   if (inputEvents.length === 0) throw new Error("Research cycle was not found")
-  const events = inputEvents
-    .filter((event) => event.eventType !== "RESEARCH_SCREENING_AUDIT_RECORDED")
-    .sort((left, right) => left.sequence - right.sequence)
+  const currentEvents = inputEvents.filter(
+    (event): event is StoredLedgerEventV2 =>
+      event.eventVersion === LEDGER_EVENT_VERSION,
+  )
+  if (currentEvents.length !== inputEvents.length) {
+    throw new Error("Legacy ledger cycles cannot be exported as research run V3")
+  }
+  const events = [...currentEvents].sort(
+    (left, right) => left.sequence - right.sequence,
+  )
   const start = one(
     events.filter((event) => event.eventType === "RESEARCH_CYCLE_STARTED"),
     "cycle-start",
@@ -235,13 +238,7 @@ export function projectResearchRunV1(
   const sessionId = start.sessionId
   if (cycleId === undefined || sessionId === undefined) throw new Error("Research cycle identity is incomplete")
   return {
-    runVersion: completed.payload.researchInvocation !== undefined
-      ? completed.payload.researchInvocation.invocationVersion === "1.0.0"
-        ? INVOCATION_RESEARCH_RUN_VERSION
-        : RESEARCH_RUN_VERSION
-      : riskEvent === undefined
-        ? LEGACY_RESEARCH_RUN_VERSION
-        : SHADOW_RESEARCH_RUN_VERSION,
+    runVersion: RESEARCH_RUN_VERSION,
     cycle: {
       cycleId,
       cycleNumber: start.payload.cycleNumber,

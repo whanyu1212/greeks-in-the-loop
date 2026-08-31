@@ -1,24 +1,16 @@
 import { z } from "zod"
 
 import {
+  ALLOWED_OPTION_UNDERLYINGS_V1,
   parseAlpacaOptionSymbol,
-  spyAlpacaOptionSymbolV1Schema,
-  validateSpyOptionUniverseV1,
+  allowedAlpacaOptionSymbolV1Schema,
+  validateOptionUniverseV1,
 } from "../shared/alpaca-option-identity.js"
 import {
   safeSchemaDiagnostics,
   type SchemaViolationCategory,
 } from "../shared/schema-diagnostics.js"
-import { strategyVersionSchema } from "../strategy/strategy-identity.js"
-
-export {
-  LEGACY_STRATEGY_VERSION,
-  STRATEGY_VERSION,
-  SUPPORTED_STRATEGY_VERSIONS,
-  strategyVersionSchema,
-} from "../strategy/strategy-identity.js"
-
-export const RESEARCH_DECISION_CONTRACT_VERSION = "1.0.0" as const
+export const RESEARCH_DECISION_CONTRACT_VERSION = "2.0.0" as const
 
 export const NO_ACTION_REASON_CODES = [
   "MARKET_WINDOW_INELIGIBLE",
@@ -35,12 +27,13 @@ export const NO_ACTION_REASON_CODES = [
 ] as const
 
 const boundedText = z.string().trim().min(1).max(2_000)
+const boundedClaim = z.string().trim().min(1).max(500)
 const boundedIdentifier = z
   .string()
   .min(1)
   .max(128)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u)
-const contractSymbol = spyAlpacaOptionSymbolV1Schema
+const contractSymbol = allowedAlpacaOptionSymbolV1Schema
 // OCC symbols encode a two-digit year. This contract only accepts 2000–2099
 // so a full ISO date maps to exactly one symbol expiration.
 const expirationDate = z.iso.date().refine((value) => {
@@ -50,6 +43,70 @@ const expirationDate = z.iso.date().refine((value) => {
 // Millisecond precision matches Date.parse, so sub-ms fractions cannot
 // collapse distinct instants into the same freshness comparison.
 const timestamp = z.iso.datetime({ offset: true, precision: 3 })
+
+export const MARKET_OBSERVATION_TEMPORAL_CLASSES = [
+  "LIVE",
+  "DELAYED",
+  "PRIOR_CLOSE",
+] as const
+
+const agentReportedSourcedFactSchema = z
+  .object({
+    claimId: boundedIdentifier,
+    kind: z.literal("SOURCED_FACT"),
+    claim: boundedClaim,
+    provider: z.enum(["ALPACA", "FMP", "EXA"]),
+    temporalClass: z.enum(MARKET_OBSERVATION_TEMPORAL_CLASSES),
+    observedAt: timestamp,
+    locator: z.string().trim().min(1).max(512).optional(),
+  })
+  .strict()
+
+const agentReportedInferenceSchema = z
+  .object({
+    claimId: boundedIdentifier,
+    kind: z.literal("INFERENCE"),
+    claim: boundedClaim,
+    basedOn: z.array(boundedIdentifier).min(1).max(16),
+  })
+  .strict()
+
+export const agentReportedEvidenceSchema = z
+  .array(
+    z.discriminatedUnion("kind", [
+      agentReportedSourcedFactSchema,
+      agentReportedInferenceSchema,
+    ]),
+  )
+  .min(1)
+  .max(16)
+  .superRefine((evidence, refinement) => {
+    const claimKinds = new Map<string, "SOURCED_FACT" | "INFERENCE">()
+    evidence.forEach((claim, index) => {
+      if (claimKinds.has(claim.claimId)) {
+        refinement.addIssue({
+          code: "custom",
+          path: [index, "claimId"],
+          message: "Agent-reported claim identifiers must be unique",
+        })
+      } else {
+        claimKinds.set(claim.claimId, claim.kind)
+      }
+    })
+
+    evidence.forEach((claim, index) => {
+      if (claim.kind !== "INFERENCE") return
+      claim.basedOn.forEach((claimId, referenceIndex) => {
+        if (claimKinds.get(claimId) !== "SOURCED_FACT") {
+          refinement.addIssue({
+            code: "custom",
+            path: [index, "basedOn", referenceIndex],
+            message: "Agent-reported inferences must reference sourced facts",
+          })
+        }
+      })
+    })
+  })
 
 const sourcedFactSchema = z
   .object({
@@ -82,9 +139,9 @@ const optionLegSchema = z
   })
   .strict()
 
-export const researchCandidateV1Schema = z
+export const researchCandidateV2Schema = z
   .object({
-    underlying: z.literal("SPY"),
+    underlying: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1),
     structure: z.enum(["BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"]),
     expiration: expirationDate,
     longLeg: optionLegSchema,
@@ -122,7 +179,7 @@ export const researchCandidateV1Schema = z
       const parsedSymbol = parseAlpacaOptionSymbol(leg.contractSymbol)
       if (
         !parsedSymbol.success ||
-        !validateSpyOptionUniverseV1(parsedSymbol.identity).success ||
+        !validateOptionUniverseV1(parsedSymbol.identity).success ||
         parsedSymbol.identity.root !== candidate.underlying ||
         parsedSymbol.identity.expiration !== candidate.expiration ||
         parsedSymbol.identity.optionType !== expectedOptionType ||
@@ -137,29 +194,27 @@ export const researchCandidateV1Schema = z
     }
   })
 
-// Keep the safe branch permissive so irrelevant prose cannot block NO_ACTION.
-const noActionDecisionV1Schema = z
+// Keep the safe branch stripped so irrelevant prose cannot block NO_ACTION.
+export const noActionDecisionV2Schema = z
   .object({
     contractVersion: z.literal(RESEARCH_DECISION_CONTRACT_VERSION),
-    strategyVersion: strategyVersionSchema,
     outcome: z.literal("NO_ACTION"),
     reasonCodes: z
       .array(z.enum(NO_ACTION_REASON_CODES))
       .min(1)
       .max(NO_ACTION_REASON_CODES.length),
-    evidence: z.array(evidenceClaimSchema).max(64).optional().default([]),
+    evidence: agentReportedEvidenceSchema,
   })
   .strip()
 
 // Proposals are strict because retained unknown fields could be mistaken for trusted data.
-const proposedTradeDecisionV1Schema = z
+export const proposedTradeDecisionV2Schema = z
   .object({
     contractVersion: z.literal(RESEARCH_DECISION_CONTRACT_VERSION),
-    strategyVersion: strategyVersionSchema,
     outcome: z.literal("PROPOSE_TRADE"),
     direction: z.enum(["BULLISH", "BEARISH"]),
     thesis: boundedText,
-    candidate: researchCandidateV1Schema,
+    candidate: researchCandidateV2Schema,
     invalidation: z.array(boundedText).min(1).max(16),
     evidence: z.array(evidenceClaimSchema).min(1).max(64),
   })
@@ -184,15 +239,15 @@ const proposedTradeDecisionV1Schema = z
     }
   })
 
-export const researchDecisionV1Schema = z.discriminatedUnion("outcome", [
-  noActionDecisionV1Schema,
-  proposedTradeDecisionV1Schema,
+export const researchDecisionV2Schema = z.discriminatedUnion("outcome", [
+  noActionDecisionV2Schema,
+  proposedTradeDecisionV2Schema,
 ])
 
-export type ResearchDecisionV1 = z.infer<typeof researchDecisionV1Schema>
-export type NoActionDecisionV1 = z.infer<typeof noActionDecisionV1Schema>
-export type ProposedTradeDecisionV1 = z.infer<typeof proposedTradeDecisionV1Schema>
-export type ResearchCandidateV1 = z.infer<typeof researchCandidateV1Schema>
+export type ResearchDecisionV2 = z.infer<typeof researchDecisionV2Schema>
+export type NoActionDecisionV2 = z.infer<typeof noActionDecisionV2Schema>
+export type ProposedTradeDecisionV2 = z.infer<typeof proposedTradeDecisionV2Schema>
+export type ResearchCandidateV2 = z.infer<typeof researchCandidateV2Schema>
 
 const evidenceSnapshotMetadataSchema = z
   .object({
@@ -240,7 +295,7 @@ export type ResearchDecisionValidationIssue = {
 export type ResearchDecisionValidationResult =
   | {
       success: true
-      data: ResearchDecisionV1
+      data: ResearchDecisionV2
     }
   | {
       success: false
@@ -264,7 +319,7 @@ const schemaIssuePath = (path: readonly PropertyKey[]) =>
   path.map((part) => (typeof part === "symbol" ? String(part) : part))
 
 /**
- * Validates untrusted agent output against the v1 contract and trusted evidence
+ * Validates untrusted agent output against the v2 contract and trusted evidence
  * metadata.
  *
  * Context is validated first because model claims must never establish their
@@ -275,7 +330,7 @@ const schemaIssuePath = (path: readonly PropertyKey[]) =>
  * @param context - Application-owned evaluation time and snapshot metadata.
  * @returns The normalized decision on success, or bounded validation issues.
  */
-export function validateResearchDecisionV1(
+export function validateResearchDecisionV2(
   input: unknown,
   context: ResearchDecisionValidationContext,
 ): ResearchDecisionValidationResult {
@@ -291,7 +346,7 @@ export function validateResearchDecisionV1(
     }
   }
 
-  const parsedDecision = researchDecisionV1Schema.safeParse(input)
+  const parsedDecision = researchDecisionV2Schema.safeParse(input)
   if (!parsedDecision.success) {
     return {
       success: false,
@@ -299,11 +354,14 @@ export function validateResearchDecisionV1(
     }
   }
 
+  // NO_ACTION evidence is explicitly agent-reported; only proposal evidence
+  // may claim application-owned snapshot verification.
+  if (parsedDecision.data.outcome === "NO_ACTION") {
+    return { success: true, data: parsedDecision.data }
+  }
+
   const issues: ResearchDecisionValidationIssue[] = []
-  const claims = new Map<
-    string,
-    ResearchDecisionV1["evidence"][number]["kind"]
-  >()
+  const claims = new Map<string, "SOURCED_FACT" | "INFERENCE">()
 
   // First index claim kinds and reject ambiguous identifiers.
   parsedDecision.data.evidence.forEach((evidence, index) => {

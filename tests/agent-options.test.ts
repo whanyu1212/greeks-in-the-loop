@@ -1,9 +1,7 @@
 import {
   linkSync,
-  mkdirSync,
   mkdtempSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -12,178 +10,55 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 
 import {
-  DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH,
-  DEFAULT_ANYTIME_SHADOW_LEDGER_PATH,
+  DEFAULT_DRY_RUN_LEDGER_PATH,
   DEFAULT_RESEARCH_LEDGER_PATH,
   parseAgentOptions,
 } from "../src/agent-options.js"
 
 describe("parseAgentOptions", () => {
-  it("preserves the normal worker defaults", () => {
+  it("keeps standard defaults and gives dry runs an isolated ledger", () => {
     expect(parseAgentOptions([])).toEqual({
       once: false,
-      researchAnytime: false,
-      shadowAnytime: false,
+      dryRun: false,
       ledgerPath: DEFAULT_RESEARCH_LEDGER_PATH,
     })
-    expect(parseAgentOptions(["--once"], ".state/configured.sqlite")).toEqual({
+    expect(parseAgentOptions(["--once", "--dry-run", "--session", "2026-08-25"])).toEqual({
       once: true,
-      researchAnytime: false,
-      shadowAnytime: false,
-      ledgerPath: ".state/configured.sqlite",
+      dryRun: true,
+      sessionDate: "2026-08-25",
+      ledgerPath: DEFAULT_DRY_RUN_LEDGER_PATH,
     })
   })
 
-  it("uses a dedicated ledger for one-cycle anytime research", () => {
-    expect(
-      parseAgentOptions(
-        ["--once", "--", "--research-anytime"],
-        ".state/production.sqlite",
-      ),
-    ).toEqual({
-      once: true,
-      researchAnytime: true,
-      shadowAnytime: false,
-      ledgerPath: DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH,
-    })
-  })
-
-  it("uses a dedicated ledger for one-cycle anytime shadow evaluation", () => {
-    expect(
-      parseAgentOptions(
-        ["--once", "--shadow-anytime"],
-        ".state/production.sqlite",
-      ),
-    ).toEqual({
-      once: true,
-      researchAnytime: false,
-      shadowAnytime: true,
-      ledgerPath: DEFAULT_ANYTIME_SHADOW_LEDGER_PATH,
-    })
-  })
-
-  it("allows an explicit isolated anytime ledger", () => {
-    expect(
-      parseAgentOptions(
-        [
-          "--once",
-          "--research-anytime",
-          "--ledger",
-          ".state/quality-run.sqlite",
-        ],
-        ".state/production.sqlite",
-      ).ledgerPath,
-    ).toBe(".state/quality-run.sqlite")
-  })
-
-  it("rejects unsafe or malformed anytime options", () => {
-    expect(() => parseAgentOptions(["--research-anytime"])).toThrow(
-      "--research-anytime requires --once",
+  it("rejects malformed or unsafe combinations", () => {
+    expect(() => parseAgentOptions(["--dry-run"])).toThrow("--dry-run requires --once")
+    expect(() => parseAgentOptions(["--once", "--session", "2026-02-30"])).toThrow(
+      "--session requires a valid calendar date",
     )
-    expect(() => parseAgentOptions(["--shadow-anytime"])).toThrow(
-      "--shadow-anytime requires --once",
+    expect(() => parseAgentOptions(["--session", "2026-08-25"])).toThrow(
+      "--session requires --dry-run",
     )
-    expect(() =>
-      parseAgentOptions([
-        "--once",
-        "--research-anytime",
-        "--shadow-anytime",
-      ]),
-    ).toThrow("mutually exclusive")
+    expect(() => parseAgentOptions(["--research-anytime"])).toThrow("Unknown option")
     expect(() =>
       parseAgentOptions(
-        ["--once", "--research-anytime", "--ledger", ".state/live.sqlite"],
+        ["--once", "--dry-run", "--ledger", ".state/live.sqlite"],
         ".state/live.sqlite",
       ),
     ).toThrow("cannot use the configured production ledger")
-    expect(() =>
-      parseAgentOptions(["--ledger", DEFAULT_ANYTIME_RESEARCH_LEDGER_PATH]),
-    ).toThrow("reserved anytime dry-run ledger")
-    expect(() =>
-      parseAgentOptions(["--ledger", DEFAULT_ANYTIME_SHADOW_LEDGER_PATH]),
-    ).toThrow("reserved anytime dry-run ledger")
-    expect(() => parseAgentOptions(["--ledger"])).toThrow(
-      "--ledger requires a value",
-    )
-    expect(() => parseAgentOptions(["--unknown"])).toThrow("Unknown option")
   })
 
-  it.each(["symbolic", "hard"] as const)(
-    "rejects a %s-link alias of the production ledger",
-    (linkKind) => {
-      const directory = mkdtempSync(join(tmpdir(), "agent-options-test-"))
-      try {
-        const productionLedger = join(directory, "production.sqlite")
-        const aliasLedger = join(directory, "dry-run.sqlite")
-        writeFileSync(productionLedger, "")
-        if (linkKind === "symbolic") {
-          symlinkSync(productionLedger, aliasLedger)
-        } else {
-          linkSync(productionLedger, aliasLedger)
-        }
-
-        expect(() =>
-          parseAgentOptions(
-            ["--once", "--research-anytime", "--ledger", aliasLedger],
-            productionLedger,
-          ),
-        ).toThrow("cannot use the configured production ledger")
-      } finally {
-        rmSync(directory, { recursive: true, force: true })
-      }
-    },
-  )
-
-  it("rejects a missing ledger behind a symlinked parent directory", () => {
+  it("detects an existing hard-link alias of the production ledger", () => {
     const directory = mkdtempSync(join(tmpdir(), "agent-options-test-"))
     try {
-      const realDirectory = join(directory, "real")
-      const aliasDirectory = join(directory, "alias")
-      mkdirSync(realDirectory)
-      symlinkSync(realDirectory, aliasDirectory, "dir")
-
+      const production = join(directory, "production.sqlite")
+      const alias = join(directory, "dry-run.sqlite")
+      writeFileSync(production, "")
+      linkSync(production, alias)
       expect(() =>
-        parseAgentOptions(
-          [
-            "--once",
-            "--research-anytime",
-            "--ledger",
-            join(aliasDirectory, "ledger.sqlite"),
-          ],
-          join(realDirectory, "ledger.sqlite"),
-        ),
+        parseAgentOptions(["--once", "--dry-run", "--ledger", alias], production),
       ).toThrow("cannot use the configured production ledger")
     } finally {
       rmSync(directory, { recursive: true, force: true })
-    }
-  })
-
-  it("rejects a dangling symbolic-link alias of the production ledger", () => {
-    const directory = mkdtempSync(join(tmpdir(), "agent-options-test-"))
-    try {
-      const productionLedger = join(directory, "production.sqlite")
-      const aliasLedger = join(directory, "dry-run.sqlite")
-      symlinkSync(productionLedger, aliasLedger)
-
-      expect(() =>
-        parseAgentOptions(
-          ["--once", "--research-anytime", "--ledger", aliasLedger],
-          productionLedger,
-        ),
-      ).toThrow("cannot use the configured production ledger")
-    } finally {
-      rmSync(directory, { recursive: true, force: true })
-    }
-  })
-
-  it("rejects case-only reserved anytime ledger aliases on case-folding platforms", () => {
-    const parse = () =>
-      parseAgentOptions(["--ledger", ".state/Research-Anytime.sqlite"])
-
-    if (process.platform === "darwin" || process.platform === "win32") {
-      expect(parse).toThrow("reserved anytime dry-run ledger")
-    } else {
-      expect(parse().ledgerPath).toBe(".state/Research-Anytime.sqlite")
     }
   })
 })

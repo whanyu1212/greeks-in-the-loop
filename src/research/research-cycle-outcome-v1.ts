@@ -1,16 +1,16 @@
 import type {
   EvidenceSnapshotMetadata,
-  NoActionDecisionV1,
-  ProposedTradeDecisionV1,
-  ResearchDecisionV1,
+  NoActionDecisionV2,
+  ProposedTradeDecisionV2,
+  ResearchDecisionV2,
   ResearchDecisionValidationIssue,
-} from "../contracts/research-decision-v1.js"
-import type { PreliminaryResearchV1 } from "../contracts/preliminary-research-v1.js"
-import type { ResearchReportV2 } from "../contracts/research-report-v2.js"
+} from "../contracts/research-decision-v2.js"
+import type { PreliminaryResearchV2 } from "../contracts/preliminary-research-v2.js"
+import type { ResearchReportV3 } from "../contracts/research-report-v3.js"
 import type {
   TradeIntentDerivationReason,
-  TradeIntentV1,
-} from "../contracts/trade-intent-v1.js"
+  TradeIntentV2,
+} from "../contracts/trade-intent-v2.js"
 import type {
   OptionQuoteConfirmationFailureCode,
 } from "../market-data/alpaca-option-quotes.js"
@@ -35,12 +35,12 @@ export type ResearchCycleOutcomeV1 =
   | {
       outcomeVersion: typeof RESEARCH_CYCLE_OUTCOME_VERSION
       status: "PRELIMINARY_RESEARCH_RETAINED"
-      research: PreliminaryResearchV1
+      research: PreliminaryResearchV2
     }
   | {
       outcomeVersion: typeof RESEARCH_CYCLE_OUTCOME_VERSION
       status: "VALIDATED_NO_ACTION"
-      decision: NoActionDecisionV1
+      decision: NoActionDecisionV2
     }
   | {
       outcomeVersion: typeof RESEARCH_CYCLE_OUTCOME_VERSION
@@ -55,8 +55,8 @@ export type ResearchCycleOutcomeV1 =
   | {
       outcomeVersion: typeof RESEARCH_CYCLE_OUTCOME_VERSION
       status: "INTENT_DERIVED"
-      decision: ProposedTradeDecisionV1
-      intent: TradeIntentV1
+      decision: ProposedTradeDecisionV2
+      intent: TradeIntentV2
     }
 
 export type ResearchCycleEvidenceSnapshotReferenceV1 = Readonly<{
@@ -71,9 +71,9 @@ export type ResearchCycleEvidenceSnapshotReferenceV1 = Readonly<{
 type ResearchCycleTerminalRecordMetadataV1 = Readonly<{
   evidenceSnapshots: readonly ResearchCycleEvidenceSnapshotReferenceV1[]
   researchInvocation: ResearchInvocationV1
-  validatedDecision?: ResearchDecisionV1
-  preliminaryResearch?: PreliminaryResearchV1
-  researchReport?: ResearchReportV2
+  validatedDecision?: ResearchDecisionV2
+  preliminaryResearch?: PreliminaryResearchV2
+  researchReport?: ResearchReportV3
 }>
 
 export type ResearchCycleTerminalRecordV1 =

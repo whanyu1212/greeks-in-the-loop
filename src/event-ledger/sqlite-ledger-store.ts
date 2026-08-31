@@ -2,11 +2,14 @@ import Database from "better-sqlite3"
 import { z } from "zod"
 
 import {
-  ledgerEventV1Schema,
-  LEDGER_EVENT_TYPES,
+  ledgerEventSchema,
+  ledgerEventV2Schema,
+  LEDGER_EVENT_VERSION,
   MAX_LEDGER_EVENT_PAYLOAD_BYTES,
-  type LedgerEventV1,
-  type StoredLedgerEventV1,
+  STORED_LEDGER_EVENT_TYPES,
+  type LedgerEventV2,
+  type StoredLedgerEvent,
+  type StoredLedgerEventV2,
 } from "./ledger-event-v1.js"
 import type {
   LedgerEventQuery,
@@ -29,7 +32,7 @@ const querySchema = z
     cycleId: identifier.optional(),
     sessionId: identifier.optional(),
     eventTypes: z
-      .array(z.enum(LEDGER_EVENT_TYPES))
+      .array(z.enum(STORED_LEDGER_EVENT_TYPES))
       .min(1)
       .max(32)
       .optional(),
@@ -91,8 +94,8 @@ const SELECT_COLUMNS = `
   payload_json
 `
 
-const decodeRow = (row: LedgerRow): StoredLedgerEventV1 => {
-  const parsed = ledgerEventV1Schema.parse({
+const decodeRow = (row: LedgerRow): StoredLedgerEvent => {
+  const parsed = ledgerEventSchema.parse({
     eventId: row.event_id,
     eventVersion: row.event_version,
     eventType: row.event_type,
@@ -116,7 +119,7 @@ const decodeRow = (row: LedgerRow): StoredLedgerEventV1 => {
 }
 
 const toInsertParameters = (
-  event: LedgerEventV1,
+  event: LedgerEventV2,
   recordedAt: string,
 ) => ({
   eventId: event.eventId,
@@ -190,9 +193,9 @@ export function createSqliteLedgerStore({
   }
 
   const appendValidated = (
-    events: readonly LedgerEventV1[],
+    events: readonly LedgerEventV2[],
     recordedAt: string,
-  ): StoredLedgerEventV1[] => {
+  ): StoredLedgerEventV2[] => {
     const insert = database.prepare(INSERT_EVENT_SQL)
     const getById = database.prepare(`
       SELECT ${SELECT_COLUMNS}
@@ -205,7 +208,11 @@ export function createSqliteLedgerStore({
         insert.run(toInsertParameters(event, recordedAt))
         const row = getById.get(event.eventId) as LedgerRow | undefined
         if (row === undefined) throw new Error("Appended ledger event was not found")
-        return decodeRow(row)
+        const stored = decodeRow(row)
+        if (stored.eventVersion !== LEDGER_EVENT_VERSION) {
+          throw new Error("Appended ledger event has an unexpected version")
+        }
+        return stored
       }),
     )
 
@@ -213,7 +220,7 @@ export function createSqliteLedgerStore({
   }
 
   const appendBatch = async (
-    events: readonly LedgerEventV1[],
+    events: readonly LedgerEventV2[],
     signal?: AbortSignal,
   ) => {
     signal?.throwIfAborted()
@@ -226,7 +233,7 @@ export function createSqliteLedgerStore({
 
     assertPersistenceSafe(events, protectedCredentialValues)
     const validated = events.map((event, index) => {
-      const parsed = ledgerEventV1Schema.safeParse(event)
+      const parsed = ledgerEventV2Schema.safeParse(event)
       if (!parsed.success) {
         throw new Error(`Invalid ledger event at batch index ${index}`)
       }

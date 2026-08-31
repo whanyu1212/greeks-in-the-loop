@@ -53,6 +53,25 @@ describe("Alpaca calendar client", () => {
     ).resolves.toBeUndefined()
   })
 
+  it("selects the latest completed session only when requested", async () => {
+    const calendar = createAlpacaCalendarClient({
+      apiKey: "key",
+      secretKey: "secret",
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(response([
+        { date: "2026-08-27", open: "09:30", close: "16:00" },
+        { date: "2026-08-28", open: "09:30", close: "16:00" },
+      ])),
+    })
+    await expect(
+      calendar.getSession("2026-08-30", new AbortController().signal, true),
+    ).resolves.toEqual({
+      date: "2026-08-28",
+      open: "2026-08-28T13:30:00.000Z",
+      close: "2026-08-28T20:00:00.000Z",
+      previousSessionDates: ["2026-08-27"],
+    })
+  })
+
   it("fails closed on malformed or unsuccessful responses", async () => {
     const malformed = createAlpacaCalendarClient({
       apiKey: "key",

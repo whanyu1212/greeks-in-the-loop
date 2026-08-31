@@ -116,7 +116,7 @@ describe("risk-state reconciliation v1", () => {
   })
 
   it.each([
-    ["unsupported", "QQQ260918C00600000", "QQQ260918C00605000"],
+    ["unsupported", "DIA260918C00600000", "DIA260918C00605000"],
     ["impossible-date", "SPY260431C00600000", "SPY260431C00605000"],
   ])("fails closed for a %s option position", (_case, long, short) => {
     const positions = [position(long, 1), position(short, -1)]
@@ -145,16 +145,16 @@ describe("risk-state reconciliation v1", () => {
     })
   })
 
-  it("maps a non-SPY opening order to existing bounded reasons", () => {
+  it("maps a non-allowlisted opening order to existing bounded reasons", () => {
     const pending = order({
       legs: [
         {
-          symbol: "QQQ260918C00600000",
+          symbol: "DIA260918C00600000",
           ratioQuantity: 1,
           positionIntent: "BUY_TO_OPEN",
         },
         {
-          symbol: "QQQ260918C00605000",
+          symbol: "DIA260918C00605000",
           ratioQuantity: 1,
           positionIntent: "SELL_TO_OPEN",
         },
@@ -169,6 +169,21 @@ describe("risk-state reconciliation v1", () => {
     expect(result.success && result.reasonCodes).toEqual([
       "UNKNOWN_OPEN_ORDER",
       "UNMATCHED_PENDING_ENTRY",
+    ])
+  })
+
+  it("rejects a spread whose legs use different allowlisted underlyings", () => {
+    const positions = [
+      position("SPY260918C00600000", 1),
+      position("QQQ260918C00605000", -1),
+    ]
+    const result = reconcile({
+      initialBrokerState: { positions, openOrders: [] },
+      finalBrokerState: { positions, openOrders: [] },
+    })
+
+    expect(result.success && result.reasonCodes).toEqual([
+      "UNMATCHED_OPTION_POSITION",
     ])
   })
 

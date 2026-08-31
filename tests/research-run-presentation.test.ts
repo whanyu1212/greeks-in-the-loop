@@ -30,14 +30,21 @@ afterEach(() => {
 
 const noActionRun = (): ResearchRunV1 => {
   const decision = {
-    contractVersion: "1.0.0" as const,
-    strategyVersion: "1.1.0" as const,
+    contractVersion: "2.0.0" as const,
     outcome: "NO_ACTION" as const,
     reasonCodes: ["SIGNAL_NOT_ACTIONABLE" as const],
-    evidence: [],
+    evidence: [{
+      claimId: "mixed-regime",
+      kind: "SOURCED_FACT" as const,
+      claim: "The retained market regime signal was mixed.",
+      provider: "ALPACA" as const,
+      temporalClass: "LIVE" as const,
+      observedAt: "2026-08-27T15:36:45.000Z",
+      locator: "analysis.marketRegime.signal",
+    }],
   }
   return {
-    runVersion: "1.0.0",
+    runVersion: "3.0.0",
     cycle: {
       cycleId: "cycle-presentation-1",
       cycleNumber: 3,
@@ -58,7 +65,7 @@ const noActionRun = (): ResearchRunV1 => {
     },
     evidenceSnapshots: [],
     researchReport: {
-      reportVersion: "2.0.0",
+      reportVersion: "3.0.0",
       result: decision,
       analysis: {
         provenance: "AGENT_REPORTED",
@@ -82,6 +89,35 @@ const noActionRun = (): ResearchRunV1 => {
           dailySessionCount: 50,
           intradayBarCount: 126,
         },
+        symbolIndicators: [
+          {
+            underlying: "SPY",
+            throughSessionDate: "2026-08-26",
+            return5d: 0.01,
+            return20d: 0.03,
+            relativeStrengthRank20d: 1,
+            realizedVolatility20: 0.16,
+            completedSessionVolumeRatio20: 1.1,
+          },
+          {
+            underlying: "QQQ",
+            throughSessionDate: "2026-08-26",
+            return5d: 0,
+            return20d: 0.02,
+            relativeStrengthRank20d: 2,
+            realizedVolatility20: 0.2,
+            completedSessionVolumeRatio20: 0.9,
+          },
+          {
+            underlying: "IWM",
+            throughSessionDate: "2026-08-26",
+            return5d: -0.01,
+            return20d: -0.02,
+            relativeStrengthRank20d: 3,
+            realizedVolatility20: 0.24,
+            completedSessionVolumeRatio20: 1.2,
+          },
+        ],
         externalContext: [
           {
             sourceId: "exa-context",
@@ -117,9 +153,8 @@ const noActionRun = (): ResearchRunV1 => {
 }
 
 const derivedIntent = {
-  contractVersion: "1.0.0",
-  decisionContractVersion: "1.0.0",
-  strategyVersion: "1.1.0",
+  contractVersion: "2.0.0",
+  decisionContractVersion: "2.0.0",
   direction: "BULLISH",
   structure: "BULL_CALL_SPREAD",
   expiration: "2026-09-18",
@@ -152,8 +187,7 @@ const derivedIntent = {
 const intentRun = (): ResearchRunV1 => {
   const source = noActionRun()
   const decision = {
-    contractVersion: "1.0.0" as const,
-    strategyVersion: "1.1.0" as const,
+    contractVersion: "2.0.0" as const,
     outcome: "PROPOSE_TRADE" as const,
     direction: "BULLISH" as const,
     thesis: "Trend and intraday confirmation align.",
@@ -274,6 +308,11 @@ describe("research run presentation", () => {
       "**Result:** NO_ACTION",
     ])
     expect(first.markdown).toContain("## Offline Audit")
+    expect(first.markdown).toContain("## ETF Indicator Context")
+    expect(first.markdown).toContain("SPY 20-day return | 3.00%")
+    expect(first.markdown).toContain(
+      "mixed-regime \\[ALPACA LIVE, 2026-08-27T15:36:45.000Z\\]: The retained market regime signal was mixed.",
+    )
     expect(first.markdown).toContain("Inflation \\[context\\]")
     expect(first.markdown).not.toContain("<script>")
     expect(first.markdown).toContain("\\<script\\>")

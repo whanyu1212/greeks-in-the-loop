@@ -16,7 +16,11 @@ const calendarResponseSchema = z.array(calendarDaySchema).max(16)
 const localTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/u
 
 export type MarketCalendar = Readonly<{
-  getSession(date: string, signal: AbortSignal): Promise<MarketSessionV1 | undefined>
+  getSession(
+    date: string,
+    signal: AbortSignal,
+    useLatestCompleted?: boolean,
+  ): Promise<MarketSessionV1 | undefined>
 }>
 
 export type CreateAlpacaCalendarClientOptions = Readonly<{
@@ -66,7 +70,7 @@ export function createAlpacaCalendarClient(
   )
 
   return {
-    async getSession(date, signal) {
+    async getSession(date, signal, useLatestCompleted = false) {
       const parsedDate = z.iso.date().parse(date)
       const lookbackStart = new Date(
         Date.parse(`${parsedDate}T00:00:00.000Z`) - 14 * 86_400_000,
@@ -109,18 +113,21 @@ export function createAlpacaCalendarClient(
         throw new Error("Alpaca calendar response is invalid")
       }
       const matchingDays = parsed.data.filter((day) => day.date === parsedDate)
-      if (matchingDays.length === 0) return undefined
-      if (matchingDays.length !== 1) {
+      if (matchingDays.length > 1) {
         throw new Error("Alpaca calendar response is invalid")
       }
 
-      const day = matchingDays[0]!
+      const day = matchingDays[0] ??
+        (useLatestCompleted
+          ? [...parsed.data].sort((left, right) => left.date.localeCompare(right.date)).at(-1)
+          : undefined)
+      if (day === undefined) return undefined
       const session = {
         date: day.date,
         open: parseSessionTimestamp(day.date, day.open),
         close: parseSessionTimestamp(day.date, day.close),
         previousSessionDates: dates
-          .filter((sessionDate) => sessionDate < parsedDate)
+          .filter((sessionDate) => sessionDate < day.date)
           .sort(),
       }
       if (Date.parse(session.open) >= Date.parse(session.close)) {

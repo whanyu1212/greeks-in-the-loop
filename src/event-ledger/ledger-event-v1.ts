@@ -1,10 +1,13 @@
 import { z } from "zod"
 
-import { researchDecisionV1Schema } from "../contracts/research-decision-v1.js"
-import { preliminaryResearchV1Schema } from "../contracts/preliminary-research-v1.js"
-import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
-import { researchReportV2Schema } from "../contracts/research-report-v2.js"
-import { researchScreeningAuditV1Schema } from "../contracts/research-screening-audit-v1.js"
+import {
+  agentReportedEvidenceSchema,
+  researchCandidateV2Schema,
+  researchDecisionV2Schema,
+} from "../contracts/research-decision-v2.js"
+import { preliminaryResearchV2Schema } from "../contracts/preliminary-research-v2.js"
+import { tradeIntentV2Schema } from "../contracts/trade-intent-v2.js"
+import { researchReportV3Schema } from "../contracts/research-report-v3.js"
 import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
 import {
   RESEARCH_MODEL_DRIFT_CODES,
@@ -17,7 +20,8 @@ import {
   shadowRiskDecisionV1Schema,
 } from "../risk/shadow-risk-v1.js"
 
-export const LEDGER_EVENT_VERSION = "1.0.0" as const
+export const LEGACY_LEDGER_EVENT_VERSION = "1.0.0" as const
+export const LEDGER_EVENT_VERSION = "2.0.0" as const
 export const RESEARCH_LOOP_BREAKER_STATE_VERSION = "1.0.0" as const
 export const MAX_LEDGER_EVENT_PAYLOAD_BYTES = 64 * 1024
 
@@ -33,12 +37,16 @@ export const LEDGER_EVENT_TYPES = [
   "TRADE_INTENT_DERIVATION_REJECTED",
   "RESEARCH_CYCLE_COMPLETED",
   "RESEARCH_CYCLE_INTERRUPTED",
-  "RESEARCH_SCREENING_AUDIT_RECORDED",
   "RESEARCH_INVOCATION_IDENTITY_REJECTED",
   "RESEARCH_LOOP_BREAKER_LATCHED",
   "RESEARCH_LOOP_BREAKER_RESET",
   "RISK_SHADOW_DECISION_RECORDED",
   "RISK_BREAKER_LATCHED",
+] as const
+
+export const STORED_LEDGER_EVENT_TYPES = [
+  ...LEDGER_EVENT_TYPES,
+  "RESEARCH_SCREENING_AUDIT_RECORDED",
 ] as const
 
 const identifier = z
@@ -111,17 +119,17 @@ const payloadSchemas = {
     ),
   PRELIMINARY_RESEARCH_RECORDED: z
     .object({
-      research: preliminaryResearchV1Schema,
+      research: preliminaryResearchV2Schema,
     })
     .strict(),
   RESEARCH_REPORT_RECORDED: z
     .object({
-      report: researchReportV2Schema,
+      report: researchReportV3Schema,
     })
     .strict(),
   RESEARCH_DECISION_VALIDATED: z
     .object({
-      decision: researchDecisionV1Schema,
+      decision: researchDecisionV2Schema,
     })
     .strict(),
   RESEARCH_DECISION_REJECTED: z
@@ -142,7 +150,7 @@ const payloadSchemas = {
     .strict(),
   TRADE_INTENT_DERIVED: z
     .object({
-      intent: tradeIntentV1Schema,
+      intent: tradeIntentV2Schema,
     })
     .strict(),
   TRADE_INTENT_DERIVATION_REJECTED: z
@@ -171,11 +179,6 @@ const payloadSchemas = {
         "PROCESS_RESTART",
         "FAILED",
       ]),
-    })
-    .strict(),
-  RESEARCH_SCREENING_AUDIT_RECORDED: z
-    .object({
-      audit: researchScreeningAuditV1Schema,
     })
     .strict(),
   RESEARCH_INVOCATION_IDENTITY_REJECTED: z
@@ -216,11 +219,200 @@ const payloadSchemas = {
   RISK_BREAKER_LATCHED: riskBreakerTransitionV1Schema,
 } as const
 
-type EventType = keyof typeof payloadSchemas
+const legacyVersion = z.string().trim().min(1).max(32)
+const legacyInvocationSchema = z
+  .object({
+    invocationVersion: z.enum(["1.0.0", "1.1.0", "1.2.0", "1.3.0"]),
+  })
+  .passthrough()
+const legacyResearchEligibilitySchema = z
+  .object({
+    evaluatedAt: timestamp,
+    sessionDate: z.iso.date().optional(),
+    sessionOpen: timestamp.optional(),
+    sessionClose: timestamp.optional(),
+    researchEligible: z.boolean(),
+    tradeIntentEligible: z.boolean(),
+    tradeIntentWindow: z
+      .object({
+        slotStartedAt: timestamp,
+        deadline: timestamp,
+      })
+      .strict()
+      .optional(),
+    previousSessionDates: z.array(z.iso.date()).max(16).optional(),
+    researchMode: z
+      .enum(["DRY_RUN_ANYTIME", "DRY_RUN_SHADOW_ANYTIME"])
+      .optional(),
+    reason: z
+      .enum([
+        "NO_MARKET_SESSION",
+        "OUTSIDE_RESEARCH_WINDOW",
+        "OUTSIDE_TRADE_INTENT_WINDOW",
+        "DRY_RUN_RESEARCH_ONLY",
+      ])
+      .optional(),
+  })
+  .strict()
+const legacyCandidateBearingDecisionSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      contractVersion: z.literal("1.0.0"),
+      strategyVersion: legacyVersion,
+      outcome: z.literal("NO_ACTION"),
+      reasonCodes: z.array(boundedCode).min(1).max(64),
+    })
+    .passthrough(),
+  z
+    .object({
+      contractVersion: z.literal("1.0.0"),
+      strategyVersion: legacyVersion,
+      outcome: z.literal("PROPOSE_TRADE"),
+      direction: z.enum(["BULLISH", "BEARISH"]),
+      candidate: researchCandidateV2Schema,
+    })
+    .passthrough(),
+])
+const legacyShadowDecisionSchema = z.discriminatedUnion("stage", [
+  z
+    .object({
+      decisionVersion: z.literal("1.0.0"),
+      mode: z.literal("SHADOW"),
+      evaluationVersion: z.literal("1.0.0"),
+      ruleVersion: z.literal("1.0.0"),
+      stage: z.literal("STATE_CAPTURE_FAILED"),
+      outcome: z.literal("REJECTED"),
+      evaluatedAt: z.null(),
+      captureReasonCodes: z.array(boundedCode).min(1).max(64),
+    })
+    .passthrough(),
+  z
+    .object({
+      decisionVersion: z.literal("1.0.0"),
+      mode: z.literal("SHADOW"),
+      evaluationVersion: z.literal("1.0.0"),
+      ruleVersion: z.literal("1.0.0"),
+      stage: z.literal("INTENT_REFRESH_FAILED"),
+      outcome: z.literal("REJECTED"),
+      evaluatedAt: timestamp,
+      derivationReasonCodes: z.array(boundedCode).min(1).max(64),
+    })
+    .passthrough(),
+  z
+    .object({
+      decisionVersion: z.literal("1.0.0"),
+      mode: z.literal("SHADOW"),
+      evaluationVersion: z.literal("1.0.0"),
+      ruleVersion: z.literal("1.0.0"),
+      stage: z.literal("EVALUATED"),
+      outcome: z.enum(["APPROVED", "REJECTED"]),
+      evaluation: z.discriminatedUnion("outcome", [
+        z
+          .object({
+            outcome: z.literal("APPROVED"),
+            evaluatedAt: timestamp,
+          })
+          .passthrough(),
+        z
+          .object({
+            outcome: z.literal("REJECTED"),
+            evaluatedAt: timestamp.nullable(),
+            reasonCodes: z.array(boundedCode).min(1).max(64),
+          })
+          .passthrough(),
+      ]),
+    })
+    .passthrough(),
+])
+const legacyPayloadSchemas = {
+  ...payloadSchemas,
+  RESEARCH_CYCLE_STARTED: z
+    .object({
+      cycleNumber: z.number().int().positive(),
+      sessionDate: z.iso.date().optional(),
+      initialEligibility: legacyResearchEligibilitySchema.optional(),
+    })
+    .strict()
+    .superRefine((payload, refinement) => {
+      if (
+        (payload.sessionDate === undefined) !==
+          (payload.initialEligibility === undefined) ||
+        (payload.initialEligibility !== undefined &&
+          (payload.initialEligibility.sessionDate !== payload.sessionDate ||
+            !payload.initialEligibility.researchEligible))
+      ) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["initialEligibility"],
+          message: "Cycle eligibility must match its eligible session",
+        })
+      }
+    }),
+  PRELIMINARY_RESEARCH_RECORDED: z
+    .object({
+      research: z
+        .object({
+          contractVersion: z.literal("1.0.0"),
+          strategyVersion: legacyVersion,
+          outcome: z.literal("PRELIMINARY_RESEARCH"),
+          targetSessionDate: z.iso.date(),
+          direction: z.enum(["BULLISH", "BEARISH", "UNDETERMINED"]),
+          candidate: researchCandidateV2Schema.optional(),
+          evidence: agentReportedEvidenceSchema,
+        })
+        .passthrough(),
+    })
+    .strict(),
+  RESEARCH_REPORT_RECORDED: z
+    .object({
+      report: z
+        .object({ reportVersion: z.literal("2.0.0") })
+        .passthrough(),
+    })
+    .strict(),
+  RESEARCH_DECISION_VALIDATED: z
+    .object({ decision: legacyCandidateBearingDecisionSchema })
+    .strict(),
+  TRADE_INTENT_DERIVED: z
+    .object({
+      intent: z
+        .object({ contractVersion: z.literal("1.0.0") })
+        .passthrough(),
+    })
+    .strict(),
+  RESEARCH_CYCLE_COMPLETED: z
+    .object({
+      status: z.enum([
+        "VALIDATED_NO_ACTION",
+        "PRELIMINARY_RESEARCH_RETAINED",
+        "DECISION_REJECTED",
+        "INTENT_DERIVATION_REJECTED",
+        "INTENT_DERIVED",
+      ]),
+      researchInvocation: legacyInvocationSchema.optional(),
+    })
+    .strict(),
+  RESEARCH_SCREENING_AUDIT_RECORDED: z
+    .object({ audit: z.record(z.string(), z.unknown()) })
+    .strict(),
+  RESEARCH_INVOCATION_IDENTITY_REJECTED: z
+    .object({
+      invocationVersion: z.enum(["1.0.0", "1.1.0", "1.2.0", "1.3.0"]),
+      reason: z.enum(RESEARCH_MODEL_DRIFT_CODES),
+      expected: identifier,
+      observed: identifier,
+    })
+    .strict(),
+  RISK_SHADOW_DECISION_RECORDED: z
+    .object({ decision: legacyShadowDecisionSchema })
+    .strict(),
+} as const
+
+type PayloadSchemas = Record<string, z.ZodType>
+type EventType<Schemas extends PayloadSchemas> = Extract<keyof Schemas, string>
 
 const baseEventShape = {
   eventId: identifier,
-  eventVersion: z.literal(LEDGER_EVENT_VERSION),
   occurredAt: timestamp,
   correlationId: identifier,
   causationEventId: identifier.optional(),
@@ -229,20 +421,27 @@ const baseEventShape = {
 }
 const baseEventSchema = z.object(baseEventShape)
 
-type LedgerEventEnvelopeV1 = z.infer<typeof baseEventSchema>
-
-export type LedgerEventV1 = {
-  [T in EventType]: LedgerEventEnvelopeV1 & {
+type LedgerEventEnvelope = z.infer<typeof baseEventSchema>
+type VersionedLedgerEvent<
+  Version extends string,
+  Schemas extends PayloadSchemas,
+> = {
+  [T in EventType<Schemas>]: LedgerEventEnvelope & {
+    eventVersion: Version
     eventType: T
-    payload: z.infer<(typeof payloadSchemas)[T]>
+    payload: z.infer<Schemas[T]>
   }
-}[EventType]
+}[EventType<Schemas>]
 
-const eventSchemas = Object.entries(payloadSchemas).map(([eventType, payload]) =>
+const createEventSchemas = (
+  schemas: PayloadSchemas,
+  eventVersion: typeof LEGACY_LEDGER_EVENT_VERSION | typeof LEDGER_EVENT_VERSION,
+) => Object.entries(schemas).map(([eventType, payload]) =>
   z
     .object({
       ...baseEventShape,
-      eventType: z.literal(eventType as EventType),
+      eventVersion: z.literal(eventVersion),
+      eventType: z.literal(eventType),
       payload,
     })
     .strict()
@@ -300,15 +499,46 @@ const eventSchemas = Object.entries(payloadSchemas).map(([eventType, payload]) =
     }),
 )
 
+export type LedgerEventV1 = VersionedLedgerEvent<
+  typeof LEGACY_LEDGER_EVENT_VERSION,
+  typeof legacyPayloadSchemas
+>
+export type LedgerEventV2 = VersionedLedgerEvent<
+  typeof LEDGER_EVENT_VERSION,
+  typeof payloadSchemas
+>
+export type LedgerEvent = LedgerEventV1 | LedgerEventV2
+
+const legacyEventSchemas = createEventSchemas(
+  legacyPayloadSchemas,
+  LEGACY_LEDGER_EVENT_VERSION,
+)
+const eventSchemas = createEventSchemas(payloadSchemas, LEDGER_EVENT_VERSION)
+
 export const ledgerEventV1Schema = z.union(
+  legacyEventSchemas as [
+    (typeof legacyEventSchemas)[number],
+    (typeof legacyEventSchemas)[number],
+    ...(typeof legacyEventSchemas)[number][],
+  ],
+) as z.ZodType<LedgerEventV1>
+export const ledgerEventV2Schema = z.union(
   eventSchemas as [
     (typeof eventSchemas)[number],
     (typeof eventSchemas)[number],
     ...(typeof eventSchemas)[number][],
   ],
-) as z.ZodType<LedgerEventV1>
+) as z.ZodType<LedgerEventV2>
+export const ledgerEventSchema = z.union([
+  ledgerEventV1Schema,
+  ledgerEventV2Schema,
+]) as z.ZodType<LedgerEvent>
 
-export type StoredLedgerEventV1 = LedgerEventV1 & {
+type Stored<Event extends LedgerEvent> = Event extends LedgerEvent ? Event & {
   sequence: number
   recordedAt: string
-}
+} : never
+
+export type StoredLedgerEventV1 = Stored<LedgerEventV1>
+export type StoredLedgerEventV2 = Stored<LedgerEventV2>
+export type StoredLedgerEvent = StoredLedgerEventV1 | StoredLedgerEventV2

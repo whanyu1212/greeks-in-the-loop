@@ -61,6 +61,7 @@ const externalUrl = (value: string) =>
 
 const dollarsFromCents = (value: number) => `$${(value / 100).toFixed(2)}`
 const dollarsFromHalfCents = (value: number) => `$${(value / 200).toFixed(3)}`
+const percentFromRatio = (value: number) => `${(value * 100).toFixed(2)}%`
 
 const duration = (startedAt: string, completedAt: string) => {
   const milliseconds = Date.parse(completedAt) - Date.parse(startedAt)
@@ -231,6 +232,17 @@ export function buildResearchRunPresentation(
       ["Daily sessions", market.dailySessionCount],
       ["Intraday bars", market.intradayBarCount],
     ])
+    if (report.analysis.symbolIndicators !== undefined) {
+      lines.push("## ETF Indicator Context", "")
+      table(lines, report.analysis.symbolIndicators.flatMap((indicator) => [
+        [`${indicator.underlying} through`, indicator.throughSessionDate] as const,
+        [`${indicator.underlying} 5-day return`, percentFromRatio(indicator.return5d)] as const,
+        [`${indicator.underlying} 20-day return`, percentFromRatio(indicator.return20d)] as const,
+        [`${indicator.underlying} relative-strength rank`, indicator.relativeStrengthRank20d] as const,
+        [`${indicator.underlying} realized volatility`, percentFromRatio(indicator.realizedVolatility20)] as const,
+        [`${indicator.underlying} completed-session volume ratio`, `${indicator.completedSessionVolumeRatio20.toFixed(2)}x`] as const,
+      ]))
+    }
   }
 
   const candidate = result?.outcome === "PRELIMINARY_RESEARCH" ||
@@ -267,6 +279,12 @@ export function buildResearchRunPresentation(
           [`${leg.role} volume`, leg.volume] as const,
           [`${leg.role} open interest`, leg.openInterest] as const,
           [`${leg.role} open-interest date`, leg.openInterestDate] as const,
+          ...(leg.ivToRealizedVolatility === undefined
+            ? []
+            : [[`${leg.role} IV / realized volatility`, leg.ivToRealizedVolatility] as const]),
+          ...(leg.bidAskSpreadPercent === undefined
+            ? []
+            : [[`${leg.role} bid-ask spread`, percentFromRatio(leg.bidAskSpreadPercent)] as const]),
         ]),
       ])
     }
@@ -394,8 +412,6 @@ export function buildResearchRunPresentation(
       : [
           ["Agent", invocation.agentName] as const,
           ["Prompt version", invocation.promptVersion] as const,
-          ["Skill", `${invocation.skillName} ${invocation.skillVersion}`] as const,
-          ["Strategy version", invocation.strategyVersion] as const,
           ["Provider / model", `${invocation.providerId} / ${invocation.modelId}`] as const,
           ["Tool calls", invocation.tools.totalCount] as const,
           ["Tool errors", invocation.tools.errorCount] as const,

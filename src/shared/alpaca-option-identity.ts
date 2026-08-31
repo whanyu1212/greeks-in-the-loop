@@ -10,12 +10,15 @@ export const ALPACA_OPTION_SYMBOL_PARSE_FAILURE_CODES = [
 export type AlpacaOptionSymbolParseFailureCode =
   (typeof ALPACA_OPTION_SYMBOL_PARSE_FAILURE_CODES)[number]
 
-export const SPY_OPTION_UNIVERSE_POLICY_VERSION = "1.0.0" as const
-export const SPY_OPTION_UNIVERSE_V1_FAILURE_CODES = [
+export const OPTION_UNIVERSE_POLICY_VERSION = "1.0.0" as const
+export const ALLOWED_OPTION_UNDERLYINGS_V1 = ["SPY", "QQQ", "IWM"] as const
+export type AllowedOptionUnderlyingV1 =
+  (typeof ALLOWED_OPTION_UNDERLYINGS_V1)[number]
+export const OPTION_UNIVERSE_V1_FAILURE_CODES = [
   "UNDERLYING_NOT_SUPPORTED",
 ] as const
-export type SpyOptionUniverseV1FailureCode =
-  (typeof SPY_OPTION_UNIVERSE_V1_FAILURE_CODES)[number]
+export type OptionUniverseV1FailureCode =
+  (typeof OPTION_UNIVERSE_V1_FAILURE_CODES)[number]
 
 export type AlpacaOptionIdentity = Readonly<{
   provider: "ALPACA"
@@ -36,11 +39,11 @@ export type ParseAlpacaOptionSymbolResult =
       reason: AlpacaOptionSymbolParseFailureCode
     }>
 
-export type SpyOptionUniverseV1Result =
+export type OptionUniverseV1Result =
   | Readonly<{ success: true }>
   | Readonly<{
       success: false
-      reason: SpyOptionUniverseV1FailureCode
+      reason: OptionUniverseV1FailureCode
     }>
 
 export type AlpacaOptionStrikeCentsResult =
@@ -113,10 +116,12 @@ export function parseAlpacaOptionSymbol(
 /**
  * Applies the current strategy-universe policy independently of symbol syntax.
  */
-export function validateSpyOptionUniverseV1(
+export function validateOptionUniverseV1(
   identity: AlpacaOptionIdentity,
-): SpyOptionUniverseV1Result {
-  return identity.root === "SPY"
+): OptionUniverseV1Result {
+  return ALLOWED_OPTION_UNDERLYINGS_V1.includes(
+    identity.root as AllowedOptionUnderlyingV1,
+  )
     ? { success: true }
     : { success: false, reason: "UNDERLYING_NOT_SUPPORTED" }
 }
@@ -150,17 +155,17 @@ export const alpacaOptionSymbolSchema = z
     }
   })
 
-/** Compact Alpaca syntax composed with the current SPY-only universe policy. */
-export const spyAlpacaOptionSymbolV1Schema = alpacaOptionSymbolSchema.superRefine(
+/** Compact Alpaca syntax composed with the current bounded universe policy. */
+export const allowedAlpacaOptionSymbolV1Schema = alpacaOptionSymbolSchema.superRefine(
   (symbol, refinement) => {
     const parsed = parseAlpacaOptionSymbol(symbol)
     if (
       parsed.success &&
-      !validateSpyOptionUniverseV1(parsed.identity).success
+      !validateOptionUniverseV1(parsed.identity).success
     ) {
       refinement.addIssue({
         code: "custom",
-        message: "The option underlying is not supported by the SPY V1 universe",
+        message: "The option underlying is not supported by the V1 universe",
       })
     }
   },

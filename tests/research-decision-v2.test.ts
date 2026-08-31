@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest"
 import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 import {
   NO_ACTION_REASON_CODES,
-  researchCandidateV1Schema,
-  validateResearchDecisionV1,
+  researchCandidateV2Schema,
+  validateResearchDecisionV2,
   type ResearchDecisionValidationContext,
-} from "../src/contracts/research-decision-v1.js"
+} from "../src/contracts/research-decision-v2.js"
 
 const context: ResearchDecisionValidationContext = {
   evaluatedAt: "2026-08-25T14:31:00.000Z",
@@ -40,9 +40,18 @@ const sourcedFact = {
   locator: "contracts[0:2]",
 } as const
 
+const noActionEvidence = [{
+  claimId: "no-action-fact",
+  kind: "SOURCED_FACT",
+  claim: "The retained market signal was mixed.",
+  provider: "ALPACA",
+  temporalClass: "LIVE",
+  observedAt: "2026-08-25T14:30:00.000Z",
+  locator: "analysis.marketRegime.signal",
+}] as const
+
 const bullishProposal = {
-  contractVersion: "1.0.0",
-  strategyVersion: "1.1.0",
+  contractVersion: "2.0.0",
   outcome: "PROPOSE_TRADE",
   direction: "BULLISH",
   thesis: "Daily and intraday direction agree.",
@@ -86,7 +95,7 @@ const expectFailureCode = (
   expectedCode: string,
   validationContext: ResearchDecisionValidationContext = context,
 ) => {
-  const result = validateResearchDecisionV1(input, validationContext)
+  const result = validateResearchDecisionV2(input, validationContext)
 
   expect(result.success).toBe(false)
   if (result.success) throw new Error("Expected validation to fail")
@@ -94,14 +103,14 @@ const expectFailureCode = (
   return result
 }
 
-describe("ResearchDecision v1 NO_ACTION contract", () => {
+describe("ResearchDecision v2 NO_ACTION contract", () => {
   it.each(NO_ACTION_REASON_CODES)("accepts the minimal %s result", (reasonCode) => {
-    const result = validateResearchDecisionV1(
+    const result = validateResearchDecisionV2(
       {
-        contractVersion: "1.0.0",
-        strategyVersion: "1.1.0",
+        contractVersion: "2.0.0",
         outcome: "NO_ACTION",
         reasonCodes: [reasonCode],
+        evidence: noActionEvidence,
       },
       context,
     )
@@ -109,22 +118,21 @@ describe("ResearchDecision v1 NO_ACTION contract", () => {
     expect(result).toEqual({
       success: true,
       data: {
-        contractVersion: "1.0.0",
-        strategyVersion: "1.1.0",
+        contractVersion: "2.0.0",
         outcome: "NO_ACTION",
         reasonCodes: [reasonCode],
-        evidence: [],
+        evidence: noActionEvidence,
       },
     })
   })
 
   it("discards irrelevant commentary instead of invalidating a safe result", () => {
-    const result = validateResearchDecisionV1(
+    const result = validateResearchDecisionV2(
       {
-        contractVersion: "1.0.0",
-        strategyVersion: "1.1.0",
+        contractVersion: "2.0.0",
         outcome: "NO_ACTION",
         reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
+        evidence: noActionEvidence,
         commentary: { arbitrary: "content" },
       },
       context,
@@ -138,10 +146,10 @@ describe("ResearchDecision v1 NO_ACTION contract", () => {
   it("rejects an empty reason-code list", () => {
     expectFailureCode(
       {
-        contractVersion: "1.0.0",
-        strategyVersion: "1.1.0",
+        contractVersion: "2.0.0",
         outcome: "NO_ACTION",
         reasonCodes: [],
+        evidence: noActionEvidence,
       },
       "SCHEMA_INVALID",
     )
@@ -150,24 +158,24 @@ describe("ResearchDecision v1 NO_ACTION contract", () => {
   it("rejects an unbounded reason-code list", () => {
     expectFailureCode(
       {
-        contractVersion: "1.0.0",
-        strategyVersion: "1.1.0",
+        contractVersion: "2.0.0",
         outcome: "NO_ACTION",
         reasonCodes: Array(NO_ACTION_REASON_CODES.length + 1).fill(
           "SIGNAL_NOT_ACTIONABLE",
         ),
+        evidence: noActionEvidence,
       },
       "SCHEMA_INVALID",
     )
   })
 
   it("does not require execution-level fields", () => {
-    const result = validateResearchDecisionV1(
+    const result = validateResearchDecisionV2(
       {
-        contractVersion: "1.0.0",
-        strategyVersion: "1.1.0",
+        contractVersion: "2.0.0",
         outcome: "NO_ACTION",
         reasonCodes: ["NO_ELIGIBLE_SPREAD"],
+        evidence: noActionEvidence,
       },
       context,
     )
@@ -178,35 +186,67 @@ describe("ResearchDecision v1 NO_ACTION contract", () => {
     expect(result.data).not.toHaveProperty("entryLimit")
     expect(result.data).not.toHaveProperty("maxLoss")
   })
+
+  it("rejects a conclusion without decisive evidence", () => {
+    const result = expectFailureCode(
+      {
+        contractVersion: "2.0.0",
+        outcome: "NO_ACTION",
+        reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
+        evidence: [],
+      },
+      "SCHEMA_INVALID",
+    )
+
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ path: ["evidence"] }),
+    )
+  })
 })
 
-describe("ResearchDecision v1 proposal contract", () => {
+describe("ResearchDecision v2 proposal contract", () => {
   it("accepts a bullish call-spread proposal", () => {
-    expect(validateResearchDecisionV1(bullishProposal, context)).toEqual({
+    expect(validateResearchDecisionV2(bullishProposal, context)).toEqual({
       success: true,
       data: bullishProposal,
     })
   })
 
-  it("preserves the canonical SPY V1 proposal bytes", () => {
-    const validated = validateResearchDecisionV1(bullishProposal, context)
+  it("preserves the canonical proposal bytes", () => {
+    const validated = validateResearchDecisionV2(bullishProposal, context)
     if (!validated.success) throw new Error("Expected proposal validation")
 
-    expect(canonicalJsonSha256(validated.data)).toBe("741ffccbf540f611c88f9382f76e125772e8d024e7b9041c76f79dadeba0adf0")
+    expect(canonicalJsonSha256(validated.data)).toBe("bc40a3a1c70aea5d5664622a9eba0c25a4ad40892cc692987b8b3d0cd92c1977")
   })
 
   it("accepts a bearish put-spread proposal", () => {
-    expect(validateResearchDecisionV1(bearishProposal, context)).toEqual({
+    expect(validateResearchDecisionV2(bearishProposal, context)).toEqual({
       success: true,
       data: bearishProposal,
     })
   })
 
+  it("accepts a QQQ proposal with matching OCC identity", () => {
+    const proposal = {
+      ...bullishProposal,
+      candidate: {
+        ...bullishProposal.candidate,
+        underlying: "QQQ",
+        longLeg: { contractSymbol: "QQQ260918C00650000", strike: 650 },
+        shortLeg: { contractSymbol: "QQQ260918C00655000", strike: 655 },
+      },
+    }
+
+    expect(validateResearchDecisionV2(proposal, context)).toMatchObject({
+      success: true,
+    })
+  })
+
   it.each([
-    ["unsupported root", "QQQ260918C00650000"],
+    ["unsupported root", "DIA260918C00650000"],
     ["impossible expiration", "SPY260431C00650000"],
   ])("rejects a candidate leg with an %s", (_case, contractSymbol) => {
-    const result = researchCandidateV1Schema.safeParse({
+    const result = researchCandidateV2Schema.safeParse({
       ...bullishProposal.candidate,
       longLeg: {
         ...bullishProposal.candidate.longLeg,
@@ -249,15 +289,14 @@ describe("ResearchDecision v1 proposal contract", () => {
       ],
     }
 
-    expect(validateResearchDecisionV1(input, context)).toEqual({
+    expect(validateResearchDecisionV2(input, context)).toEqual({
       success: true,
       data: input,
     })
   })
 
   it.each([
-    ["contractVersion", { ...bullishProposal, contractVersion: "2.0.0" }],
-    ["strategyVersion", { ...bullishProposal, strategyVersion: "2.0.0" }],
+    ["contractVersion", { ...bullishProposal, contractVersion: "1.0.0" }],
     ["outcome", { ...bullishProposal, outcome: "TRADE" }],
     [
       "underlying",
@@ -277,7 +316,7 @@ describe("ResearchDecision v1 proposal contract", () => {
     expectFailureCode(input, "SCHEMA_INVALID")
   })
 
-  it.each(["contractVersion", "strategyVersion", "outcome"] as const)(
+  it.each(["contractVersion", "outcome"] as const)(
     "rejects a missing %s",
     (field) => {
       const input = structuredClone(bullishProposal) as Record<string, unknown>
@@ -446,7 +485,7 @@ describe("ResearchDecision v1 proposal contract", () => {
   })
 })
 
-describe("ResearchDecision v1 evidence validation", () => {
+describe("ResearchDecision v2 evidence validation", () => {
   it("rejects an invalid evaluation timestamp", () => {
     expectFailureCode(
       bullishProposal,
@@ -537,7 +576,7 @@ describe("ResearchDecision v1 evidence validation", () => {
   )
 
   it("accepts a trusted own snapshot whose key collides with a prototype name", () => {
-    const result = validateResearchDecisionV1(
+    const result = validateResearchDecisionV2(
       {
         ...bullishProposal,
         evidence: [{ ...sourcedFact, snapshotRef: "constructor" }],
@@ -588,7 +627,7 @@ describe("ResearchDecision v1 evidence validation", () => {
   })
 
   it("accepts a snapshot fresh exactly through evaluation", () => {
-    const result = validateResearchDecisionV1(bullishProposal, {
+    const result = validateResearchDecisionV2(bullishProposal, {
       ...context,
       snapshots: {
         ...context.snapshots,
@@ -677,8 +716,8 @@ describe("ResearchDecision v1 evidence validation", () => {
   })
 
   it("returns the same result for identical input and context", () => {
-    const first = validateResearchDecisionV1(bullishProposal, context)
-    const second = validateResearchDecisionV1(bullishProposal, context)
+    const first = validateResearchDecisionV2(bullishProposal, context)
+    const second = validateResearchDecisionV2(bullishProposal, context)
 
     expect(second).toEqual(first)
   })

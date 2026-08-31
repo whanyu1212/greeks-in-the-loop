@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import type { PreliminaryResearchV1 } from "../src/contracts/preliminary-research-v1.js"
+import type { PreliminaryResearchV2 } from "../src/contracts/preliminary-research-v2.js"
 import {
-  validateResearchDecisionV1,
-  type ProposedTradeDecisionV1,
-} from "../src/contracts/research-decision-v1.js"
-import type { ResearchReportV2 } from "../src/contracts/research-report-v2.js"
-import { deriveTradeIntentV1 } from "../src/contracts/trade-intent-v1.js"
+  validateResearchDecisionV2,
+  type ProposedTradeDecisionV2,
+} from "../src/contracts/research-decision-v2.js"
+import type { ResearchReportV3 } from "../src/contracts/research-report-v3.js"
+import { deriveTradeIntentV2 } from "../src/contracts/trade-intent-v2.js"
 import {
   evaluateResearchRunV1,
   researchRunEvaluationV1Schema,
@@ -17,9 +17,8 @@ import {
   PROPOSAL_QUOTE_SNAPSHOT_REF,
 } from "../src/research/research-cycle.js"
 
-const preliminaryResearch = (): PreliminaryResearchV1 => ({
-  contractVersion: "1.0.0",
-  strategyVersion: "1.1.0",
+const preliminaryResearch = (): PreliminaryResearchV2 => ({
+  contractVersion: "2.0.0",
   outcome: "PRELIMINARY_RESEARCH",
   targetSessionDate: "2026-08-26",
   direction: "UNDETERMINED",
@@ -45,8 +44,8 @@ const preliminaryResearch = (): PreliminaryResearchV1 => ({
   requiresRefresh: true,
 })
 
-const reportFor = (research: PreliminaryResearchV1): ResearchReportV2 => ({
-  reportVersion: "2.0.0",
+const reportFor = (research: PreliminaryResearchV2): ResearchReportV3 => ({
+  reportVersion: "3.0.0",
   result: research,
   analysis: {
     provenance: "AGENT_REPORTED",
@@ -88,7 +87,7 @@ const reportFor = (research: PreliminaryResearchV1): ResearchReportV2 => ({
 const preliminaryRun = (): ResearchRunV1 => {
   const research = preliminaryResearch()
   return {
-    runVersion: "1.0.0",
+    runVersion: "3.0.0",
     cycle: {
       cycleId: "cycle-evaluation-1",
       cycleNumber: 1,
@@ -129,11 +128,18 @@ const noActionRun = (): ResearchRunV1 => {
     ...base
   } = sourceRun
   const decision = {
-    contractVersion: "1.0.0" as const,
-    strategyVersion: "1.1.0" as const,
+    contractVersion: "2.0.0" as const,
     outcome: "NO_ACTION" as const,
     reasonCodes: ["SIGNAL_NOT_ACTIONABLE" as const],
-    evidence: [],
+    evidence: [{
+      claimId: "mixed-regime",
+      kind: "SOURCED_FACT" as const,
+      claim: "The retained market regime signal was mixed.",
+      provider: "ALPACA" as const,
+      temporalClass: "PRIOR_CLOSE" as const,
+      observedAt: "2026-08-25T20:00:00.000Z",
+      locator: "analysis.marketRegime.signal",
+    }],
   }
   return {
     ...base,
@@ -151,15 +157,12 @@ const noActionRun = (): ResearchRunV1 => {
 }
 
 const currentInvocation = {
-  invocationVersion: "1.1.0" as const,
+  invocationVersion: "3.0.0" as const,
   agentName: "research",
   cycleMode: "STANDARD" as const,
   promptVersion: "1.4.0",
-  skillName: "spy-debit-spread-research",
-  skillVersion: "1.2.0",
-  strategyVersion: "1.1.0",
-  decisionContractVersion: "1.0.0",
-  reportVersion: "2.0.0",
+  decisionContractVersion: "2.0.0",
+  reportVersion: "3.0.0",
   providerId: "test-provider",
   modelId: "test-model",
   responseError: false,
@@ -175,9 +178,8 @@ const currentInvocation = {
 
 const priorInvocation = {
   ...currentInvocation,
-  invocationVersion: "1.0.0" as const,
+  invocationVersion: "3.0.0" as const,
   promptVersion: "1.3.0",
-  skillVersion: "1.1.0",
 }
 
 const derivedIntentRun = (): ResearchRunV1 => {
@@ -186,9 +188,8 @@ const derivedIntentRun = (): ResearchRunV1 => {
     researchReport: _researchReport,
     ...base
   } = preliminaryRun()
-  const decision: ProposedTradeDecisionV1 = {
-    contractVersion: "1.0.0",
-    strategyVersion: "1.1.0",
+  const decision: ProposedTradeDecisionV2 = {
+    contractVersion: "2.0.0",
     outcome: "PROPOSE_TRADE",
     direction: "BULLISH",
     thesis: "private-proposal-marker",
@@ -215,7 +216,7 @@ const derivedIntentRun = (): ResearchRunV1 => {
       },
     ],
   }
-  const derived = deriveTradeIntentV1(decision, {
+  const derived = deriveTradeIntentV2(decision, {
     quoteSnapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
     evaluatedAt: "2026-08-26T14:04:00.000Z",
     longQuote: {
@@ -235,8 +236,8 @@ const derivedIntentRun = (): ResearchRunV1 => {
   })
   if (!derived.success) throw new Error("Expected valid derived-intent fixture")
 
-  const researchReport: ResearchReportV2 = {
-    reportVersion: "2.0.0",
+  const researchReport: ResearchReportV3 = {
+    reportVersion: "3.0.0",
     result: decision,
     analysis: {
       provenance: "AGENT_REPORTED",
@@ -261,6 +262,35 @@ const derivedIntentRun = (): ResearchRunV1 => {
         dailySessionCount: 50,
         intradayBarCount: 33,
       },
+      symbolIndicators: [
+        {
+          underlying: "SPY",
+          throughSessionDate: "2026-08-25",
+          return5d: 0.01,
+          return20d: 0.03,
+          relativeStrengthRank20d: 1,
+          realizedVolatility20: 0.16,
+          completedSessionVolumeRatio20: 1.1,
+        },
+        {
+          underlying: "QQQ",
+          throughSessionDate: "2026-08-25",
+          return5d: -0.01,
+          return20d: 0.01,
+          relativeStrengthRank20d: 2,
+          realizedVolatility20: 0.21,
+          completedSessionVolumeRatio20: 0.9,
+        },
+        {
+          underlying: "IWM",
+          throughSessionDate: "2026-08-25",
+          return5d: -0.02,
+          return20d: -0.04,
+          relativeStrengthRank20d: 3,
+          realizedVolatility20: 0.24,
+          completedSessionVolumeRatio20: 1.2,
+        },
+      ],
       candidateEvaluation: {
         verification: "AGENT_REPORTED",
         observedAt: "2026-08-26T14:03:30.000Z",
@@ -356,72 +386,11 @@ describe("research run evaluation", () => {
   it("accepts the additive shadow-risk research run version", () => {
     const evaluation = evaluateResearchRunV1({
       ...noActionRun(),
-      runVersion: "1.1.0",
+      runVersion: "3.0.0",
     })
 
     expect(evaluation.dimensions.contractCompliance.issueCodes).not.toContain(
       "RUN_VERSION_INVALID",
-    )
-  })
-
-  it("accepts the canonical rejection of a legacy strategy version", () => {
-    const rejectedRun = (source: ResearchRunV1, useLegacyVersion = true) => {
-      const {
-        preliminaryResearch: _preliminaryResearch,
-        validatedDecision: _validatedDecision,
-        shadowRisk: _shadowRisk,
-        ...base
-      } = source
-      return {
-        ...base,
-        runVersion: "1.3.0" as const,
-        researchInvocation: currentInvocation,
-        evidenceSnapshots: [],
-        researchReport: {
-          ...source.researchReport!,
-          result: {
-            ...source.researchReport!.result,
-            ...(useLegacyVersion ? { strategyVersion: "1.0.0" as const } : {}),
-          },
-        },
-        outcome: {
-          outcomeVersion: "1.0.0" as const,
-          status: "DECISION_REJECTED" as const,
-          issues: [{
-            code: "SCHEMA_INVALID",
-            schemaCategory: "VALUE_NOT_ALLOWED" as const,
-            path: ["result", "strategyVersion"],
-          }],
-        },
-      }
-    }
-    const canonical = [preliminaryRun(), noActionRun(), derivedIntentRun()].map(
-      (source) => evaluateResearchRunV1(rejectedRun(source)),
-    )
-    const forged = evaluateResearchRunV1(rejectedRun(noActionRun(), false))
-    const wrongDiagnosticRun = rejectedRun(noActionRun())
-    const wrongDiagnostic = evaluateResearchRunV1({
-      ...wrongDiagnosticRun,
-      outcome: {
-        ...wrongDiagnosticRun.outcome,
-        issues: [{
-          code: "SCHEMA_INVALID",
-          schemaCategory: "VALUE_NOT_ALLOWED",
-          path: ["result", "contractVersion"],
-        }],
-      },
-    })
-
-    expect(canonical.map(({ dimensions }) => dimensions.contractCompliance)).toEqual([
-      { status: "PASS", issueCodes: [] },
-      { status: "PASS", issueCodes: [] },
-      { status: "PASS", issueCodes: [] },
-    ])
-    expect(forged.dimensions.contractCompliance.issueCodes).toContain(
-      "OUTCOME_RECORD_MISMATCH",
-    )
-    expect(wrongDiagnostic.dimensions.contractCompliance.issueCodes).toContain(
-      "RUN_METADATA_INVALID",
     )
   })
 
@@ -458,7 +427,7 @@ describe("research run evaluation", () => {
       ...run,
       initialEligibility: {
         ...run.initialEligibility!,
-        researchMode: "DRY_RUN_ANYTIME",
+        researchMode: "DRY_RUN",
         reason: "DRY_RUN_RESEARCH_ONLY",
       },
     })
@@ -535,7 +504,7 @@ describe("research run evaluation", () => {
     ) {
       throw new Error("Expected a preliminary-research fixture")
     }
-    const research: PreliminaryResearchV1 = {
+    const research: PreliminaryResearchV2 = {
       ...run.preliminaryResearch,
       evidence: run.preliminaryResearch.evidence.map((claim) =>
         claim.kind === "SOURCED_FACT"
@@ -582,7 +551,6 @@ describe("research run evaluation", () => {
     }
     const decision = {
       ...run.validatedDecision,
-      strategyVersion: "1.0.0" as const,
     }
     const evaluation = evaluateResearchRunV1({
       ...run,
@@ -603,7 +571,6 @@ describe("research run evaluation", () => {
         decision,
         intent: {
           ...run.outcome.intent,
-          strategyVersion: "1.0.0",
         },
       },
     })
@@ -675,8 +642,8 @@ describe("research run evaluation", () => {
     const evaluation = evaluateResearchRunV1({
       ...run,
       researchReport: {
-        reportVersion: "2.0.0",
-      } as unknown as ResearchReportV2,
+        reportVersion: "3.0.0",
+      } as unknown as ResearchReportV3,
     })
 
     expect(researchRunEvaluationV1Schema.safeParse(evaluation).success).toBe(
@@ -964,7 +931,7 @@ describe("research run evaluation", () => {
     ) {
       throw new Error("Expected a proposal report fixture")
     }
-    const decision: ProposedTradeDecisionV1 = {
+    const decision: ProposedTradeDecisionV2 = {
       ...run.researchReport.result,
       evidence: [
         {
@@ -984,7 +951,7 @@ describe("research run evaluation", () => {
         })),
       ],
     }
-    const validation = validateResearchDecisionV1(
+    const validation = validateResearchDecisionV2(
       decision,
       PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
     )
@@ -1289,7 +1256,7 @@ describe("research run evaluation", () => {
     }
   })
 
-  it("keeps a semantically invalid no-action report reachable as rejected", () => {
+  it("keeps a schema-invalid no-action report reachable as rejected", () => {
     const run = noActionRun()
     if (run.researchReport === undefined) {
       throw new Error("Expected a no-action report fixture")
@@ -1297,14 +1264,7 @@ describe("research run evaluation", () => {
     const { validatedDecision: _validatedDecision, ...base } = run
     const invalidDecision = {
       ...run.researchReport.result,
-      evidence: [
-        {
-          claimId: "unknown-snapshot",
-          kind: "SOURCED_FACT" as const,
-          claim: "Retained only to exercise rejection validation.",
-          snapshotRef: "missing-snapshot",
-        },
-      ],
+      evidence: [],
     }
     const rejectedRun = {
       ...base,
@@ -1314,24 +1274,14 @@ describe("research run evaluation", () => {
         status: "DECISION_REJECTED",
         issues: [
           {
-            code: "UNKNOWN_SNAPSHOT",
-            path: ["evidence", 0, "snapshotRef"],
+            code: "SCHEMA_INVALID",
+            path: ["result", "evidence"],
           },
         ],
       },
     } as ResearchRunV1
     const evaluation = evaluateResearchRunV1(rejectedRun)
-    const misattributed = evaluateResearchRunV1({
-      ...rejectedRun,
-      outcome: {
-        ...rejectedRun.outcome,
-        issues: [{ code: "UNKNOWN_SNAPSHOT", path: ["evidence"] }],
-      },
-    } as ResearchRunV1)
     expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
-    expect(misattributed.dimensions.contractCompliance.issueCodes).toContain(
-      "OUTCOME_RECORD_MISMATCH",
-    )
   })
 
   it("requires exact preflight issues for snapshot-free proposal rejections", () => {
@@ -1346,7 +1296,7 @@ describe("research run evaluation", () => {
     if (firstEvidence === undefined) {
       throw new Error("Expected proposal evidence")
     }
-    const decision: ProposedTradeDecisionV1 = {
+    const decision: ProposedTradeDecisionV2 = {
       ...run.researchReport.result,
       evidence: [...run.researchReport.result.evidence, { ...firstEvidence }],
     }
@@ -1596,7 +1546,7 @@ describe("research run evaluation", () => {
       throw new Error("Expected a preliminary report fixture")
     }
     const { preliminaryResearch: _preliminaryResearch, ...base } = run
-    const research: PreliminaryResearchV1 = {
+    const research: PreliminaryResearchV2 = {
       ...run.preliminaryResearch,
       targetSessionDate: "2026-08-27",
     }
@@ -1659,7 +1609,7 @@ describe("research run evaluation", () => {
       initialEligibility: {
         ...base.initialEligibility!,
         evaluatedAt: "2026-08-27T03:57:59.000Z",
-        researchMode: "DRY_RUN_ANYTIME",
+        researchMode: "DRY_RUN",
         reason: "DRY_RUN_RESEARCH_ONLY",
       },
       researchReport: {
@@ -1701,7 +1651,7 @@ describe("research run evaluation", () => {
       initialEligibility: {
         ...base.initialEligibility!,
         evaluatedAt: "2026-08-26T20:00:59.000Z",
-        researchMode: "DRY_RUN_ANYTIME",
+        researchMode: "DRY_RUN",
         reason: "DRY_RUN_RESEARCH_ONLY",
       },
       researchReport: {
@@ -1738,7 +1688,7 @@ describe("research run evaluation", () => {
       throw new Error("Expected a preliminary report fixture")
     }
     const { preliminaryResearch: _preliminaryResearch, ...base } = run
-    const research: PreliminaryResearchV1 = {
+    const research: PreliminaryResearchV2 = {
       ...run.preliminaryResearch,
       evidence: run.preliminaryResearch.evidence.map((claim) =>
         claim.kind === "SOURCED_FACT"
@@ -1855,7 +1805,7 @@ describe("research run evaluation", () => {
       researchReport: { ...run.researchReport, result: decision },
       validatedDecision: decision,
       outcome: { ...run.outcome, decision },
-    })
+    } as unknown as ResearchRunV1)
 
     expect(evaluation.dimensions.grounding).toEqual({
       status: "FAIL",
@@ -2171,7 +2121,7 @@ describe("research run evaluation", () => {
       evidence: run.preliminaryResearch!.evidence.map((claim) =>
         claim.kind === "INFERENCE" ? { ...claim, basedOn: ["missing-fact"] } : claim,
       ),
-    } as PreliminaryResearchV1
+    } as PreliminaryResearchV2
 
     const evaluation = evaluateResearchRunV1({
       ...run,
@@ -2207,7 +2157,7 @@ describe("research run evaluation", () => {
       ...run.validatedDecision.evidence,
       { ...firstEvidence },
     ]
-    const decision: ProposedTradeDecisionV1 = {
+    const decision: ProposedTradeDecisionV2 = {
       ...run.validatedDecision,
       evidence: duplicatedEvidence,
     }
@@ -2248,7 +2198,7 @@ describe("research run evaluation", () => {
 
   it("detects candidate identity drift between retained records", () => {
     const run = preliminaryRun()
-    const research: PreliminaryResearchV1 = {
+    const research: PreliminaryResearchV2 = {
       ...run.preliminaryResearch!,
       direction: "BULLISH",
       candidate: {
@@ -2265,7 +2215,7 @@ describe("research run evaluation", () => {
         },
       },
     }
-    const report: ResearchReportV2 = {
+    const report: ResearchReportV3 = {
       ...reportFor(research),
       analysis: {
         ...reportFor(research).analysis,
@@ -2535,7 +2485,7 @@ describe("research run evaluation", () => {
       ...run,
       initialEligibility: {
         ...run.initialEligibility!,
-        researchMode: "DRY_RUN_ANYTIME",
+        researchMode: "DRY_RUN",
         reason: "DRY_RUN_RESEARCH_ONLY",
       },
       outcome: invalidOutcome,

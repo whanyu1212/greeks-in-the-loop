@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
-import type { TradeIntentDerivationResult } from "../src/contracts/trade-intent-v1.js"
-import type { ProposedTradeDecisionV1 } from "../src/contracts/research-decision-v1.js"
+import type { TradeIntentDerivationResult } from "../src/contracts/trade-intent-v2.js"
+import type { ProposedTradeDecisionV2 } from "../src/contracts/research-decision-v2.js"
 import type { OptionQuoteProvider } from "../src/market-data/alpaca-option-quotes.js"
 import type { ResearchCycleTrace } from "../src/observability/research-telemetry.js"
 import type { ResearchEligibilityV1 } from "../src/scheduling/research-eligibility.js"
@@ -20,24 +20,29 @@ import type {
 import type { ResearchInvocationV1 } from "../src/research/research-invocation-v1.js"
 
 const noAction = {
-  contractVersion: "1.0.0",
-  strategyVersion: "1.1.0",
+  contractVersion: "2.0.0",
   outcome: "NO_ACTION",
   reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
+  evidence: [{
+    claimId: "mixed-regime",
+    kind: "SOURCED_FACT",
+    claim: "The retained market regime signal was mixed.",
+    provider: "ALPACA",
+    temporalClass: "LIVE",
+    observedAt: "2026-08-25T14:30:00.000Z",
+    locator: "analysis.marketRegime.signal",
+  }],
 } as const
 
 const previousSessionDates = ["2026-08-21", "2026-08-24"] as const
 
 const researchInvocation: ResearchInvocationV1 = {
-  invocationVersion: "1.0.0",
+  invocationVersion: "3.0.0",
   agentName: "research",
   cycleMode: "STANDARD",
   promptVersion: "1.3.0",
-  skillName: "spy-debit-spread-research",
-  skillVersion: "1.1.0",
-  strategyVersion: "1.1.0",
-  decisionContractVersion: "1.0.0",
-  reportVersion: "2.0.0",
+  decisionContractVersion: "2.0.0",
+  reportVersion: "3.0.0",
   providerId: "test-provider",
   modelId: "test-model",
   responseError: false,
@@ -60,8 +65,7 @@ const expectRecords = (
 })))
 
 const proposal = {
-  contractVersion: "1.0.0",
-  strategyVersion: "1.1.0",
+  contractVersion: "2.0.0",
   outcome: "PROPOSE_TRADE",
   direction: "BULLISH",
   thesis: "Daily and intraday direction agree.",
@@ -90,8 +94,7 @@ const proposal = {
 } as const
 
 const preliminary = {
-  contractVersion: "1.0.0",
-  strategyVersion: "1.1.0",
+  contractVersion: "2.0.0",
   outcome: "PRELIMINARY_RESEARCH",
   targetSessionDate: "2026-08-25",
   direction: "BULLISH",
@@ -120,7 +123,7 @@ type ReportFixtureResult = Readonly<{
 }>
 
 const researchReport = <T extends ReportFixtureResult>(result: T) => ({
-  reportVersion: "2.0.0" as const,
+  reportVersion: "3.0.0" as const,
   result,
   analysis: {
     provenance: "AGENT_REPORTED" as const,
@@ -157,6 +160,35 @@ const researchReport = <T extends ReportFixtureResult>(result: T) => ({
     },
     ...(result.outcome === "PROPOSE_TRADE"
       ? {
+          symbolIndicators: [
+            {
+              underlying: "SPY" as const,
+              throughSessionDate: "2026-08-24",
+              return5d: 0.01,
+              return20d: 0.03,
+              relativeStrengthRank20d: 1,
+              realizedVolatility20: 0.16,
+              completedSessionVolumeRatio20: 1.1,
+            },
+            {
+              underlying: "QQQ" as const,
+              throughSessionDate: "2026-08-24",
+              return5d: -0.01,
+              return20d: 0.01,
+              relativeStrengthRank20d: 2,
+              realizedVolatility20: 0.21,
+              completedSessionVolumeRatio20: 0.9,
+            },
+            {
+              underlying: "IWM" as const,
+              throughSessionDate: "2026-08-24",
+              return5d: -0.02,
+              return20d: -0.04,
+              relativeStrengthRank20d: 3,
+              realizedVolatility20: 0.24,
+              completedSessionVolumeRatio20: 1.2,
+            },
+          ],
           candidateEvaluation: {
             verification: "AGENT_REPORTED" as const,
             observedAt: "2026-08-25T14:30:30.000Z",
@@ -285,7 +317,7 @@ const setup = () => {
   }))
   const deriveIntent = vi.fn<
     (
-      decision: ProposedTradeDecisionV1,
+      decision: ProposedTradeDecisionV2,
       context: Parameters<
         NonNullable<
           Parameters<typeof processResearchCycle>[0]["deriveIntent"]
@@ -295,9 +327,8 @@ const setup = () => {
   >(() => ({
     success: true,
     intent: {
-      contractVersion: "1.0.0",
-      decisionContractVersion: "1.0.0",
-      strategyVersion: "1.1.0",
+      contractVersion: "2.0.0",
+      decisionContractVersion: "2.0.0",
       direction: "BULLISH",
       structure: "BULL_CALL_SPREAD",
       expiration: "2026-09-18",
@@ -340,7 +371,7 @@ describe("processResearchCycle", () => {
       sessionDate: "2026-08-25",
       researchEligible: true,
       tradeIntentEligible: false,
-      researchMode: "DRY_RUN_ANYTIME",
+      researchMode: "DRY_RUN",
       reason: "DRY_RUN_RESEARCH_ONLY",
     })
 
@@ -392,7 +423,7 @@ describe("processResearchCycle", () => {
       sessionDate: "2026-08-25",
       researchEligible: true,
       tradeIntentEligible: false,
-      researchMode: "DRY_RUN_ANYTIME",
+      researchMode: "DRY_RUN",
       reason: "DRY_RUN_RESEARCH_ONLY",
     })
 
@@ -409,32 +440,6 @@ describe("processResearchCycle", () => {
     })
     expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
-  })
-
-  it("rejects a legacy strategy version from new agent output", async () => {
-    const dependencies = setup()
-
-    const result = await processResearchCycle({
-      rawResponse: serializeReport({
-        ...proposal,
-        strategyVersion: "1.0.0",
-      }),
-      signal: new AbortController().signal,
-      ...dependencies,
-    })
-
-    expect(result.outcome).toEqual({
-      outcomeVersion: "1.0.0",
-      status: "DECISION_REJECTED",
-      issues: [
-        {
-          code: "SCHEMA_INVALID",
-          schemaCategory: "VALUE_NOT_ALLOWED",
-          path: ["result", "strategyVersion"],
-        },
-      ],
-    })
-    expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
   })
 
   it("rejects a proposal backed by a non-live market regime", async () => {
@@ -609,6 +614,34 @@ describe("processResearchCycle", () => {
           path: ["analysis", "candidateEvaluation", "dte"],
         },
       ],
+    })
+    expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
+  })
+
+  it("requires indicator cutoffs at the latest completed session", async () => {
+    const dependencies = setup()
+    const report = researchReport(proposal)
+    const result = await processResearchCycle({
+      rawResponse: JSON.stringify({
+        ...report,
+        analysis: {
+          ...report.analysis,
+          symbolIndicators: report.analysis.symbolIndicators?.map((indicator) => ({
+            ...indicator,
+            throughSessionDate: "2026-08-25",
+          })),
+        },
+      }),
+      signal: new AbortController().signal,
+      ...dependencies,
+    })
+
+    expect(result.outcome).toMatchObject({
+      status: "DECISION_REJECTED",
+      issues: [{
+        code: "CONTEXT_INVALID",
+        path: ["analysis", "symbolIndicators", 0, "throughSessionDate"],
+      }],
     })
     expect(dependencies.confirmQuotes).not.toHaveBeenCalled()
   })
@@ -846,7 +879,6 @@ describe("processResearchCycle", () => {
       status: "VALIDATED_NO_ACTION",
       decision: {
         ...noAction,
-        evidence: [],
       },
     })
     expect(dependencies.quoteProvider.confirmQuotes).not.toHaveBeenCalled()
@@ -861,7 +893,7 @@ describe("processResearchCycle", () => {
       {
         outcome: result.outcome,
         evidenceSnapshots: [],
-        validatedDecision: { ...noAction, evidence: [] },
+        validatedDecision: noAction,
         researchReport: result.researchReport,
       },
     ])
@@ -1062,7 +1094,7 @@ describe("processResearchCycle", () => {
     ])
   })
 
-  it("rejects NO_ACTION evidence that has no trusted snapshot", async () => {
+  it("rejects proposal-snapshot evidence on NO_ACTION", async () => {
     const dependencies = setup()
 
     const result = await processResearchCycle({
@@ -1075,9 +1107,14 @@ describe("processResearchCycle", () => {
       ...dependencies,
     })
 
-    expect(result.outcome).toMatchObject({
-      status: "DECISION_REJECTED",
-      issues: [{ code: "UNKNOWN_SNAPSHOT" }],
+    expect(result.outcome.status).toBe("DECISION_REJECTED")
+    if (result.outcome.status !== "DECISION_REJECTED") {
+      throw new Error("Expected decision rejection")
+    }
+    expect(result.outcome.issues).toContainEqual({
+      code: "SCHEMA_INVALID",
+      path: ["result", "evidence", 0],
+      schemaCategory: "UNRECOGNIZED_FIELD",
     })
     expect(dependencies.quoteProvider.confirmQuotes).not.toHaveBeenCalled()
     expect(dependencies.deriveIntent).not.toHaveBeenCalled()
@@ -1340,7 +1377,7 @@ describe("processResearchCycle", () => {
         deadline: "2026-08-26T14:31:00.000Z",
       },
       previousSessionDates,
-      researchMode: "DRY_RUN_SHADOW_ANYTIME",
+      researchMode: "DRY_RUN",
     })
 
     const result = await processResearchCycle({
@@ -1354,7 +1391,7 @@ describe("processResearchCycle", () => {
     expect(dependencies.evaluateShadowRisk).toHaveBeenCalledWith(
       expect.objectContaining({
         captureEligibility: expect.objectContaining({
-          researchMode: "DRY_RUN_SHADOW_ANYTIME",
+          researchMode: "DRY_RUN",
           tradeIntentEligible: true,
         }),
       }),
@@ -1510,7 +1547,7 @@ describe("processResearchCycle", () => {
     >["decision"] = {
       ...noAction,
       reasonCodes: [...noAction.reasonCodes],
-      evidence: [],
+      evidence: [...noAction.evidence],
     }
     const outcome = {
       outcomeVersion: "1.0.0",

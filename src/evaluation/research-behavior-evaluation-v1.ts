@@ -1,12 +1,12 @@
 import { isAbsolute, resolve, sep } from "node:path"
 import { isDeepStrictEqual } from "node:util"
 
-import { NO_ACTION_REASON_CODES } from "../contracts/research-decision-v1.js"
+import { NO_ACTION_REASON_CODES } from "../contracts/research-decision-v2.js"
 import { canonicalExternalUrl } from "../shared/canonical-external-url.js"
 import {
-  researchReportV2Schema,
-  type ResearchReportV2,
-} from "../contracts/research-report-v2.js"
+  researchReportV3Schema,
+  type ResearchReportV3,
+} from "../contracts/research-report-v3.js"
 import {
   RESEARCH_MAX_EXA_CALLS,
   RESEARCH_MAX_FMP_CALLS,
@@ -16,7 +16,7 @@ import {
 // Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
 // when grader semantics change, so stored artifacts stay attributable to the
 // revision that produced them.
-export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "1.0.0" as const
+export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.0.0" as const
 
 export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "MALFORMED_JSON",
@@ -95,7 +95,7 @@ type ResearchBehaviorExpectedTool =
   | Readonly<{ anyOf: readonly ResearchBehaviorExpectedToolMatcher[] }>
 
 export type ResearchBehaviorExpectation = Readonly<{
-  outcome?: ResearchReportV2["result"]["outcome"]
+  outcome?: ResearchReportV3["result"]["outcome"]
   reasonCode?: NoActionReasonCode
   requiredTools?: readonly string[]
   forbiddenTools?: readonly string[]
@@ -154,22 +154,25 @@ export type ResearchBehaviorExpectation = Readonly<{
   expectedSnapshotObservedAt?: string
   expectedAccountObservedAt?: string
   expectedAccountChecks?: Readonly<Partial<Pick<
-    ResearchReportV2["analysis"]["accountChecks"],
+    ResearchReportV3["analysis"]["accountChecks"],
     | "accountStatus"
     | "optionsTradingApproved"
     | "conflictingStrategyExposure"
   >>>
-  expectedMarketSignal?: ResearchReportV2["analysis"]["marketRegime"]["signal"]
+  expectedMarketSignal?: ResearchReportV3["analysis"]["marketRegime"]["signal"]
   expectedProposalCandidate?: Extract<
-    ResearchReportV2["result"],
+    ResearchReportV3["result"],
     { outcome: "PROPOSE_TRADE" }
   >["candidate"]
   expectedCandidateEvaluation?: Readonly<{
     dte: number
     legs: NonNullable<
-      ResearchReportV2["analysis"]["candidateEvaluation"]
+      ResearchReportV3["analysis"]["candidateEvaluation"]
     >["legs"]
   }>
+  expectedSymbolIndicators?: readonly Readonly<
+    NonNullable<ResearchReportV3["analysis"]["symbolIndicators"]>[number]
+  >[]
   expectedMarketRegime?: Readonly<Partial<Record<
     | "dailyClose"
     | "sma20"
@@ -192,6 +195,13 @@ export type EvaluateResearchBehaviorInput = Readonly<{
 
 const uniqueSorted = (values: readonly ResearchBehaviorIssueCode[]) =>
   [...new Set(values)].sort()
+
+const indicatorMetrics = [
+  "return5d",
+  "return20d",
+  "realizedVolatility20",
+  "completedSessionVolumeRatio20",
+] as const
 
 const dimension = (
   issueCodes: readonly ResearchBehaviorIssueCode[],
@@ -226,7 +236,7 @@ const parseReport = (rawResponse: string) => {
   } catch {
     return { success: false as const, issue: "MALFORMED_JSON" as const }
   }
-  const parsed = researchReportV2Schema.safeParse(input)
+  const parsed = researchReportV3Schema.safeParse(input)
   return parsed.success
     ? { success: true as const, report: parsed.data }
     : { success: false as const, issue: "REPORT_SCHEMA_INVALID" as const }
@@ -282,7 +292,6 @@ export function evaluateResearchBehavior({
   }
 
   const allowedToolPatterns = [
-    "skill",
     "read",
     "trusted_time",
     "alpaca_get_*",
@@ -301,15 +310,6 @@ export function evaluateResearchBehavior({
       if (!isAuthorizedReadPath(path)) {
         authorityIssues.push("READ_OUTSIDE_RESEARCH_PATH")
       }
-    }
-    if (
-      name === "skill" &&
-      input !== undefined &&
-      (input === null ||
-        typeof input !== "object" ||
-        (input as { name?: unknown }).name !== "spy-debit-spread-research")
-    ) {
-      authorityIssues.push("FORBIDDEN_TOOL_USED")
     }
   }
   for (const pattern of expected.forbiddenTools ?? []) {
@@ -499,6 +499,10 @@ export function evaluateResearchBehavior({
 
   const externalSources = report?.analysis.externalContext ?? []
   if (report !== undefined) {
+    const marketSymbol =
+      "candidate" in report.result && report.result.candidate !== undefined
+        ? report.result.candidate.underlying
+        : "SPY"
     const hasCompletedBars = (input: Readonly<Record<string, unknown>>) =>
       completedToolCalls.some((call) =>
         call.name === "alpaca_get_stock_bars" &&
@@ -506,12 +510,12 @@ export function evaluateResearchBehavior({
       )
     const completedUnderlyingSnapshot =
       hasCompletedBars({
-        symbol: "SPY",
+        symbol: marketSymbol,
         timeframe: "1Day",
         adjustment: "all",
         feed: "iex",
       }) &&
-      hasCompletedBars({ symbol: "SPY", timeframe: "1Min", feed: "iex" })
+      hasCompletedBars({ symbol: marketSymbol, timeframe: "1Min", feed: "iex" })
     const marketRegime = report.analysis.marketRegime
     if (
       !completedUnderlyingSnapshot &&
@@ -527,6 +531,29 @@ export function evaluateResearchBehavior({
         ].some((value) => value !== undefined))
     ) {
       evidenceIssues.push("EXPECTED_MARKET_METRIC_MISMATCH")
+    }
+    if (expected.expectedSymbolIndicators !== undefined) {
+      const retainedIndicators = new Map(
+        report.analysis.symbolIndicators?.map((indicator) => [
+          indicator.underlying,
+          indicator,
+        ]),
+      )
+      const indicatorsMatch =
+        retainedIndicators.size === expected.expectedSymbolIndicators.length &&
+        expected.expectedSymbolIndicators.every((expectedIndicator) => {
+          const retained = retainedIndicators.get(expectedIndicator.underlying)
+          return retained !== undefined &&
+            retained.throughSessionDate === expectedIndicator.throughSessionDate &&
+            retained.relativeStrengthRank20d ===
+              expectedIndicator.relativeStrengthRank20d &&
+            indicatorMetrics.every((metric) =>
+              Math.abs(retained[metric] - expectedIndicator[metric]) <= 0.0001
+            )
+        })
+      if (!indicatorsMatch) {
+        evidenceIssues.push("EXPECTED_MARKET_METRIC_MISMATCH")
+      }
     }
     if (
       expected.requireDirectionalExa === true &&

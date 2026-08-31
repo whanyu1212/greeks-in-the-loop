@@ -4,7 +4,7 @@
   "share": "disabled",
   "agent": {
     "research": {
-      "description": "Produces structured, non-executing SPY options research decisions.",
+      "description": "Selects and researches one bounded ETF options opportunity without execution authority.",
       "mode": "primary",
       "prompt": "{file:./src/research/research-agent-system.md}",
       "model": "openai/gpt-5.6-sol",
@@ -28,10 +28,7 @@
         },
         "bash": "deny",
         "task": "deny",
-        "skill": {
-          "*": "deny",
-          "spy-debit-spread-research": "allow"
-        },
+        "skill": "deny",
         "external_directory": "deny",
         "webfetch": "deny",
         "websearch": "deny",

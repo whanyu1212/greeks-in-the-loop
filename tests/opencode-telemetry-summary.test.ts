@@ -130,6 +130,51 @@ describe("summarizeOpenCodeInvocation", () => {
     expect(summary.omittedToolCallCount).toBe(3)
   })
 
+  it("aggregates every assistant step in one invocation", () => {
+    const first = assistantMessage({
+      id: "message-1",
+      tokens: {
+        input: 100,
+        output: 10,
+        reasoning: 5,
+        cache: { read: 0, write: 0 },
+      },
+    })
+    const second = assistantMessage({
+      id: "message-2",
+      tokens: {
+        input: 20,
+        output: 30,
+        reasoning: 15,
+        cache: { read: 80, write: 0 },
+      },
+    })
+
+    expect(
+      summarizeOpenCodeInvocation(
+        [first, second],
+        [completedTool(1), completedTool(2, "trusted_time")],
+      ),
+    ).toMatchObject({
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4",
+      inputTokenCount: 120,
+      outputTokenCount: 40,
+      reasoningTokenCount: 20,
+      cacheReadTokenCount: 80,
+      toolCallCount: 2,
+    })
+  })
+
+  it("exposes model drift across assistant steps", () => {
+    const summary = summarizeOpenCodeInvocation(
+      [assistantMessage(), assistantMessage({ modelID: "unexpected-model" })],
+      [],
+    )
+
+    expect(summary.modelId).toBe("multiple")
+  })
+
   it("drops invalid counts and timing instead of exporting them", () => {
     const info = assistantMessage({
       tokens: {

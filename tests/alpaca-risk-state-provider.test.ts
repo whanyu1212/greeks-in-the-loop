@@ -701,7 +701,8 @@ describe("Alpaca risk-state provider", () => {
 
   it.each([
     ["malformed", "not-a-symbol"],
-    ["unsupported", "QQQ260918C00600000"],
+    ["mixed-underlying", "QQQ260918C00600000"],
+    ["unsupported", "DIA260918C00600000"],
     ["impossible-date", "SPY260431C00600000"],
   ])(
     "maps a %s capture symbol to the existing input failure",
