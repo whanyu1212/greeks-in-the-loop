@@ -121,7 +121,9 @@ export function projectResearchRunV1(
   inputEvents: readonly StoredLedgerEventV1[],
 ): ResearchRunV1 {
   if (inputEvents.length === 0) throw new Error("Research cycle was not found")
-  const events = [...inputEvents].sort((left, right) => left.sequence - right.sequence)
+  const events = inputEvents
+    .filter((event) => event.eventType !== "RESEARCH_SCREENING_AUDIT_RECORDED")
+    .sort((left, right) => left.sequence - right.sequence)
   const start = one(
     events.filter((event) => event.eventType === "RESEARCH_CYCLE_STARTED"),
     "cycle-start",

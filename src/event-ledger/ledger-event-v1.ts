@@ -4,6 +4,7 @@ import { researchDecisionV1Schema } from "../contracts/research-decision-v1.js"
 import { preliminaryResearchV1Schema } from "../contracts/preliminary-research-v1.js"
 import { tradeIntentV1Schema } from "../contracts/trade-intent-v1.js"
 import { researchReportV2Schema } from "../contracts/research-report-v2.js"
+import { researchScreeningAuditV1Schema } from "../contracts/research-screening-audit-v1.js"
 import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
 import {
   RESEARCH_MODEL_DRIFT_CODES,
@@ -32,6 +33,7 @@ export const LEDGER_EVENT_TYPES = [
   "TRADE_INTENT_DERIVATION_REJECTED",
   "RESEARCH_CYCLE_COMPLETED",
   "RESEARCH_CYCLE_INTERRUPTED",
+  "RESEARCH_SCREENING_AUDIT_RECORDED",
   "RESEARCH_INVOCATION_IDENTITY_REJECTED",
   "RESEARCH_LOOP_BREAKER_LATCHED",
   "RESEARCH_LOOP_BREAKER_RESET",
@@ -169,6 +171,11 @@ const payloadSchemas = {
         "PROCESS_RESTART",
         "FAILED",
       ]),
+    })
+    .strict(),
+  RESEARCH_SCREENING_AUDIT_RECORDED: z
+    .object({
+      audit: researchScreeningAuditV1Schema,
     })
     .strict(),
   RESEARCH_INVOCATION_IDENTITY_REJECTED: z

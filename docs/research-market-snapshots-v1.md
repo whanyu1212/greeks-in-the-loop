@@ -5,11 +5,11 @@
 This document defines the normalized, application-owned market-data identity used
 by deterministic SPY screening. Contract version `1.0.0` and normalization
 version `1.0.0` define data only. `createAlpacaResearchSnapshotProvider` captures
-that data without invoking the research agent; runtime audit wiring remains
-separate under #66. The pure `directional-debit-vertical-v1` strategy component
-consumes a validated snapshot pair to calculate exact features and select the
-deterministic rank-one SPY candidate; runtime authority remains unchanged until
-#67.
+that data without invoking the research agent. Trade-intent-eligible cycles now
+use it as a non-authoritative audit sidecar under #66. The pure
+`directional-debit-vertical-v1` strategy component consumes a validated snapshot
+pair to calculate exact features and select the deterministic rank-one SPY
+candidate; runtime authority remains unchanged until #67.
 
 The contract contains no provider client, model output, account state, risk
 result, runtime callback, credential, URL, page token, or raw provider payload.
@@ -121,8 +121,10 @@ cancellation escapes without recording a misleading capture failure. Raw
 provider payloads and credentials never cross the adapter boundary.
 
 The provider returns a validated snapshot pair but does not persist it or invoke
-screening. Composition-root wiring, audit comparison, and ledger diagnostics
-belong to #66.
+screening. The #66 composition root passes that pair to deterministic screening
+and persists only bounded identity, latency, result, and rejection-funnel
+diagnostics after the authoritative cycle terminal. Snapshot bodies remain
+ephemeral.
 
 ## Content identity
 
@@ -163,7 +165,7 @@ values never cross this boundary.
 The snapshot contract and builders do not implement:
 
 - Alpaca requests, pagination loops, retries, timeouts, or credentials;
-- runtime, research-agent, ledger, artifact, or SQLite integration;
+- runtime authority, research-agent inputs, snapshot-body persistence, or research artifacts;
 - signal features, contract eligibility, candidate IDs, spreads, or ranking;
 - risk evaluation, intent derivation, exact-leg confirmation, or execution;
 - replay migration; or

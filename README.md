@@ -73,7 +73,7 @@ The frozen MVP strategy is documented in [SPY Directional Debit Spreads](docs/st
 | [Research Plan V1](docs/research-plan-v1.md) | Plan-driven qualitative contract and candidate-reference response (not production-active) |
 | [Event Ledger V1](docs/event-ledger-v1.md) | Append-only audit record and SQL invariants |
 | [Backtest Replay V1/V2](docs/backtest-replay-v1.md) | Offline scenario contracts and fidelities |
-| [Research Market Snapshots V1](docs/research-market-snapshots-v1.md) | Application-owned SPY market-data identity and capture (runtime audit wiring is unbuilt) |
+| [Research Market Snapshots V1](docs/research-market-snapshots-v1.md) | Application-owned SPY market-data identity and non-authoritative runtime audit capture |
 | [Pre-Market Research V1](docs/pre-market-research-v1.md) | Research vs. trade-intent eligibility windows |
 | [Research Source Policy](docs/research-source-policy.md) | Source precedence and freshness rules |
 | [Research Behavior Evaluation](docs/research-behavior-evaluation.md) | Prompt-behavior evaluation record |

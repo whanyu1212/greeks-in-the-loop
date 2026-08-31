@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 
+import type { ResearchScreeningAuditV1 } from "../contracts/research-screening-audit-v1.js"
 import type {
   ResearchCycleOutcomeSink,
   ResearchCycleTerminalRecordV1,
@@ -78,6 +79,11 @@ export type ResearchLifecycleRecorder = Readonly<{
   recordResearchLoopBreakerReset(): Promise<void>
   recordOpenCodeSessionStarted(
     sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<void>
+  recordResearchScreeningAudit(
+    cycleId: string,
+    audit: ResearchScreeningAuditV1,
     signal?: AbortSignal,
   ): Promise<void>
   startCycle(
@@ -345,6 +351,45 @@ export function createResearchLifecycleRecorder({
             correlationId: idFactory(),
             sessionId,
             payload: { sessionId },
+          },
+          signal,
+        ),
+      )
+    },
+
+    async recordResearchScreeningAudit(cycleId, audit, signal) {
+      const [terminal] = await persist("screening-audit terminal query", () =>
+        store.list({
+          cycleId,
+          direction: "DESC",
+          eventTypes: [
+            "RESEARCH_CYCLE_COMPLETED",
+            "RESEARCH_CYCLE_INTERRUPTED",
+          ],
+          limit: 1,
+        }),
+      )
+      if (terminal === undefined) {
+        throw new LedgerPersistenceError(
+          "screening-audit append",
+          new Error("Research screening audit requires a cycle terminal"),
+        )
+      }
+      signal?.throwIfAborted()
+      await persist("screening-audit append", () =>
+        store.append(
+          {
+            eventId: idFactory(),
+            eventVersion: LEDGER_EVENT_VERSION,
+            eventType: "RESEARCH_SCREENING_AUDIT_RECORDED",
+            occurredAt: now().toISOString(),
+            correlationId: terminal.correlationId,
+            causationEventId: terminal.eventId,
+            cycleId,
+            ...(terminal.sessionId === undefined
+              ? {}
+              : { sessionId: terminal.sessionId }),
+            payload: { audit },
           },
           signal,
         ),

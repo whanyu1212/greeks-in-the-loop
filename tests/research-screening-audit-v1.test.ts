@@ -4,6 +4,8 @@ import {
   agentResearchScreeningAuditV1Schema,
   applicationResearchScreeningAuditV1Schema,
   classifyResearchScreeningComparisonV1,
+  createAgentResearchScreeningModelDriftAuditV1,
+  createAgentResearchScreeningUnavailableAuditV1,
   createApplicationCaptureUnavailableAuditV1,
   createApplicationResearchScreeningAuditV1,
   createApplicationScreeningUnavailableAuditV1,
@@ -243,6 +245,27 @@ describe("research screening audit V1", () => {
       eligibleCandidateCount: 1,
       firstFailureCounts: [],
     }).success).toBe(false)
+  })
+
+  it("constructs bounded unavailable and model-drift agent audits", () => {
+    expect(createAgentResearchScreeningUnavailableAuditV1(
+      "INVOCATION_FAILED",
+    )).toEqual({
+      status: "UNAVAILABLE",
+      reason: "INVOCATION_FAILED",
+    })
+    expect(createAgentResearchScreeningModelDriftAuditV1({
+      invocationVersion: "1.3.0",
+      reason: "MODEL_DRIFT",
+      expected: "gpt-5.6-sol",
+      observed: "different-model",
+    })).toEqual({
+      status: "MODEL_IDENTITY_DRIFT",
+      invocationVersion: "1.3.0",
+      reason: "MODEL_DRIFT",
+      expected: "gpt-5.6-sol",
+      observed: "different-model",
+    })
   })
 
   it("canonicalizes capture failure reasons", () => {

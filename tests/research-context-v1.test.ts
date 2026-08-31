@@ -2,12 +2,19 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type {
-  LedgerEventV1,
-  StoredLedgerEventV1,
+import {
+  createAgentResearchScreeningUnavailableAuditV1,
+  createApplicationCaptureUnavailableAuditV1,
+  createResearchScreeningAuditV1,
+} from "../src/contracts/research-screening-audit-v1.js"
+import {
+  LEDGER_EVENT_TYPES,
+  type LedgerEventV1,
+  type StoredLedgerEventV1,
 } from "../src/event-ledger/ledger-event-v1.js"
+import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
 import {
   MAX_RESEARCH_CONTEXT_EVENTS,
@@ -153,6 +160,53 @@ afterEach(() => {
 })
 
 describe("ResearchContextV1", () => {
+  it("excludes screening audits before applying the bounded prompt window", async () => {
+    const authoritativeEvents = Array.from(
+      { length: MAX_RESEARCH_CONTEXT_EVENTS },
+      (_, index) => stored(cycleStarted(index + 1), index + 1),
+    )
+    const terminal = authoritativeEvents.at(-1)!
+    const audit = stored({
+      ...terminal,
+      eventId: "screening-audit",
+      eventType: "RESEARCH_SCREENING_AUDIT_RECORDED",
+      causationEventId: terminal.eventId,
+      payload: {
+        audit: createResearchScreeningAuditV1({
+          application: createApplicationCaptureUnavailableAuditV1(
+            ["REQUEST_TIMED_OUT"],
+            25,
+          ),
+          agent: createAgentResearchScreeningUnavailableAuditV1(
+            "INVOCATION_FAILED",
+          ),
+        }),
+      },
+    }, MAX_RESEARCH_CONTEXT_EVENTS + 1)
+
+    expect(projectResearchContextV1(
+      [...authoritativeEvents, audit],
+      { generatedAt: recordedAt },
+    )).toEqual(projectResearchContextV1(
+      authoritativeEvents,
+      { generatedAt: recordedAt },
+    ))
+
+    const queries: Parameters<LedgerStore["list"]>[0][] = []
+    const store = {
+      list: vi.fn<LedgerStore["list"]>(async (query) => {
+        queries.push(query)
+        return []
+      }),
+    } as unknown as LedgerStore
+    await loadResearchContextV1(store, { generatedAt: recordedAt })
+    expect(queries[0]?.eventTypes).toEqual(
+      LEDGER_EVENT_TYPES.filter(
+        (eventType) => eventType !== "RESEARCH_SCREENING_AUDIT_RECORDED",
+      ),
+    )
+  })
+
   it("carries the latest preliminary finding forward with mandatory refresh", () => {
     const context = projectResearchContextV1(
       [

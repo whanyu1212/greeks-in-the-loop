@@ -1106,6 +1106,27 @@ const candidateIdentity = (
       }
 }
 
+export function createAgentResearchScreeningUnavailableAuditV1(
+  reason: "INVOCATION_FAILED" | "REPORT_REJECTED" | "AUDIT_CANCELLED" | "UNEXPECTED_FAILURE",
+): AgentResearchScreeningAuditV1 {
+  return agentResearchScreeningAuditV1Schema.parse({
+    status: "UNAVAILABLE",
+    reason,
+  })
+}
+
+export function createAgentResearchScreeningModelDriftAuditV1(options: Readonly<{
+  invocationVersion: (typeof SUPPORTED_RESEARCH_INVOCATION_VERSIONS)[number]
+  reason: "PROVIDER_DRIFT" | "MODEL_DRIFT"
+  expected: string
+  observed: string
+}>): AgentResearchScreeningAuditV1 {
+  return agentResearchScreeningAuditV1Schema.parse({
+    status: "MODEL_IDENTITY_DRIFT",
+    ...options,
+  })
+}
+
 export function projectResearchReportV2ForScreeningAudit(
   report: ResearchReportV2,
   invocation: ResearchInvocationV1,

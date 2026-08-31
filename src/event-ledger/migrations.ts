@@ -251,6 +251,52 @@ export const LEDGER_MIGRATIONS: readonly LedgerMigration[] = [
       END;
     `,
   },
+  {
+    id: "004_research_screening_audit",
+    sql: `
+      DROP TRIGGER ledger_events_no_post_terminal;
+
+      CREATE UNIQUE INDEX ledger_events_one_research_screening_audit
+        ON ledger_events(cycle_id)
+        WHERE event_type = 'RESEARCH_SCREENING_AUDIT_RECORDED';
+
+      CREATE TRIGGER ledger_events_screening_audit_requires_terminal
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.event_type = 'RESEARCH_SCREENING_AUDIT_RECORDED'
+      BEGIN
+        SELECT CASE
+          WHEN NEW.cycle_id IS NULL OR NOT EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE event_id = NEW.causation_event_id
+              AND cycle_id = NEW.cycle_id
+              AND event_type IN (
+                'RESEARCH_CYCLE_COMPLETED',
+                'RESEARCH_CYCLE_INTERRUPTED'
+              )
+          )
+          THEN RAISE(ABORT, 'screening audit must follow its cycle terminal')
+        END;
+      END;
+
+      CREATE TRIGGER ledger_events_no_post_terminal
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.cycle_id IS NOT NULL
+        AND NEW.event_type <> 'RESEARCH_SCREENING_AUDIT_RECORDED'
+        AND EXISTS (
+          SELECT 1
+          FROM ledger_events
+          WHERE cycle_id = NEW.cycle_id
+            AND event_type IN (
+              'RESEARCH_CYCLE_COMPLETED',
+              'RESEARCH_CYCLE_INTERRUPTED'
+            )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'cannot append after a cycle terminal event');
+      END;
+    `,
+  },
 ]
 
 const checksum = (sql: string) =>
