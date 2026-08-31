@@ -151,6 +151,43 @@ The regimes and triggers are:
 Strict inequalities are intentional. Equality, mixed ordering, or a trigger
 that disagrees with the daily regime produces `NO_ACTION`.
 
+## Application-Owned Applicability V1
+
+`StrategyApplicabilityV1` version `1.0.0` is the deterministic boundary between
+an underlying-session snapshot and option candidate generation.
+`assessDirectionalDebitVerticalApplicabilityV1` consumes only the validated
+underlying snapshot; it does not require or request an option chain. Its identity
+binds the snapshot strategy manifest, resolved evaluation manifest, feature
+implementation, and applicability component versions to the content-addressed
+underlying snapshot and evaluation time. A null evaluation manifest records
+fail-closed registry or manifest resolution. A validated snapshot identity binds
+the complete immutable snapshot manifest; malformed snapshot input instead uses
+an explicit `INVALID` identity with a domain-separated canonical input digest.
+
+The evaluator preserves this first-result precedence:
+
+| Result | Reason |
+| --- | --- |
+| `UNAVAILABLE` | `STRATEGY_MANIFEST_INCOMPATIBLE` |
+| `UNAVAILABLE` | `UNDERLYING_SNAPSHOT_INVALID` |
+| `UNAVAILABLE` | `FEATURE_INPUT_INVALID` |
+| `NOT_APPLICABLE` | `SIGNAL_NOT_ACTIONABLE` |
+| `UNAVAILABLE` | `UNDERLYING_QUOTE_STALE` |
+| `UNAVAILABLE` | `LATEST_MINUTE_BAR_STALE` |
+| `APPLICABLE` | all preceding gates pass |
+
+`APPLICABLE` means only that the strategy may proceed to option candidate
+screening. It does not mean a candidate exists and does not authorize a trade.
+In particular, `NO_ELIGIBLE_SPREAD` remains a downstream candidate-availability
+result. The application owns applicability; qualitative research may veto an
+application-selected candidate but may not select, substitute, or authorize a
+strategy.
+
+The existing SPY screener delegates these gates to the applicability evaluator
+without changing Strategy V1 thresholds, diagnostics, ranking, candidate IDs,
+replay results, or runtime authority. Staged underlying-first provider capture
+and applicability persistence are deferred to issue #90.
+
 ## Contract Eligibility
 
 Both legs must pass every rule at the same decision timestamp:

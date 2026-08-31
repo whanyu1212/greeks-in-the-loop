@@ -7,10 +7,19 @@ import type {
 } from "../contracts/research-market-snapshot-builders-v1.js"
 import {
   researchSnapshotStrategyManifestV1Schema,
+  underlyingSessionSnapshotV1Schema,
   type OptionUniverseContractV1,
   type ResearchSnapshotStrategyManifestV1,
+  type UnderlyingSessionSnapshotV1,
 } from "../contracts/research-market-snapshot-v1.js"
 import { canonicalJson, canonicalJsonSha256 } from "../shared/canonical-json.js"
+import {
+  DIRECTIONAL_DEBIT_VERTICAL_APPLICABILITY_COMPONENT_ID,
+  DIRECTIONAL_DEBIT_VERTICAL_APPLICABILITY_COMPONENT_VERSION,
+  STRATEGY_APPLICABILITY_VERSION,
+  strategyApplicabilityV1Schema,
+  type StrategyApplicabilityV1,
+} from "./strategy-applicability-v1.js"
 import { checkStrategyManifestCompatibility } from "./strategy-registry.js"
 
 export const DIRECTIONAL_TREND_FEATURE_COMPONENT_ID =
@@ -321,6 +330,159 @@ const quoteIsFreshAt = (
   return Number.isFinite(age) && age >= 0 && age <= maximumAgeMs
 }
 
+type DirectionalDebitVerticalApplicabilityAssessmentV1 = Readonly<{
+  applicability: StrategyApplicabilityV1
+  features?: DirectionalTrendFeaturesV1
+}>
+
+const applicabilityIdentity = (
+  underlying: UnderlyingSessionSnapshotV1,
+  validatedUnderlying: UnderlyingSessionSnapshotV1 | undefined,
+  evaluatedStrategyManifest: ResearchSnapshotStrategyManifestV1 | null,
+) => ({
+  evaluatedStrategyManifest,
+  featureComponentId: DIRECTIONAL_TREND_FEATURE_COMPONENT_ID,
+  featureVersion: DIRECTIONAL_TREND_FEATURE_VERSION,
+  applicabilityComponentId:
+    DIRECTIONAL_DEBIT_VERTICAL_APPLICABILITY_COMPONENT_ID,
+  applicabilityComponentVersion:
+    DIRECTIONAL_DEBIT_VERTICAL_APPLICABILITY_COMPONENT_VERSION,
+  snapshot: validatedUnderlying === undefined
+    ? {
+        status: "INVALID" as const,
+        inputDigest: canonicalJsonSha256({
+          domain: "strategy-applicability-invalid-underlying-v1",
+          underlying,
+        }),
+      }
+    : {
+        status: "VALIDATED" as const,
+        strategyManifest: validatedUnderlying.strategyManifest,
+        underlying: validatedUnderlying.underlying,
+        underlyingSnapshotId: validatedUnderlying.snapshotId,
+        evaluatedAt: validatedUnderlying.times.evaluatedAt,
+      },
+})
+
+type ApplicabilityOutcomeV1<T = StrategyApplicabilityV1> = T extends unknown
+  ? Omit<T, "applicabilityVersion" | "identity">
+  : never
+
+const assessDirectionalDebitVerticalApplicabilityForManifestWithFeaturesV1 = (
+  underlying: UnderlyingSessionSnapshotV1,
+  strategyManifest: ResearchSnapshotStrategyManifestV1 | undefined,
+): DirectionalDebitVerticalApplicabilityAssessmentV1 => {
+  const manifest = researchSnapshotStrategyManifestV1Schema.safeParse(
+    strategyManifest,
+  )
+  const snapshot = underlyingSessionSnapshotV1Schema.safeParse(underlying)
+  const result = (
+    applicability: ApplicabilityOutcomeV1,
+    features?: DirectionalTrendFeaturesV1,
+  ) => deepFreeze({
+    applicability: strategyApplicabilityV1Schema.parse({
+      applicabilityVersion: STRATEGY_APPLICABILITY_VERSION,
+      identity: applicabilityIdentity(
+        underlying,
+        snapshot.success ? snapshot.data : undefined,
+        manifest.success ? manifest.data : null,
+      ),
+      ...applicability,
+    }),
+    ...(features === undefined ? {} : { features }),
+  })
+  const snapshotManifest = researchSnapshotStrategyManifestV1Schema.safeParse(
+    underlying.strategyManifest,
+  )
+  if (
+    !manifest.success ||
+    !snapshotManifest.success ||
+    canonicalJson(snapshotManifest.data) !== canonicalJson(manifest.data)
+  ) {
+    return result({
+      status: "UNAVAILABLE",
+      reason: "STRATEGY_MANIFEST_INCOMPATIBLE",
+    })
+  }
+  if (!snapshot.success) {
+    return result({
+      status: "UNAVAILABLE",
+      reason: "UNDERLYING_SNAPSHOT_INVALID",
+    })
+  }
+  const validatedUnderlying = snapshot.data
+
+  const featureResult = calculateDirectionalTrendFeaturesV1({
+    completedDailyClosesMicrosPerShare: validatedUnderlying.dailyBars.map(
+      ({ closeMicrosPerShare }) => closeMicrosPerShare,
+    ),
+    completedMinuteBars: validatedUnderlying.minuteBars.map(
+      ({ vwapMicrosPerShare, volume }) => ({ vwapMicrosPerShare, volume }),
+    ),
+    underlyingBidMicrosPerShare:
+      validatedUnderlying.underlyingQuote.bidMicrosPerShare,
+    underlyingAskMicrosPerShare:
+      validatedUnderlying.underlyingQuote.askMicrosPerShare,
+  })
+  if (!featureResult.success) {
+    return result({ status: "UNAVAILABLE", reason: "FEATURE_INPUT_INVALID" })
+  }
+  const { features } = featureResult
+  if (features.direction === "NO_ACTION") {
+    return result({
+      status: "NOT_APPLICABLE",
+      reason: "SIGNAL_NOT_ACTIONABLE",
+    }, features)
+  }
+
+  const evaluatedAt = validatedUnderlying.times.evaluatedAt
+  if (!quoteIsFreshAt(
+    validatedUnderlying.underlyingQuote.providerTimestamp,
+    evaluatedAt,
+    60_000,
+  )) {
+    return result({
+      status: "UNAVAILABLE",
+      reason: "UNDERLYING_QUOTE_STALE",
+    }, features)
+  }
+  const latestMinute = validatedUnderlying.minuteBars.at(-1)!
+  if (
+    Date.parse(evaluatedAt) - (Date.parse(latestMinute.startedAt) + 60_000) >
+      120_000
+  ) {
+    return result({
+      status: "UNAVAILABLE",
+      reason: "LATEST_MINUTE_BAR_STALE",
+    }, features)
+  }
+  return result({ status: "APPLICABLE" }, features)
+}
+
+/** Assesses one underlying snapshot against an explicit immutable manifest. */
+export function assessDirectionalDebitVerticalApplicabilityForManifestV1(
+  underlying: UnderlyingSessionSnapshotV1,
+  strategyManifest: ResearchSnapshotStrategyManifestV1,
+): StrategyApplicabilityV1 {
+  return assessDirectionalDebitVerticalApplicabilityForManifestWithFeaturesV1(
+    underlying,
+    strategyManifest,
+  ).applicability
+}
+
+/** Assesses current registered SPY strategy applicability from one underlying snapshot. */
+export function assessDirectionalDebitVerticalApplicabilityV1(
+  underlying: UnderlyingSessionSnapshotV1,
+): StrategyApplicabilityV1 {
+  const compatibility = checkStrategyManifestCompatibility(
+    underlying.strategyManifest,
+  )
+  return assessDirectionalDebitVerticalApplicabilityForManifestWithFeaturesV1(
+    underlying,
+    compatibility.success ? compatibility.manifest : undefined,
+  ).applicability
+}
+
 export const DEBIT_VERTICAL_FIRST_FAILURE_STAGE_BY_REASON: Readonly<
   Record<DebitVerticalFirstFailureReasonV1, DebitVerticalAuditStageV1>
 > = Object.freeze({
@@ -516,55 +678,50 @@ const screenSpyDirectionalDebitVerticalForManifestWithAuditV1 = (
   const manifest = researchSnapshotStrategyManifestV1Schema.safeParse(
     strategyManifest,
   )
-  if (
-    !manifest.success ||
-    canonicalJson(underlying.strategyManifest) !== canonicalJson(manifest.data)
-  ) {
-    reject("STRATEGY_MANIFEST_INCOMPATIBLE")
+  const assessment =
+    assessDirectionalDebitVerticalApplicabilityForManifestWithFeaturesV1(
+      underlying,
+      manifest.success ? manifest.data : undefined,
+    )
+  const { applicability, features } = assessment
+  if (applicability.status === "UNAVAILABLE") {
+    if (applicability.reason === "UNDERLYING_SNAPSHOT_INVALID") {
+      throw new Error("Validated research snapshot became invalid")
+    }
+    if (applicability.reason === "FEATURE_INPUT_INVALID") {
+      throw new Error("Validated research snapshots contain invalid feature inputs")
+    }
+    if (applicability.reason === "STRATEGY_MANIFEST_INCOMPATIBLE") {
+      reject("STRATEGY_MANIFEST_INCOMPATIBLE")
+      return finish({
+        status: "NO_ACTION",
+        reason: "STRATEGY_MANIFEST_INCOMPATIBLE",
+      })
+    }
+    reject(applicability.reason)
     return finish({
       status: "NO_ACTION",
-      reason: "STRATEGY_MANIFEST_INCOMPATIBLE",
+      reason: "MARKET_DATA_STALE",
+      features: features!,
     })
   }
-  const featureResult = calculateDirectionalTrendFeaturesV1({
-    completedDailyClosesMicrosPerShare: underlying.dailyBars.map(
-      ({ closeMicrosPerShare }) => closeMicrosPerShare,
-    ),
-    completedMinuteBars: underlying.minuteBars.map(
-      ({ vwapMicrosPerShare, volume }) => ({ vwapMicrosPerShare, volume }),
-    ),
-    underlyingBidMicrosPerShare:
-      underlying.underlyingQuote.bidMicrosPerShare,
-    underlyingAskMicrosPerShare:
-      underlying.underlyingQuote.askMicrosPerShare,
-  })
-  if (!featureResult.success) {
-    throw new Error("Validated research snapshots contain invalid feature inputs")
-  }
-  const { features } = featureResult
-  if (features.direction === "NO_ACTION") {
+  if (applicability.status === "NOT_APPLICABLE") {
     reject("FEATURE_SIGNAL_NOT_ACTIONABLE")
-    return finish({ status: "NO_ACTION", reason: "SIGNAL_NOT_ACTIONABLE", features })
+    return finish({
+      status: "NO_ACTION",
+      reason: "SIGNAL_NOT_ACTIONABLE",
+      features: features!,
+    })
+  }
+  if (
+    !manifest.success ||
+    features === undefined ||
+    features.direction === "NO_ACTION"
+  ) {
+    throw new Error("Applicable strategy assessment is internally inconsistent")
   }
 
   const evaluatedAt = underlying.times.evaluatedAt
-  const latestMinute = underlying.minuteBars.at(-1)!
-  if (!quoteIsFreshAt(
-    underlying.underlyingQuote.providerTimestamp,
-    evaluatedAt,
-    60_000,
-  )) {
-    reject("UNDERLYING_QUOTE_STALE")
-    return finish({ status: "NO_ACTION", reason: "MARKET_DATA_STALE", features })
-  }
-  if (
-    Date.parse(evaluatedAt) - (Date.parse(latestMinute.startedAt) + 60_000) >
-      120_000
-  ) {
-    reject("LATEST_MINUTE_BAR_STALE")
-    return finish({ status: "NO_ACTION", reason: "MARKET_DATA_STALE", features })
-  }
-
   const direction = features.direction
   const optionType = direction === "BULLISH" ? "CALL" : "PUT"
   const structure =

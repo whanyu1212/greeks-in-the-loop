@@ -22,6 +22,15 @@ without changing the terminal, scheduler backoff, or research-loop breaker.
 `screenSpyDirectionalDebitVerticalV1` delegates to it and returns only the
 unchanged result.
 
+The screener's manifest, feature-actionability, and underlying-freshness gates
+now delegate to application-owned `StrategyApplicabilityV1`. Applicability is
+computed from the underlying snapshot before option candidate availability:
+`APPLICABLE` permits screening to continue, `NOT_APPLICABLE` maps to the
+existing signal no-action result, and `UNAVAILABLE` maps fail-closed to the
+existing manifest or market-data result. `NO_ELIGIBLE_SPREAD` remains downstream
+of applicability. This internal boundary does not add an audit field, change a
+retained identity, or alter application/agent comparison semantics.
+
 Diagnostics count the first failed predicate for each evaluation unit:
 
 - compatibility, feature, and underlying freshness are one cycle-level unit;
@@ -169,4 +178,5 @@ model-identity failures retain their existing breaker behavior.
 
 V1 does not provide threshold tuning, profitability evidence, authority
 promotion, replay migration, an audit-specific breaker, provider-payload replay,
-or runtime readback of aggregate reports.
+runtime readback of aggregate reports, staged underlying-first capture, or
+persisted applicability results.
