@@ -457,11 +457,22 @@ describe("research behavior evaluation", () => {
       expected: injectionExpectation,
     })
     const candidate = researchBehaviorScenarios[7]!
+    const candidateChainIndexes = candidate.toolCalls.flatMap(
+      ({ name }, index) => name === "alpaca_get_option_chain" ? [index] : [],
+    )
+    const [firstCandidateChainIndex, secondCandidateChainIndex] =
+      candidateChainIndexes
+    if (
+      firstCandidateChainIndex === undefined ||
+      secondCandidateChainIndex === undefined
+    ) {
+      throw new Error("candidate fixture requires two option-chain calls")
+    }
     const withoutRefresh = evaluateResearchBehavior({
       ...candidate,
       scenarioId: "candidate-not-refreshed",
       toolCalls: candidate.toolCalls.filter(
-        ({ name }, index) => name !== "alpaca_get_option_chain" || index <= 6,
+        (_call, index) => index !== secondCandidateChainIndex,
       ),
     })
     const extraRefresh = evaluateResearchBehavior({
@@ -476,18 +487,25 @@ describe("research behavior evaluation", () => {
       ...candidate,
       scenarioId: "candidate-refresh-input-invalid",
       toolCalls: candidate.toolCalls.map((call, index) =>
-        index === 8 ? { ...call, input: { symbol: "SPY" } } : call
+        index === secondCandidateChainIndex
+          ? { ...call, input: { symbol: "SPY" } }
+          : call
       ),
     })
+    const candidateExaIndex = candidate.toolCalls.findIndex(
+      ({ name }) => name === "exa_search",
+    )
     const wrongRefreshOrder = evaluateResearchBehavior({
       ...candidate,
       scenarioId: "candidate-refresh-order-invalid",
       toolCalls: [
-        ...candidate.toolCalls.slice(0, 5),
-        candidate.toolCalls[6]!,
-        candidate.toolCalls[5]!,
-        candidate.toolCalls[7]!,
-        candidate.toolCalls[8]!,
+        ...candidate.toolCalls.slice(0, candidateExaIndex),
+        ...candidate.toolCalls.slice(
+          candidateExaIndex + 1,
+          firstCandidateChainIndex + 1,
+        ),
+        candidate.toolCalls[candidateExaIndex]!,
+        ...candidate.toolCalls.slice(firstCandidateChainIndex + 1),
       ],
     })
     const withoutCandidateAccount = evaluateResearchBehavior({
@@ -1316,25 +1334,24 @@ describe("research behavior evaluation", () => {
           : call
       ),
     })
-    let stockBarIndex = 0
+    const stockBarIndexes = source.toolCalls.flatMap(
+      ({ name }, index) => name === "alpaca_get_stock_bars" ? [index] : [],
+    )
+    const rebuildDailyIndex = stockBarIndexes.at(-2)
+    const rebuildIntradayIndex = stockBarIndexes.at(-1)
+    if (rebuildDailyIndex === undefined || rebuildIntradayIndex === undefined) {
+      throw new Error("stale fixture requires a two-call bar rebuild")
+    }
     const splitBarTimeframes = evaluateResearchBehavior({
       ...source,
       scenarioId: "split-bar-timeframes",
-      toolCalls: source.toolCalls.map((call) => {
-        if (call.name !== "alpaca_get_stock_bars") return call
-        const timeframe = stockBarIndex < 2 ? "1Day" : "1Min"
-        stockBarIndex += 1
-        const { adjustment: _adjustment, ...input } =
-          call.input as Record<string, unknown>
-        return {
-          ...call,
-          input: {
-            ...input,
-            timeframe,
-            ...(timeframe === "1Day" ? { adjustment: "all" } : {}),
-          },
-        }
-      }),
+      toolCalls: source.toolCalls.map((call, index) =>
+        index === rebuildDailyIndex
+          ? source.toolCalls[rebuildIntradayIndex]!
+          : index === rebuildIntradayIndex
+            ? source.toolCalls[rebuildDailyIndex]!
+            : call
+      ),
     })
     const firstStaleBarIndex = source.toolCalls.findIndex(
       ({ name }) => name === "alpaca_get_stock_bars",

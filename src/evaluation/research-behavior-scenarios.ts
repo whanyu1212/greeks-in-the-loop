@@ -1,4 +1,5 @@
 import { NO_ACTION_REASON_CODES } from "../contracts/research-decision-v2.js"
+import { ALLOWED_OPTION_UNDERLYINGS_V1 } from "../shared/alpaca-option-identity.js"
 import type {
   ResearchBehaviorExpectation,
   ResearchBehaviorIssueCode,
@@ -235,6 +236,27 @@ const completed = (
   }
 }
 
+const screeningToolExpectations = ALLOWED_OPTION_UNDERLYINGS_V1.flatMap(
+  (symbol) => [
+    {
+      pattern: "alpaca_get_stock_bars",
+      input: { symbol, timeframe: "1Day", adjustment: "all", feed: "iex" },
+    },
+    {
+      pattern: "alpaca_get_stock_bars",
+      input: { symbol, timeframe: "1Min", feed: "iex" },
+    },
+    {
+      pattern: "alpaca_get_stock_latest_quote",
+      input: { symbol, feed: "iex" },
+    },
+  ],
+)
+
+const screeningToolCalls = screeningToolExpectations.map(({ pattern, input }) =>
+  completed(pattern, input)
+)
+
 const completeProposalToolCalls = (
   exaCallCount: number,
 ): readonly ResearchBehaviorToolCall[] => [
@@ -245,18 +267,7 @@ const completeProposalToolCalls = (
   completed("alpaca_get_orders"),
   completed("alpaca_get_calendar"),
   ...Array.from({ length: exaCallCount }, () => completed("exa_search")),
-  completed("alpaca_get_stock_bars", {
-    symbol: "SPY",
-    timeframe: "1Day",
-    adjustment: "all",
-    feed: "iex",
-  }),
-  completed("alpaca_get_stock_bars", {
-    symbol: "SPY",
-    timeframe: "1Min",
-    feed: "iex",
-  }),
-  completed("alpaca_get_stock_latest_quote", { symbol: "SPY", feed: "iex" }),
+  ...screeningToolCalls,
   completed("alpaca_get_option_chain", {
     symbol: "SPY",
     feed: "indicative",
@@ -287,37 +298,20 @@ const completeProposalToolExpectation = {
     ["exa_*", "alpaca_get_stock_bars"],
   ],
   completedToolCounts: [
-    { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 2 },
-    { pattern: "alpaca_get_stock_latest_quote", minimum: 1, maximum: 1 },
+    { pattern: "alpaca_get_stock_bars", minimum: 6, maximum: 6 },
+    { pattern: "alpaca_get_stock_latest_quote", minimum: 3, maximum: 3 },
     { pattern: "alpaca_get_option_chain", minimum: 1, maximum: 1 },
     { pattern: "alpaca_get_option_contracts", minimum: 1, maximum: 1 },
     { pattern: "alpaca_get_clock", minimum: 1, maximum: 1 },
     { pattern: "trusted_time", minimum: 3, maximum: 4 },
   ],
   completedToolInputCounts: [
-    {
-      pattern: "alpaca_get_stock_bars",
-      input: {
-        symbol: "SPY",
-        timeframe: "1Day",
-        adjustment: "all",
-        feed: "iex",
-      },
+    ...screeningToolExpectations.map(({ pattern, input }) => ({
+      pattern,
+      input,
       minimum: 1,
       maximum: 1,
-    },
-    {
-      pattern: "alpaca_get_stock_bars",
-      input: { symbol: "SPY", timeframe: "1Min", feed: "iex" },
-      minimum: 1,
-      maximum: 1,
-    },
-    {
-      pattern: "alpaca_get_stock_latest_quote",
-      input: { symbol: "SPY", feed: "iex" },
-      minimum: 1,
-      maximum: 1,
-    },
+    })),
     {
       pattern: "alpaca_get_option_chain",
       input: { symbol: "SPY", feed: "indicative" },
@@ -345,23 +339,7 @@ const completeProposalToolExpectation = {
     "alpaca_get_all_positions",
     "alpaca_get_orders",
     "alpaca_get_calendar",
-    {
-      pattern: "alpaca_get_stock_bars",
-      input: {
-        symbol: "SPY",
-        timeframe: "1Day",
-        adjustment: "all",
-        feed: "iex",
-      },
-    },
-    {
-      pattern: "alpaca_get_stock_bars",
-      input: { symbol: "SPY", timeframe: "1Min", feed: "iex" },
-    },
-    {
-      pattern: "alpaca_get_stock_latest_quote",
-      input: { symbol: "SPY", feed: "iex" },
-    },
+    ...screeningToolExpectations,
     {
       pattern: "alpaca_get_option_chain",
       input: { symbol: "SPY", feed: "indicative" },
@@ -657,18 +635,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       completed("alpaca_get_all_positions"),
       completed("alpaca_get_orders"),
       completed("exa_search"),
-      completed("alpaca_get_stock_bars", {
-        symbol: "SPY",
-        timeframe: "1Day",
-        adjustment: "all",
-        feed: "iex",
-      }),
-      completed("alpaca_get_stock_bars", {
-        symbol: "SPY",
-        timeframe: "1Min",
-        feed: "iex",
-      }),
-      completed("alpaca_get_stock_latest_quote", { symbol: "SPY", feed: "iex" }),
+      ...screeningToolCalls,
       completed("alpaca_get_option_chain", { symbol: "SPY", feed: "indicative" }),
       completed("alpaca_get_option_contracts", { symbol: "SPY" }),
       completed("trusted_time"),
@@ -702,13 +669,21 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       requiredCompletedToolPrefix: ["alpaca_get_account"],
       expectedAccountObservedAt: "2026-08-26T14:30:00.000Z",
       completedToolCounts: [
-        { pattern: "alpaca_get_stock_bars", minimum: 4, maximum: 4 },
-        { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 2 },
+        { pattern: "alpaca_get_stock_bars", minimum: 8, maximum: 8 },
+        { pattern: "alpaca_get_stock_latest_quote", minimum: 4, maximum: 4 },
         { pattern: "alpaca_get_option_chain", minimum: 2, maximum: 2 },
         { pattern: "alpaca_get_option_contracts", minimum: 2, maximum: 2 },
         { pattern: "trusted_time", minimum: 3, maximum: 5 },
       ],
       completedToolInputCounts: [
+        ...screeningToolExpectations
+          .filter(({ input }) => input.symbol !== "SPY")
+          .map(({ pattern, input }) => ({
+            pattern,
+            input,
+            minimum: 1,
+            maximum: 1,
+          })),
         {
           pattern: "alpaca_get_stock_bars",
           input: {
@@ -752,23 +727,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         "alpaca_get_all_positions",
         "alpaca_get_orders",
         "exa_*",
-        {
-          pattern: "alpaca_get_stock_bars",
-          input: {
-            symbol: "SPY",
-            timeframe: "1Day",
-            adjustment: "all",
-            feed: "iex",
-          },
-        },
-        {
-          pattern: "alpaca_get_stock_bars",
-          input: { symbol: "SPY", timeframe: "1Min", feed: "iex" },
-        },
-        {
-          pattern: "alpaca_get_stock_latest_quote",
-          input: { symbol: "SPY", feed: "iex" },
-        },
+        ...screeningToolExpectations,
         {
           pattern: "alpaca_get_option_chain",
           input: { symbol: "SPY", feed: "indicative" },
@@ -842,6 +801,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       completed("alpaca_get_all_positions"),
       completed("alpaca_get_orders"),
       completed("exa_search"),
+      ...screeningToolCalls,
       completed("alpaca_get_option_chain", {
         symbol: "SPY",
         feed: "indicative",
@@ -954,18 +914,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       completed("alpaca_get_all_positions"),
       completed("alpaca_get_orders"),
       completed("exa_search"),
-      completed("alpaca_get_stock_bars", {
-        symbol: "SPY",
-        timeframe: "1Day",
-        adjustment: "all",
-        feed: "iex",
-      }),
-      completed("alpaca_get_stock_bars", {
-        symbol: "SPY",
-        timeframe: "1Min",
-        feed: "iex",
-      }),
-      completed("alpaca_get_stock_latest_quote", { symbol: "SPY", feed: "iex" }),
+      ...screeningToolCalls,
       completed("trusted_time"),
     ],
     expected: {
@@ -983,33 +932,16 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       ],
       completedToolCounts: [
         { pattern: "trusted_time", minimum: 2, maximum: 4 },
-        { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
-        { pattern: "alpaca_get_stock_latest_quote", minimum: 1, maximum: 2 },
+        { pattern: "alpaca_get_stock_bars", minimum: 6, maximum: 8 },
+        { pattern: "alpaca_get_stock_latest_quote", minimum: 3, maximum: 4 },
       ],
       completedToolInputCounts: [
-        {
-          pattern: "alpaca_get_stock_bars",
-          input: {
-            symbol: "SPY",
-            timeframe: "1Day",
-            adjustment: "all",
-            feed: "iex",
-          },
+        ...screeningToolExpectations.map(({ pattern, input }) => ({
+          pattern,
+          input,
           minimum: 1,
-          maximum: 2,
-        },
-        {
-          pattern: "alpaca_get_stock_bars",
-          input: { symbol: "SPY", timeframe: "1Min", feed: "iex" },
-          minimum: 1,
-          maximum: 2,
-        },
-        {
-          pattern: "alpaca_get_stock_latest_quote",
-          input: { symbol: "SPY", feed: "iex" },
-          minimum: 1,
-          maximum: 2,
-        },
+          maximum: input.symbol === "SPY" ? 2 : 1,
+        })),
       ],
       requiredCompletedToolPrefix: ["alpaca_get_account"],
       requiredCompletedToolSequence: [
@@ -1019,23 +951,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         "alpaca_get_all_positions",
         "alpaca_get_orders",
         "exa_*",
-        {
-          pattern: "alpaca_get_stock_bars",
-          input: {
-            symbol: "SPY",
-            timeframe: "1Day",
-            adjustment: "all",
-            feed: "iex",
-          },
-        },
-        {
-          pattern: "alpaca_get_stock_bars",
-          input: { symbol: "SPY", timeframe: "1Min", feed: "iex" },
-        },
-        {
-          pattern: "alpaca_get_stock_latest_quote",
-          input: { symbol: "SPY", feed: "iex" },
-        },
+        ...screeningToolExpectations,
         "trusted_time",
       ],
       requiredAdjacentToolPairs: [
@@ -1043,10 +959,10 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         [
           {
             anyOf: [
-              {
+              ...ALLOWED_OPTION_UNDERLYINGS_V1.map((symbol) => ({
                 pattern: "alpaca_get_stock_latest_quote",
-                input: { symbol: "SPY", feed: "iex" },
-              },
+                input: { symbol, feed: "iex" },
+              })),
               {
                 pattern: "alpaca_get_option_chain",
                 input: { symbol: "SPY", feed: "indicative" },
@@ -1059,10 +975,10 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       forbiddenAfterAdjacentToolPairs: [{
         before: {
           anyOf: [
-            {
+            ...ALLOWED_OPTION_UNDERLYINGS_V1.map((symbol) => ({
               pattern: "alpaca_get_stock_latest_quote",
-              input: { symbol: "SPY", feed: "iex" },
-            },
+              input: { symbol, feed: "iex" },
+            })),
             {
               pattern: "alpaca_get_option_chain",
               input: { symbol: "SPY", feed: "indicative" },
