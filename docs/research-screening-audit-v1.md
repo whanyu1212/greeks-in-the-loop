@@ -94,6 +94,61 @@ Identical-input checks are application-authored evidence; they are never derived
 from untrusted model claims. Equal time and membership with unequal snapshot IDs
 is not identical input and remains `COMPARISON_NOT_REPRESENTABLE`.
 
+## Deterministic aggregate report
+
+`buildResearchScreeningAuditReportV1` projects validated cycle-start and audit
+events for one mandatory inclusive session-date range. The read-only CLI pages
+only those event types and never migrates the ledger or acquires worker
+ownership:
+
+```bash
+pnpm research:audit:report -- \
+  --ledger .state/research-ledger.sqlite \
+  --from YYYY-MM-DD \
+  --to YYYY-MM-DD
+```
+
+The cycle start's `sessionDate`, not ledger timestamps, selects the observation
+window. `auditEligible` counts only standard-mode, trade-intent-eligible starts
+with a real scheduled slot. `missingAudit` counts those starts without an audit;
+`unexpectedAudit` counts audits attached to starts outside that eligibility.
+Unexpected audits remain visible but are excluded from application, agent,
+comparison, latency, funnel, and candidate aggregates.
+
+The report retains:
+
+- application capture/screening status, failure reasons, and latency;
+- selected/no-action frequency and the deterministic first-failure funnel;
+- selected direction, session-relative calendar DTE, expiration, and width;
+- bounded agent status, terminal class, invocation identity, unavailable reason,
+  and provider/model drift counts; and
+- every comparison-class count plus at most the first 100 identical-input
+  mismatch details in ledger order.
+
+Latency summaries are integer milliseconds with `count`, `min`, nearest-rank
+`p50`, nearest-rank `p95`, and `max`. Empty summaries retain null extrema. Sparse
+maps are sorted lexically, except numeric DTE and width keys. Fixed bounded
+status and comparison maps retain zero keys.
+
+The report has no generation timestamp. Its SHA-256 `checksum` covers canonical
+JSON for every other report field, so identical events and bounds reproduce the
+same output independent of input order. Mismatch details retain bounded result
+and identity evidence but omit selected-leg membership proofs. The detail list
+reports its uncapped `total` and whether the 100-row projection was truncated.
+
+Live legacy reports normally produce zero `identicalInputComparable` cycles:
+model-stated identity cannot establish application-owned snapshot parity.
+
+## Forward observation protocol
+
+Before collection, declare exactly five regular-session dates, the merged commit
+SHA, and the report version on issue #66. Run only the standard worker; do not
+substitute synthetic `--shadow-anytime` cycles or extend the window after seeing
+results. After the fifth session, run the bounded report twice, verify identical
+checksums, and attach the JSON plus checksum to the issue. Explain every missing
+or unexpected audit and any mismatch without treating the report as strategy,
+profitability, or promotion evidence.
+
 ## Runtime authority boundary
 
 The application snapshot and screening result never enter the agent prompt,
@@ -112,6 +167,6 @@ model-identity failures retain their existing breaker behavior.
 
 ## Non-goals
 
-V1 does not provide aggregate reports, threshold tuning, profitability evidence,
-authority promotion, replay migration, an audit-specific breaker, or a forward
-shadow window.
+V1 does not provide threshold tuning, profitability evidence, authority
+promotion, replay migration, an audit-specific breaker, provider-payload replay,
+or runtime readback of aggregate reports.

@@ -29,6 +29,7 @@
     "research:eval:plan": "vitest run tests/qualitative-research-scenarios.test.ts",
     "research:eval:plan:live": "tsx src/evaluation/qualitative-research-evaluate-cli.ts",
     "research:run": "tsx src/research/research-run-cli.ts",
+    "research:audit:report": "tsx src/research/research-screening-audit-report-cli.ts",
     "risk:report": "tsx src/risk/risk-report-cli.ts",
     "backtest:data": "tsx src/backtest/backtest-data-cli.ts",
     "backtest": "tsx src/backtest/backtest-cli.ts",

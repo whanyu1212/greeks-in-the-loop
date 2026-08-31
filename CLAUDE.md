@@ -13,6 +13,7 @@ pnpm agent:once                 # single cycle
 pnpm agent:once -- --research-anytime   # bypass the market-window gate for research
 pnpm agent:once -- --shadow-anytime     # bypass the window gate for shadow risk
 pnpm risk:report                # aggregate shadow decisions from the ledger
+pnpm research:audit:report -- --ledger <path> --from <date> --to <date>  # read-only audit baseline
 pnpm research:run               # replay a stored research run
 pnpm research:evaluate          # offline research-run evaluation
 pnpm backtest:data -- --from <date> --to <date> --option <OCC>   # acquire dataset
@@ -126,7 +127,9 @@ belong only under `workspace/` (gitignored, along with `.state/`).
 `risk-engine-v1.md`, `trade-intent-v1.md`, `research-decision-v1.md`,
 `research-report-v2.md`, `event-ledger-v1.md`, `backtest-replay-v1.md`,
 `pre-market-research-v1.md`, `research-market-snapshots-v1.md` (contracts,
-provider capture, and non-authoritative runtime audit wiring), `research-source-policy.md`,
-`research-evaluation.md`, `research-behavior-evaluation.md`, `observability.md`.
+provider capture, and non-authoritative runtime audit wiring),
+`research-screening-audit-v1.md` (comparison, aggregate reporting, and forward
+observation), `research-source-policy.md`, `research-evaluation.md`,
+`research-behavior-evaluation.md`, `observability.md`.
 Consult these before changing contract or rule behavior. The README's Strategy
 section indexes the same set with one-line descriptions.
