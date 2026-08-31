@@ -323,6 +323,76 @@ export const LEDGER_MIGRATIONS: readonly LedgerMigration[] = [
       END;
     `,
   },
+  {
+    id: "006_order_execution",
+    sql: `
+      DROP TRIGGER ledger_events_no_post_terminal;
+
+      -- Execution follows a durably recorded shadow decision, so order events
+      -- are the one kind that may legitimately land after the cycle terminal.
+      CREATE TRIGGER ledger_events_no_post_terminal
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.cycle_id IS NOT NULL
+        AND NEW.event_type NOT IN (
+          'ORDER_SUBMITTED',
+          'ORDER_FILLED',
+          'ORDER_REJECTED'
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM ledger_events
+          WHERE cycle_id = NEW.cycle_id
+            AND event_type IN (
+              'RESEARCH_CYCLE_COMPLETED',
+              'RESEARCH_CYCLE_INTERRUPTED'
+            )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'cannot append after a cycle terminal event');
+      END;
+
+      CREATE UNIQUE INDEX ledger_events_one_order_submission
+        ON ledger_events(cycle_id)
+        WHERE event_type = 'ORDER_SUBMITTED';
+
+      CREATE UNIQUE INDEX ledger_events_one_order_terminal
+        ON ledger_events(cycle_id)
+        WHERE event_type IN ('ORDER_FILLED', 'ORDER_REJECTED');
+
+      -- An order that skipped the risk gate is unrepresentable.
+      CREATE TRIGGER ledger_events_order_follows_approved_risk
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.event_type = 'ORDER_SUBMITTED'
+      BEGIN
+        SELECT CASE
+          WHEN NEW.cycle_id IS NULL OR NOT EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE event_id = NEW.causation_event_id
+              AND cycle_id = NEW.cycle_id
+              AND event_type = 'RISK_SHADOW_DECISION_RECORDED'
+              AND json_extract(payload_json, '$.decision.outcome') = 'APPROVED'
+          )
+          THEN RAISE(ABORT, 'order submission must follow an approved shadow risk decision')
+        END;
+      END;
+
+      CREATE TRIGGER ledger_events_order_terminal_follows_submission
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.event_type IN ('ORDER_FILLED', 'ORDER_REJECTED')
+      BEGIN
+        SELECT CASE
+          WHEN NEW.cycle_id IS NULL OR NOT EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE cycle_id = NEW.cycle_id
+              AND event_type = 'ORDER_SUBMITTED'
+          )
+          THEN RAISE(ABORT, 'order terminal must follow its submission')
+        END;
+      END;
+    `,
+  },
 ]
 
 const checksum = (sql: string) =>

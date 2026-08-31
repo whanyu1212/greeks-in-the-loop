@@ -44,6 +44,12 @@ import {
   type ResearchInvocationV1,
 } from "./research/research-invocation-v1.js"
 import { startOpencode } from "./opencode-runtime.js"
+import { createAlpacaOrderSubmitter } from "./execution/alpaca-order-submitter.js"
+import {
+  executeApprovedTradeV1,
+  hasHeldExecutedEntryV1,
+  reconcileOpenOrderRecordsV1,
+} from "./execution/trade-executor.js"
 import {
   buildResearchCyclePrompt,
   buildResearchReportRepairPrompt,
@@ -185,7 +191,7 @@ const agentOptions = parseAgentOptions(
   process.argv.slice(2),
   readSetting("RESEARCH_LEDGER_PATH"),
 )
-const { once, dryRun, ledgerPath } = agentOptions
+const { once, dryRun, execute, ledgerPath } = agentOptions
 const breakerResetInstruction =
   `run pnpm agent:reset-breaker -- --ledger <ledger-path> for ${JSON.stringify(ledgerPath)}`
 const researchMode = dryRun ? DRY_RUN_MODE : undefined
@@ -240,6 +246,15 @@ const riskStateProvider = createAlpacaRiskStateProvider({
     readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
     "https://paper-api.alpaca.markets",
 })
+const orderSubmitter = execute
+  ? createAlpacaOrderSubmitter({
+      apiKey: alpacaApiKey,
+      secretKey: alpacaSecretKey,
+      tradingBaseUrl:
+        readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
+        "https://paper-api.alpaca.markets",
+    })
+  : undefined
 const calendar = createAlpacaCalendarClient({
   apiKey: alpacaApiKey,
   secretKey: alpacaSecretKey,
@@ -300,6 +315,20 @@ try {
     provider: riskStateProvider,
     durableControl: createLedgerDurableRiskControlStateLoader(activeLedgerStore),
   })
+  if (orderSubmitter !== undefined) {
+    // Resolve any submission left without a terminal record by an earlier
+    // crash before a new cycle can approve another entry.
+    const reconciled = await reconcileOpenOrderRecordsV1({
+      store: activeLedgerStore,
+      submitter: orderSubmitter,
+      signal: abortController.signal,
+    })
+    for (const record of reconciled) {
+      console.log(
+        `[startup] reconciled order ${record.clientOrderId}: ${record.resolution}`,
+      )
+    }
+  }
   const runtime = await startOpencode({
     port,
     signal: abortController.signal,
@@ -333,14 +362,27 @@ try {
               calendarSignal,
               dryRun && agentOptions.sessionDate === undefined,
             )
+            const scheduled = evaluateResearchEligibility({
+              evaluatedAt: eligibilityEvaluatedAt,
+              ...(session === undefined ? {} : { session }),
+              premarketStartEt,
+              ...(researchMode === undefined ? {} : { researchMode }),
+            })
+            // Withhold trade-intent eligibility while an executed entry is
+            // still held, so the cycle is not spent on a proposal the risk
+            // gate would reject for exposure anyway.
+            const heldEntry =
+              orderSubmitter !== undefined &&
+              scheduled.tradeIntentEligible &&
+              (await hasHeldExecutedEntryV1(
+                activeLedgerStore,
+                abortController.signal,
+              ))
             return {
               session,
-              initialEligibility: evaluateResearchEligibility({
-                evaluatedAt: eligibilityEvaluatedAt,
-                ...(session === undefined ? {} : { session }),
-                premarketStartEt,
-                ...(researchMode === undefined ? {} : { researchMode }),
-              }),
+              initialEligibility: heldEntry
+                ? { ...scheduled, tradeIntentEligible: false }
+                : scheduled,
             }
           },
         )
@@ -676,6 +718,32 @@ try {
             },
           })
           cycleTrace.setOutcome(processed.outcome.status)
+          // Execution runs only after the approval is durably recorded, so a
+          // submitted order always has a persisted risk decision behind it.
+          let executionReport: string | undefined
+          if (orderSubmitter !== undefined && processed.shadowRisk !== undefined) {
+            const execution = await cycleTrace.run("order.execute", () =>
+              executeApprovedTradeV1({
+                store: activeLedgerStore,
+                submitter: orderSubmitter,
+                shadowRisk: processed.shadowRisk!,
+                cycleId: cycle.cycleId,
+                signal: abortController.signal,
+              }),
+            )
+            stageReporter.report(
+              "order.execute",
+              execution.status === "REJECTED" ? "REJECTED" : "COMPLETED",
+              { ...execution },
+            )
+            executionReport = `Order: ${execution.status}${
+              execution.status === "SKIPPED"
+                ? ` (${execution.reason})`
+                : execution.status === "REJECTED"
+                  ? ` (${execution.reason})`
+                  : ` ${execution.brokerOrderId}`
+            }`
+          }
           try {
             const artifacts = await cycleTrace.run(
               "research.artifact.project",
@@ -709,6 +777,7 @@ try {
             })
             return [
               processed.report,
+              ...(executionReport === undefined ? [] : [executionReport]),
               `Actionability: ${artifacts.presentation.actionability}`,
               `Audit: ${artifacts.presentation.audit.passCount} PASS / ${artifacts.presentation.audit.failCount} FAIL / ${artifacts.presentation.audit.notApplicableCount} N/A`,
               `Research brief: ${artifacts.markdownPath}`,
@@ -721,7 +790,11 @@ try {
             console.error(
               `[cycle ${cycleNumber}] validated outcome recorded, but research artifact could not be written`,
             )
-            return `${processed.report}\nResearch artifacts: unavailable`
+            return [
+              processed.report,
+              ...(executionReport === undefined ? [] : [executionReport]),
+              "Research artifacts: unavailable",
+            ].join("\n")
           }
         } catch (error) {
           if (error instanceof LedgerPersistenceError) {

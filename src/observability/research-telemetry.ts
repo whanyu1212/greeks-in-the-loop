@@ -36,6 +36,7 @@ export const RESEARCH_TRACE_OPERATIONS = [
   "risk.shadow.evaluate",
   "ledger.cycle.terminalize",
   "research.artifact.project",
+  "order.execute",
 ] as const
 
 export type ResearchTraceOperation = typeof RESEARCH_TRACE_OPERATIONS[number]
@@ -50,6 +51,7 @@ const OPERATION_KINDS: Readonly<Record<ResearchTraceOperation, OpenInferenceSpan
   "risk.shadow.evaluate": OpenInferenceSpanKind.GUARDRAIL,
   "ledger.cycle.terminalize": OpenInferenceSpanKind.CHAIN,
   "research.artifact.project": OpenInferenceSpanKind.CHAIN,
+  "order.execute": OpenInferenceSpanKind.TOOL,
 }
 
 export const RESEARCH_TRACE_ATTRIBUTE_KEYS = {

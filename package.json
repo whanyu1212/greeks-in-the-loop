@@ -25,6 +25,7 @@
     "research:eval:live": "tsx src/evaluation/research-behavior-evaluate-cli.ts",
     "research:run": "tsx src/research/research-run-cli.ts",
     "risk:report": "tsx src/risk/risk-report-cli.ts",
+    "execute:mock": "tsx src/execution/execute-mock-trade-cli.ts",
     "backtest": "tsx src/backtest/backtest-cli.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
@@ -47,6 +48,7 @@
     "mcp-remote": "0.1.49",
     "opencode-ai": "1.18.21",
     "picocolors": "^1.1.1",
+    "undici": "^8.10.1",
     "zod": "4.4.3"
   },
   "devDependencies": {

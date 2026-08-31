@@ -19,6 +19,11 @@ import {
   riskBreakerTransitionV1Schema,
   shadowRiskDecisionV1Schema,
 } from "../risk/shadow-risk-v1.js"
+import {
+  orderFilledPayloadV1Schema,
+  orderRejectedPayloadV1Schema,
+  orderSubmittedPayloadV1Schema,
+} from "../execution/order-submission-v1.js"
 
 export const LEGACY_LEDGER_EVENT_VERSION = "1.0.0" as const
 export const LEDGER_EVENT_VERSION = "2.0.0" as const
@@ -42,6 +47,9 @@ export const LEDGER_EVENT_TYPES = [
   "RESEARCH_LOOP_BREAKER_RESET",
   "RISK_SHADOW_DECISION_RECORDED",
   "RISK_BREAKER_LATCHED",
+  "ORDER_SUBMITTED",
+  "ORDER_FILLED",
+  "ORDER_REJECTED",
 ] as const
 
 export const STORED_LEDGER_EVENT_TYPES = [
@@ -217,6 +225,9 @@ const payloadSchemas = {
     })
     .strict(),
   RISK_BREAKER_LATCHED: riskBreakerTransitionV1Schema,
+  ORDER_SUBMITTED: orderSubmittedPayloadV1Schema,
+  ORDER_FILLED: orderFilledPayloadV1Schema,
+  ORDER_REJECTED: orderRejectedPayloadV1Schema,
 } as const
 
 const legacyVersion = z.string().trim().min(1).max(32)

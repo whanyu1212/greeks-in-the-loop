@@ -83,6 +83,10 @@ describe("applyLedgerMigrations", () => {
         migration_id: "005_remove_research_screening_audit",
         applied_at: "2026-08-25T14:30:00.000Z",
       },
+      {
+        migration_id: "006_order_execution",
+        applied_at: "2026-08-25T14:30:00.000Z",
+      },
     ])
     expect(
       database
@@ -108,6 +112,7 @@ describe("applyLedgerMigrations", () => {
       LEDGER_MIGRATIONS[2]!,
       LEDGER_MIGRATIONS[3]!,
       LEDGER_MIGRATIONS[4]!,
+      LEDGER_MIGRATIONS[5]!,
     ]
 
     expect(() => applyLedgerMigrations(database, modified)).toThrow(

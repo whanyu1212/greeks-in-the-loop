@@ -20,11 +20,13 @@ describe("parseAgentOptions", () => {
     expect(parseAgentOptions([])).toEqual({
       once: false,
       dryRun: false,
+      execute: false,
       ledgerPath: DEFAULT_RESEARCH_LEDGER_PATH,
     })
     expect(parseAgentOptions(["--once", "--dry-run", "--session", "2026-08-25"])).toEqual({
       once: true,
       dryRun: true,
+      execute: false,
       sessionDate: "2026-08-25",
       ledgerPath: DEFAULT_DRY_RUN_LEDGER_PATH,
     })

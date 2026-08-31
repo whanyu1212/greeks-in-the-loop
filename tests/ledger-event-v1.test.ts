@@ -86,6 +86,9 @@ describe("LedgerEventV2", () => {
       "RESEARCH_LOOP_BREAKER_RESET",
       "RISK_SHADOW_DECISION_RECORDED",
       "RISK_BREAKER_LATCHED",
+      "ORDER_SUBMITTED",
+      "ORDER_FILLED",
+      "ORDER_REJECTED",
     ])
   })
 
@@ -172,7 +175,7 @@ describe("LedgerEventV2", () => {
       cycleId: "cycle-1",
       sessionId: "session-1",
       payload: {
-        invocationVersion: "3.0.0",
+        invocationVersion: "3.0.3",
         reason: "MODEL_DRIFT",
         expected: "gpt-5.6-sol",
         observed: "gpt-5.6-sol-fast",
@@ -184,10 +187,10 @@ describe("LedgerEventV2", () => {
     expect(
       ledgerEventV2Schema.parse({
         ...cycleScoped,
-        payload: { ...cycleScoped.payload, invocationVersion: "3.0.0" },
+        payload: { ...cycleScoped.payload, invocationVersion: "3.0.3" },
       }),
     ).toMatchObject({
-      payload: { invocationVersion: "3.0.0" },
+      payload: { invocationVersion: "3.0.3" },
     })
 
     // Unlike the breaker events, drift happens inside a live cycle.
