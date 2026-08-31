@@ -131,6 +131,21 @@ The evaluator permits only the generic skill, Exa, and FMP tool classes.
 Application-owned snapshot capture and financial calculations are outside the
 qualitative agent boundary.
 
+`pnpm research:eval:plan` runs the deterministic plan-driven scenario matrix.
+It covers the current SPY identity, a fixture-only DIA plan, fail-closed
+provider behavior, untrusted retrieved instructions, cross-plan reference
+substitution, and provider/model/skill drift. The DIA fixture demonstrates that
+evaluation follows the plan's symbol and budgets; it does not register DIA or
+admit it to production.
+
+`pnpm research:eval:plan:live -- --scenario all` optionally runs the live-gradeable
+scenarios against an isolated OpenCode project and deterministic mock Exa/FMP
+servers. The runner copies only the generic skill, grants no Alpaca or mutation
+tools, and passes the provider and model actually reported by OpenCode to the
+evaluator. Model authentication must already be configured, but research-provider
+credentials are removed. Private diagnostic output is written under
+`workspace/research-plan-evals/` and is never read by runtime code.
+
 ## Current compatibility
 
 This contract is not active in the production research cycle. The production
