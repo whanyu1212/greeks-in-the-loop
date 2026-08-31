@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+
 import { describe, expect, it } from "vitest"
 
 import { researchReportV3Schema } from "../src/contracts/research-report-v3.js"
@@ -424,5 +426,45 @@ describe("ResearchReportV3", () => {
     expect(attempts).toBe(1)
     expect(resolved.schemaRepairAttempted).toBe(true)
     expect(parseResearchReportV3Response(resolved.rawResponse).success).toBe(true)
+  })
+
+  // The agent only emits the proposal shape correctly when the prompt shows it
+  // literally, so every JSON example in the prompt must stay contract-valid.
+  it("keeps the agent prompt's proposal examples schema-valid", () => {
+    const prompt = readFileSync(
+      new URL("../src/research/research-agent-system.md", import.meta.url),
+      "utf8",
+    )
+    const examples = [...prompt.matchAll(/`(\{.*?\})`/gsu)].map(
+      ([, json]) => JSON.parse(json ?? "") as Record<string, unknown>,
+    )
+    const candidate = examples.find((example) => "longLeg" in example)
+    const evaluation = examples.find((example) => "dte" in example)
+    const proposalFact = examples.find((example) => "snapshotRef" in example)
+    expect([candidate, evaluation, proposalFact]).not.toContain(undefined)
+
+    const parsed = researchReportV3Schema.safeParse({
+      ...proposalReport,
+      result: {
+        ...proposalReport.result,
+        candidate,
+        evidence: [proposalFact],
+      },
+      analysis: {
+        ...proposalReport.analysis,
+        asOf: (evaluation as { observedAt: string }).observedAt,
+        accountChecks: {
+          ...proposalReport.analysis.accountChecks,
+          observedAt: (evaluation as { observedAt: string }).observedAt,
+        },
+        marketRegime: {
+          ...proposalReport.analysis.marketRegime,
+          observedAt: (evaluation as { observedAt: string }).observedAt,
+        },
+        candidateEvaluation: evaluation,
+      },
+    })
+
+    expect(parsed.error?.issues ?? []).toEqual([])
   })
 })

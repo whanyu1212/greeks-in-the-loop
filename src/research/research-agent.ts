@@ -15,7 +15,7 @@ import { ALLOWED_OPTION_UNDERLYINGS_V1 } from "../shared/alpaca-option-identity.
 /** Checked-in OpenCode primary agent used by every unattended cycle. */
 export const RESEARCH_AGENT_NAME = "research" as const
 /** Increment when the system prompt or cycle-request behavior changes. */
-export const RESEARCH_PROMPT_VERSION = "3.0.3" as const
+export const RESEARCH_PROMPT_VERSION = "3.0.4" as const
 
 /** Hard OpenCode turn bound mirrored by the checked-in agent configuration. */
 export const RESEARCH_MAX_AGENT_STEPS = 24
@@ -62,6 +62,7 @@ export function buildResearchReportRepairPrompt(
     "Do not call tools or add new research. Correct the complete existing report using only facts already gathered, then return exactly one bare JSON object with no Markdown or commentary.",
     "Every invalidation field is an array of strings. Every date-time uses UTC ISO 8601 with exactly three fractional digits, for example 2026-08-31T07:43:13.082Z.",
     "NO_ACTION evidence is a non-empty array of timestamped ALPACA, EXA, or FMP sourced facts and optional inferences grounded in those fact claim IDs.",
+    "PROPOSE_TRADE uses different shapes: result.candidate has exactly underlying, structure, expiration, longLeg, and shortLeg, where each leg is {\"contractSymbol\",\"strike\"}; analysis.candidateEvaluation has exactly verification, observedAt, dte, and legs; each proposal evidence sourced fact has exactly claimId, kind, claim, snapshotRef, and optional locator, and never provider, temporalClass, or observedAt.",
     `Safe validation diagnostics: ${JSON.stringify(issues)}`,
   ].join("\n")
 }

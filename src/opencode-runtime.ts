@@ -14,7 +14,39 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { Agent, fetch as undiciFetch } from "undici"
+
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk"
+
+/**
+ * HTTP dispatcher for long-running agent prompts.
+ *
+ * The OpenCode server sends response headers only after a prompted agent run
+ * completes, so the default 300s undici headers timeout aborts healthy runs.
+ * Duration is bounded by the caller's cycle deadline signal instead.
+ */
+const longRunDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 })
+
+/**
+ * A fetch implementation that keeps agent-run requests open until the caller's
+ * abort signal fires, regardless of how long the server takes to respond.
+ */
+const fetchWithLongRuns = async (
+  request: Request,
+): Promise<Response> => {
+  const body =
+    request.method === "GET" || request.method === "HEAD"
+      ? undefined
+      : await request.arrayBuffer()
+  const response = await undiciFetch(request.url, {
+    method: request.method,
+    headers: Array.from(request.headers),
+    ...(body === undefined ? {} : { body }),
+    signal: request.signal,
+    dispatcher: longRunDispatcher,
+  })
+  return response as unknown as Response
+}
 
 /** A managed OpenCode server and its connected SDK client. */
 export type OpencodeRuntime = {
@@ -229,7 +261,11 @@ export async function startOpencode({
     if (signal.aborted) onAbort()
   })
 
-  const client = createOpencodeClient({ baseUrl: url, directory: cwd })
+  const client = createOpencodeClient({
+    baseUrl: url,
+    directory: cwd,
+    fetch: fetchWithLongRuns,
+  })
   let closing: Promise<void> | undefined
 
   /**

@@ -17,7 +17,7 @@ import { projectResearchContextV1 } from "../src/research/research-context-v1.js
 describe("research agent request construction", () => {
   it("uses the fixed checked-in agent identity", () => {
     expect(RESEARCH_AGENT_NAME).toBe("research")
-    expect(RESEARCH_PROMPT_VERSION).toBe("3.0.3")
+    expect(RESEARCH_PROMPT_VERSION).toBe("3.0.4")
   })
 
   it("publishes bounded research budgets", () => {

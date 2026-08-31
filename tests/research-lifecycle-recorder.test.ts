@@ -21,7 +21,7 @@ const TIMESTAMP = "2026-08-26T10:00:00.000Z"
 const signal = new AbortController().signal
 
 const researchInvocation: ResearchInvocationV1 = {
-  invocationVersion: "3.0.0",
+  invocationVersion: "3.0.3",
   agentName: "research",
   cycleMode: "STANDARD",
   promptVersion: "1.3.0",
@@ -487,7 +487,7 @@ describe("createResearchLifecycleRecorder", () => {
         cycleId: "id-1",
         sessionId: "session-1",
         payload: {
-          invocationVersion: "3.0.0",
+          invocationVersion: "3.0.3",
           reason: "MODEL_DRIFT",
           expected: "gpt-5.6-sol",
           observed: "gpt-5.6-sol-fast",

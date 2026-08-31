@@ -133,7 +133,7 @@ describe("runAgentLoop", () => {
     // must therefore halt the worker rather than loop forever.
     const onBreakerLatched = vi.fn(async () => undefined)
     const drift = new Error(
-      "Research model identity rejected: MODEL_DRIFT (expected gpt-5.6-sol, observed gpt-5.6-sol-fast)",
+      "Research model identity rejected: MODEL_DRIFT (expected deepseek-v4-flash, observed deepseek-v4-flash-turbo)",
     )
 
     await expect(

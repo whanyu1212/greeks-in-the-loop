@@ -12,34 +12,34 @@ import {
 const versions = {
   agentName: "research",
   cycleMode: "DRY_RUN" as const,
-  promptVersion: "3.0.3",
+  promptVersion: "3.0.4",
   decisionContractVersion: "2.0.0",
   reportVersion: "3.0.0",
 }
 
 describe("ResearchInvocationV1", () => {
   it("supports only the current generic-agent provenance", () => {
-    expect(SUPPORTED_RESEARCH_INVOCATION_VERSIONS).toEqual(["3.0.0"])
+    expect(SUPPORTED_RESEARCH_INVOCATION_VERSIONS).toEqual(["3.0.0", "3.0.2", "3.0.3"])
     expect(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[RESEARCH_INVOCATION_VERSION]).toEqual({
       agentName: "research",
-      promptVersion: "3.0.3",
+      promptVersion: "3.0.4",
       decisionContractVersion: "2.0.0",
       reportVersion: "3.0.0",
-      providerId: "openai",
-      modelId: "gpt-5.6-sol",
+      providerId: "opencode-go",
+      modelId: "deepseek-v4-pro",
     })
   })
 
   it("pins the configured model", () => {
     expect(
       assertResearchModelIdentityV1({
-        providerId: "openai",
-        modelId: "gpt-5.6-sol",
+        providerId: "opencode-go",
+        modelId: "deepseek-v4-pro",
       }),
     ).toEqual({ ok: true })
     expect(
       assertResearchModelIdentityV1({
-        providerId: "openai",
+        providerId: "opencode-go",
         modelId: "other",
       }),
     ).toMatchObject({ ok: false, reason: "MODEL_DRIFT" })

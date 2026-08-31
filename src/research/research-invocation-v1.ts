@@ -5,18 +5,28 @@ import {
   type OpenCodeInvocationSummary,
 } from "../observability/opencode-telemetry-summary.js"
 import type { ResearchTraceVersions } from "../observability/research-telemetry.js"
-export const RESEARCH_INVOCATION_VERSION = "3.0.0" as const
+export const RESEARCH_INVOCATION_VERSION = "3.0.3" as const
+/**
+ * Invocation versions this build can still decode from an existing ledger.
+ *
+ * Only `RESEARCH_INVOCATION_VERSION` is ever appended. Retired versions stay
+ * listed because ledger rows are immutable: dropping one makes every event
+ * written before that bump fail to decode, which breaks retained-context reads
+ * rather than any single cycle.
+ */
 export const SUPPORTED_RESEARCH_INVOCATION_VERSIONS = Object.freeze([
+  "3.0.0",
+  "3.0.2",
   RESEARCH_INVOCATION_VERSION,
 ] as const)
 export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = Object.freeze({
   [RESEARCH_INVOCATION_VERSION]: Object.freeze({
     agentName: "research",
-    promptVersion: "3.0.3",
+    promptVersion: "3.0.4",
     decisionContractVersion: "2.0.0",
     reportVersion: "3.0.0",
-    providerId: "openai",
-    modelId: "gpt-5.6-sol",
+    providerId: "opencode-go",
+    modelId: "deepseek-v4-pro",
   }),
 })
 

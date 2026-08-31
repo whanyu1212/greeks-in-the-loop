@@ -11,7 +11,7 @@ import {
 import type { ResearchInvocationV1 } from "../src/research/research-invocation-v1.js"
 
 const researchInvocation: ResearchInvocationV1 = {
-  invocationVersion: "3.0.0",
+  invocationVersion: "3.0.3",
   agentName: "research",
   cycleMode: "STANDARD",
   promptVersion: "1.3.0",

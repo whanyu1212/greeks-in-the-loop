@@ -37,7 +37,7 @@ const noAction = {
 const previousSessionDates = ["2026-08-21", "2026-08-24"] as const
 
 const researchInvocation: ResearchInvocationV1 = {
-  invocationVersion: "3.0.0",
+  invocationVersion: "3.0.3",
   agentName: "research",
   cycleMode: "STANDARD",
   promptVersion: "1.3.0",

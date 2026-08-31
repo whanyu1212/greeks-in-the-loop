@@ -7,8 +7,7 @@
       "description": "Selects and researches one bounded ETF options opportunity without execution authority.",
       "mode": "primary",
       "prompt": "{file:./src/research/research-agent-system.md}",
-      "model": "openai/gpt-5.6-sol",
-      "options": { "reasoningEffort": "medium" },
+      "model": "opencode-go/deepseek-v4-pro",
       "steps": 24,
       "permission": {
         "*": "deny",
