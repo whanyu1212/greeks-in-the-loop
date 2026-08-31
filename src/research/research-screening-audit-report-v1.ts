@@ -7,12 +7,18 @@ import {
   type ResearchScreeningComparisonClassV1,
 } from "../contracts/research-screening-audit-v1.js"
 import type { StoredLedgerEventV1 } from "../event-ledger/ledger-event-v1.js"
+import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import { canonicalJsonSha256 } from "../shared/canonical-json.js"
 import { researchScreeningAuditWindowV1 } from "./research-screening-audit-runtime-v1.js"
 
 export const RESEARCH_SCREENING_AUDIT_REPORT_VERSION = "1.0.0" as const
 export const MAX_IDENTICAL_INPUT_MISMATCH_DETAILS = 100
 
+const REPORT_EVENT_TYPES = [
+  "RESEARCH_CYCLE_STARTED",
+  "RESEARCH_SCREENING_AUDIT_RECORDED",
+] as const
+const REPORT_PAGE_SIZE = 1_000
 const APPLICATION_STATUSES = [
   "SCREENED",
   "CAPTURE_UNAVAILABLE",
@@ -49,7 +55,6 @@ const IDENTICAL_INPUT_MISMATCH_CLASSES = new Set<ResearchScreeningComparisonClas
 ])
 
 const isoDate = z.iso.date()
-const DAY_MS = 24 * 60 * 60 * 1_000
 const lexicalCompare = (left: string, right: string) =>
   left < right ? -1 : left > right ? 1 : 0
 
@@ -105,9 +110,35 @@ const latencySummary = (
   }
 }
 
-const sessionRelativeDte = (sessionDate: string, expirationDate: string) =>
-  (Date.parse(`${expirationDate}T00:00:00.000Z`) -
-    Date.parse(`${sessionDate}T00:00:00.000Z`)) / DAY_MS
+export async function loadResearchScreeningAuditReportEventsV1(
+  store: Pick<LedgerStore, "list">,
+): Promise<readonly StoredLedgerEventV1[]> {
+  const [latest] = await store.list({
+    direction: "DESC",
+    eventTypes: REPORT_EVENT_TYPES,
+    limit: 1,
+  })
+  if (latest === undefined) return []
+  if (latest.sequence >= Number.MAX_SAFE_INTEGER) {
+    throw new Error("Research screening audit report sequence is too large")
+  }
+
+  const events: StoredLedgerEventV1[] = []
+  const beforeSequence = latest.sequence + 1
+  let afterSequence = 0
+  while (true) {
+    const page = await store.list({
+      afterSequence,
+      beforeSequence,
+      direction: "ASC",
+      eventTypes: REPORT_EVENT_TYPES,
+      limit: REPORT_PAGE_SIZE,
+    })
+    events.push(...page)
+    if (page.length < REPORT_PAGE_SIZE) return events
+    afterSequence = page.at(-1)?.sequence ?? afterSequence
+  }
+}
 
 const selectedResultForMismatch = (
   result: Extract<
@@ -238,10 +269,7 @@ export function buildResearchScreeningAuditReportV1(
           increment(noActionReasonCounts, application.result.reason)
         } else {
           byDirection[application.result.direction] += 1
-          increment(byDte, String(sessionRelativeDte(
-            start.payload.sessionDate!,
-            application.result.expirationDate,
-          )))
+          increment(byDte, String(application.result.dte))
           increment(byExpiration, application.result.expirationDate)
           increment(byWidth, String(application.result.widthCentsPerShare))
         }

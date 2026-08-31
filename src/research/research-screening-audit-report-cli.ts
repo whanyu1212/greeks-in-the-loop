@@ -3,9 +3,11 @@ import { existsSync, readFileSync } from "node:fs"
 import { parse as parseEnv } from "dotenv"
 import { z } from "zod"
 
-import type { StoredLedgerEventV1 } from "../event-ledger/ledger-event-v1.js"
 import { createSqliteLedgerStore } from "../event-ledger/sqlite-ledger-store.js"
-import { buildResearchScreeningAuditReportV1 } from "./research-screening-audit-report-v1.js"
+import {
+  buildResearchScreeningAuditReportV1,
+  loadResearchScreeningAuditReportEventsV1,
+} from "./research-screening-audit-report-v1.js"
 
 const usage = `Usage: pnpm research:audit:report -- [options]
 
@@ -67,22 +69,7 @@ const store = createSqliteLedgerStore({
   readonly: true,
 })
 try {
-  const events: StoredLedgerEventV1[] = []
-  let afterSequence = 0
-  while (true) {
-    const page = await store.list({
-      afterSequence,
-      direction: "ASC",
-      eventTypes: [
-        "RESEARCH_CYCLE_STARTED",
-        "RESEARCH_SCREENING_AUDIT_RECORDED",
-      ],
-      limit: 1_000,
-    })
-    events.push(...page)
-    if (page.length < 1_000) break
-    afterSequence = page.at(-1)?.sequence ?? afterSequence
-  }
+  const events = await loadResearchScreeningAuditReportEventsV1(store)
   console.log(JSON.stringify(buildResearchScreeningAuditReportV1(events, {
     fromSessionDate,
     toSessionDate,

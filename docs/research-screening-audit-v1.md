@@ -97,9 +97,9 @@ is not identical input and remains `COMPARISON_NOT_REPRESENTABLE`.
 ## Deterministic aggregate report
 
 `buildResearchScreeningAuditReportV1` projects validated cycle-start and audit
-events for one mandatory inclusive session-date range. The read-only CLI pages
-only those event types and never migrates the ledger or acquires worker
-ownership:
+events for one mandatory inclusive session-date range. The read-only CLI pins
+the initial highest relevant ledger sequence before pagination, pages only those
+event types, and never migrates the ledger or acquires worker ownership:
 
 ```bash
 pnpm research:audit:report -- \

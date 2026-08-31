@@ -4,12 +4,13 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { StoredLedgerEventV1 } from "../src/event-ledger/ledger-event-v1.js"
 import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
 import {
   buildResearchScreeningAuditReportV1,
+  loadResearchScreeningAuditReportEventsV1,
   MAX_IDENTICAL_INPUT_MISMATCH_DETAILS,
 } from "../src/research/research-screening-audit-report-v1.js"
 import {
@@ -204,6 +205,58 @@ describe("research screening audit aggregate report V1", () => {
     })
     expect(actual.comparison.classCounts.IDENTICAL_INPUT_MATCH).toBe(0)
     expect(actual.comparison.classCounts.IDENTICAL_INPUT_FEATURE_MISMATCH).toBe(0)
+  })
+
+  it("uses the retained application DTE rather than unrelated cycle context", () => {
+    const events = createResearchScreeningAuditReportFixtureEventsV1()
+      .slice(0, 3)
+      .map((event) => event.eventType !== "RESEARCH_CYCLE_STARTED"
+        ? event
+        : {
+            ...event,
+            payload: {
+              ...event.payload,
+              sessionDate: "2026-08-27",
+              initialEligibility: {
+                ...event.payload.initialEligibility!,
+                sessionDate: "2026-08-27",
+              },
+            },
+          }) as StoredLedgerEventV1[]
+
+    const actual = buildResearchScreeningAuditReportV1(events, {
+      fromSessionDate: "2026-08-27",
+      toSessionDate: "2026-08-27",
+    })
+    expect(actual.application.selectedCandidateDimensionCounts)
+      .toMatchObject({ bySessionRelativeCalendarDte: { 21: 1 } })
+  })
+
+  it("anchors paginated reads to the initial high-water sequence", async () => {
+    const initial = createResearchScreeningAuditReportFixtureEventsV1()
+      .filter(({ eventType }) =>
+        eventType === "RESEARCH_CYCLE_STARTED" ||
+        eventType === "RESEARCH_SCREENING_AUDIT_RECORDED")
+    const latest = initial.at(-1)!
+    const appended = {
+      ...latest,
+      sequence: latest.sequence + 1,
+      eventId: "audit-appended-during-report",
+    } as StoredLedgerEventV1
+    const list = vi.fn(async (query: Parameters<
+      Pick<ReturnType<typeof createSqliteLedgerStore>, "list">["list"]
+    >[0]) => query.direction === "DESC"
+      ? [latest]
+      : [...initial, appended].filter(({ sequence }) =>
+          sequence > (query.afterSequence ?? 0) &&
+          sequence < (query.beforeSequence ?? Number.POSITIVE_INFINITY)))
+
+    await expect(loadResearchScreeningAuditReportEventsV1({ list }))
+      .resolves.toEqual(initial)
+    expect(list).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      afterSequence: 0,
+      beforeSequence: latest.sequence + 1,
+    }))
   })
 
   it("caps mismatch details without capping the total", () => {
