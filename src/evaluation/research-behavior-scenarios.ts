@@ -65,29 +65,29 @@ const symbolIndicators = [
   {
     underlying: "SPY",
     throughSessionDate: "2026-08-25",
-    return5d: 0.0021,
-    return20d: 0.0084,
+    return5d: 0.0020764119601328623,
+    return20d: 0.008357709987463435,
     relativeStrengthRank20d: 1,
-    realizedVolatility20: 0.01,
-    completedSessionVolumeRatio20: 1,
+    realizedVolatility20: 0.00001626418287454355,
+    completedSessionVolumeRatio20: 1.0020839535576065,
   },
   {
     underlying: "QQQ",
     throughSessionDate: "2026-08-25",
-    return5d: -0.001,
-    return20d: -0.004,
+    return5d: -0.0009996001599360538,
+    return20d: -0.003986446083316775,
     relativeStrengthRank20d: 3,
-    realizedVolatility20: 0.005,
-    completedSessionVolumeRatio20: 1,
+    realizedVolatility20: 0.000003746108709082082,
+    completedSessionVolumeRatio20: 1.0023790642347343,
   },
   {
     underlying: "IWM",
     throughSessionDate: "2026-08-25",
     return5d: 0,
-    return20d: 0.0072,
+    return20d: 0.0072033135242211,
     relativeStrengthRank20d: 2,
-    realizedVolatility20: 0.08,
-    completedSessionVolumeRatio20: 1,
+    realizedVolatility20: 0.029199705708874733,
+    completedSessionVolumeRatio20: 1.0031140329197765,
   },
 ] as const
 
@@ -310,6 +310,7 @@ const completeProposalToolCalls = (
 ]
 
 const completeProposalToolExpectation = {
+  expectedSymbolIndicators: symbolIndicators,
   requiredTools: [
     "alpaca_get_account",
     "alpaca_get_account_configurations",

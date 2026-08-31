@@ -311,6 +311,37 @@ describe("research behavior evaluation", () => {
     )
   })
 
+  it("checks retained ETF indicators against fixture-derived values", () => {
+    const source = researchBehaviorScenarios.find(
+      ({ id }) => id === "valid-adversarial-proposal",
+    )!
+    const report = JSON.parse(source.rawResponse) as {
+      analysis: {
+        symbolIndicators: Array<{
+          return20d: number
+          realizedVolatility20: number
+        }>
+      }
+    }
+    report.analysis.symbolIndicators = report.analysis.symbolIndicators.map(
+      (indicator) => ({
+        ...indicator,
+        return20d: indicator.return20d * 10,
+        realizedVolatility20: 0.5,
+      }),
+    )
+    const evaluation = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "fabricated-etf-indicators",
+      rawResponse: JSON.stringify(report),
+    })
+
+    expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
+    expect(evaluation.dimensions.evidenceDiscipline.issueCodes).toContain(
+      "EXPECTED_MARKET_METRIC_MISMATCH",
+    )
+  })
+
   it("forbids every tool after an ineligible account hard gate", () => {
     const source = researchBehaviorScenarios[0]!
     const evaluation = evaluateResearchBehavior({

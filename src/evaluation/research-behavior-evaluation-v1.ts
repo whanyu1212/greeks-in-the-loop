@@ -16,7 +16,7 @@ import {
 // Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
 // when grader semantics change, so stored artifacts stay attributable to the
 // revision that produced them.
-export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "2.0.0" as const
+export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.0.0" as const
 
 export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "MALFORMED_JSON",
@@ -170,6 +170,9 @@ export type ResearchBehaviorExpectation = Readonly<{
       ResearchReportV3["analysis"]["candidateEvaluation"]
     >["legs"]
   }>
+  expectedSymbolIndicators?: readonly Readonly<
+    NonNullable<ResearchReportV3["analysis"]["symbolIndicators"]>[number]
+  >[]
   expectedMarketRegime?: Readonly<Partial<Record<
     | "dailyClose"
     | "sma20"
@@ -192,6 +195,13 @@ export type EvaluateResearchBehaviorInput = Readonly<{
 
 const uniqueSorted = (values: readonly ResearchBehaviorIssueCode[]) =>
   [...new Set(values)].sort()
+
+const indicatorMetrics = [
+  "return5d",
+  "return20d",
+  "realizedVolatility20",
+  "completedSessionVolumeRatio20",
+] as const
 
 const dimension = (
   issueCodes: readonly ResearchBehaviorIssueCode[],
@@ -521,6 +531,29 @@ export function evaluateResearchBehavior({
         ].some((value) => value !== undefined))
     ) {
       evidenceIssues.push("EXPECTED_MARKET_METRIC_MISMATCH")
+    }
+    if (expected.expectedSymbolIndicators !== undefined) {
+      const retainedIndicators = new Map(
+        report.analysis.symbolIndicators?.map((indicator) => [
+          indicator.underlying,
+          indicator,
+        ]),
+      )
+      const indicatorsMatch =
+        retainedIndicators.size === expected.expectedSymbolIndicators.length &&
+        expected.expectedSymbolIndicators.every((expectedIndicator) => {
+          const retained = retainedIndicators.get(expectedIndicator.underlying)
+          return retained !== undefined &&
+            retained.throughSessionDate === expectedIndicator.throughSessionDate &&
+            retained.relativeStrengthRank20d ===
+              expectedIndicator.relativeStrengthRank20d &&
+            indicatorMetrics.every((metric) =>
+              Math.abs(retained[metric] - expectedIndicator[metric]) <= 0.0001
+            )
+        })
+      if (!indicatorsMatch) {
+        evidenceIssues.push("EXPECTED_MARKET_METRIC_MISMATCH")
+      }
     }
     if (
       expected.requireDirectionalExa === true &&

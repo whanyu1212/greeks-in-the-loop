@@ -499,7 +499,7 @@ describe("backtest replay input validation", () => {
     monitorCycles: [monitorCycle],
   }
   const replay = (scenarios: readonly unknown[]) => ({
-    replayVersion: "6.0.0",
+    replayVersion: "7.0.0",
     initialEquityCents: 10_000_000,
     execution: {
       entrySlippageHalfCentsPerShare: 0,
@@ -610,6 +610,7 @@ describe("backtest replay input validation", () => {
       sessionDate,
       closeMicros: 600_000_000,
     }))
+    dailyCloses.at(-1)!.closeMicros = 600_000_011
     const replayWithTrend = (completedDailyCloseMicros: number) => ({
       ...replay([{
         ...scenario,
@@ -617,15 +618,15 @@ describe("backtest replay input validation", () => {
         monitorCycles: [{
           ...monitorCycle,
           completedDailyCloseMicros,
-          sma20Micros: 600_000_000,
+          sma20Micros: 600_000_001,
         }],
       }]),
       sessions,
     })
 
-    expect(runBacktestReplay(replayWithTrend(600_000_000)).aggregate)
+    expect(runBacktestReplay(replayWithTrend(600_000_011)).aggregate)
       .toMatchObject({ status: "COMPLETE" })
-    expect(() => runBacktestReplay(replayWithTrend(600_000_001)))
+    expect(() => runBacktestReplay(replayWithTrend(600_000_012)))
       .toThrow(/trend evidence must match/u)
   })
 })

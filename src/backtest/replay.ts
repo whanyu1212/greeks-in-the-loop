@@ -12,7 +12,7 @@ import {
   simulateReplayScenario,
 } from "./replay-core.js"
 
-export const BACKTEST_REPLAY_VERSION = "6.0.0" as const
+export const BACKTEST_REPLAY_VERSION = "7.0.0" as const
 
 const positiveSafeInteger = z
   .number()
@@ -220,8 +220,8 @@ const replayInputSchema = z
           ? trendCloses.reduce((total, close) => total + BigInt(close!), 0n)
           : undefined
         const expectedSma20 =
-          trendTotal !== undefined && trendTotal % 20n === 0n
-            ? Number(trendTotal / 20n)
+          trendTotal !== undefined
+            ? Number((trendTotal + 10n) / 20n)
             : undefined
         if (
           !hasCompletedClose ||
