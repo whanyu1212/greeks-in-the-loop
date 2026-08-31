@@ -66,7 +66,9 @@ export async function runApplicationResearchScreeningAuditV1({
   const captureDurationMs = elapsedMs(captureStartedAt, clock)
   if (!captured.success) {
     return createApplicationCaptureUnavailableAuditV1(
-      captured.reasons,
+      captured.reasons.length === 0
+        ? ["UNEXPECTED_FAILURE"]
+        : captured.reasons,
       captureDurationMs,
     )
   }

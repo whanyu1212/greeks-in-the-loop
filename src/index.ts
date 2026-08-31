@@ -40,6 +40,7 @@ import {
 import {
   createAgentResearchScreeningModelDriftAuditV1,
   createAgentResearchScreeningUnavailableAuditV1,
+  createApplicationCaptureUnavailableAuditV1,
   createResearchScreeningAuditV1,
   projectResearchReportV2ForScreeningAudit,
 } from "./contracts/research-screening-audit-v1.js"
@@ -507,7 +508,10 @@ try {
                     abortController.signal,
                     AbortSignal.timeout(cycleTimeoutMs),
                   ]),
-                }),
+                }).catch(() => createApplicationCaptureUnavailableAuditV1(
+                  ["UNEXPECTED_FAILURE"],
+                  0,
+                )),
               }
             })()
         let agentAudit = createAgentResearchScreeningUnavailableAuditV1(

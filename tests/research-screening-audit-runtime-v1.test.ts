@@ -68,6 +68,24 @@ describe("application research screening audit runtime V1", () => {
     })
   })
 
+  it("maps an empty provider failure to a bounded unexpected failure", async () => {
+    const provider: ResearchSnapshotProviderV1 = {
+      capture: async () => ({ success: false, reasons: [] }),
+    }
+
+    await expect(runApplicationResearchScreeningAuditV1({
+      provider,
+      sessionDate: SESSION_DATE,
+      slotStartedAt: SLOT_STARTED_AT,
+      signal,
+      nowMs: clock(0, 2),
+    })).resolves.toEqual({
+      status: "CAPTURE_UNAVAILABLE",
+      captureDurationMs: 2,
+      reasons: ["UNEXPECTED_FAILURE"],
+    })
+  })
+
   it.each([
     [new DOMException("cancelled", "AbortError"), "AUDIT_CANCELLED"],
     [new DOMException("timed out", "TimeoutError"), "AUDIT_DEADLINE_EXCEEDED"],
