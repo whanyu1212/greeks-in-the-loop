@@ -499,7 +499,7 @@ describe("backtest replay input validation", () => {
     monitorCycles: [monitorCycle],
   }
   const replay = (scenarios: readonly unknown[]) => ({
-    replayVersion: "5.0.0",
+    replayVersion: "6.0.0",
     initialEquityCents: 10_000_000,
     execution: {
       entrySlippageHalfCentsPerShare: 0,
@@ -582,5 +582,50 @@ describe("backtest replay input validation", () => {
       ...monitorCycle,
       minutesToClose: 0,
     }] }]))).toThrow(/minutes to close must match/u)
+  })
+
+  it("requires intent evaluation during its retained entry session", () => {
+    expect(() => runBacktestReplay(replay([{
+      ...scenario,
+      riskInput: {
+        ...scenario.riskInput,
+        intent: {
+          ...scenario.riskInput.intent,
+          evaluatedAt: "2026-08-27T12:30:00.000Z",
+        },
+      },
+    }]))).toThrow(/evaluated during its entry session/u)
+  })
+
+  it("derives trend evidence from the prior 20 retained daily closes", () => {
+    const dates = Array.from({ length: 21 }, (_, index) =>
+      new Date(Date.UTC(2026, 7, 7 + index)).toISOString().slice(0, 10)
+    )
+    const sessions = dates.map((date) => ({
+      date,
+      open: `${date}T13:30:00.000Z`,
+      close: `${date}T20:00:00.000Z`,
+    }))
+    const dailyCloses = dates.slice(0, -1).map((sessionDate) => ({
+      sessionDate,
+      closeMicros: 600_000_000,
+    }))
+    const replayWithTrend = (completedDailyCloseMicros: number) => ({
+      ...replay([{
+        ...scenario,
+        dailyCloses,
+        monitorCycles: [{
+          ...monitorCycle,
+          completedDailyCloseMicros,
+          sma20Micros: 600_000_000,
+        }],
+      }]),
+      sessions,
+    })
+
+    expect(runBacktestReplay(replayWithTrend(600_000_000)).aggregate)
+      .toMatchObject({ status: "COMPLETE" })
+    expect(() => runBacktestReplay(replayWithTrend(600_000_001)))
+      .toThrow(/trend evidence must match/u)
   })
 })

@@ -12,7 +12,13 @@ import {
   simulateReplayScenario,
 } from "./replay-core.js"
 
-export const BACKTEST_REPLAY_VERSION = "5.0.0" as const
+export const BACKTEST_REPLAY_VERSION = "6.0.0" as const
+
+const positiveSafeInteger = z
+  .number()
+  .int()
+  .positive()
+  .max(Number.MAX_SAFE_INTEGER)
 
 const replaySessionSchema = z
   .object({
@@ -50,10 +56,28 @@ const replaySessionsSchema = z
     }
   })
 
+const replayDailyClosesSchema = z
+  .array(z.object({
+    sessionDate: z.iso.date(),
+    closeMicros: positiveSafeInteger,
+  }).strict())
+  .max(10_000)
+  .superRefine((closes, context) => {
+    for (let index = 1; index < closes.length; index += 1) {
+      if (closes[index]!.sessionDate > closes[index - 1]!.sessionDate) continue
+      context.addIssue({
+        code: "custom",
+        path: [index],
+        message: "Replay daily closes must be strictly increasing",
+      })
+    }
+  })
+
 const scenarioSchema = z
   .object({
     scenarioId: z.string().trim().min(1).max(128),
     riskInput: riskEvaluationInputV1Schema,
+    dailyCloses: replayDailyClosesSchema.optional(),
     monitorCycles: replayMonitorCyclesSchema,
   })
   .strict()
@@ -105,7 +129,12 @@ const replayInputSchema = z
   .strict()
   .superRefine(({ scenarios, sessions }, context) => {
     const scenarioIds = new Set<string>()
-    scenarios.forEach(({ scenarioId, riskInput, monitorCycles }, index) => {
+    scenarios.forEach(({
+      scenarioId,
+      riskInput,
+      dailyCloses,
+      monitorCycles,
+    }, index) => {
       if (scenarioIds.has(scenarioId)) {
         context.addIssue({
           code: "custom",
@@ -117,6 +146,26 @@ const replayInputSchema = z
 
       const entrySessionIndex = sessions.findIndex(
         ({ date }) => date === newYorkDate(new Date(riskInput.intent.evaluatedAt)),
+      )
+      const entrySession = sessions[entrySessionIndex]
+      const entryInstant = Date.parse(riskInput.intent.evaluatedAt)
+      if (
+        entrySession === undefined ||
+        entryInstant < Date.parse(entrySession.open) ||
+        entryInstant > Date.parse(entrySession.close)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["scenarios", index, "riskInput", "intent", "evaluatedAt"],
+          message: "Replay intent must be evaluated during its entry session",
+        })
+        return
+      }
+      const dailyCloseBySessionDate = new Map(
+        dailyCloses?.map(({ sessionDate, closeMicros }) => [
+          sessionDate,
+          closeMicros,
+        ]),
       )
       monitorCycles.forEach((cycle, cycleIndex) => {
         const cycleSessionIndex = sessions.findIndex(
@@ -157,6 +206,33 @@ const replayInputSchema = z
             code: "custom",
             path: [...path, "minutesToClose"],
             message: "Monitor cycle minutes to close must match replay session hours",
+          })
+        }
+        const hasCompletedClose = cycle.completedDailyCloseMicros !== undefined
+        const hasSma20 = cycle.sma20Micros !== undefined
+        if (!hasCompletedClose && !hasSma20) return
+        const trendCloses = sessions
+          .slice(0, cycleSessionIndex)
+          .slice(-20)
+          .map(({ date }) => dailyCloseBySessionDate.get(date))
+        const trendTotal = trendCloses.length === 20 &&
+            trendCloses.every((close) => close !== undefined)
+          ? trendCloses.reduce((total, close) => total + BigInt(close!), 0n)
+          : undefined
+        const expectedSma20 =
+          trendTotal !== undefined && trendTotal % 20n === 0n
+            ? Number(trendTotal / 20n)
+            : undefined
+        if (
+          !hasCompletedClose ||
+          !hasSma20 ||
+          cycle.completedDailyCloseMicros !== trendCloses.at(-1) ||
+          cycle.sma20Micros !== expectedSma20
+        ) {
+          context.addIssue({
+            code: "custom",
+            path: [...path, "completedDailyCloseMicros"],
+            message: "Monitor cycle trend evidence must match retained daily closes",
           })
         }
       })
