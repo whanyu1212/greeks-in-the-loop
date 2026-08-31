@@ -499,13 +499,14 @@ describe("backtest replay input validation", () => {
     monitorCycles: [monitorCycle],
   }
   const replay = (scenarios: readonly unknown[]) => ({
-    replayVersion: "3.0.0",
+    replayVersion: "4.0.0",
     initialEquityCents: 10_000_000,
     execution: {
       entrySlippageHalfCentsPerShare: 0,
       exitSlippageHalfCentsPerShare: 0,
       commissionCentsPerContract: 0,
     },
+    sessionDates: ["2026-08-27", "2026-08-28"],
     scenarios,
   })
 
@@ -539,5 +540,24 @@ describe("backtest replay input validation", () => {
       status: "INCOMPLETE",
       reason: "UNPRICED_EXIT",
     })
+  })
+
+  it("cross-checks holding-session indexes against the replay calendar", () => {
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      holdingSessionIndex: 5,
+    }] }]))).toThrow(/holding-session index must match/u)
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      decidedAt: "2026-08-28T14:31:00.000Z",
+      dte: 14,
+      holdingSessionIndex: 1,
+    }] }]))).toThrow(/holding-session index must match/u)
+    expect(runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      decidedAt: "2026-08-28T14:31:00.000Z",
+      dte: 14,
+      holdingSessionIndex: 2,
+    }] }])).aggregate).toMatchObject({ status: "COMPLETE" })
   })
 })

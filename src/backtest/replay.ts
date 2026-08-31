@@ -12,7 +12,22 @@ import {
   simulateReplayScenario,
 } from "./replay-core.js"
 
-export const BACKTEST_REPLAY_VERSION = "3.0.0" as const
+export const BACKTEST_REPLAY_VERSION = "4.0.0" as const
+
+const replaySessionDatesSchema = z
+  .array(z.iso.date())
+  .min(1)
+  .max(10_000)
+  .superRefine((dates, context) => {
+    for (let index = 1; index < dates.length; index += 1) {
+      if (dates[index]! > dates[index - 1]!) continue
+      context.addIssue({
+        code: "custom",
+        path: [index],
+        message: "Replay session dates must be strictly increasing",
+      })
+    }
+  })
 
 const scenarioSchema = z
   .object({
@@ -63,12 +78,13 @@ const replayInputSchema = z
     replayVersion: z.literal(BACKTEST_REPLAY_VERSION),
     initialEquityCents: z.number().int().positive().safe(),
     execution: replayExecutionSchema,
+    sessionDates: replaySessionDatesSchema,
     scenarios: z.array(scenarioSchema).min(1).max(10_000),
   })
   .strict()
-  .superRefine(({ scenarios }, context) => {
+  .superRefine(({ scenarios, sessionDates }, context) => {
     const scenarioIds = new Set<string>()
-    scenarios.forEach(({ scenarioId }, index) => {
+    scenarios.forEach(({ scenarioId, riskInput, monitorCycles }, index) => {
       if (scenarioIds.has(scenarioId)) {
         context.addIssue({
           code: "custom",
@@ -77,6 +93,25 @@ const replayInputSchema = z
         })
       }
       scenarioIds.add(scenarioId)
+
+      const entrySessionIndex = sessionDates.indexOf(
+        newYorkDate(new Date(riskInput.intent.evaluatedAt)),
+      )
+      monitorCycles.forEach((cycle, cycleIndex) => {
+        const cycleSessionIndex = sessionDates.indexOf(
+          newYorkDate(new Date(cycle.decidedAt)),
+        )
+        if (
+          entrySessionIndex >= 0 &&
+          cycleSessionIndex >= entrySessionIndex &&
+          cycle.holdingSessionIndex === cycleSessionIndex - entrySessionIndex + 1
+        ) return
+        context.addIssue({
+          code: "custom",
+          path: ["scenarios", index, "monitorCycles", cycleIndex, "holdingSessionIndex"],
+          message: "Monitor cycle holding-session index must match the replay calendar",
+        })
+      })
     })
   })
 
