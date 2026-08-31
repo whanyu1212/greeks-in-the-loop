@@ -4,7 +4,7 @@ import { tradeIntentV2Schema } from "../contracts/trade-intent-v2.js"
 import { RISK_STATE_CAPTURE_FAILURE_CODES } from "./alpaca-risk-state-provider.js"
 import {
   RISK_EVALUATION_VERSION,
-  RISK_RULE_VERSION,
+  SUPPORTED_RISK_RULE_VERSIONS,
   riskEvaluationV1Schema,
 } from "./risk-evaluation-v1.js"
 import {
@@ -45,7 +45,7 @@ const commonDecisionFields = {
   decisionVersion: z.literal(SHADOW_RISK_DECISION_VERSION),
   mode: z.literal("SHADOW"),
   evaluationVersion: z.literal(RISK_EVALUATION_VERSION),
-  ruleVersion: z.literal(RISK_RULE_VERSION),
+  ruleVersion: z.enum(SUPPORTED_RISK_RULE_VERSIONS),
 } as const
 
 export const shadowRiskDecisionV1Schema = z.discriminatedUnion("stage", [
