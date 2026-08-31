@@ -74,6 +74,7 @@ The frozen MVP strategy is documented in [SPY Directional Debit Spreads](docs/st
 | [Event Ledger V1](docs/event-ledger-v1.md) | Append-only audit record and SQL invariants |
 | [Backtest Replay V1/V2](docs/backtest-replay-v1.md) | Offline scenario contracts and fidelities |
 | [Research Market Snapshots V1](docs/research-market-snapshots-v1.md) | Application-owned SPY market-data identity and non-authoritative runtime audit capture |
+| [Research Screening Audit V1](docs/research-screening-audit-v1.md) | Audit comparison, deterministic aggregate report, and forward observation protocol |
 | [Pre-Market Research V1](docs/pre-market-research-v1.md) | Research vs. trade-intent eligibility windows |
 | [Research Source Policy](docs/research-source-policy.md) | Source precedence and freshness rules |
 | [Research Behavior Evaluation](docs/research-behavior-evaluation.md) | Prompt-behavior evaluation record |
@@ -199,10 +200,20 @@ The standard daemon and a standard `--once` invocation conflict when they use
 the same ledger. Research-anytime and shadow-anytime use separate ledgers by
 default, so they do not conflict with production; two runs targeting the same
 explicit anytime ledger do conflict. Read-only commands such as
-`research:evaluate` and `risk:report` do not acquire worker ownership and may
-inspect the WAL-backed ledger concurrently. `research:run` remains unlocked but
-may migrate the ledger before projecting or exporting a run, so do not invoke it
-concurrently with the worker.
+`research:evaluate`, `risk:report`, and `research:audit:report` do not acquire
+worker ownership and may inspect the WAL-backed ledger concurrently.
+`research:run` remains unlocked but may migrate the ledger before projecting or
+exporting a run, so do not invoke it concurrently with the worker.
+
+Build one bounded, reproducible screening-audit baseline with mandatory
+inclusive session-date bounds:
+
+```bash
+pnpm research:audit:report -- \
+  --ledger .state/research-ledger.sqlite \
+  --from YYYY-MM-DD \
+  --to YYYY-MM-DD
+```
 
 This is a single-host lock scoped to the canonical ledger, not a distributed
 lease. Deploy one production ledger per Alpaca account, complete shutdown before
