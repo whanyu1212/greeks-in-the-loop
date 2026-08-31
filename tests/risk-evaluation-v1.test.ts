@@ -510,12 +510,12 @@ describe("backtest replay input validation", () => {
   })
 
   it("rejects pre-entry cycles, impossible marks, and duplicate scenario IDs", () => {
-    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+    expect(runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
       ...monitorCycle,
       decidedAt: scenario.riskInput.intent.evaluatedAt,
       markHalfCentsPerShare:
         scenario.riskInput.intent.widthCentsPerShare * 2,
-    }] }]))).not.toThrow()
+    }] }])).aggregate).toMatchObject({ status: "COMPLETE" })
     expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
       ...monitorCycle,
       decidedAt: "2026-08-27T14:29:59.999Z",
@@ -528,5 +528,16 @@ describe("backtest replay input validation", () => {
     expect(() => runBacktestReplay(replay([scenario, scenario]))).toThrow(
       /scenario IDs must be unique/u,
     )
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      dte: monitorCycle.dte - 1,
+    }] }]))).toThrow(/DTE must match/u)
+    expect(runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      markHalfCentsPerShare: undefined,
+    }] }])).aggregate).toEqual({
+      status: "INCOMPLETE",
+      reason: "UNPRICED_EXIT",
+    })
   })
 })

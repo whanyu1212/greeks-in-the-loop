@@ -4,6 +4,7 @@ import {
   evaluateTradeIntentRiskV1,
   riskEvaluationInputV1Schema,
 } from "../risk/risk-evaluation-v1.js"
+import { newYorkDate } from "../scheduling/research-eligibility.js"
 import {
   aggregateReplayCents,
   replayExecutionSchema,
@@ -22,6 +23,9 @@ const scenarioSchema = z
   .strict()
   .superRefine(({ riskInput, monitorCycles }, context) => {
     const evaluatedAt = Date.parse(riskInput.intent.evaluatedAt)
+    const expirationDay = Date.parse(
+      `${riskInput.intent.expiration}T00:00:00.000Z`,
+    )
     const maximumMark = riskInput.intent.widthCentsPerShare * 2
     monitorCycles.forEach((cycle, index) => {
       if (Date.parse(cycle.decidedAt) < evaluatedAt) {
@@ -29,6 +33,16 @@ const scenarioSchema = z
           code: "custom",
           path: ["monitorCycles", index, "decidedAt"],
           message: "Monitor cycles cannot predate intent evaluation",
+        })
+      }
+      const cycleDay = Date.parse(
+        `${newYorkDate(new Date(cycle.decidedAt))}T00:00:00.000Z`,
+      )
+      if (cycle.dte !== (expirationDay - cycleDay) / 86_400_000) {
+        context.addIssue({
+          code: "custom",
+          path: ["monitorCycles", index, "dte"],
+          message: "Monitor cycle DTE must match its decision date and expiration",
         })
       }
       if (
@@ -79,12 +93,20 @@ export function runBacktestReplay(input: unknown) {
       : null
     return { scenarioId: scenario.scenarioId, risk, simulation }
   })
+  const hasUnpricedExit = scenarios.some(
+    ({ simulation }) => simulation?.outcome === "EXIT_UNPRICED",
+  )
   return {
     replayVersion: BACKTEST_REPLAY_VERSION,
     scenarios,
-    aggregate: aggregateReplayCents(
-      replay.initialEquityCents,
-      scenarios.map(({ simulation }) => simulation?.pnlCents ?? null),
-    ),
+    aggregate: hasUnpricedExit
+      ? { status: "INCOMPLETE" as const, reason: "UNPRICED_EXIT" as const }
+      : {
+          status: "COMPLETE" as const,
+          ...aggregateReplayCents(
+            replay.initialEquityCents,
+            scenarios.map(({ simulation }) => simulation?.pnlCents ?? null),
+          ),
+        },
   }
 }

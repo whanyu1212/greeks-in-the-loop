@@ -47,6 +47,7 @@ import { startOpencode } from "./opencode-runtime.js"
 import {
   buildResearchCyclePrompt,
   buildResearchReportRepairPrompt,
+  researchToolBudgetViolation,
 } from "./research/research-agent.js"
 import { loadResearchRunV1 } from "./research/research-artifact.js"
 import {
@@ -612,6 +613,16 @@ try {
                     )
                   }
                   cycleTrace.recordOpenCodeResult(invocation)
+                  const budgetViolation = researchToolBudgetViolation(invocation)
+                  if (budgetViolation !== undefined) {
+                    stageReporter.report("research.agent", "REJECTED", {
+                      reason: budgetViolation,
+                      toolCallCount: invocation.toolCallCount,
+                    })
+                    throw new Error(
+                      `Research tool budget rejected: ${budgetViolation}`,
+                    )
+                  }
                   stageReporter.report("research.agent", "COMPLETED", {
                     providerId: invocation.providerId,
                     modelId: invocation.modelId,

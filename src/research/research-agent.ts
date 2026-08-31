@@ -28,6 +28,27 @@ export const RESEARCH_MAX_FMP_CALLS = 3
 /** A stale snapshot may be rebuilt completely at most once. */
 export const RESEARCH_MAX_SNAPSHOT_REBUILDS = 1
 
+/** Returns the first deterministic research-tool budget exceeded by a run. */
+export function researchToolBudgetViolation(
+  usage: Readonly<{
+    toolCallCount: number
+    toolCalls: readonly Readonly<{ name: string }>[]
+  }>,
+) {
+  if (usage.toolCallCount > RESEARCH_MAX_TOOL_CALLS) {
+    return "TOTAL_TOOL_BUDGET_EXCEEDED" as const
+  }
+  if (usage.toolCalls.filter(({ name }) => name.startsWith("exa_")).length >
+    RESEARCH_MAX_EXA_CALLS) {
+    return "EXA_TOOL_BUDGET_EXCEEDED" as const
+  }
+  if (usage.toolCalls.filter(({ name }) => name.startsWith("fmp_")).length >
+    RESEARCH_MAX_FMP_CALLS) {
+    return "FMP_TOOL_BUDGET_EXCEEDED" as const
+  }
+  return undefined
+}
+
 /** Builds one bounded correction request after deterministic schema rejection. */
 export function buildResearchReportRepairPrompt(
   issues: readonly Readonly<{

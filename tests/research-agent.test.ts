@@ -10,6 +10,7 @@ import {
   RESEARCH_MAX_SNAPSHOT_REBUILDS,
   RESEARCH_MAX_TOOL_CALLS,
   RESEARCH_PROMPT_VERSION,
+  researchToolBudgetViolation,
 } from "../src/research/research-agent.js"
 import { projectResearchContextV1 } from "../src/research/research-context-v1.js"
 
@@ -25,6 +26,25 @@ describe("research agent request construction", () => {
     expect(RESEARCH_MAX_EXA_CALLS).toBe(4)
     expect(RESEARCH_MAX_FMP_CALLS).toBe(3)
     expect(RESEARCH_MAX_SNAPSHOT_REBUILDS).toBe(1)
+  })
+
+  it("rejects aggregate tool usage above any research budget", () => {
+    const usage = (names: readonly string[], toolCallCount = names.length) => ({
+      toolCallCount,
+      toolCalls: names.map((name) => ({ name })),
+    })
+    expect(researchToolBudgetViolation(usage([], RESEARCH_MAX_TOOL_CALLS + 1)))
+      .toBe("TOTAL_TOOL_BUDGET_EXCEEDED")
+    expect(researchToolBudgetViolation(usage(
+      Array.from({ length: RESEARCH_MAX_EXA_CALLS + 1 }, () => "exa_search"),
+    ))).toBe("EXA_TOOL_BUDGET_EXCEEDED")
+    expect(researchToolBudgetViolation(usage(
+      Array.from({ length: RESEARCH_MAX_FMP_CALLS + 1 }, () => "fmp_quote"),
+    ))).toBe("FMP_TOOL_BUDGET_EXCEEDED")
+    expect(researchToolBudgetViolation(usage([
+      ...Array.from({ length: RESEARCH_MAX_EXA_CALLS }, () => "exa_search"),
+      ...Array.from({ length: RESEARCH_MAX_FMP_CALLS }, () => "fmp_quote"),
+    ]))).toBeUndefined()
   })
 
   it("builds a bounded cycle request with an optional operator objective", () => {

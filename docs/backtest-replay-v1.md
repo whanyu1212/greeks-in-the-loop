@@ -9,4 +9,6 @@ The input is one JSON object with `replayVersion`, initial equity, execution ass
 
 Replay calls `evaluateTradeIntentRiskV1`. Rejected inputs are not simulated; approved inputs use the deterministic monitor and execution model in `src/backtest/replay-core.ts`.
 
+The aggregate has `status: "COMPLETE"` and numeric metrics only when every entered scenario has a priced exit. Any `EXIT_UNPRICED` scenario instead produces `status: "INCOMPLETE"` with reason `UNPRICED_EXIT`.
+
 There is no dataset downloader, SQLite dataset store, proxy fidelity, or strategy registry.
