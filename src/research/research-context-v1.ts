@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto"
 
-import type {
-  LedgerEventV1,
-  StoredLedgerEventV1,
+import {
+  LEDGER_EVENT_TYPES,
+  type LedgerEventV1,
+  type StoredLedgerEventV1,
 } from "../event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import type { PreliminaryResearchV1 } from "../contracts/preliminary-research-v1.js"
@@ -18,6 +19,9 @@ const TERMINAL_EVENT_TYPES = [
   "RESEARCH_CYCLE_COMPLETED",
   "RESEARCH_CYCLE_INTERRUPTED",
 ] as const
+const RESEARCH_CONTEXT_EVENT_TYPES = LEDGER_EVENT_TYPES.filter(
+  (eventType) => eventType !== "RESEARCH_SCREENING_AUDIT_RECORDED",
+)
 
 type TerminalStatus = Extract<
   LedgerEventV1,
@@ -158,9 +162,9 @@ export function projectResearchContextV1(
     throw new Error("Research context generation time is invalid")
   }
 
-  const orderedInput = [...inputEvents].sort(
-    (left, right) => left.sequence - right.sequence,
-  )
+  const orderedInput = inputEvents
+    .filter((event) => event.eventType !== "RESEARCH_SCREENING_AUDIT_RECORDED")
+    .sort((left, right) => left.sequence - right.sequence)
   const events = orderedInput.slice(-MAX_RESEARCH_CONTEXT_EVENTS)
   let truncatedBefore =
     options.truncatedBefore === true ||
@@ -479,6 +483,7 @@ export async function loadResearchContextV1(
   const [window, latestStart] = await Promise.all([
     store.list({
       direction: "DESC",
+      eventTypes: RESEARCH_CONTEXT_EVENT_TYPES,
       limit: MAX_RESEARCH_CONTEXT_EVENTS + 1,
     }),
     store.list({

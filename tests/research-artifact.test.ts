@@ -13,6 +13,11 @@ import { afterEach, describe, expect, it } from "vitest"
 
 import type { ResearchReportV2 } from "../src/contracts/research-report-v2.js"
 import {
+  createAgentResearchScreeningUnavailableAuditV1,
+  createApplicationCaptureUnavailableAuditV1,
+  createResearchScreeningAuditV1,
+} from "../src/contracts/research-screening-audit-v1.js"
+import {
   projectResearchRunV1,
   type ResearchRunV1,
   writeResearchRunArtifact,
@@ -236,10 +241,36 @@ describe("research cycle artifact", () => {
           }
         : event,
     ) as StoredLedgerEventV1[]
-    expect(projectResearchRunV1(currentEvents)).toMatchObject({
+    const currentRun = projectResearchRunV1(currentEvents)
+    expect(currentRun).toMatchObject({
       runVersion: "1.2.0",
       researchInvocation,
     })
+    const completion = currentEvents.at(-1)
+    if (completion?.eventType !== "RESEARCH_CYCLE_COMPLETED") {
+      throw new Error("Expected completed cycle fixture")
+    }
+    expect(projectResearchRunV1([
+      ...currentEvents,
+      {
+        ...completion,
+        sequence: completion.sequence + 1,
+        eventId: "event-screening-audit",
+        causationEventId: completion.eventId,
+        eventType: "RESEARCH_SCREENING_AUDIT_RECORDED",
+        payload: {
+          audit: createResearchScreeningAuditV1({
+            application: createApplicationCaptureUnavailableAuditV1(
+              ["REQUEST_TIMED_OUT"],
+              25,
+            ),
+            agent: createAgentResearchScreeningUnavailableAuditV1(
+              "INVOCATION_FAILED",
+            ),
+          }),
+        },
+      },
+    ])).toEqual(currentRun)
 
     const latestInvocation = {
       ...researchInvocation,

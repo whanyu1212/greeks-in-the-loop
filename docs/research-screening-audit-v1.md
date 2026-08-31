@@ -8,8 +8,12 @@ projects the existing agent result without retaining new model prose or
 financial values, and classifies only comparisons supported by retained input
 identity.
 
-This contract does not wire capture into runtime, add ledger events, change the
-research result, or grant screening authority. Those remain separate changes.
+The runtime starts application capture beside the legacy agent only when the
+cycle is trade-intent eligible and has a real scheduled slot. The authoritative
+research completion or interruption commits first; one bounded
+`RESEARCH_SCREENING_AUDIT_RECORDED` event is then appended as an observational
+child of that terminal. Audit construction or persistence failures are logged
+without changing the terminal, scheduler backoff, or research-loop breaker.
 
 ## Deterministic screening diagnostics
 
@@ -90,8 +94,24 @@ Identical-input checks are application-authored evidence; they are never derived
 from untrusted model claims. Equal time and membership with unequal snapshot IDs
 is not identical input and remains `COMPARISON_NOT_REPRESENTABLE`.
 
+## Runtime authority boundary
+
+The application snapshot and screening result never enter the agent prompt,
+proposal validation, trade-intent derivation, shadow-risk evaluation, or terminal
+record. Snapshot bodies and provider payloads are not persisted. Live legacy
+reports do not receive trusted application input identity or identical-input
+checks, so independently captured observations cannot be mislabeled as an
+algorithm mismatch.
+
+Audit capture uses an independent abort signal bounded by the existing cycle
+timeout. Early authoritative failures cancel unfinished capture; provider,
+screening, projection, and audit-append failures remain non-authoritative.
+Application-audit failures are therefore visible in retained diagnostics but do
+not engage the production research-loop breaker. Existing agent invocation and
+model-identity failures retain their existing breaker behavior.
+
 ## Non-goals
 
-V1 does not provide runtime scheduling, persistence, aggregate reports, breaker
-behavior, threshold tuning, profitability evidence, authority promotion, replay
-migration, or a forward shadow window.
+V1 does not provide aggregate reports, threshold tuning, profitability evidence,
+authority promotion, replay migration, an audit-specific breaker, or a forward
+shadow window.

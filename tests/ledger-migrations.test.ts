@@ -75,6 +75,10 @@ describe("applyLedgerMigrations", () => {
         migration_id: "003_shadow_risk_integrity",
         applied_at: "2026-08-25T14:30:00.000Z",
       },
+      {
+        migration_id: "004_research_screening_audit",
+        applied_at: "2026-08-25T14:30:00.000Z",
+      },
     ])
     expect(
       database
@@ -98,6 +102,7 @@ describe("applyLedgerMigrations", () => {
       },
       LEDGER_MIGRATIONS[1]!,
       LEDGER_MIGRATIONS[2]!,
+      LEDGER_MIGRATIONS[3]!,
     ]
 
     expect(() => applyLedgerMigrations(database, modified)).toThrow(
@@ -425,6 +430,84 @@ describe("research lifecycle integrity migration", () => {
       ).toEqual(["001_initial_ledger"])
       database.close()
     }
+  })
+})
+
+describe("research screening audit migration", () => {
+  it("allows exactly one audit caused by a completed or interrupted terminal", () => {
+    const database = new Database(":memory:")
+    applyLedgerMigrations(database)
+
+    for (const [cycleId, terminalType] of [
+      ["completed", "RESEARCH_CYCLE_COMPLETED"],
+      ["interrupted", "RESEARCH_CYCLE_INTERRUPTED"],
+    ] as const) {
+      const startId = `start-${cycleId}`
+      const terminalId = `terminal-${cycleId}`
+      insertDirectEvent(database, {
+        eventId: startId,
+        eventType: "RESEARCH_CYCLE_STARTED",
+        cycleId,
+      })
+      expect(() =>
+        insertDirectEvent(database, {
+          eventId: `early-audit-${cycleId}`,
+          eventType: "RESEARCH_SCREENING_AUDIT_RECORDED",
+          causationEventId: startId,
+          cycleId,
+        }),
+      ).toThrow("screening audit must follow its cycle terminal")
+      insertDirectEvent(database, {
+        eventId: terminalId,
+        eventType: terminalType,
+        causationEventId: startId,
+        cycleId,
+      })
+      insertDirectEvent(database, {
+        eventId: `audit-${cycleId}`,
+        eventType: "RESEARCH_SCREENING_AUDIT_RECORDED",
+        causationEventId: terminalId,
+        cycleId,
+      })
+      expect(() =>
+        insertDirectEvent(database, {
+          eventId: `duplicate-audit-${cycleId}`,
+          eventType: "RESEARCH_SCREENING_AUDIT_RECORDED",
+          causationEventId: terminalId,
+          cycleId,
+        }),
+      ).toThrow("UNIQUE constraint failed: ledger_events.cycle_id")
+      expect(() =>
+        insertDirectEvent(database, {
+          eventId: `late-event-${cycleId}`,
+          eventType: "RESEARCH_DECISION_REJECTED",
+          causationEventId: terminalId,
+          cycleId,
+        }),
+      ).toThrow("cannot append after a cycle terminal event")
+    }
+
+    database.close()
+  })
+
+  it("upgrades an existing migration-003 ledger without rewriting history", () => {
+    const database = new Database(":memory:")
+    applyLedgerMigrations(database, LEDGER_MIGRATIONS.slice(0, 3))
+    insertDirectEvent(database, {
+      eventId: "historical-start",
+      eventType: "RESEARCH_CYCLE_STARTED",
+      cycleId: "historical-cycle",
+    })
+    insertDirectEvent(database, {
+      eventId: "historical-terminal",
+      eventType: "RESEARCH_CYCLE_COMPLETED",
+      causationEventId: "historical-start",
+      cycleId: "historical-cycle",
+    })
+
+    expect(() => applyLedgerMigrations(database)).not.toThrow()
+    expect(database.prepare("SELECT COUNT(*) FROM ledger_events").pluck().get()).toBe(2)
+    database.close()
   })
 })
 

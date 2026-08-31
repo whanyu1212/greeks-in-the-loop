@@ -30,6 +30,7 @@ import {
 import { createSqliteLedgerStore } from "./event-ledger/sqlite-ledger-store.js"
 import { createAlpacaOptionQuoteProvider } from "./market-data/alpaca-option-quotes.js"
 import { createAlpacaCalendarClient } from "./market-data/alpaca-calendar-client.js"
+import { createAlpacaResearchSnapshotProvider } from "./market-data/alpaca-research-snapshot-provider-v1.js"
 import { summarizeOpenCodeInvocation } from "./observability/opencode-telemetry-summary.js"
 import { startResearchTelemetry } from "./observability/research-telemetry.js"
 import {
@@ -37,8 +38,17 @@ import {
   resolveTerminalLogFormat,
 } from "./observability/terminal-stage-reporter.js"
 import {
+  createAgentResearchScreeningModelDriftAuditV1,
+  createAgentResearchScreeningUnavailableAuditV1,
+  createApplicationCaptureUnavailableAuditV1,
+  createResearchScreeningAuditV1,
+  projectResearchReportV2ForScreeningAudit,
+} from "./contracts/research-screening-audit-v1.js"
+import {
   assertResearchModelIdentityV1,
   createResearchInvocationV1,
+  RESEARCH_INVOCATION_VERSION,
+  type ResearchInvocationV1,
 } from "./research/research-invocation-v1.js"
 import { startOpencode } from "./opencode-runtime.js"
 import { buildResearchCyclePrompt } from "./research/research-agent.js"
@@ -52,6 +62,10 @@ import {
   reconstructResearchContextV1,
 } from "./research/research-context-v1.js"
 import { processResearchCycle } from "./research/research-cycle.js"
+import {
+  researchScreeningAuditWindowV1,
+  runApplicationResearchScreeningAuditV1,
+} from "./research/research-screening-audit-runtime-v1.js"
 import { createAlpacaRiskStateProvider } from "./risk/alpaca-risk-state-provider.js"
 import {
   createLedgerDurableRiskControlStateLoader,
@@ -227,6 +241,16 @@ const quoteProvider = createAlpacaOptionQuoteProvider({
     "https://data.alpaca.markets",
 })
 const riskStateProvider = createAlpacaRiskStateProvider({
+  apiKey: alpacaApiKey,
+  secretKey: alpacaSecretKey,
+  dataBaseUrl:
+    readSetting("ALPACA_MARKET_DATA_BASE_URL")?.trim() ||
+    "https://data.alpaca.markets",
+  tradingBaseUrl:
+    readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
+    "https://paper-api.alpaca.markets",
+})
+const researchSnapshotProvider = createAlpacaResearchSnapshotProvider({
   apiKey: alpacaApiKey,
   secretKey: alpacaSecretKey,
   dataBaseUrl:
@@ -469,6 +493,54 @@ try {
         const tools = Object.fromEntries(
           MUTATING_ALPACA_TOOLS.map((tool) => [tool, false]),
         )
+        const auditWindow = researchScreeningAuditWindowV1(initialEligibility)
+        const applicationAudit = auditWindow === undefined
+          ? undefined
+          : (() => {
+              const controller = new AbortController()
+              return {
+                controller,
+                result: runApplicationResearchScreeningAuditV1({
+                  provider: researchSnapshotProvider,
+                  sessionDate,
+                  slotStartedAt: auditWindow.slotStartedAt,
+                  signal: AbortSignal.any([
+                    controller.signal,
+                    abortController.signal,
+                    AbortSignal.timeout(cycleTimeoutMs),
+                  ]),
+                }).catch(() => createApplicationCaptureUnavailableAuditV1(
+                  ["UNEXPECTED_FAILURE"],
+                  0,
+                )),
+              }
+            })()
+        let agentAudit = createAgentResearchScreeningUnavailableAuditV1(
+          "INVOCATION_FAILED",
+        )
+        let researchInvocation: ResearchInvocationV1 | undefined
+        const recordScreeningAudit = async (cancelApplication: boolean) => {
+          if (applicationAudit === undefined) return
+          if (cancelApplication && !applicationAudit.controller.signal.aborted) {
+            applicationAudit.controller.abort(
+              new DOMException("Research screening audit cancelled", "AbortError"),
+            )
+          }
+          try {
+            await lifecycleRecorder.recordResearchScreeningAudit(
+              cycle.cycleId,
+              createResearchScreeningAuditV1({
+                application: await applicationAudit.result,
+                agent: agentAudit,
+              }),
+              AbortSignal.timeout(cycleAbortTimeoutMs),
+            )
+          } catch {
+            console.error(
+              `[cycle ${cycleNumber}] research screening audit unavailable`,
+            )
+          }
+        }
         let timedOut = false
 
         try {
@@ -520,6 +592,18 @@ try {
                       expected: identity.expected,
                       observed: identity.observed,
                     })
+                    try {
+                      agentAudit = createAgentResearchScreeningModelDriftAuditV1({
+                        invocationVersion: RESEARCH_INVOCATION_VERSION,
+                        reason: identity.reason,
+                        expected: identity.expected,
+                        observed: identity.observed,
+                      })
+                    } catch {
+                      agentAudit = createAgentResearchScreeningUnavailableAuditV1(
+                        "UNEXPECTED_FAILURE",
+                      )
+                    }
                     await cycle.recordInvocationIdentityRejected(
                       {
                         reason: identity.reason,
@@ -558,6 +642,10 @@ try {
                 .filter(Boolean)
                 .join("\n")
 
+              researchInvocation = createResearchInvocationV1(
+                traceVersions,
+                response.invocation,
+              )
               return processResearchCycle({
                 rawResponse: text,
                 cycleStartedAt: cycle.startedAt,
@@ -566,10 +654,7 @@ try {
                 shadowRiskEvaluator,
                 outcomeSink: cycle.outcomeSink,
                 getEligibility,
-                researchInvocation: createResearchInvocationV1(
-                  traceVersions,
-                  response.invocation,
-                ),
+                researchInvocation,
                 trace: cycleTrace,
                 stageReporter,
               })
@@ -591,6 +676,22 @@ try {
             },
           })
           cycleTrace.setOutcome(processed.outcome.status)
+          try {
+            agentAudit = processed.researchReport === undefined ||
+                researchInvocation === undefined
+              ? createAgentResearchScreeningUnavailableAuditV1(
+                  "REPORT_REJECTED",
+                )
+              : projectResearchReportV2ForScreeningAudit(
+                  processed.researchReport,
+                  researchInvocation,
+                )
+          } catch {
+            agentAudit = createAgentResearchScreeningUnavailableAuditV1(
+              "UNEXPECTED_FAILURE",
+            )
+          }
+          await recordScreeningAudit(false)
           try {
             const artifacts = await cycleTrace.run(
               "research.artifact.project",
@@ -645,12 +746,28 @@ try {
           } else if (abortController.signal.aborted) {
             cycleTrace.setOutcome(timedOut ? "TIMEOUT" : "SHUTDOWN")
             await interruptCycle(timedOut ? "TIMEOUT" : "SHUTDOWN")
+            if (agentAudit.status === "UNAVAILABLE") {
+              agentAudit = createAgentResearchScreeningUnavailableAuditV1(
+                "AUDIT_CANCELLED",
+              )
+            }
+            await recordScreeningAudit(true)
           } else if (!timedOut) {
             cycleTrace.setOutcome("FAILED")
             const abortFailure = await synchronizeSessionAbort(
               "Aborting failed OpenCode session",
             )
             await interruptCycle("FAILED")
+            if (
+              researchInvocation !== undefined &&
+              agentAudit.status === "UNAVAILABLE" &&
+              agentAudit.reason === "INVOCATION_FAILED"
+            ) {
+              agentAudit = createAgentResearchScreeningUnavailableAuditV1(
+                "UNEXPECTED_FAILURE",
+              )
+            }
+            await recordScreeningAudit(true)
             if (abortFailure) {
               const fatal = new WorkerFatalError(
                 abortFailure.message,
@@ -659,6 +776,13 @@ try {
               abortController.abort(fatal)
               throw fatal
             }
+          } else {
+            if (agentAudit.status === "UNAVAILABLE") {
+              agentAudit = createAgentResearchScreeningUnavailableAuditV1(
+                "AUDIT_CANCELLED",
+              )
+            }
+            await recordScreeningAudit(true)
           }
           throw error
         } finally {

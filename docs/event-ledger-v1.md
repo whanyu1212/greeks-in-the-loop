@@ -44,7 +44,9 @@ Each serialized event payload is limited to 64 KiB. Event-specific arrays and st
 
 Causal events must appear before their dependents in the same batch or already exist in the ledger.
 
-Each research cycle has one start and at most one completion or interruption event. Database constraints reject cycle identity drift, cross-cycle causation, duplicate terminals, and events appended after a terminal. Normal result events and completion are committed in one atomic batch.
+Each research cycle has one start and at most one completion or interruption event. Database constraints reject cycle identity drift, cross-cycle causation, and duplicate terminals. Normal result events and completion are committed in one atomic batch.
+
+A terminal is the final authoritative lifecycle event. The only permitted later cycle row is one `RESEARCH_SCREENING_AUDIT_RECORDED` observation directly caused by that exact completion or interruption. A partial unique index limits it to one per cycle; every other post-terminal event remains forbidden.
 
 ## Append-only guarantee
 
@@ -133,6 +135,8 @@ The worker creates a fresh OpenCode session for every cycle, then generates one 
 
 Timeout, explicit cancellation, unexpected runtime failure, process shutdown, and startup recovery produce `RESEARCH_CYCLE_INTERRUPTED`. A cycle-scoped recorder arbitrates completion and interruption in memory, while database constraints provide the durable exactly-one-terminal backstop. Ledger persistence failures are fatal and are never relabeled as ordinary cycle interruptions.
 
+For a trade-intent-eligible cycle with a real scheduled slot, application-owned SPY snapshot capture and deterministic screening run beside the unchanged agent path. After the authoritative terminal commits, the recorder may append one bounded screening audit containing application and agent projections plus a fail-closed comparison. The audit never enters proposal, intent, risk, or terminal construction. Its failures are logged and do not affect scheduler success, backoff, or the production breaker.
+
 The research agent runs against a pinned provider and model. `opencode.json` selects it and `RESEARCH_INVOCATION_PROVENANCE_BY_VERSION` records the expected identity, so changing the model requires editing both and bumping `RESEARCH_INVOCATION_VERSION`. Each cycle compares the observed provider and model against that pin immediately after the agent responds and before the response is parsed. Drift appends a cycle-scoped `RESEARCH_INVOCATION_IDENTITY_REJECTED` event holding only the invocation version, a bounded `PROVIDER_DRIFT` or `MODEL_DRIFT` reason, and the expected and observed labels, then fails the cycle closed. The observed label is length-capped and reduced to the safe label alphabet but is never collapsed to `unknown`, because the record exists to say what the provider actually returned. No proposal is validated and no intent is derived from a drifted cycle. Because the failure is non-fatal it counts toward the consecutive-failure breaker below, so a sustained provider default change halts the worker instead of looping. Reasoning effort is configured alongside the model but is deliberately not asserted; it is a tuning knob rather than part of model identity.
 
 Consecutive non-fatal cycle failures are counted in memory and reset by success. At the configured threshold the worker appends a cycleless `RESEARCH_LOOP_BREAKER_LATCHED` event containing only the state version, bounded count, threshold, last attempt, and `CONSECUTIVE_FAILURE_LIMIT` reason, then exits without another delay or attempt. Fatal errors and cancellation never count toward the threshold. The latest latch/reset transition is authoritative across restarts.
@@ -143,7 +147,7 @@ On startup, the worker scans lifecycle events in bounded pages. Every start with
 
 ## Bounded agent context
 
-The worker projects at most 500 recent ledger events into a maximum 32 KiB context containing recent outcomes, the latest validated candidate and direction, recurring bounded rejection codes, normalized evidence references, recent interruptions, and required refresh markers. A single `truncatedBefore` flag identifies that older memory was dropped, alongside the next durable cycle number. When the projection exceeds its byte bound it trims the largest collection first, so no one kind of memory is starved.
+The worker projects at most 500 recent authoritative ledger events into a maximum 32 KiB context containing recent outcomes, the latest validated candidate and direction, recurring bounded rejection codes, normalized evidence references, recent interruptions, and required refresh markers. Screening-audit events are excluded before the event window is applied, so observational rows cannot displace prompt context. A single `truncatedBefore` flag identifies that older memory was dropped, alongside the next durable cycle number. When the projection exceeds its byte bound it trims the largest collection first, so no one kind of memory is starved.
 
 The projection excludes thesis and evidence prose, invalidation prose, raw model responses, complete provider payloads, transcripts, credentials, and hidden reasoning. Every prompt labels projected state as historical planning context and requires current account, market, quote, and freshness facts to be refreshed. OpenCode session memory is not authoritative.
 
