@@ -45,6 +45,18 @@ The scenario matrix holds two kinds of fixture, with
 The prompt-injection and operator-mutation scenarios are load-bearing security
 tests and are never removed.
 
+## Plan-driven qualitative compatibility
+
+The existing `researchBehaviorScenarios`, `pnpm research:eval`, and
+`pnpm research:eval:live` remain the legacy SPY/`ResearchReportV2` suite. They
+are not reinterpreted through `ResearchPlanV1`.
+
+The separate `pnpm research:eval:plan` matrix evaluates strict candidate-reference
+responses against complete plans, including a fixture-only non-SPY plan. Its
+optional live counterpart is `pnpm research:eval:plan:live`; it authorizes only
+the generic qualitative skill plus mock Exa/FMP tools. Neither suite activates
+the generic skill in production.
+
 ## Optional live-model evaluation
 
 Run one scenario:

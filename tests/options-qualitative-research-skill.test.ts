@@ -6,6 +6,7 @@ import {
   QUALITATIVE_RESEARCH_SKILL_NAME,
   QUALITATIVE_RESEARCH_SKILL_VERSION,
 } from "../src/contracts/research-plan-v1.js"
+import { skillIdentityFromMarkdown } from "../src/evaluation/qualitative-research-evaluate-cli.js"
 
 const skill = readFileSync(
   ".opencode/skills/options-qualitative-research/SKILL.md",
@@ -21,7 +22,18 @@ describe("generic qualitative research skill", () => {
     expect(skill).toContain(
       `skill-version: "${QUALITATIVE_RESEARCH_SKILL_VERSION}"`,
     )
+    expect(skillIdentityFromMarkdown(skill)).toEqual({
+      name: QUALITATIVE_RESEARCH_SKILL_NAME,
+      version: QUALITATIVE_RESEARCH_SKILL_VERSION,
+    })
     expect(productionConfig).not.toContain(QUALITATIVE_RESEARCH_SKILL_NAME)
+  })
+
+  it("fails observed skill identity closed when frontmatter is missing", () => {
+    expect(skillIdentityFromMarkdown("# Missing frontmatter")).toEqual({
+      name: "unknown",
+      version: "unknown",
+    })
   })
 
   it("keeps trusted financial identity and decisions outside the skill", () => {
