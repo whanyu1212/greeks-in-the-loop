@@ -225,6 +225,35 @@ const legacyInvocationSchema = z
     invocationVersion: z.enum(["1.0.0", "1.1.0", "1.2.0", "1.3.0"]),
   })
   .passthrough()
+const legacyResearchEligibilitySchema = z
+  .object({
+    evaluatedAt: timestamp,
+    sessionDate: z.iso.date().optional(),
+    sessionOpen: timestamp.optional(),
+    sessionClose: timestamp.optional(),
+    researchEligible: z.boolean(),
+    tradeIntentEligible: z.boolean(),
+    tradeIntentWindow: z
+      .object({
+        slotStartedAt: timestamp,
+        deadline: timestamp,
+      })
+      .strict()
+      .optional(),
+    previousSessionDates: z.array(z.iso.date()).max(16).optional(),
+    researchMode: z
+      .enum(["DRY_RUN_ANYTIME", "DRY_RUN_SHADOW_ANYTIME"])
+      .optional(),
+    reason: z
+      .enum([
+        "NO_MARKET_SESSION",
+        "OUTSIDE_RESEARCH_WINDOW",
+        "OUTSIDE_TRADE_INTENT_WINDOW",
+        "DRY_RUN_RESEARCH_ONLY",
+      ])
+      .optional(),
+  })
+  .strict()
 const legacyCandidateBearingDecisionSchema = z.discriminatedUnion("outcome", [
   z
     .object({
@@ -297,6 +326,28 @@ const legacyShadowDecisionSchema = z.discriminatedUnion("stage", [
 ])
 const legacyPayloadSchemas = {
   ...payloadSchemas,
+  RESEARCH_CYCLE_STARTED: z
+    .object({
+      cycleNumber: z.number().int().positive(),
+      sessionDate: z.iso.date().optional(),
+      initialEligibility: legacyResearchEligibilitySchema.optional(),
+    })
+    .strict()
+    .superRefine((payload, refinement) => {
+      if (
+        (payload.sessionDate === undefined) !==
+          (payload.initialEligibility === undefined) ||
+        (payload.initialEligibility !== undefined &&
+          (payload.initialEligibility.sessionDate !== payload.sessionDate ||
+            !payload.initialEligibility.researchEligible))
+      ) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["initialEligibility"],
+          message: "Cycle eligibility must match its eligible session",
+        })
+      }
+    }),
   PRELIMINARY_RESEARCH_RECORDED: z
     .object({
       research: z

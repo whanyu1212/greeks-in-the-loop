@@ -481,13 +481,16 @@ try {
               const response = await cycleTrace.run(
                 "opencode.session.prompt",
                 async () => {
-                  const prompt = async (text: string) => {
+                  const prompt = async (
+                    text: string,
+                    enabledTools: Record<string, boolean> = tools,
+                  ) => {
                     const response = await runtime.client.session.prompt({
                       path: { id: sessionId },
                       signal,
                       body: {
                         agent: researchCompatibility.agentName,
-                        tools,
+                        tools: enabledTools,
                         parts: [{ type: "text", text }],
                       },
                     })
@@ -544,10 +547,25 @@ try {
                   )
                   const resolvedResponse = await repairResearchReportV3ResponseOnce(
                     textResponse(initialResponse.parts),
-                    async (issues) =>
-                      textResponse(
-                        (await prompt(buildResearchReportRepairPrompt(issues))).parts,
-                      ),
+                    async (issues) => {
+                      const availableTools = await runtime.client.tool.ids({ signal })
+                      if (!availableTools.data || availableTools.data.length === 0) {
+                        throw formatApiError(
+                          "Listing OpenCode tools for schema repair",
+                          availableTools.error,
+                        )
+                      }
+                      const repairResponse = await prompt(
+                        buildResearchReportRepairPrompt(issues),
+                        Object.fromEntries(
+                          availableTools.data.map((tool) => [tool, false]),
+                        ),
+                      )
+                      if (repairResponse.parts.some(({ type }) => type === "tool")) {
+                        throw new Error("Schema repair cannot call tools")
+                      }
+                      return textResponse(repairResponse.parts)
+                    },
                   )
                   const text = resolvedResponse.rawResponse
                   const schemaRepairAttempted =

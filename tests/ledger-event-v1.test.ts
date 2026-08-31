@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 import {
+  ledgerEventV1Schema,
   ledgerEventV2Schema,
   LEDGER_EVENT_TYPES,
   type LedgerEventV2,
@@ -21,6 +22,42 @@ const baseEvent = {
 } as const
 
 describe("LedgerEventV2", () => {
+  it("decodes retired V1 dry-run cycle modes", () => {
+    for (const researchMode of [
+      "DRY_RUN_ANYTIME",
+      "DRY_RUN_SHADOW_ANYTIME",
+    ] as const) {
+      expect(
+        ledgerEventV1Schema.safeParse({
+          ...baseEvent,
+          eventVersion: "1.0.0",
+          payload: {
+            cycleNumber: 1,
+            sessionDate: "2026-08-25",
+            initialEligibility: {
+              evaluatedAt: "2026-08-25T14:30:00.000Z",
+              sessionDate: "2026-08-25",
+              sessionOpen: "2026-08-25T13:30:00.000Z",
+              sessionClose: "2026-08-25T20:00:00.000Z",
+              researchEligible: true,
+              tradeIntentEligible:
+                researchMode === "DRY_RUN_SHADOW_ANYTIME",
+              ...(researchMode === "DRY_RUN_SHADOW_ANYTIME"
+                ? {
+                    tradeIntentWindow: {
+                      slotStartedAt: "2026-08-25T14:30:00.000Z",
+                      deadline: "2026-08-25T14:40:00.000Z",
+                    },
+                  }
+                : { reason: "DRY_RUN_RESEARCH_ONLY" }),
+              researchMode,
+            },
+          },
+        }).success,
+      ).toBe(true)
+    }
+  })
+
   it("accepts a versioned research-cycle event", () => {
     expect(ledgerEventV2Schema.parse(baseEvent)).toEqual(baseEvent)
   })
