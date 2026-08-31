@@ -20,6 +20,29 @@ const scenarioSchema = z
     monitorCycles: replayMonitorCyclesSchema,
   })
   .strict()
+  .superRefine(({ riskInput, monitorCycles }, context) => {
+    const evaluatedAt = Date.parse(riskInput.intent.evaluatedAt)
+    const maximumMark = riskInput.intent.widthCentsPerShare * 2
+    monitorCycles.forEach((cycle, index) => {
+      if (Date.parse(cycle.decidedAt) < evaluatedAt) {
+        context.addIssue({
+          code: "custom",
+          path: ["monitorCycles", index, "decidedAt"],
+          message: "Monitor cycles cannot predate intent evaluation",
+        })
+      }
+      if (
+        cycle.markHalfCentsPerShare !== undefined &&
+        cycle.markHalfCentsPerShare > maximumMark
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["monitorCycles", index, "markHalfCentsPerShare"],
+          message: "Monitor marks cannot exceed the spread width",
+        })
+      }
+    })
+  })
 
 const replayInputSchema = z
   .object({
@@ -29,6 +52,19 @@ const replayInputSchema = z
     scenarios: z.array(scenarioSchema).min(1).max(10_000),
   })
   .strict()
+  .superRefine(({ scenarios }, context) => {
+    const scenarioIds = new Set<string>()
+    scenarios.forEach(({ scenarioId }, index) => {
+      if (scenarioIds.has(scenarioId)) {
+        context.addIssue({
+          code: "custom",
+          path: ["scenarios", index, "scenarioId"],
+          message: "Replay scenario IDs must be unique",
+        })
+      }
+      scenarioIds.add(scenarioId)
+    })
+  })
 
 export function runBacktestReplay(input: unknown) {
   const replay = replayInputSchema.parse(input)

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 
 import { describe, expect, it } from "vitest"
 
+import { runBacktestReplay } from "../src/backtest/replay.js"
 import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 import {
   evaluateTradeIntentRiskV1,
@@ -478,5 +479,54 @@ describe("evaluateTradeIntentRiskV1", () => {
       "utf8",
     )
     expect(source).not.toContain("SPY")
+  })
+})
+
+describe("backtest replay input validation", () => {
+  const monitorCycle = {
+    decidedAt: "2026-08-27T14:31:00.000Z",
+    marketOpen: true,
+    lateFill: false,
+    dte: 15,
+    minutesToClose: 329,
+    staleMinutes: 0,
+    markHalfCentsPerShare: 700,
+    holdingSessionIndex: 1,
+  } as const
+  const scenario = {
+    scenarioId: "scenario-1",
+    riskInput: makeInput(),
+    monitorCycles: [monitorCycle],
+  }
+  const replay = (scenarios: readonly unknown[]) => ({
+    replayVersion: "3.0.0",
+    initialEquityCents: 10_000_000,
+    execution: {
+      entrySlippageHalfCentsPerShare: 0,
+      exitSlippageHalfCentsPerShare: 0,
+      commissionCentsPerContract: 0,
+    },
+    scenarios,
+  })
+
+  it("rejects pre-entry cycles, impossible marks, and duplicate scenario IDs", () => {
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      decidedAt: scenario.riskInput.intent.evaluatedAt,
+      markHalfCentsPerShare:
+        scenario.riskInput.intent.widthCentsPerShare * 2,
+    }] }]))).not.toThrow()
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      decidedAt: "2026-08-27T14:29:59.999Z",
+    }] }]))).toThrow(/cannot predate intent evaluation/u)
+    expect(() => runBacktestReplay(replay([{ ...scenario, monitorCycles: [{
+      ...monitorCycle,
+      markHalfCentsPerShare:
+        scenario.riskInput.intent.widthCentsPerShare * 2 + 1,
+    }] }]))).toThrow(/cannot exceed the spread width/u)
+    expect(() => runBacktestReplay(replay([scenario, scenario]))).toThrow(
+      /scenario IDs must be unique/u,
+    )
   })
 })
