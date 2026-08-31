@@ -5,7 +5,11 @@ import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.
 import { parseRfc3339Nanoseconds } from "../shared/value-normalization.js"
 
 export const RISK_EVALUATION_VERSION = "1.0.0" as const
-export const RISK_RULE_VERSION = "1.0.0" as const
+export const RISK_RULE_VERSION = "1.1.0" as const
+export const SUPPORTED_RISK_RULE_VERSIONS = [
+  "1.0.0",
+  RISK_RULE_VERSION,
+] as const
 
 export const RISK_REJECTION_CODES = [
   "RISK_INPUT_INVALID",
@@ -27,6 +31,8 @@ export const RISK_REJECTION_CODES = [
   "EXPOSURE_LIMIT_ACTIVE",
   "DAILY_ENTRY_LIMIT_ACTIVE",
   "BUYING_POWER_RESERVE_INSUFFICIENT",
+  "DAILY_LOSS_BUDGET_INSUFFICIENT",
+  "COMPETITION_LOSS_BUDGET_INSUFFICIENT",
   "DAILY_BREAKER_ACTIVE",
   "COMPETITION_BREAKER_ACTIVE",
 ] as const
@@ -47,6 +53,7 @@ const DAILY_DRAWDOWN_CENTS = 150_000
 const COMPETITION_BREAKER_EQUITY_CENTS = 9_250_000
 
 const timestamp = z.iso.datetime({ offset: true, precision: 3 })
+const riskRuleVersion = z.enum(SUPPORTED_RISK_RULE_VERSIONS)
 const nonnegativeSafeInteger = z
   .number()
   .int()
@@ -160,7 +167,7 @@ export type RiskEvaluationInputV1 = Readonly<
 const approvedRiskEvaluationV1Schema = z
   .object({
     evaluationVersion: z.literal(RISK_EVALUATION_VERSION),
-    ruleVersion: z.literal(RISK_RULE_VERSION),
+    ruleVersion: riskRuleVersion,
     outcome: z.literal("APPROVED"),
     evaluatedAt: timestamp,
     approvedQuantity: z.literal(1),
@@ -172,7 +179,7 @@ const approvedRiskEvaluationV1Schema = z
 const rejectedRiskEvaluationV1Schema = z
   .object({
     evaluationVersion: z.literal(RISK_EVALUATION_VERSION),
-    ruleVersion: z.literal(RISK_RULE_VERSION),
+    ruleVersion: riskRuleVersion,
     outcome: z.literal("REJECTED"),
     evaluatedAt: timestamp.nullable(),
     reasonCodes: z.array(z.enum(RISK_REJECTION_CODES)).min(1),
@@ -404,6 +411,16 @@ export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
     reject("CONTRACT_METRICS_INELIGIBLE")
   }
 
+  const combinedQuoteWidth =
+    BigInt(intent.longQuote.askCentsPerShare) -
+    BigInt(intent.longQuote.bidCentsPerShare) +
+    BigInt(intent.shortQuote.askCentsPerShare) -
+    BigInt(intent.shortQuote.bidCentsPerShare)
+  const exactMidpointHalfDebit =
+    BigInt(intent.longQuote.bidCentsPerShare) +
+    BigInt(intent.longQuote.askCentsPerShare) -
+    BigInt(intent.shortQuote.bidCentsPerShare) -
+    BigInt(intent.shortQuote.askCentsPerShare)
   if (
     quoteIsTooWide(
       intent.longQuote.bidCentsPerShare,
@@ -412,7 +429,8 @@ export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
     quoteIsTooWide(
       intent.shortQuote.bidCentsPerShare,
       intent.shortQuote.askCentsPerShare,
-    )
+    ) ||
+    combinedQuoteWidth * 10n > exactMidpointHalfDebit
   ) {
     liquidityIneligible = true
   }
@@ -420,9 +438,14 @@ export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
     reject("LIQUIDITY_INELIGIBLE")
   }
 
+  const maximumEligibleDebitBasis = BigInt(intent.widthCentsPerShare) * 60n
+  const naturalEntryDebit =
+    BigInt(intent.longQuote.askCentsPerShare) -
+    BigInt(intent.shortQuote.bidCentsPerShare)
   if (
     BigInt(intent.entryLimitCentsPerShare) * 100n >
-    BigInt(intent.widthCentsPerShare) * 60n
+      maximumEligibleDebitBasis ||
+    naturalEntryDebit * 100n > maximumEligibleDebitBasis
   ) {
     reject("ENTRY_PRICE_INELIGIBLE")
   }
@@ -448,9 +471,8 @@ export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
     reject("DAILY_ENTRY_LIMIT_ACTIVE")
   }
 
-  const projectedBuyingPower =
-    BigInt(account.buyingPowerCents) -
-    BigInt(intent.maxLossCentsPerContract)
+  const maxLoss = BigInt(intent.maxLossCentsPerContract)
+  const projectedBuyingPower = BigInt(account.buyingPowerCents) - maxLoss
   if (
     projectedBuyingPower < 0n ||
     projectedBuyingPower * 2n < BigInt(account.buyingPowerCents)
@@ -458,18 +480,28 @@ export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
     reject("BUYING_POWER_RESERVE_INSUFFICIENT")
   }
 
+  const currentDailyDrawdown =
+    BigInt(account.lastEquityCents) - BigInt(account.equityCents)
   if (
     portfolio.dailyBreakerActive ||
-    BigInt(account.lastEquityCents) - BigInt(account.equityCents) >=
-      BigInt(DAILY_DRAWDOWN_CENTS)
+    currentDailyDrawdown >= BigInt(DAILY_DRAWDOWN_CENTS)
   ) {
     reject("DAILY_BREAKER_ACTIVE")
+  } else if (
+    currentDailyDrawdown + maxLoss >= BigInt(DAILY_DRAWDOWN_CENTS)
+  ) {
+    reject("DAILY_LOSS_BUDGET_INSUFFICIENT")
   }
   if (
     portfolio.competitionBreakerActive ||
     account.equityCents <= COMPETITION_BREAKER_EQUITY_CENTS
   ) {
     reject("COMPETITION_BREAKER_ACTIVE")
+  } else if (
+    BigInt(account.equityCents) - maxLoss <=
+    BigInt(COMPETITION_BREAKER_EQUITY_CENTS)
+  ) {
+    reject("COMPETITION_LOSS_BUDGET_INSUFFICIENT")
   }
 
   if (reasons.length > 0) {

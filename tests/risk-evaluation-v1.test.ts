@@ -184,14 +184,27 @@ describe("evaluateTradeIntentRiskV1", () => {
     const evaluation = evaluateTradeIntentRiskV1(input)
     expect(evaluation).toEqual({
       evaluationVersion: "1.0.0",
-      ruleVersion: "1.0.0",
+      ruleVersion: "1.1.0",
       outcome: "APPROVED",
       evaluatedAt: "2026-08-27T14:30:00.000Z",
       approvedQuantity: 1,
       maxLossCents: 20_000,
       projectedBuyingPowerCents: 19_980_000,
     })
-    expect(canonicalJsonSha256(evaluation)).toBe("c3c5509885c7d7da2282e4ab5a3afe22b63c34b03e93b963bf98bc716f823d9c")
+    expect(canonicalJsonSha256(evaluation)).toBe("5c168d147ce2787330851daaed510273f91483c7f9a4429e5078e63e753b629d")
+
+    expect(
+      riskEvaluationV1Schema.safeParse({
+        ...evaluation,
+        ruleVersion: "1.0.0",
+      }).success,
+    ).toBe(true)
+    expect(
+      riskEvaluationV1Schema.safeParse({
+        ...evaluation,
+        ruleVersion: "1.2.0",
+      }).success,
+    ).toBe(false)
   })
 
   const untrustedInput = makeInput()
@@ -203,7 +216,7 @@ describe("evaluateTradeIntentRiskV1", () => {
     (input) => {
       expect(evaluateTradeIntentRiskV1(input)).toEqual({
         evaluationVersion: "1.0.0",
-        ruleVersion: "1.0.0",
+        ruleVersion: "1.1.0",
         outcome: "REJECTED",
         evaluatedAt: null,
         reasonCodes: ["RISK_INPUT_INVALID"],
@@ -277,7 +290,7 @@ describe("evaluateTradeIntentRiskV1", () => {
     malformed.context.contracts.legs[0]!.contractSymbol = "not-a-symbol"
     expect(evaluateTradeIntentRiskV1(malformed)).toEqual({
       evaluationVersion: "1.0.0",
-      ruleVersion: "1.0.0",
+      ruleVersion: "1.1.0",
       outcome: "REJECTED",
       evaluatedAt: null,
       reasonCodes: ["RISK_INPUT_INVALID"],
@@ -371,6 +384,50 @@ describe("evaluateTradeIntentRiskV1", () => {
     ).toContain("LIQUIDITY_INELIGIBLE")
   })
 
+  it("checks combined-spread quote liquidity at the exact 20% boundary", () => {
+    const exactBoundary = makeInput(
+      makeIntent({
+        longBidCents: 300,
+        longAskCents: 310,
+        shortBidCents: 200,
+        shortAskCents: 210,
+      }),
+    )
+    expect(evaluateTradeIntentRiskV1(exactBoundary).outcome).toBe("APPROVED")
+
+    const aboveBoundary = makeInput(
+      makeIntent({
+        longBidCents: 300,
+        longAskCents: 311,
+        shortBidCents: 200,
+        shortAskCents: 210,
+      }),
+    )
+    expect(rejectionReasons(aboveBoundary)).toContain("LIQUIDITY_INELIGIBLE")
+  })
+
+  it("checks natural entry debit at the exact 60% width boundary", () => {
+    const exactBoundary = makeInput(
+      makeIntent({
+        longBidCents: 500,
+        longAskCents: 510,
+        shortBidCents: 210,
+        shortAskCents: 220,
+      }),
+    )
+    expect(evaluateTradeIntentRiskV1(exactBoundary).outcome).toBe("APPROVED")
+
+    const aboveBoundary = makeInput(
+      makeIntent({
+        longBidCents: 500,
+        longAskCents: 510,
+        shortBidCents: 209,
+        shortAskCents: 219,
+      }),
+    )
+    expect(rejectionReasons(aboveBoundary)).toContain("ENTRY_PRICE_INELIGIBLE")
+  })
+
   it("checks exact price, loss, and buying-power thresholds", () => {
     expect(
       rejectionReasons(
@@ -457,6 +514,45 @@ describe("evaluateTradeIntentRiskV1", () => {
       input.context.account.equityCents = 9_250_000
       input.context.account.lastEquityCents = 9_250_000
     }, "COMPETITION_BREAKER_ACTIVE")
+  })
+
+  it("reserves full maximum loss against daily and competition budgets", () => {
+    const dailyEquality = makeInput()
+    dailyEquality.context.account.lastEquityCents = 10_130_000
+    expect(rejectionReasons(dailyEquality)).toContain(
+      "DAILY_LOSS_BUDGET_INSUFFICIENT",
+    )
+
+    const dailyBelow = makeInput()
+    dailyBelow.context.account.lastEquityCents = 10_129_999
+    expect(evaluateTradeIntentRiskV1(dailyBelow).outcome).toBe("APPROVED")
+
+    const competitionEquality = makeInput()
+    competitionEquality.context.account.equityCents = 9_270_000
+    competitionEquality.context.account.lastEquityCents = 9_270_000
+    expect(rejectionReasons(competitionEquality)).toContain(
+      "COMPETITION_LOSS_BUDGET_INSUFFICIENT",
+    )
+
+    const competitionAbove = makeInput()
+    competitionAbove.context.account.equityCents = 9_270_001
+    competitionAbove.context.account.lastEquityCents = 9_270_001
+    expect(evaluateTradeIntentRiskV1(competitionAbove).outcome).toBe("APPROVED")
+  })
+
+  it("reports active breakers without redundant projected-budget reasons", () => {
+    const daily = makeInput()
+    daily.context.portfolio.dailyBreakerActive = true
+    daily.context.account.lastEquityCents = 10_130_000
+    expect(rejectionReasons(daily)).toEqual(["DAILY_BREAKER_ACTIVE"])
+
+    const competition = makeInput()
+    competition.context.portfolio.competitionBreakerActive = true
+    competition.context.account.equityCents = 9_270_000
+    competition.context.account.lastEquityCents = 9_270_000
+    expect(rejectionReasons(competition)).toEqual([
+      "COMPETITION_BREAKER_ACTIVE",
+    ])
   })
 
   it("returns multiple failures once in stable gate order", () => {

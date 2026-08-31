@@ -89,6 +89,45 @@ describe("LedgerEventV2", () => {
     ])
   })
 
+  it("reads stored and current shadow-risk rule versions", () => {
+    const event = {
+      ...baseEvent,
+      eventId: "risk-event-1",
+      eventType: "RISK_SHADOW_DECISION_RECORDED",
+      causationEventId: "intent-event-1",
+      payload: {
+        decision: {
+          decisionVersion: "1.0.0",
+          mode: "SHADOW",
+          evaluationVersion: "1.0.0",
+          ruleVersion: "1.0.0",
+          stage: "STATE_CAPTURE_FAILED",
+          outcome: "REJECTED",
+          evaluatedAt: null,
+          captureReasonCodes: ["ACCOUNT_REQUEST_FAILED"],
+        },
+      },
+    } as const
+
+    expect(ledgerEventV2Schema.safeParse(event).success).toBe(true)
+    expect(
+      ledgerEventV2Schema.safeParse({
+        ...event,
+        payload: {
+          decision: { ...event.payload.decision, ruleVersion: "1.1.0" },
+        },
+      }).success,
+    ).toBe(true)
+    expect(
+      ledgerEventV2Schema.safeParse({
+        ...event,
+        payload: {
+          decision: { ...event.payload.decision, ruleVersion: "1.2.0" },
+        },
+      }).success,
+    ).toBe(false)
+  })
+
   it("accepts strict cycleless research-loop breaker transitions", () => {
     const envelope = {
       eventId: "breaker-event-1",
