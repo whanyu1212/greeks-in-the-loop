@@ -1,9 +1,9 @@
-import type { StoredLedgerEventV1 } from "../event-ledger/ledger-event-v1.js"
+import type { StoredLedgerEvent } from "../event-ledger/ledger-event-v1.js"
 
 export const RISK_REPORT_VERSION = "1.0.0" as const
 
 export function buildRiskReportV1(
-  events: readonly StoredLedgerEventV1[],
+  events: readonly StoredLedgerEvent[],
   tradingDate?: string,
 ) {
   const cycleDates = new Map<string, string>()

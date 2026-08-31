@@ -5,8 +5,8 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
-  type LedgerEventV1,
-  type StoredLedgerEventV1,
+  type LedgerEventV2,
+  type StoredLedgerEventV2,
 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
@@ -23,16 +23,16 @@ const temporaryDirectories: string[] = []
 const recordedAt = "2026-08-26T14:00:00.000Z"
 
 const stored = (
-  event: LedgerEventV1,
+  event: LedgerEventV2,
   sequence: number,
-): StoredLedgerEventV1 => ({ ...event, sequence, recordedAt })
+): StoredLedgerEventV2 => ({ ...event, sequence, recordedAt })
 
 const cycleStarted = (
   cycleNumber: number,
   cycleId = `cycle-${cycleNumber}`,
-): LedgerEventV1 => ({
+): LedgerEventV2 => ({
   eventId: `started-${cycleId}`,
-  eventVersion: "1.0.0",
+  eventVersion: "2.0.0",
   eventType: "RESEARCH_CYCLE_STARTED",
   occurredAt: `2026-08-26T13:${String(cycleNumber).padStart(2, "0")}:00.000Z`,
   correlationId: `correlation-${cycleId}`,
@@ -47,9 +47,9 @@ const cycleCompleted = (
     | "VALIDATED_NO_ACTION"
     | "PRELIMINARY_RESEARCH_RETAINED"
     | "INTENT_DERIVED" = "VALIDATED_NO_ACTION",
-): LedgerEventV1 => ({
+): LedgerEventV2 => ({
   eventId: `completed-cycle-${cycleNumber}`,
-  eventVersion: "1.0.0",
+  eventVersion: "2.0.0",
   eventType: "RESEARCH_CYCLE_COMPLETED",
   occurredAt: `2026-08-26T13:${String(cycleNumber).padStart(2, "0")}:30.000Z`,
   correlationId: `correlation-cycle-${cycleNumber}`,
@@ -59,9 +59,9 @@ const cycleCompleted = (
   payload: { status },
 })
 
-const validatedProposal = (): LedgerEventV1 => ({
+const validatedProposal = (): LedgerEventV2 => ({
   eventId: "validated-proposal",
-  eventVersion: "1.0.0",
+  eventVersion: "2.0.0",
   eventType: "RESEARCH_DECISION_VALIDATED",
   occurredAt: "2026-08-26T13:01:10.000Z",
   correlationId: "correlation-cycle-1",
@@ -97,9 +97,9 @@ const evidenceReferenced = (
   snapshotRef: string,
   cycleId = "cycle-1",
   source = "option-quotes",
-): LedgerEventV1 => ({
+): LedgerEventV2 => ({
   eventId: `evidence-${cycleId}-${snapshotRef}`,
-  eventVersion: "1.0.0",
+  eventVersion: "2.0.0",
   eventType: "EVIDENCE_SNAPSHOT_REFERENCED",
   occurredAt: "2026-08-26T13:01:05.000Z",
   correlationId: `correlation-${cycleId}`,
@@ -113,9 +113,9 @@ const evidenceReferenced = (
   },
 })
 
-const preliminaryRecorded = (): LedgerEventV1 => ({
+const preliminaryRecorded = (): LedgerEventV2 => ({
   eventId: "preliminary-cycle-1",
-  eventVersion: "1.0.0",
+  eventVersion: "2.0.0",
   eventType: "PRELIMINARY_RESEARCH_RECORDED",
   occurredAt: "2026-08-26T13:01:10.000Z",
   correlationId: "correlation-cycle-1",
@@ -187,7 +187,7 @@ describe("ResearchContextV1", () => {
   })
 
   it("clears preliminary refresh after a later proposal is freshly validated", () => {
-    const laterProposal: LedgerEventV1 = {
+    const laterProposal: LedgerEventV2 = {
       ...validatedProposal(),
       eventId: "validated-proposal-cycle-2",
       correlationId: "correlation-cycle-2",
@@ -214,14 +214,14 @@ describe("ResearchContextV1", () => {
   })
 
   it("projects normalized bounded memory without decision prose", () => {
-    const events: StoredLedgerEventV1[] = [
+    const events: StoredLedgerEventV2[] = [
       stored(cycleStarted(1), 1),
       stored(evidenceReferenced("snapshot-1"), 2),
       stored(validatedProposal(), 3),
       stored(
         {
           eventId: "rejected-1",
-          eventVersion: "1.0.0",
+          eventVersion: "2.0.0",
           eventType: "RESEARCH_DECISION_REJECTED",
           occurredAt: "2026-08-26T13:01:20.000Z",
           correlationId: "correlation-cycle-1",
@@ -240,7 +240,7 @@ describe("ResearchContextV1", () => {
       stored(
         {
           eventId: "validated-no-action",
-          eventVersion: "1.0.0",
+          eventVersion: "2.0.0",
           eventType: "RESEARCH_DECISION_VALIDATED",
           occurredAt: "2026-08-26T13:02:10.000Z",
           correlationId: "correlation-cycle-2",
@@ -268,7 +268,7 @@ describe("ResearchContextV1", () => {
       stored(
         {
           eventId: "interrupted-cycle-3",
-          eventVersion: "1.0.0",
+          eventVersion: "2.0.0",
           eventType: "RESEARCH_CYCLE_INTERRUPTED",
           occurredAt: "2026-08-26T13:03:20.000Z",
           correlationId: "correlation-cycle-3",
@@ -342,7 +342,7 @@ describe("ResearchContextV1", () => {
     // over its serialized budget. The byte cap alone does not say *which*
     // collection loses items, so these counts are the contract a reshape of the
     // trim policy has to justify changing.
-    const events: StoredLedgerEventV1[] = []
+    const events: StoredLedgerEventV2[] = []
     let sequence = 1
     for (let cycle = 1; cycle <= 60; cycle += 1) {
       const cycleId = `cycle-${cycle}`
@@ -365,7 +365,7 @@ describe("ResearchContextV1", () => {
         stored(
           {
             eventId: `interrupted-${cycleId}`,
-            eventVersion: "1.0.0",
+            eventVersion: "2.0.0",
             eventType: "RESEARCH_CYCLE_INTERRUPTED",
             occurredAt: "2026-08-26T13:02:00.000Z",
             correlationId: `correlation-${cycleId}`,
@@ -411,7 +411,7 @@ describe("ResearchContextV1", () => {
   })
 
   it("enforces event, collection, and final UTF-8 bounds deterministically", () => {
-    const events: StoredLedgerEventV1[] = []
+    const events: StoredLedgerEventV2[] = []
     for (let index = 1; index <= 700; index += 1) {
       events.push(stored(cycleStarted(index), index * 2 - 1))
       events.push(stored(cycleCompleted(index), index * 2))

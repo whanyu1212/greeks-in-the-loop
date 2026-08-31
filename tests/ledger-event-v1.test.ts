@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest"
 
 import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 import {
-  ledgerEventV1Schema,
+  ledgerEventV2Schema,
   LEDGER_EVENT_TYPES,
-  type LedgerEventV1,
+  type LedgerEventV2,
 } from "../src/event-ledger/ledger-event-v1.js"
 
 const baseEvent = {
   eventId: "event-1",
-  eventVersion: "1.0.0",
+  eventVersion: "2.0.0",
   eventType: "RESEARCH_CYCLE_STARTED",
   occurredAt: "2026-08-25T14:30:00.000Z",
   correlationId: "correlation-1",
@@ -20,14 +20,14 @@ const baseEvent = {
   },
 } as const
 
-describe("LedgerEventV1", () => {
+describe("LedgerEventV2", () => {
   it("accepts a versioned research-cycle event", () => {
-    expect(ledgerEventV1Schema.parse(baseEvent)).toEqual(baseEvent)
+    expect(ledgerEventV2Schema.parse(baseEvent)).toEqual(baseEvent)
   })
 
-  it("preserves the canonical V1 ledger-event bytes", () => {
-    expect(canonicalJsonSha256(ledgerEventV1Schema.parse(baseEvent))).toBe(
-      "7d6d9bdbe39251ab6fdae116c27f79c17a2939877a1268cb26f4f358044f3b1c",
+  it("preserves the canonical V2 ledger-event bytes", () => {
+    expect(canonicalJsonSha256(ledgerEventV2Schema.parse(baseEvent))).toBe(
+      "11a5c93ea34cc7d42f348d21997c004195ec22896b872e39acf009e363b0e255",
     )
   })
 
@@ -55,12 +55,12 @@ describe("LedgerEventV1", () => {
   it("accepts strict cycleless research-loop breaker transitions", () => {
     const envelope = {
       eventId: "breaker-event-1",
-      eventVersion: "1.0.0",
+      eventVersion: "2.0.0",
       occurredAt: "2026-08-25T14:30:00.000Z",
       correlationId: "breaker-correlation-1",
     } as const
     expect(
-      ledgerEventV1Schema.parse({
+      ledgerEventV2Schema.parse({
         ...envelope,
         eventType: "RESEARCH_LOOP_BREAKER_LATCHED",
         payload: {
@@ -73,7 +73,7 @@ describe("LedgerEventV1", () => {
       }),
     ).toMatchObject({ eventType: "RESEARCH_LOOP_BREAKER_LATCHED" })
     expect(
-      ledgerEventV1Schema.parse({
+      ledgerEventV2Schema.parse({
         ...envelope,
         eventId: "breaker-event-2",
         eventType: "RESEARCH_LOOP_BREAKER_RESET",
@@ -88,7 +88,7 @@ describe("LedgerEventV1", () => {
   it("requires cycle identity on invocation-identity rejections", () => {
     const cycleScoped = {
       eventId: "identity-event-1",
-      eventVersion: "1.0.0",
+      eventVersion: "2.0.0",
       eventType: "RESEARCH_INVOCATION_IDENTITY_REJECTED",
       occurredAt: "2026-08-25T14:30:00.000Z",
       correlationId: "identity-correlation-1",
@@ -102,11 +102,11 @@ describe("LedgerEventV1", () => {
         observed: "gpt-5.6-sol-fast",
       },
     } as const
-    expect(ledgerEventV1Schema.parse(cycleScoped)).toMatchObject({
+    expect(ledgerEventV2Schema.parse(cycleScoped)).toMatchObject({
       eventType: "RESEARCH_INVOCATION_IDENTITY_REJECTED",
     })
     expect(
-      ledgerEventV1Schema.parse({
+      ledgerEventV2Schema.parse({
         ...cycleScoped,
         payload: { ...cycleScoped.payload, invocationVersion: "3.0.0" },
       }),
@@ -116,23 +116,23 @@ describe("LedgerEventV1", () => {
 
     // Unlike the breaker events, drift happens inside a live cycle.
     const { cycleId, sessionId, ...cycleless } = cycleScoped
-    expect(() => ledgerEventV1Schema.parse(cycleless)).toThrow()
+    expect(() => ledgerEventV2Schema.parse(cycleless)).toThrow()
 
     // Bounded payload only: no raw provider prose, no extra fields.
     expect(() =>
-      ledgerEventV1Schema.parse({
+      ledgerEventV2Schema.parse({
         ...cycleScoped,
         payload: { ...cycleScoped.payload, providerResponse: "..." },
       }),
     ).toThrow()
     expect(() =>
-      ledgerEventV1Schema.parse({
+      ledgerEventV2Schema.parse({
         ...cycleScoped,
         payload: { ...cycleScoped.payload, reason: "SOMETHING_ELSE" },
       }),
     ).toThrow()
     expect(() =>
-      ledgerEventV1Schema.parse({
+      ledgerEventV2Schema.parse({
         ...cycleScoped,
         payload: { ...cycleScoped.payload, observed: "a b c" },
       }),
@@ -142,7 +142,7 @@ describe("LedgerEventV1", () => {
   it("rejects malformed or cycle-scoped research-loop breaker events", () => {
     const latch = {
       eventId: "breaker-event-1",
-      eventVersion: "1.0.0",
+      eventVersion: "2.0.0",
       eventType: "RESEARCH_LOOP_BREAKER_LATCHED",
       occurredAt: "2026-08-25T14:30:00.000Z",
       correlationId: "breaker-correlation-1",
@@ -163,31 +163,31 @@ describe("LedgerEventV1", () => {
       { ...latch, payload: { ...latch.payload, rawError: "secret" } },
       { ...latch, payload: { ...latch.payload, stateVersion: "2.0.0" } },
     ]) {
-      expect(ledgerEventV1Schema.safeParse(invalid).success).toBe(false)
+      expect(ledgerEventV2Schema.safeParse(invalid).success).toBe(false)
     }
   })
 
   it("rejects a payload that does not match its event type", () => {
-    const invalidEvent: LedgerEventV1 = {
+    const invalidEvent: LedgerEventV2 = {
       ...baseEvent,
       // @ts-expect-error The event type and payload must remain paired statically.
       payload: { status: "VALIDATED_NO_ACTION" },
     }
 
     expect(
-      ledgerEventV1Schema.safeParse(invalidEvent).success,
+      ledgerEventV2Schema.safeParse(invalidEvent).success,
     ).toBe(false)
   })
 
   it("rejects imprecise timestamps and unknown fields", () => {
     expect(
-      ledgerEventV1Schema.safeParse({
+      ledgerEventV2Schema.safeParse({
         ...baseEvent,
         occurredAt: "2026-08-25T14:30:00Z",
       }).success,
     ).toBe(false)
     expect(
-      ledgerEventV1Schema.safeParse({
+      ledgerEventV2Schema.safeParse({
         ...baseEvent,
         rawResponse: "untrusted",
       }).success,
@@ -196,7 +196,7 @@ describe("LedgerEventV1", () => {
 
   it("uses occurredAt as the canonical event occurrence time", () => {
     expect(
-      ledgerEventV1Schema.safeParse({
+      ledgerEventV2Schema.safeParse({
         ...baseEvent,
         payload: {
           ...baseEvent.payload,
@@ -208,13 +208,13 @@ describe("LedgerEventV1", () => {
 
   it("requires cycle identity and rejects self-causation", () => {
     expect(
-      ledgerEventV1Schema.safeParse({
+      ledgerEventV2Schema.safeParse({
         ...baseEvent,
         cycleId: undefined,
       }).success,
     ).toBe(false)
     expect(
-      ledgerEventV1Schema.safeParse({
+      ledgerEventV2Schema.safeParse({
         ...baseEvent,
         causationEventId: baseEvent.eventId,
       }).success,
@@ -224,7 +224,7 @@ describe("LedgerEventV1", () => {
   it("requires matching session-start identity", () => {
     const sessionEvent = {
       eventId: "event-session",
-      eventVersion: "1.0.0",
+      eventVersion: "2.0.0",
       eventType: "OPENCODE_SESSION_STARTED",
       occurredAt: "2026-08-25T14:29:00.000Z",
       correlationId: "session-correlation",
@@ -234,9 +234,9 @@ describe("LedgerEventV1", () => {
       },
     }
 
-    expect(ledgerEventV1Schema.safeParse(sessionEvent).success).toBe(false)
+    expect(ledgerEventV2Schema.safeParse(sessionEvent).success).toBe(false)
     expect(
-      ledgerEventV1Schema.safeParse({
+      ledgerEventV2Schema.safeParse({
         ...sessionEvent,
         sessionId: "ses_payload",
       }).success,
@@ -245,7 +245,7 @@ describe("LedgerEventV1", () => {
 
   it("rejects evidence freshness ending before retrieval", () => {
     expect(
-      ledgerEventV1Schema.safeParse({
+      ledgerEventV2Schema.safeParse({
         ...baseEvent,
         eventType: "EVIDENCE_SNAPSHOT_REFERENCED",
         payload: {
@@ -261,7 +261,7 @@ describe("LedgerEventV1", () => {
 
   it("rejects speculative broker event types", () => {
     expect(
-      ledgerEventV1Schema.safeParse({
+      ledgerEventV2Schema.safeParse({
         ...baseEvent,
         eventType: "ORDER_SUBMITTED",
       }).success,

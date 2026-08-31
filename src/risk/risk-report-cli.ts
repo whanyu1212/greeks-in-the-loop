@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { parse as parseEnv } from "dotenv"
 import { z } from "zod"
 
-import type { StoredLedgerEventV1 } from "../event-ledger/ledger-event-v1.js"
+import type { StoredLedgerEvent } from "../event-ledger/ledger-event-v1.js"
 import { createSqliteLedgerStore } from "../event-ledger/sqlite-ledger-store.js"
 import { buildRiskReportV1 } from "./risk-report-v1.js"
 
@@ -55,7 +55,7 @@ const store = createSqliteLedgerStore({
   readonly: true,
 })
 try {
-  const events: StoredLedgerEventV1[] = []
+  const events: StoredLedgerEvent[] = []
   let afterSequence = 0
   while (true) {
     const page = await store.list({

@@ -17,7 +17,7 @@ import {
   type ResearchRunV1,
   writeResearchRunArtifact,
 } from "../src/research/research-artifact.js"
-import type { StoredLedgerEventV1 } from "../src/event-ledger/ledger-event-v1.js"
+import type { StoredLedgerEventV2 } from "../src/event-ledger/ledger-event-v1.js"
 import type { ResearchCycleOutcomeV1 } from "../src/research/research-cycle-outcome-v1.js"
 
 const researchInvocation = {
@@ -51,7 +51,7 @@ afterEach(() => {
 describe("research cycle artifact", () => {
   it("integrates a bounded shadow-risk decision and breaker transitions", () => {
     const base = {
-      eventVersion: "1.0.0",
+      eventVersion: "2.0.0",
       occurredAt: "2026-08-27T14:30:00.000Z",
       recordedAt: "2026-08-27T14:30:00.001Z",
       correlationId: "correlation-risk",
@@ -122,7 +122,7 @@ describe("research cycle artifact", () => {
         eventType: "RESEARCH_CYCLE_COMPLETED",
         payload: { status: "INTENT_DERIVED" },
       },
-    ] as unknown as StoredLedgerEventV1[]
+    ] as unknown as StoredLedgerEventV2[]
 
     expect(projectResearchRunV1(events)).toMatchObject({
       runVersion: "3.0.0",
@@ -152,14 +152,14 @@ describe("research cycle artifact", () => {
       }],
     }
     const base = {
-      eventVersion: "1.0.0" as const,
+      eventVersion: "2.0.0" as const,
       occurredAt: "2026-08-26T12:00:00.000Z",
       recordedAt: "2026-08-26T12:00:00.001Z",
       correlationId: "correlation-1",
       cycleId: "cycle-1",
       sessionId: "session-1",
     }
-    const events: StoredLedgerEventV1[] = [
+    const events: StoredLedgerEventV2[] = [
       {
         ...base,
         sequence: 2,
@@ -238,7 +238,7 @@ describe("research cycle artifact", () => {
             payload: { ...event.payload, researchInvocation },
           }
         : event,
-    ) as StoredLedgerEventV1[]
+    ) as StoredLedgerEventV2[]
     const currentRun = projectResearchRunV1(currentEvents)
     expect(currentRun).toMatchObject({
       runVersion: "3.0.0",
@@ -256,7 +256,7 @@ describe("research cycle artifact", () => {
             payload: { ...event.payload, researchInvocation: latestInvocation },
           }
         : event,
-    ) as StoredLedgerEventV1[]
+    ) as StoredLedgerEventV2[]
     expect(projectResearchRunV1(latestEvents)).toMatchObject({
       runVersion: "3.0.0",
       researchInvocation: latestInvocation,

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { ProposedTradeDecisionV2 } from "../src/contracts/research-decision-v2.js"
 import { deriveTradeIntentV2 } from "../src/contracts/trade-intent-v2.js"
 import type { RiskStateProvider } from "../src/risk/alpaca-risk-state-provider.js"
-import type { StoredLedgerEventV1 } from "../src/event-ledger/ledger-event-v1.js"
+import type { StoredLedgerEventV2 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { LedgerPersistenceError } from "../src/event-ledger/research-lifecycle-recorder.js"
 import { buildRiskReportV1 } from "../src/risk/risk-report-v1.js"
@@ -241,7 +241,7 @@ describe("shadow risk evaluator", () => {
     const events = [
       {
         eventId: "cycle-start",
-        eventVersion: "1.0.0",
+        eventVersion: "2.0.0",
         eventType: "RESEARCH_CYCLE_STARTED",
         occurredAt: evaluatedAt,
         recordedAt: evaluatedAt,
@@ -256,7 +256,7 @@ describe("shadow risk evaluator", () => {
       },
       {
         eventId: "risk-1",
-        eventVersion: "1.0.0",
+        eventVersion: "2.0.0",
         eventType: "RISK_SHADOW_DECISION_RECORDED",
         occurredAt: evaluatedAt,
         recordedAt: evaluatedAt,
@@ -277,7 +277,7 @@ describe("shadow risk evaluator", () => {
           },
         },
       },
-    ] as StoredLedgerEventV1[]
+    ] as StoredLedgerEventV2[]
 
     expect(buildRiskReportV1(events, sessionDate)).toMatchObject({
       tradingDate: sessionDate,

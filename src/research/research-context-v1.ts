@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto"
 
 import {
+  LEDGER_EVENT_VERSION,
   LEDGER_EVENT_TYPES,
-  type LedgerEventV1,
-  type StoredLedgerEventV1,
+  type LedgerEvent,
+  type LedgerEventV2,
+  type StoredLedgerEvent,
 } from "../event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import type { PreliminaryResearchV2 } from "../contracts/preliminary-research-v2.js"
@@ -23,11 +25,11 @@ const TERMINAL_EVENT_TYPES = [
 const RESEARCH_CONTEXT_EVENT_TYPES = LEDGER_EVENT_TYPES
 
 type TerminalStatus = Extract<
-  LedgerEventV1,
+  LedgerEventV2,
   { eventType: "RESEARCH_CYCLE_COMPLETED" }
 >["payload"]["status"]
 type InterruptionReason = Extract<
-  LedgerEventV1,
+  LedgerEventV2,
   { eventType: "RESEARCH_CYCLE_INTERRUPTED" }
 >["payload"]["reason"]
 type RejectionSource =
@@ -128,7 +130,7 @@ export type LoadResearchContextV1Options = Readonly<{
 }>
 
 export type ReconstructResearchContextV1Options = Readonly<{
-  createEventId?: (startedEvent: LedgerEventV1, recoveryIndex: number) => string
+  createEventId?: (startedEvent: LedgerEvent, recoveryIndex: number) => string
   now?: () => Date
 }>
 
@@ -153,7 +155,7 @@ export const researchContextEvidenceKey = (
  * Projects compact, non-prose research memory from a bounded ledger window.
  */
 export function projectResearchContextV1(
-  inputEvents: readonly StoredLedgerEventV1[],
+  inputEvents: readonly StoredLedgerEvent[],
   options: ProjectResearchContextV1Options,
 ): ResearchContextV1 {
   const generatedAt = Date.parse(options.generatedAt)
@@ -513,7 +515,7 @@ export async function reconstructResearchContextV1(
 ): Promise<ResearchContextV1> {
   const createEventId = options.createEventId ?? (() => randomUUID())
   const reconstructedAt = (options.now ?? (() => new Date()))().toISOString()
-  const openCycles = new Map<string, StoredLedgerEventV1>()
+  const openCycles = new Map<string, StoredLedgerEvent>()
   let afterSequence = 0
 
   while (true) {
@@ -542,13 +544,13 @@ export async function reconstructResearchContextV1(
   const starts = [...openCycles.values()].sort(
     (left, right) => left.sequence - right.sequence,
   )
-  const interruptions: LedgerEventV1[] = starts.map((start, recoveryIndex) => {
+  const interruptions: LedgerEventV2[] = starts.map((start, recoveryIndex) => {
     if (start.cycleId === undefined) {
       throw new Error("Research cycle start is missing its cycle identity")
     }
     return {
       eventId: createEventId(start, recoveryIndex),
-      eventVersion: "1.0.0",
+      eventVersion: LEDGER_EVENT_VERSION,
       eventType: "RESEARCH_CYCLE_INTERRUPTED",
       occurredAt: reconstructedAt,
       correlationId: start.correlationId,

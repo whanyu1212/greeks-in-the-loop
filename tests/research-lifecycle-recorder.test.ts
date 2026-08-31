@@ -8,8 +8,8 @@ import type { PreliminaryResearchV2 } from "../src/contracts/preliminary-researc
 import type { ResearchReportV3 } from "../src/contracts/research-report-v3.js"
 import type { TradeIntentV2 } from "../src/contracts/trade-intent-v2.js"
 import type {
-  LedgerEventV1,
-  StoredLedgerEventV1,
+  LedgerEventV2,
+  StoredLedgerEventV2,
 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { createResearchLifecycleRecorder } from "../src/event-ledger/research-lifecycle-recorder.js"
@@ -207,17 +207,17 @@ const evidenceSnapshots = [
 ] as const
 
 const asStored = (
-  event: LedgerEventV1,
+  event: LedgerEventV2,
   sequence: number,
-): StoredLedgerEventV1 =>
+): StoredLedgerEventV2 =>
   ({
     ...event,
     sequence,
     recordedAt: TIMESTAMP,
-  }) as StoredLedgerEventV1
+  }) as StoredLedgerEventV2
 
 const setup = () => {
-  const events: LedgerEventV1[] = []
+  const events: LedgerEventV2[] = []
   const append = vi.fn<LedgerStore["append"]>(async (event, appendSignal) => {
     appendSignal?.throwIfAborted()
     events.push(event)
@@ -259,7 +259,12 @@ const startCycle = async (setupResult: ReturnType<typeof setup>) =>
     signal,
   })
 
-const assertCausalChain = (events: readonly LedgerEventV1[]) => {
+const assertCausalChain = (
+  events: readonly Readonly<{
+    eventId: string
+    causationEventId?: string | undefined
+  }>[],
+) => {
   for (let index = 1; index < events.length; index += 1) {
     expect(events[index]!.causationEventId).toBe(events[index - 1]!.eventId)
   }
@@ -268,7 +273,7 @@ const assertCausalChain = (events: readonly LedgerEventV1[]) => {
 const terminalMappingCases: readonly {
   name: string
   record: ResearchCycleTerminalRecordV1
-  eventTypes: readonly LedgerEventV1["eventType"][]
+  eventTypes: readonly LedgerEventV2["eventType"][]
 }[] = [
   {
     name: "retained preliminary research",
@@ -380,7 +385,7 @@ describe("createResearchLifecycleRecorder", () => {
     expect(state.events).toEqual([
       {
         eventId: "id-1",
-        eventVersion: "1.0.0",
+        eventVersion: "2.0.0",
         eventType: "OPENCODE_SESSION_STARTED",
         occurredAt: TIMESTAMP,
         correlationId: "id-2",
@@ -406,7 +411,7 @@ describe("createResearchLifecycleRecorder", () => {
     expect(state.events).toEqual([
       {
         eventId: "id-1",
-        eventVersion: "1.0.0",
+        eventVersion: "2.0.0",
         eventType: "RESEARCH_LOOP_BREAKER_LATCHED",
         occurredAt: TIMESTAMP,
         correlationId: "id-2",
@@ -420,7 +425,7 @@ describe("createResearchLifecycleRecorder", () => {
       },
       {
         eventId: "id-3",
-        eventVersion: "1.0.0",
+        eventVersion: "2.0.0",
         eventType: "RESEARCH_LOOP_BREAKER_RESET",
         occurredAt: TIMESTAMP,
         correlationId: "id-4",
@@ -449,7 +454,7 @@ describe("createResearchLifecycleRecorder", () => {
     expect(state.events).toEqual([
       {
         eventId: "id-3",
-        eventVersion: "1.0.0",
+        eventVersion: "2.0.0",
         eventType: "RESEARCH_CYCLE_STARTED",
         occurredAt: TIMESTAMP,
         correlationId: "id-2",
@@ -474,7 +479,7 @@ describe("createResearchLifecycleRecorder", () => {
     expect(state.events).toEqual([
       {
         eventId: "id-4",
-        eventVersion: "1.0.0",
+        eventVersion: "2.0.0",
         eventType: "RESEARCH_INVOCATION_IDENTITY_REJECTED",
         occurredAt: TIMESTAMP,
         correlationId: "id-2",
@@ -649,7 +654,7 @@ describe("createResearchLifecycleRecorder", () => {
 
     expect(state.events.at(-1)).toEqual({
       eventId: "id-4",
-      eventVersion: "1.0.0",
+      eventVersion: "2.0.0",
       eventType: "RESEARCH_CYCLE_INTERRUPTED",
       occurredAt: TIMESTAMP,
       correlationId: cycle.correlationId,
@@ -763,7 +768,7 @@ describe("createResearchLifecycleRecorder", () => {
     let rejectWrite!: (error: Error) => void
     state.appendBatch.mockImplementationOnce(
       async () =>
-        new Promise<readonly StoredLedgerEventV1[]>((_resolve, reject) => {
+        new Promise<readonly StoredLedgerEventV2[]>((_resolve, reject) => {
           rejectWrite = reject
         }),
     )

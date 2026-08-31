@@ -1,6 +1,8 @@
 import type {
-  LedgerEventV1,
-  StoredLedgerEventV1,
+  LedgerEvent,
+  LedgerEventV2,
+  StoredLedgerEvent,
+  StoredLedgerEventV2,
 } from "./ledger-event-v1.js"
 
 export type LedgerEventQuery = Readonly<{
@@ -10,21 +12,21 @@ export type LedgerEventQuery = Readonly<{
   correlationId?: string
   cycleId?: string
   sessionId?: string
-  eventTypes?: readonly LedgerEventV1["eventType"][]
+  eventTypes?: readonly LedgerEvent["eventType"][]
   limit: number
 }>
 
 export type LedgerStore = Readonly<{
   migrate(signal?: AbortSignal): Promise<void>
   append(
-    event: LedgerEventV1,
+    event: LedgerEventV2,
     signal?: AbortSignal,
-  ): Promise<StoredLedgerEventV1>
+  ): Promise<StoredLedgerEventV2>
   appendBatch(
-    events: readonly LedgerEventV1[],
+    events: readonly LedgerEventV2[],
     signal?: AbortSignal,
-  ): Promise<readonly StoredLedgerEventV1[]>
-  getByEventId(eventId: string): Promise<StoredLedgerEventV1 | undefined>
-  list(query: LedgerEventQuery): Promise<readonly StoredLedgerEventV1[]>
+  ): Promise<readonly StoredLedgerEventV2[]>
+  getByEventId(eventId: string): Promise<StoredLedgerEvent | undefined>
+  list(query: LedgerEventQuery): Promise<readonly StoredLedgerEvent[]>
   close(): Promise<void>
 }>

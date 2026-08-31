@@ -7,7 +7,11 @@ import type { PreliminaryResearchV2 } from "../contracts/preliminary-research-v2
 import type { ResearchDecisionV2 } from "../contracts/research-decision-v2.js"
 import type { ResearchReportV3 } from "../contracts/research-report-v3.js"
 import type { TradeIntentV2 } from "../contracts/trade-intent-v2.js"
-import type { StoredLedgerEventV1 } from "../event-ledger/ledger-event-v1.js"
+import {
+  LEDGER_EVENT_VERSION,
+  type StoredLedgerEvent,
+  type StoredLedgerEventV2,
+} from "../event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import type { SchemaViolationCategory } from "../shared/schema-diagnostics.js"
 import type {
@@ -110,10 +114,17 @@ const optionalOne = <T>(values: readonly T[], label: string): T | undefined => {
 
 /** Rebuilds the complete bounded research run from its authoritative events. */
 export function projectResearchRunV1(
-  inputEvents: readonly StoredLedgerEventV1[],
+  inputEvents: readonly StoredLedgerEvent[],
 ): ResearchRunV1 {
   if (inputEvents.length === 0) throw new Error("Research cycle was not found")
-  const events = [...inputEvents].sort(
+  const currentEvents = inputEvents.filter(
+    (event): event is StoredLedgerEventV2 =>
+      event.eventVersion === LEDGER_EVENT_VERSION,
+  )
+  if (currentEvents.length !== inputEvents.length) {
+    throw new Error("Legacy ledger cycles cannot be exported as research run V3")
+  }
+  const events = [...currentEvents].sort(
     (left, right) => left.sequence - right.sequence,
   )
   const start = one(

@@ -29,5 +29,5 @@ Start with:
 - [Research Report V3](/research-report-v3)
 - [Trade Intent V2](/trade-intent-v2)
 - [Risk Engine V1](/risk-engine-v1)
-- [Event Ledger V1](/event-ledger-v1)
+- [Event Ledger V2](/event-ledger-v1)
 - [Deterministic replay](/backtest-replay-v1)

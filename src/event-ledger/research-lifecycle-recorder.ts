@@ -15,7 +15,7 @@ import {
 import {
   LEDGER_EVENT_VERSION,
   RESEARCH_LOOP_BREAKER_STATE_VERSION,
-  type LedgerEventV1,
+  type LedgerEventV2,
 } from "./ledger-event-v1.js"
 import type { LedgerStore } from "./ledger-store.js"
 
@@ -130,14 +130,14 @@ const completionEvents = (
   startEventId: string,
   occurredAt: string,
   idFactory: () => string,
-): LedgerEventV1[] => {
+): LedgerEventV2[] => {
   if (record.researchInvocation === undefined) {
     throw new Error("Completed research cycles require invocation metadata")
   }
-  const events: LedgerEventV1[] = []
+  const events: LedgerEventV2[] = []
   let causationEventId = startEventId
 
-  const append = (event: LedgerEventV1) => {
+  const append = (event: LedgerEventV2) => {
     events.push(event)
     causationEventId = event.eventId
   }
