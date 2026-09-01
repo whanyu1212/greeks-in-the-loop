@@ -944,6 +944,24 @@ export function createAlpacaRiskStateProvider(
         if (!reconciliation.success) {
           return { success: false, reasons: ["CAPTURE_INPUT_INVALID"] }
         }
+        const shareCollateralExplainsPositions =
+          collateral.requiredLongSharesPerUnit > 0 &&
+          (collateral.maxUnitsFromShares ?? 0) >= 1 &&
+          finalPositions.length > 0 &&
+          finalPositions.every(({ assetClass, symbol, signedQuantity }) =>
+            assetClass === "us_equity" &&
+            symbol === parsedInput.data.entryPlan.underlying &&
+            signedQuantity > 0
+          ) &&
+          reconciliation.reasonCodes.every((reason) =>
+            reason === "UNKNOWN_POSITION"
+          )
+        const reconciliationReasonCodes = shareCollateralExplainsPositions
+          ? []
+          : reconciliation.reasonCodes
+        const portfolio = shareCollateralExplainsPositions
+          ? { ...reconciliation.portfolio, consistent: true }
+          : reconciliation.portfolio
         const freshUntilNanoseconds = successfulQuotes.reduce(
           (earliest, quote) =>
             quote.freshUntilNanoseconds < earliest
@@ -972,9 +990,9 @@ export function createAlpacaRiskStateProvider(
             account,
             positions: finalPositions,
             candidateCollateral: collateral,
-            portfolio: reconciliation.portfolio,
+            portfolio,
             contracts: contracts.data as ContractSnapshotV2,
-            reconciliationReasonCodes: reconciliation.reasonCodes,
+            reconciliationReasonCodes,
           },
         }
       } catch (error) {

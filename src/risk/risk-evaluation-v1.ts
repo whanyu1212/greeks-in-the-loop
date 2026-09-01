@@ -1,18 +1,28 @@
 import { z } from "zod"
 
 import { tradeIntentV3Schema } from "../contracts/trade-intent-v3.js"
+import { tradeIntentV4Schema } from "../contracts/trade-intent-v4.js"
+import { alpacaMinimumLevelFor } from "../options/alpaca-capabilities.js"
 import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
+import { parseAlpacaOptionSymbol } from "../shared/alpaca-option-identity.js"
+import { deriveOptionLegAggregateGreeksV1 } from "../shared/option-leg-aggregate-greeks.js"
 import { parseRfc3339Nanoseconds } from "../shared/value-normalization.js"
 import {
   deriveVerticalSpreadGreeksV1,
   verticalSpreadGreeksV1Schema,
 } from "../shared/vertical-spread-greeks.js"
+import {
+  deriveStrategyEconomicsV1,
+  strategyEconomicsV1Schema,
+} from "./strategy-economics-v1.js"
 
 export const RISK_EVALUATION_VERSION = "1.0.0" as const
-export const RISK_RULE_VERSION = "1.2.0" as const
+export const RISK_RULE_VERSION = "2.0.0" as const
+const LEGACY_RISK_RULE_VERSION = "1.2.0" as const
 export const SUPPORTED_RISK_RULE_VERSIONS = [
   "1.0.0",
   "1.1.0",
+  "1.2.0",
   RISK_RULE_VERSION,
 ] as const
 
@@ -32,6 +42,9 @@ export const RISK_REJECTION_CODES = [
   "LIQUIDITY_INELIGIBLE",
   "ENTRY_PRICE_INELIGIBLE",
   "MAX_LOSS_EXCEEDED",
+  "STRATEGY_ECONOMICS_INELIGIBLE",
+  "OPTIONS_APPROVAL_INSUFFICIENT",
+  "COLLATERAL_INSUFFICIENT",
   "ACCOUNT_INELIGIBLE",
   "RECONCILIATION_INCONSISTENT",
   "EXPOSURE_LIMIT_ACTIVE",
@@ -59,6 +72,7 @@ export const MAX_DIRECTIONAL_NET_DELTA = 0.4
 const MAX_LOSS_CENTS = 50_000
 const DAILY_DRAWDOWN_CENTS = 150_000
 const COMPETITION_BREAKER_EQUITY_CENTS = 9_250_000
+const MAX_GENERIC_DIRECTIONAL_NET_DELTA = 0.7
 
 const timestamp = z.iso.datetime({ offset: true, precision: 3 })
 const riskRuleVersion = z.enum(SUPPORTED_RISK_RULE_VERSIONS)
@@ -222,6 +236,57 @@ export type RiskEvaluationInputV1 = Readonly<
   z.infer<typeof riskEvaluationInputV1Schema>
 >
 
+const applicationVerifiedAccountV2RiskSchema = applicationVerifiedAccountV1Schema
+  .omit({ multilegOptionsApproved: true })
+  .extend({
+    snapshotVersion: z.literal("2.0.0"),
+    optionsApprovedLevel: count,
+    optionsTradingLevel: count,
+    multilegOptionsApproved: z.boolean(),
+    cashCents: z.number().int().safe(),
+  })
+  .strict()
+  .superRefine((account, refinement) => {
+    if (
+      account.multilegOptionsApproved !==
+        (account.optionsApprovedLevel >= 3 && account.optionsTradingLevel >= 3)
+    ) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["multilegOptionsApproved"],
+        message: "Multileg approval must match the captured option levels",
+      })
+    }
+  })
+
+const candidateCollateralV1RiskSchema = z
+  .object({
+    underlying: z.string().min(1).max(12),
+    longUnderlyingShares: z.number().finite().nonnegative(),
+    cashAvailableCents: nonnegativeSafeInteger,
+    requiredLongSharesPerUnit: count,
+    requiredCashCentsPerUnit: nonnegativeSafeInteger,
+    maxUnitsFromShares: count.nullable(),
+    maxUnitsFromCash: count.nullable(),
+  })
+  .strict()
+
+export const riskEvaluationInputV2Schema = z
+  .object({
+    intent: tradeIntentV4Schema,
+    context: z
+      .object({
+        provenance: z.literal("APPLICATION_VERIFIED"),
+        eligibility: researchEligibilityV1Schema,
+        account: applicationVerifiedAccountV2RiskSchema,
+        candidateCollateral: candidateCollateralV1RiskSchema,
+        portfolio: reconciledPortfolioV1Schema,
+        contracts: contractSnapshotV2Schema,
+      })
+      .strict(),
+  })
+  .strict()
+
 const approvedRiskEvaluationV1Schema = z
   .object({
     evaluationVersion: z.literal(RISK_EVALUATION_VERSION),
@@ -229,10 +294,21 @@ const approvedRiskEvaluationV1Schema = z
     outcome: z.literal("APPROVED"),
     evaluatedAt: timestamp,
     approvedQuantity: z.literal(1),
-    maxLossCents: positiveSafeInteger,
+    maxLossCents: nonnegativeSafeInteger,
     projectedBuyingPowerCents: nonnegativeSafeInteger,
     // Optional only so stored rule 1.0/1.1 decisions remain readable.
     spreadGreeks: verticalSpreadGreeksV1Schema.optional(),
+    aggregateGreeks: z
+      .object({
+        calculation: z.literal("POSITION_WEIGHTED_SUM"),
+        netDelta: z.number().finite(),
+        netGamma: z.number().finite(),
+        netTheta: z.number().finite(),
+        netVega: z.number().finite(),
+      })
+      .strict()
+      .optional(),
+    strategyEconomics: strategyEconomicsV1Schema.optional(),
   })
   .strict()
 
@@ -245,6 +321,17 @@ const rejectedRiskEvaluationV1Schema = z
     reasonCodes: z.array(z.enum(RISK_REJECTION_CODES)).min(1),
     // Input-invalid decisions cannot derive Greeks; older decisions predate them.
     spreadGreeks: verticalSpreadGreeksV1Schema.optional(),
+    aggregateGreeks: z
+      .object({
+        calculation: z.literal("POSITION_WEIGHTED_SUM"),
+        netDelta: z.number().finite(),
+        netGamma: z.number().finite(),
+        netTheta: z.number().finite(),
+        netVega: z.number().finite(),
+      })
+      .strict()
+      .optional(),
+    strategyEconomics: strategyEconomicsV1Schema.optional(),
   })
   .strict()
 
@@ -314,7 +401,7 @@ const quoteIsTooWide = (bidCents: number, askCents: number) => {
  * application-verified state. This function performs no I/O and grants no
  * broker authority.
  */
-export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
+function evaluateLegacyTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
   const parsed = riskEvaluationInputV1Schema.safeParse(input)
   if (!parsed.success) {
     return {
@@ -601,5 +688,253 @@ export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
     maxLossCents: intent.maxLossCentsPerContract,
     projectedBuyingPowerCents: Number(projectedBuyingPower),
     spreadGreeks: spreadGreeks!,
+  }
+}
+
+const evaluateGenericTradeIntentRiskV1 = (
+  input: z.infer<typeof riskEvaluationInputV2Schema>,
+): RiskEvaluationV1 => {
+  const { intent, context } = input
+  const {
+    eligibility,
+    account,
+    candidateCollateral,
+    portfolio,
+    contracts,
+  } = context
+  const evaluatedAt = Date.parse(eligibility.evaluatedAt)
+  const reasons: RiskRejectionCode[] = []
+  const reject = (reason: RiskRejectionCode) => {
+    if (!reasons.includes(reason)) reasons.push(reason)
+  }
+  const tradeWindow = eligibility.tradeIntentWindow
+  if (
+    !eligibility.tradeIntentEligible ||
+    eligibility.sessionDate === undefined ||
+    tradeWindow === undefined ||
+    evaluatedAt < Date.parse(tradeWindow.slotStartedAt) ||
+    evaluatedAt >= Date.parse(tradeWindow.deadline)
+  ) reject("MARKET_WINDOW_INELIGIBLE")
+
+  if (
+    timestampAfter(intent.evaluatedAt, eligibility.evaluatedAt) ||
+    intent.legs.some(({ quote }) => timestampAgeIsInvalid(
+      quote.providerTimestamp,
+      eligibility.evaluatedAt,
+      QUOTE_AND_CONTRACT_MAX_AGE_NANOSECONDS,
+    )) ||
+    timestampAgeIsInvalid(
+      contracts.observedAt,
+      eligibility.evaluatedAt,
+      QUOTE_AND_CONTRACT_MAX_AGE_NANOSECONDS,
+    )
+  ) reject("MARKET_DATA_STALE")
+
+  const snapshotFallsWithinTradeWindow = tradeWindow !== undefined &&
+    !timestampAfter(tradeWindow.slotStartedAt, contracts.observedAt) &&
+    timestampAfter(tradeWindow.deadline, contracts.observedAt)
+  const intentFallsWithinTradeWindow = tradeWindow !== undefined &&
+    !timestampAfter(tradeWindow.slotStartedAt, intent.evaluatedAt) &&
+    timestampAfter(tradeWindow.deadline, intent.evaluatedAt)
+  if (
+    tradeWindow === undefined ||
+    !timestampsEqual(contracts.slotStartedAt, tradeWindow.slotStartedAt) ||
+    !timestampsEqual(intent.evaluatedAt, contracts.observedAt) ||
+    !snapshotFallsWithinTradeWindow ||
+    !intentFallsWithinTradeWindow ||
+    intent.legs.some(({ quote }) =>
+      timestampAfter(quote.providerTimestamp, contracts.observedAt)
+    )
+  ) reject("SNAPSHOT_INTEGRITY_INVALID")
+
+  if (ageIsInvalid(
+    account.observedAt,
+    evaluatedAt,
+    ACCOUNT_AND_RECONCILIATION_MAX_AGE_MS,
+  )) reject("ACCOUNT_STATE_STALE")
+  if (ageIsInvalid(
+    portfolio.observedAt,
+    evaluatedAt,
+    ACCOUNT_AND_RECONCILIATION_MAX_AGE_MS,
+  )) reject("RECONCILIATION_STATE_STALE")
+
+  if (
+    contracts.legs.length !== intent.legs.length ||
+    contracts.legs.some((contract, index) => {
+      const leg = intent.legs[index]
+      return leg === undefined ||
+        contract.contractSymbol !== leg.contractSymbol ||
+        contract.positionIntent !== leg.positionIntent ||
+        contract.ratioQuantity !== leg.ratioQuantity
+    })
+  ) reject("CONTRACT_IDENTITY_MISMATCH")
+  if (contracts.legs.some((leg) =>
+    !leg.active || !leg.tradable || leg.exerciseStyle !== "AMERICAN" ||
+    leg.multiplier !== 100
+  )) reject("CONTRACT_INELIGIBLE")
+
+  const identities = intent.legs.map(({ contractSymbol }) =>
+    parseAlpacaOptionSymbol(contractSymbol)
+  )
+  let liquidityIneligible = false
+  if (
+    eligibility.sessionDate === undefined ||
+    identities.some((identity) => !identity.success)
+  ) {
+    reject("EXPIRATION_INELIGIBLE")
+    liquidityIneligible = true
+  } else {
+    if (identities.some((identity) => {
+      if (!identity.success) return true
+      const dte = millisecondsBetweenDates(
+        eligibility.sessionDate!,
+        identity.identity.expiration,
+      ) / 86_400_000
+      return !Number.isInteger(dte) || dte < MIN_DTE || dte > MAX_DTE
+    })) reject("EXPIRATION_INELIGIBLE")
+    const permittedOpenInterestDates = new Set([
+      eligibility.sessionDate,
+      ...(eligibility.previousSessionDates?.slice(-2) ?? []),
+    ])
+    if (contracts.legs.some((leg) =>
+      leg.volume < MIN_VOLUME ||
+      leg.volumeDate !== eligibility.sessionDate ||
+      leg.openInterest < MIN_OPEN_INTEREST ||
+      !permittedOpenInterestDates.has(leg.openInterestDate)
+    )) liquidityIneligible = true
+  }
+
+  const aggregateGreeks = deriveOptionLegAggregateGreeksV1(contracts.legs)
+  if (
+    aggregateGreeks === undefined ||
+    contracts.legs.some(({ impliedVolatility }) => impliedVolatility <= 0)
+  ) {
+    reject("CONTRACT_METRICS_INELIGIBLE")
+  } else if (intent.direction === "BULLISH" || intent.direction === "BEARISH") {
+    const direction = intent.direction === "BULLISH" ? 1 : -1
+    const directionalNetDelta = direction * aggregateGreeks.netDelta
+    if (
+      directionalNetDelta < MIN_DIRECTIONAL_NET_DELTA ||
+      directionalNetDelta > MAX_GENERIC_DIRECTIONAL_NET_DELTA
+    ) reject("SPREAD_GREEKS_INELIGIBLE")
+  }
+
+  const combinedQuoteWidth = intent.legs.reduce(
+    (total, leg) => total + BigInt(leg.ratioQuantity) *
+      BigInt(leg.quote.askCentsPerShare - leg.quote.bidCentsPerShare),
+    0n,
+  )
+  if (
+    intent.legs.some(({ quote }) => quoteIsTooWide(
+      quote.bidCentsPerShare,
+      quote.askCentsPerShare,
+    )) ||
+    combinedQuoteWidth * 5n > BigInt(intent.entryLimitCentsPerStrategyUnit)
+  ) liquidityIneligible = true
+  if (liquidityIneligible) reject("LIQUIDITY_INELIGIBLE")
+
+  const economicsResult = deriveStrategyEconomicsV1(intent)
+  const economics = economicsResult.success
+    ? economicsResult.economics
+    : undefined
+  if (economics === undefined) reject("STRATEGY_ECONOMICS_INELIGIBLE")
+  else if (economics.maxLossCents > MAX_LOSS_CENTS) reject("MAX_LOSS_EXCEEDED")
+
+  if (account.status !== "ACTIVE" || account.tradingRestricted) {
+    reject("ACCOUNT_INELIGIBLE")
+  }
+  const minimumLevel = alpacaMinimumLevelFor(intent.strategy)
+  if (
+    account.optionsApprovedLevel < minimumLevel ||
+    account.optionsTradingLevel < minimumLevel ||
+    (minimumLevel === 3 && !account.multilegOptionsApproved)
+  ) reject("OPTIONS_APPROVAL_INSUFFICIENT")
+
+  const requiredShares = intent.strategy === "COVERED_CALL" ||
+      intent.strategy === "COLLAR"
+    ? intent.legs.reduce((total, leg, index) => {
+        const identity = identities[index]
+        return total + (leg.positionIntent === "SELL_TO_OPEN" &&
+            identity?.success === true && identity.identity.optionType === "C"
+          ? leg.ratioQuantity * 100
+          : 0)
+      }, 0)
+    : 0
+  const requiredCash = intent.strategy === "CASH_SECURED_PUT"
+    ? economics?.buyingPowerRequirementCents ?? 0
+    : 0
+  if (
+    candidateCollateral.underlying !== intent.underlying ||
+    candidateCollateral.requiredLongSharesPerUnit !== requiredShares ||
+    candidateCollateral.requiredCashCentsPerUnit !== requiredCash ||
+    (requiredShares > 0 && (candidateCollateral.maxUnitsFromShares ?? 0) < 1) ||
+    (requiredCash > 0 && (candidateCollateral.maxUnitsFromCash ?? 0) < 1)
+  ) reject("COLLATERAL_INSUFFICIENT")
+
+  if (!portfolio.consistent) reject("RECONCILIATION_INCONSISTENT")
+  if (portfolio.openStrategyPositionCount > 0 || portfolio.pendingEntryCount > 0) {
+    reject("EXPOSURE_LIMIT_ACTIVE")
+  }
+  if (portfolio.entriesSubmittedToday > 0) reject("DAILY_ENTRY_LIMIT_ACTIVE")
+
+  const maxLoss = BigInt(economics?.maxLossCents ?? 0)
+  const buyingPowerRequirement = BigInt(
+    economics?.buyingPowerRequirementCents ?? account.buyingPowerCents + 1,
+  )
+  const projectedBuyingPower = BigInt(account.buyingPowerCents) -
+    buyingPowerRequirement
+  if (
+    projectedBuyingPower < 0n ||
+    projectedBuyingPower * 2n < BigInt(account.buyingPowerCents)
+  ) reject("BUYING_POWER_RESERVE_INSUFFICIENT")
+
+  const currentDailyDrawdown = BigInt(account.lastEquityCents) -
+    BigInt(account.equityCents)
+  if (
+    portfolio.dailyBreakerActive ||
+    currentDailyDrawdown >= BigInt(DAILY_DRAWDOWN_CENTS)
+  ) reject("DAILY_BREAKER_ACTIVE")
+  else if (currentDailyDrawdown + maxLoss >= BigInt(DAILY_DRAWDOWN_CENTS)) {
+    reject("DAILY_LOSS_BUDGET_INSUFFICIENT")
+  }
+  if (
+    portfolio.competitionBreakerActive ||
+    account.equityCents <= COMPETITION_BREAKER_EQUITY_CENTS
+  ) reject("COMPETITION_BREAKER_ACTIVE")
+  else if (
+    BigInt(account.equityCents) - maxLoss <=
+      BigInt(COMPETITION_BREAKER_EQUITY_CENTS)
+  ) reject("COMPETITION_LOSS_BUDGET_INSUFFICIENT")
+
+  if (reasons.length > 0) {
+    return {
+      evaluationVersion: RISK_EVALUATION_VERSION,
+      ruleVersion: RISK_RULE_VERSION,
+      outcome: "REJECTED",
+      evaluatedAt: eligibility.evaluatedAt,
+      reasonCodes: reasons,
+      ...(aggregateGreeks === undefined ? {} : { aggregateGreeks }),
+      ...(economics === undefined ? {} : { strategyEconomics: economics }),
+    }
+  }
+  return {
+    evaluationVersion: RISK_EVALUATION_VERSION,
+    ruleVersion: RISK_RULE_VERSION,
+    outcome: "APPROVED",
+    evaluatedAt: eligibility.evaluatedAt,
+    approvedQuantity: 1,
+    maxLossCents: economics!.maxLossCents,
+    projectedBuyingPowerCents: Number(projectedBuyingPower),
+    aggregateGreeks: aggregateGreeks!,
+    strategyEconomics: economics!,
+  }
+}
+
+export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
+  const generic = riskEvaluationInputV2Schema.safeParse(input)
+  if (generic.success) return evaluateGenericTradeIntentRiskV1(generic.data)
+  return {
+    ...evaluateLegacyTradeIntentRiskV1(input),
+    ruleVersion: LEGACY_RISK_RULE_VERSION,
   }
 }

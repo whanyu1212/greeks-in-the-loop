@@ -492,6 +492,39 @@ describe("Alpaca risk-state provider", () => {
     ])
   })
 
+  it("recognizes exact underlying shares as covered-call collateral", async () => {
+    const coveredInput = {
+      ...input,
+      entryPlan: {
+        capabilityVersion: "2.0.0" as const,
+        strategy: "COVERED_CALL" as const,
+        underlying: "SPY",
+        legs: [{
+          contractSymbol: shortSymbol,
+          positionIntent: "SELL_TO_OPEN" as const,
+          ratioQuantity: 1,
+        }],
+      },
+    }
+    const result = await provider(router({
+      contractSymbols: [shortSymbol],
+      snapshots: { snapshots: { [shortSymbol]: optionSnapshot(0.3) } },
+      positions: () => [{
+        asset_class: "us_equity",
+        symbol: "SPY",
+        qty: "100",
+        side: "long",
+      }],
+    })).capture(coveredInput)
+
+    expect(result.success && result.snapshot.candidateCollateral).toMatchObject({
+      requiredLongSharesPerUnit: 100,
+      maxUnitsFromShares: 1,
+    })
+    expect(result.success && result.snapshot.portfolio.consistent).toBe(true)
+    expect(result.success && result.snapshot.reconciliationReasonCodes).toEqual([])
+  })
+
   it("counts same-day submitted entries through capture completion", async () => {
     const now = vi.fn()
       .mockReturnValueOnce(new Date("2026-08-27T14:30:30.000Z"))

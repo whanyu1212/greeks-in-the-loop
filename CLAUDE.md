@@ -25,7 +25,7 @@ The agent proposes; deterministic code disposes.
 - The strategy catalog represents Alpaca-supported entry families, but only `BULL_CALL_SPREAD` and `BEAR_PUT_SPREAD` are currently actionable end-to-end. Every other strategy remains `APPLICATION_SUPPORT_PENDING`.
 - `evaluateTradeIntentRiskV1` in `src/risk/risk-evaluation-v1.ts` is pure: no I/O, history, database access, or ambient state.
 - Only candidate identity crosses from research into risk. Application code refreshes quotes, contracts, account state, portfolio state, and clock data.
-- Application code calculates vertical-spread Greeks from refreshed legs as long minus short; only signed directional net delta is currently a hard Greek limit.
+- Application code calculates position-weighted Greeks from refreshed ordered legs; signed directional net delta is the hard Greek limit for bullish and bearish strategies.
 - Money is integer cents; exit marks are half-cents per share.
 - No order-submission code exists. Runtime ends with a shadow decision in the ledger.
 
@@ -39,7 +39,7 @@ OptionUniverseSnapshotV2
   -> confirm exact-leg quotes
   -> deriveTradeIntentV4
   -> capture application-owned risk state
-  -> refresh TradeIntentV4 and adapt supported debit verticals to TradeIntentV3
+  -> refresh TradeIntentV4
   -> evaluateTradeIntentRiskV1
   -> append ledger events
 ```

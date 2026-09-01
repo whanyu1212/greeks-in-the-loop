@@ -229,22 +229,53 @@ describe("shadow risk evaluator", () => {
       mode: "SHADOW",
       stage: "EVALUATED",
       outcome: "APPROVED",
-      ruleVersion: "1.2.0",
+      ruleVersion: "2.0.0",
       evaluatedIntent: {
         quoteSnapshotRef: SHADOW_RISK_QUOTE_SNAPSHOT_REF,
         evaluatedAt,
       },
       evaluation: {
-        spreadGreeks: {
-          calculation: "LONG_MINUS_SHORT",
+        aggregateGreeks: {
+          calculation: "POSITION_WEIGHTED_SUM",
           netDelta: 0.2,
           netGamma: 0,
           netTheta: 0,
           netVega: 0,
         },
+        strategyEconomics: {
+          strategy: "BULL_CALL_SPREAD",
+          maxLossCents: 21_000,
+          maxProfitCents: 29_000,
+        },
       },
     })
     expect(result.breakerTransitions).toEqual([])
+  })
+
+  it("rejects when the captured Alpaca option level cannot open the strategy", async () => {
+    const captured = snapshot()
+    const result = await evaluate({
+      capture: vi.fn(async () => ({
+        success: true as const,
+        snapshot: {
+          ...captured,
+          account: {
+            ...captured.account,
+            optionsApprovedLevel: 2,
+            optionsTradingLevel: 2,
+            multilegOptionsApproved: false,
+          },
+        },
+      })),
+    })
+
+    expect(result.decision).toMatchObject({
+      stage: "EVALUATED",
+      outcome: "REJECTED",
+      evaluation: {
+        reasonCodes: expect.arrayContaining(["OPTIONS_APPROVAL_INSUFFICIENT"]),
+      },
+    })
   })
 
   it("fails closed on capture errors and records newly observed breaker latches", async () => {

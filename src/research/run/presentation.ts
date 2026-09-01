@@ -487,8 +487,11 @@ export function buildResearchRunPresentation(
         : risk.evaluation.outcome === "REJECTED"
           ? risk.evaluation.reasonCodes
           : []
-    const spreadGreeks = risk.stage === "EVALUATED"
-      ? risk.evaluation.spreadGreeks
+    const verifiedGreeks = risk.stage === "EVALUATED"
+      ? risk.evaluation.aggregateGreeks ?? risk.evaluation.spreadGreeks
+      : undefined
+    const strategyEconomics = risk.stage === "EVALUATED"
+      ? risk.evaluation.strategyEconomics
       : undefined
     lines.push("## Shadow Risk", "")
     table(lines, [
@@ -497,13 +500,24 @@ export function buildResearchRunPresentation(
       ["Outcome", risk.outcome],
       ["Evaluated", riskEvaluatedAt ?? "unavailable"],
       ["Rule version", risk.ruleVersion],
-      ...(spreadGreeks === undefined
+      ...(verifiedGreeks === undefined
         ? []
         : [
-            ["Verified net delta", spreadGreeks.netDelta] as const,
-            ["Verified net gamma", spreadGreeks.netGamma] as const,
-            ["Verified net theta", spreadGreeks.netTheta] as const,
-            ["Verified net vega", spreadGreeks.netVega] as const,
+            ["Verified net delta", verifiedGreeks.netDelta] as const,
+            ["Verified net gamma", verifiedGreeks.netGamma] as const,
+            ["Verified net theta", verifiedGreeks.netTheta] as const,
+            ["Verified net vega", verifiedGreeks.netVega] as const,
+          ]),
+      ...(strategyEconomics === undefined
+        ? []
+        : [
+            ["Entry premium", dollarsFromCents(strategyEconomics.entryPremiumCents)] as const,
+            ["Maximum loss", dollarsFromCents(strategyEconomics.maxLossCents)] as const,
+            ["Maximum profit", strategyEconomics.maxProfitCents === null
+              ? "unbounded"
+              : dollarsFromCents(strategyEconomics.maxProfitCents)] as const,
+            ["Buying-power requirement", dollarsFromCents(strategyEconomics.buyingPowerRequirementCents)] as const,
+            ["Collateral", strategyEconomics.collateral] as const,
           ]),
     ])
     bullets(lines, "Risk Reasons", riskReasons)
