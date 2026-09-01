@@ -61,7 +61,7 @@ import {
 } from "./research/context.js"
 import {
   processResearchCycle,
-  repairResearchReportV6ResponseOnce,
+  repairResearchReportV7ResponseOnce,
 } from "./research/cycle.js"
 import { screenOptionUniverseV2 } from "./research/symbol-screen.js"
 import { createAlpacaRiskStateProvider } from "./risk/alpaca-risk-state-provider.js"
@@ -586,7 +586,7 @@ try {
                       symbolScreen,
                     ),
                   )
-                  const resolvedResponse = await repairResearchReportV6ResponseOnce(
+                  const resolvedResponse = await repairResearchReportV7ResponseOnce(
                     textResponse(initialResponse.parts),
                     async (issues) => {
                       const availableTools = await runtime.client.tool.ids({ signal })

@@ -206,6 +206,10 @@ const derivedIntent = {
 
 const intentRun = (): ResearchRunV1 => {
   const source = noActionRun()
+  if (source.researchReport?.reportVersion !== "6.0.0") {
+    throw new Error("Expected a legacy report fixture")
+  }
+  const legacyReport = source.researchReport
   const decision = {
     contractVersion: "3.0.0" as const,
     outcome: "PROPOSE_TRADES" as const,
@@ -246,12 +250,12 @@ const intentRun = (): ResearchRunV1 => {
       temporalClass: "LIVE",
     }],
     researchReport: {
-      ...source.researchReport!,
+      ...legacyReport,
       result: decision,
       analysis: {
-        ...source.researchReport!.analysis,
+        ...legacyReport.analysis,
         marketRegimes: [{
-          ...source.researchReport!.analysis.marketRegimes[0]!,
+          ...legacyReport.analysis.marketRegimes[0]!,
           signal: "BULLISH",
           dailyClose: 770,
           sma20: 765,
@@ -388,8 +392,11 @@ describe("research run presentation", () => {
     const source = intentRun()
     if (
       source.validatedDecision?.outcome !== "PROPOSE_TRADES" ||
+      source.validatedDecision.contractVersion !== "3.0.0" ||
       source.researchReport?.result.outcome !== "PROPOSE_TRADES" ||
-      source.outcome.status !== "PORTFOLIO_EVALUATED"
+      source.researchReport.reportVersion !== "6.0.0" ||
+      source.outcome.status !== "PORTFOLIO_EVALUATED" ||
+      source.outcome.outcomeVersion !== "3.0.0"
     ) {
       throw new Error("Expected a portfolio fixture")
     }

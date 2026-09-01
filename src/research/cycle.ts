@@ -1,10 +1,12 @@
 import { deriveTradeIntentV3 } from "../contracts/trade-intent-v3.js"
 import type { OptionUniverseSnapshotV2 } from "../contracts/option-universe-v2.js"
-import { validateResearchDecisionV3 } from "../contracts/research-decision-v3.js"
 import {
-  researchReportV6Schema,
-  type ResearchReportV6,
-} from "../contracts/research-report-v6.js"
+  validateResearchDecisionV4,
+} from "../contracts/research-decision-v4.js"
+import {
+  researchReportV7Schema,
+  type ResearchReportV7,
+} from "../contracts/research-report-v7.js"
 import { MAX_LEDGER_EVENT_PAYLOAD_BYTES } from "../event-ledger/ledger-event-v1.js"
 import type {
   OptionQuoteProvider,
@@ -55,11 +57,11 @@ export {
 export const MAX_RESEARCH_RESPONSE_BYTES = 256 * 1024
 
 export type ResearchReportResponseParseResult =
-  | Readonly<{ success: true; report: ResearchReportV6 }>
+  | Readonly<{ success: true; report: ResearchReportV7 }>
   | Readonly<{ success: false; issues: readonly DecisionRejectionIssue[] }>
 
 /** Parses an untrusted response without retaining rejected model content. */
-export function parseResearchReportV6Response(
+export function parseResearchReportV7Response(
   rawResponse: string,
 ): ResearchReportResponseParseResult {
   if (Buffer.byteLength(rawResponse, "utf8") > MAX_RESEARCH_RESPONSE_BYTES) {
@@ -77,7 +79,7 @@ export function parseResearchReportV6Response(
       issues: [{ code: "MALFORMED_JSON", path: [] }],
     }
   }
-  const report = researchReportV6Schema.safeParse(input)
+  const report = researchReportV7Schema.safeParse(input)
   if (!report.success) {
     return {
       success: false,
@@ -97,11 +99,11 @@ export function parseResearchReportV6Response(
 }
 
 /** Allows at most one model correction before the normal trust boundary runs. */
-export async function repairResearchReportV6ResponseOnce(
+export async function repairResearchReportV7ResponseOnce(
   rawResponse: string,
   repair: (issues: readonly DecisionRejectionIssue[]) => Promise<string>,
 ) {
-  const parsed = parseResearchReportV6Response(rawResponse)
+  const parsed = parseResearchReportV7Response(rawResponse)
   if (parsed.success) {
     return { rawResponse, schemaRepairAttempted: false } as const
   }
@@ -129,7 +131,7 @@ export type ProcessResearchCycleOptions = Readonly<{
 }>
 
 const optionUniverseIssuePath = (
-  report: ResearchReportV6,
+  report: ResearchReportV7,
   expected: OptionUniverseSnapshotV2,
 ): readonly (string | number)[] | undefined => {
   if (
@@ -168,7 +170,7 @@ export async function processResearchCycle({
   signal.throwIfAborted()
   const stages = createResearchCycleStageReports(stageReporter)
   const parsed = await trace.run("research.report.parse", () =>
-    parseResearchReportV6Response(rawResponse),
+    parseResearchReportV7Response(rawResponse),
   )
   if (!parsed.success) {
     stages.researchReportRejected(parsed.issues)
@@ -283,7 +285,7 @@ export async function processResearchCycle({
       })
     }
     const validation = await trace.run("research.decision.validate", () =>
-      validateResearchDecisionV3(result, {
+      validateResearchDecisionV4(result, {
         evaluatedAt: processingEvaluatedAt.toISOString(),
         snapshots: {},
       }),

@@ -57,7 +57,7 @@ export const candidateEvaluationV7Schema = z
     }
   })
 
-const researchAnalysisV7Schema = researchAnalysisV6Schema
+export const researchAnalysisV7Schema = researchAnalysisV6Schema
   .omit({ candidateEvaluations: true })
   .extend({
     candidateEvaluations: z.array(candidateEvaluationV7Schema).max(3),
@@ -73,6 +73,38 @@ export const researchReportV7Schema = z
   .strict()
   .superRefine((report, refinement) => {
     const asOf = Date.parse(report.analysis.asOf)
+    const universe = report.analysis.optionUniverse
+    if (universe !== undefined) {
+      const allowed = new Set(universe.candidates.map(({ underlying }) => underlying))
+      const evaluations = report.analysis.symbolEvaluations.map(
+        ({ underlying }) => underlying,
+      )
+      if (
+        new Set(evaluations).size !== universe.candidates.length ||
+        evaluations.some((underlying) => !allowed.has(underlying))
+      ) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["analysis", "symbolEvaluations"],
+          message: "Symbol evaluations must cover the supplied universe exactly once",
+        })
+      }
+      if (report.analysis.symbolIndicators !== undefined) {
+        const indicators = report.analysis.symbolIndicators.map(
+          ({ underlying }) => underlying,
+        )
+        if (
+          new Set(indicators).size !== universe.candidates.length ||
+          indicators.some((underlying) => !allowed.has(underlying))
+        ) {
+          refinement.addIssue({
+            code: "custom",
+            path: ["analysis", "symbolIndicators"],
+            message: "Symbol indicators must cover the supplied universe exactly once",
+          })
+        }
+      }
+    }
     report.analysis.candidateEvaluations.forEach((evaluation, index) => {
       if (Date.parse(evaluation.observedAt) > asOf) {
         refinement.addIssue({
@@ -83,6 +115,22 @@ export const researchReportV7Schema = z
       }
     })
     if (report.result.outcome !== "PROPOSE_TRADES") return
+    const proposed = new Set(
+      report.result.proposals.map(({ candidate }) => candidate.underlying),
+    )
+    const evaluated = report.analysis.candidateEvaluations.map(
+      ({ underlying }) => underlying,
+    )
+    if (
+      new Set(evaluated).size !== proposed.size ||
+      evaluated.some((underlying) => !proposed.has(underlying))
+    ) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["analysis", "candidateEvaluations"],
+        message: "Candidate diagnostics must cover proposed symbols exactly once",
+      })
+    }
     report.result.proposals.forEach((proposal, proposalIndex) => {
       const evaluationIndex = report.analysis.candidateEvaluations.findIndex(
         ({ underlying }) => underlying === proposal.candidate.underlying,
@@ -96,13 +144,14 @@ export const researchReportV7Schema = z
         })
         return
       }
-      if (
-        JSON.stringify(evaluation.legs.map(({ contractSymbol, positionIntent, ratioQuantity }) => ({
-          contractSymbol,
-          positionIntent,
-          ratioQuantity,
-        }))) !== JSON.stringify(proposal.candidate.legs)
-      ) {
+      if (evaluation.legs.length !== proposal.candidate.legs.length ||
+        evaluation.legs.some((leg, legIndex) => {
+          const candidateLeg = proposal.candidate.legs[legIndex]
+          return candidateLeg === undefined ||
+            leg.contractSymbol !== candidateLeg.contractSymbol ||
+            leg.positionIntent !== candidateLeg.positionIntent ||
+            leg.ratioQuantity !== candidateLeg.ratioQuantity
+        })) {
         refinement.addIssue({
           code: "custom",
           path: ["analysis", "candidateEvaluations", evaluationIndex, "legs"],

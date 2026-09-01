@@ -33,9 +33,9 @@ The agent proposes; deterministic code disposes.
 
 ```text
 OptionUniverseSnapshotV2
-  -> SymbolScreenResultV2 (application-owned, shadow-only)
-  -> ResearchReportV6
-  -> validateResearchDecisionV3
+  -> SymbolScreenResultV2 (application-owned actionability)
+  -> ResearchReportV7
+  -> validateResearchDecisionV4
   -> confirm exact-leg quotes
   -> deriveTradeIntentV3
   -> capture application-owned risk state
@@ -59,7 +59,7 @@ OptionUniverseSnapshotV2
 
 ## Contract rules
 
-Current breaking contracts are `OptionUniverseSnapshotV2`, `ResearchDecisionV3`, `ResearchReportV6`, and `TradeIntentV3`. Schemas are strict on proposal paths; safe `NO_ACTION` strips irrelevant prose. Do not add compatibility parsers without an explicit requirement.
+Current breaking contracts are `OptionUniverseSnapshotV2`, `ResearchDecisionV4`, `ResearchReportV7`, and `TradeIntentV3`. Persisted V3/V6 decisions and reports remain readable. Schemas are strict on proposal paths; safe `NO_ACTION` strips irrelevant prose. Do not add other compatibility parsers without an explicit requirement.
 
 Failures expose bounded reason codes, never raw model or provider input.
 

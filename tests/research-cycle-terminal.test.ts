@@ -53,10 +53,10 @@ describe("recordResearchCycleOutcome", () => {
     const record = vi.fn<ResearchCycleOutcomeSink["record"]>(async () => {})
     const processed = await recordResearchCycleOutcome({
       outcome: {
-        outcomeVersion: "3.0.0",
+        outcomeVersion: "4.0.0",
         status: "VALIDATED_NO_ACTION",
         decision: {
-          contractVersion: "3.0.0",
+          contractVersion: "4.0.0",
           outcome: "NO_ACTION",
           reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
           evidence: [{
@@ -87,7 +87,7 @@ describe("recordResearchCycleOutcome", () => {
     )
     const processed = await recordResearchCycleOutcome({
       outcome: {
-        outcomeVersion: "3.0.0",
+        outcomeVersion: "4.0.0",
         status: "DECISION_REJECTED",
         issues,
       },

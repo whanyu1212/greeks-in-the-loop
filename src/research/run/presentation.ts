@@ -307,57 +307,86 @@ export function buildResearchRunPresentation(
   const candidate = primaryProposal?.candidate
   if (candidate !== undefined) {
     lines.push("## Candidate", "")
-    table(lines, [
-      ["Underlying", candidate.underlying],
-      ["Structure", candidate.structure],
-      ["Expiration", candidate.expiration],
-      [
-        "Long leg",
-        `${candidate.longLeg.contractSymbol} at ${candidate.longLeg.strike}`,
-      ],
-      [
-        "Short leg",
-        `${candidate.shortLeg.contractSymbol} at ${candidate.shortLeg.strike}`,
-      ],
-    ])
+    table(lines, "strategy" in candidate
+      ? [
+          ["Underlying", candidate.underlying],
+          ["Strategy", candidate.strategy],
+          ...candidate.legs.map((leg, index) => [
+            `Leg ${index + 1}`,
+            `${leg.positionIntent} ${leg.ratioQuantity} ${leg.contractSymbol}`,
+          ] as const),
+        ]
+      : [
+          ["Underlying", candidate.underlying],
+          ["Structure", candidate.structure],
+          ["Expiration", candidate.expiration],
+          [
+            "Long leg",
+            `${candidate.longLeg.contractSymbol} at ${candidate.longLeg.strike}`,
+          ],
+          [
+            "Short leg",
+            `${candidate.shortLeg.contractSymbol} at ${candidate.shortLeg.strike}`,
+          ],
+        ])
 
     const diagnostics = report?.analysis.candidateEvaluations.find(
       ({ underlying }) => underlying === candidate.underlying,
     )
     if (diagnostics !== undefined) {
       lines.push(`**Diagnostics observed:** ${diagnostics.observedAt}`, "")
-      table(lines, [
-        ["DTE", diagnostics.dte],
-        ...diagnostics.legs.flatMap((leg) => [
-          [`${leg.role} delta`, leg.delta] as const,
-          [`${leg.role} implied volatility`, leg.impliedVolatility] as const,
-          [`${leg.role} gamma`, leg.gamma] as const,
-          [`${leg.role} theta`, leg.theta] as const,
-          [`${leg.role} vega`, leg.vega] as const,
-          [`${leg.role} volume`, leg.volume] as const,
-          [`${leg.role} open interest`, leg.openInterest] as const,
-          [`${leg.role} open-interest date`, leg.openInterestDate] as const,
-          ...(leg.ivToRealizedVolatility === undefined
-            ? []
-            : [[`${leg.role} IV / realized volatility`, leg.ivToRealizedVolatility] as const]),
-          ...(leg.bidAskSpreadPercent === undefined
-            ? []
-            : [[`${leg.role} bid-ask spread`, percentFromRatio(leg.bidAskSpreadPercent)] as const]),
-        ]),
-      ])
-      const longLeg = diagnostics.legs.find(({ role }) => role === "LONG")
-      const shortLeg = diagnostics.legs.find(({ role }) => role === "SHORT")
-      const spreadGreeks = longLeg === undefined || shortLeg === undefined
-        ? undefined
-        : deriveVerticalSpreadGreeksV1(longLeg, shortLeg)
-      if (spreadGreeks !== undefined) {
-        lines.push("**Agent-reported spread Greeks (long minus short):**", "")
+      if ("dte" in diagnostics) {
         table(lines, [
-          ["Net delta", spreadGreeks.netDelta],
-          ["Net gamma", spreadGreeks.netGamma],
-          ["Net theta", spreadGreeks.netTheta],
-          ["Net vega", spreadGreeks.netVega],
+          ["DTE", diagnostics.dte],
+          ...diagnostics.legs.flatMap((leg) => [
+            [`${leg.role} delta`, leg.delta] as const,
+            [`${leg.role} implied volatility`, leg.impliedVolatility] as const,
+            [`${leg.role} gamma`, leg.gamma] as const,
+            [`${leg.role} theta`, leg.theta] as const,
+            [`${leg.role} vega`, leg.vega] as const,
+            [`${leg.role} volume`, leg.volume] as const,
+            [`${leg.role} open interest`, leg.openInterest] as const,
+            [`${leg.role} open-interest date`, leg.openInterestDate] as const,
+            ...(leg.ivToRealizedVolatility === undefined
+              ? []
+              : [[`${leg.role} IV / realized volatility`, leg.ivToRealizedVolatility] as const]),
+            ...(leg.bidAskSpreadPercent === undefined
+              ? []
+              : [[`${leg.role} bid-ask spread`, percentFromRatio(leg.bidAskSpreadPercent)] as const]),
+          ]),
         ])
+        const longLeg = diagnostics.legs.find(({ role }) => role === "LONG")
+        const shortLeg = diagnostics.legs.find(({ role }) => role === "SHORT")
+        const spreadGreeks = longLeg === undefined || shortLeg === undefined
+          ? undefined
+          : deriveVerticalSpreadGreeksV1(longLeg, shortLeg)
+        if (spreadGreeks !== undefined) {
+          lines.push("**Agent-reported spread Greeks (long minus short):**", "")
+          table(lines, [
+            ["Net delta", spreadGreeks.netDelta],
+            ["Net gamma", spreadGreeks.netGamma],
+            ["Net theta", spreadGreeks.netTheta],
+            ["Net vega", spreadGreeks.netVega],
+          ])
+        }
+      } else {
+        table(lines, diagnostics.legs.flatMap((leg, index) => [
+          [`Leg ${index + 1} intent`, leg.positionIntent] as const,
+          [`Leg ${index + 1} ratio`, leg.ratioQuantity] as const,
+          [`Leg ${index + 1} delta`, leg.delta] as const,
+          [`Leg ${index + 1} implied volatility`, leg.impliedVolatility] as const,
+          [`Leg ${index + 1} volume`, leg.volume] as const,
+          [`Leg ${index + 1} open interest`, leg.openInterest] as const,
+        ]))
+        if (diagnostics.aggregateGreeks !== undefined) {
+          lines.push("**Agent-reported position-weighted Greeks:**", "")
+          table(lines, [
+            ["Net delta", diagnostics.aggregateGreeks.netDelta],
+            ["Net gamma", diagnostics.aggregateGreeks.netGamma],
+            ["Net theta", diagnostics.aggregateGreeks.netTheta],
+            ["Net vega", diagnostics.aggregateGreeks.netVega],
+          ])
+        }
       }
     }
   }

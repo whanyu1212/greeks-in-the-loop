@@ -3,12 +3,17 @@ import { describe, expect, it } from "vitest"
 import {
   RESEARCH_DECISION_V4_CONTRACT_VERSION,
   researchDecisionV4Schema,
+  validateResearchDecisionV4,
 } from "../src/contracts/research-decision-v4.js"
 import {
   candidateEvaluationV7Schema,
   RESEARCH_REPORT_V7_VERSION,
   researchReportV7Schema,
 } from "../src/contracts/research-report-v7.js"
+import {
+  parseResearchReportV7Response,
+  repairResearchReportV7ResponseOnce,
+} from "../src/research/cycle.js"
 
 const symbols = [
   "SPY261218P00490000",
@@ -69,6 +74,24 @@ describe("ResearchDecisionV4", () => {
         },
       }],
     }).success).toBe(false)
+  })
+
+  it("validates proposal evidence against application snapshot metadata", () => {
+    expect(validateResearchDecisionV4({
+      contractVersion: RESEARCH_DECISION_V4_CONTRACT_VERSION,
+      outcome: "PROPOSE_TRADES",
+      proposals: [proposal],
+    }, {
+      evaluatedAt: "2026-09-01T14:30:00.000Z",
+      snapshots: {
+        "alpaca-proposal-quotes-v2-SPY": {
+          provider: "ALPACA",
+          source: "options-snapshots-indicative",
+          retrievedAt: "2026-09-01T14:29:59.000Z",
+          freshUntil: "2026-09-01T14:30:59.000Z",
+        },
+      },
+    }).success).toBe(true)
   })
 })
 
@@ -136,5 +159,52 @@ describe("ResearchReportV7", () => {
         netVega: 0,
       },
     }).success).toBe(true)
+  })
+
+  it("allows one repair before V7 response validation", async () => {
+    const report = researchReportV7Schema.parse({
+      reportVersion: RESEARCH_REPORT_V7_VERSION,
+      result: {
+        contractVersion: RESEARCH_DECISION_V4_CONTRACT_VERSION,
+        outcome: "NO_ACTION",
+        reasonCodes: ["INSUFFICIENT_UNDERLYING_DATA"],
+        evidence: [{
+          claimId: "empty-universe",
+          kind: "SOURCED_FACT",
+          claim: "The supplied option universe was empty.",
+          provider: "ALPACA",
+          temporalClass: "LIVE",
+          observedAt: "2026-09-01T14:30:00.000Z",
+        }],
+      },
+      analysis: {
+        provenance: "AGENT_REPORTED",
+        asOf: "2026-09-01T14:30:00.000Z",
+        accountChecks: {
+          verification: "AGENT_REPORTED",
+          observedAt: "2026-09-01T14:30:00.000Z",
+          accountStatus: "ACTIVE",
+          optionsTradingApproved: true,
+          conflictingStrategyExposure: false,
+        },
+        symbolEvaluations: [],
+        marketRegimes: [],
+        optionSurfaces: [],
+        candidateEvaluations: [],
+        externalContext: [],
+        supportingFactors: [],
+        contradictingFactors: [],
+        conflicts: [],
+      },
+    })
+    const resolved = await repairResearchReportV7ResponseOnce(
+      "not-json",
+      async (issues) => {
+        expect(issues).toEqual([{ code: "MALFORMED_JSON", path: [] }])
+        return JSON.stringify(report)
+      },
+    )
+    expect(resolved.schemaRepairAttempted).toBe(true)
+    expect(parseResearchReportV7Response(resolved.rawResponse).success).toBe(true)
   })
 })

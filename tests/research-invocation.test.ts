@@ -30,12 +30,13 @@ describe("ResearchInvocationV1", () => {
       "6.1.0",
       "6.1.1",
       "6.2.0",
+      "7.0.0",
     ])
     expect(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[RESEARCH_INVOCATION_VERSION]).toEqual({
       agentName: "research",
-      promptVersion: "6.2.0",
-      decisionContractVersion: "3.0.0",
-      reportVersion: "6.0.0",
+      promptVersion: "7.0.0",
+      decisionContractVersion: "4.0.0",
+      reportVersion: "7.0.0",
       providerId: "openai",
       modelId: "gpt-5.6-sol",
     })

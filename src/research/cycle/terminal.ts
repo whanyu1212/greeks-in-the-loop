@@ -1,11 +1,11 @@
-import type { ResearchDecisionV3 } from "../../contracts/research-decision-v3.js"
-import type { ResearchReportV6 } from "../../contracts/research-report-v6.js"
+import type { ResearchDecisionV4 } from "../../contracts/research-decision-v4.js"
+import type { ResearchReportV7 } from "../../contracts/research-report-v7.js"
 import type { ResearchCycleTrace } from "../../observability/research-telemetry.js"
 import type { ShadowRiskResultV1 } from "../../risk/shadow-risk-v1.js"
 import type {
   ResearchCycleOutcomeSink,
-  ResearchCycleOutcomeV3,
-  ResearchCycleTerminalRecordV3,
+  ResearchCycleOutcomeV4,
+  ResearchCycleTerminalRecordV4,
 } from "./outcome.js"
 import type { ResearchCycleStageReports } from "./stage-reporting.js"
 import type { ResearchInvocationV1 } from "../invocation.js"
@@ -14,12 +14,12 @@ import type { SymbolScreenResultV2 } from "../symbol-screen.js"
 export const MAX_TERMINAL_REJECTION_DETAILS = 64
 
 type CommonTerminalMetadata = Readonly<{
-  evidenceSnapshots?: ResearchCycleTerminalRecordV3["evidenceSnapshots"]
-  validatedDecision?: ResearchDecisionV3
+  evidenceSnapshots?: ResearchCycleTerminalRecordV4["evidenceSnapshots"]
+  validatedDecision?: ResearchDecisionV4
 }>
 
 export type ResearchCycleTerminalResolution = Readonly<{
-  outcome: ResearchCycleOutcomeV3
+  outcome: ResearchCycleOutcomeV4
   metadata?: CommonTerminalMetadata
 }>
 
@@ -28,22 +28,22 @@ export type RecordResearchCycleOutcomeContext = Readonly<{
   signal: AbortSignal
   researchInvocation: ResearchInvocationV1
   symbolScreen: SymbolScreenResultV2
-  researchReport?: ResearchReportV6
+  researchReport?: ResearchReportV7
   trace: ResearchCycleTrace
   stages: ResearchCycleStageReports
 }>
 
 export type ProcessedResearchCycle = Readonly<{
-  outcome: ResearchCycleOutcomeV3
+  outcome: ResearchCycleOutcomeV4
   report: string
   symbolScreen: SymbolScreenResultV2
-  researchReport?: ResearchReportV6
+  researchReport?: ResearchReportV7
   shadowRisks?: readonly ShadowRiskResultV1[]
 }>
 
 const boundTerminalOutcome = (
-  outcome: ResearchCycleOutcomeV3,
-): ResearchCycleOutcomeV3 => {
+  outcome: ResearchCycleOutcomeV4,
+): ResearchCycleOutcomeV4 => {
   if (outcome.status === "DECISION_REJECTED") {
     return {
       ...outcome,
@@ -82,7 +82,7 @@ export async function recordResearchCycleOutcome(
   context.signal.throwIfAborted()
   const boundedOutcome = boundTerminalOutcome(resolution.outcome)
   const metadata = resolution.metadata ?? {}
-  const record: ResearchCycleTerminalRecordV3 = {
+  const record: ResearchCycleTerminalRecordV4 = {
     outcome: boundedOutcome,
     researchInvocation: context.researchInvocation,
     symbolScreen: context.symbolScreen,

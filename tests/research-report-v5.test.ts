@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest"
 
 import { researchReportV6Schema } from "../src/contracts/research-report-v6.js"
-import {
-  parseResearchReportV6Response,
-  repairResearchReportV6ResponseOnce,
-} from "../src/research/cycle.js"
 import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 
 const noAction = {
@@ -583,19 +579,4 @@ describe("ResearchReportV6", () => {
     )
   })
 
-  it("allows exactly one schema correction before normal validation", async () => {
-    let attempts = 0
-    const resolved = await repairResearchReportV6ResponseOnce(
-      "not-json",
-      async (issues) => {
-        attempts += 1
-        expect(issues).toEqual([{ code: "MALFORMED_JSON", path: [] }])
-        return JSON.stringify(noAction)
-      },
-    )
-
-    expect(attempts).toBe(1)
-    expect(resolved.schemaRepairAttempted).toBe(true)
-    expect(parseResearchReportV6Response(resolved.rawResponse).success).toBe(true)
-  })
 })

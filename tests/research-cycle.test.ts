@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import { proposalQuoteSnapshotRef } from "../src/contracts/research-decision-v3.js"
 import type { OptionUniverseSnapshotV2 } from "../src/contracts/option-universe-v2.js"
-import { researchReportV6Schema } from "../src/contracts/research-report-v6.js"
+import { researchReportV7Schema } from "../src/contracts/research-report-v7.js"
 import type { OptionQuoteProvider } from "../src/market-data/alpaca-option-quotes.js"
 import { OPTION_STRATEGIES } from "../src/options/strategy.js"
 import type { ShadowRiskEvaluator } from "../src/risk/shadow-risk-service.js"
@@ -10,6 +10,7 @@ import type { ResearchEligibilityV1 } from "../src/scheduling/research-eligibili
 import type {
   ResearchCycleOutcomeSink,
   ResearchCycleTerminalRecordV3,
+  ResearchCycleTerminalRecordV4,
 } from "../src/research/cycle/outcome.js"
 import { processResearchCycle } from "../src/research/cycle.js"
 import type { ResearchInvocationV1 } from "../src/research/invocation.js"
@@ -48,12 +49,12 @@ const optionUniverse: OptionUniverseSnapshotV2 = {
 }
 
 const invocation: ResearchInvocationV1 = {
-  invocationVersion: "6.0.0",
+  invocationVersion: "7.0.0",
   agentName: "research",
   cycleMode: "DRY_RUN",
-  promptVersion: "6.0.0",
-  decisionContractVersion: "3.0.0",
-  reportVersion: "6.0.0",
+  promptVersion: "7.0.0",
+  decisionContractVersion: "4.0.0",
+  reportVersion: "7.0.0",
   providerId: "openai",
   modelId: "gpt-5.6-sol",
   responseError: false,
@@ -95,10 +96,19 @@ const proposal = (underlying: string, priority: number) => {
     thesis: `${underlying} has aligned daily and intraday evidence.`,
     candidate: {
       underlying,
-      structure: "BULL_CALL_SPREAD" as const,
-      expiration,
-      longLeg: { contractSymbol: contracts.long, strike: 600 },
-      shortLeg: { contractSymbol: contracts.short, strike: 605 },
+      strategy: "BULL_CALL_SPREAD" as const,
+      legs: [
+        {
+          contractSymbol: contracts.long,
+          positionIntent: "BUY_TO_OPEN" as const,
+          ratioQuantity: 1,
+        },
+        {
+          contractSymbol: contracts.short,
+          positionIntent: "SELL_TO_OPEN" as const,
+          ratioQuantity: 1,
+        },
+      ],
     },
     invalidation: ["Reject if refreshed evidence changes the candidate."],
     evidence: [{
@@ -177,12 +187,11 @@ const candidateEvaluation = (underlying: string) => {
     verification: "AGENT_REPORTED" as const,
     observedAt,
     underlying,
-    expiration,
-    dte: 23,
     legs: [
       {
-        role: "LONG" as const,
         contractSymbol: contracts.long,
+        positionIntent: "BUY_TO_OPEN" as const,
+        ratioQuantity: 1,
         delta: 0.52,
         impliedVolatility: 0.3,
         gamma: 0.02,
@@ -193,8 +202,9 @@ const candidateEvaluation = (underlying: string) => {
         openInterestDate: "2026-08-25",
       },
       {
-        role: "SHORT" as const,
         contractSymbol: contracts.short,
+        positionIntent: "SELL_TO_OPEN" as const,
+        ratioQuantity: 1,
         delta: 0.29,
         impliedVolatility: 0.29,
         gamma: 0.015,
@@ -205,8 +215,8 @@ const candidateEvaluation = (underlying: string) => {
         openInterestDate: "2026-08-25",
       },
     ],
-    spreadGreeks: {
-      calculation: "LONG_MINUS_SHORT" as const,
+    aggregateGreeks: {
+      calculation: "POSITION_WEIGHTED_SUM" as const,
       netDelta: 0.23,
       netGamma: 0.005,
       netTheta: -0.02,
@@ -218,9 +228,9 @@ const candidateEvaluation = (underlying: string) => {
 const proposalReport = (count = 3) => {
   const finalists = underlyings.slice(0, count)
   return {
-    reportVersion: "6.0.0" as const,
+    reportVersion: "7.0.0" as const,
     result: {
-      contractVersion: "3.0.0" as const,
+      contractVersion: "4.0.0" as const,
       outcome: "PROPOSE_TRADES" as const,
       proposals: finalists.map((underlying, index) =>
         proposal(underlying, index + 1)
@@ -281,9 +291,9 @@ const proposalReport = (count = 3) => {
 }
 
 const noActionReport = () => ({
-  reportVersion: "6.0.0" as const,
+  reportVersion: "7.0.0" as const,
   result: {
-    contractVersion: "3.0.0" as const,
+    contractVersion: "4.0.0" as const,
     outcome: "NO_ACTION" as const,
     reasonCodes: ["SIGNAL_NOT_ACTIONABLE" as const],
     evidence: [{
@@ -389,7 +399,9 @@ const run = async (
     risk?: ShadowRiskEvaluator
   }> = {},
 ) => {
-  const records: ResearchCycleTerminalRecordV3[] = []
+  const records: Array<
+    ResearchCycleTerminalRecordV3 | ResearchCycleTerminalRecordV4
+  > = []
   const selectedUniverse = options.universe ?? optionUniverse
   const outcomeSink: ResearchCycleOutcomeSink = {
     async record(record) {
@@ -477,7 +489,7 @@ describe("processResearchCycle", () => {
   })
 
   it("evaluates up to three proposals and uses priority to break equal quality", async () => {
-    const parsedReport = researchReportV6Schema.safeParse(proposalReport(3))
+    const parsedReport = researchReportV7Schema.safeParse(proposalReport(3))
     if (!parsedReport.success) throw new Error(JSON.stringify(parsedReport.error.issues))
     const risk = {
       evaluate: vi.fn(async ({ sourceIntent }) => ({
@@ -648,7 +660,7 @@ describe("processResearchCycle", () => {
   it("rejects malformed output before downstream work", async () => {
     const { processed, records } = await run("not json")
     expect(processed.outcome).toEqual({
-      outcomeVersion: "3.0.0",
+      outcomeVersion: "4.0.0",
       status: "DECISION_REJECTED",
       issues: [{ code: "MALFORMED_JSON", path: [] }],
     })

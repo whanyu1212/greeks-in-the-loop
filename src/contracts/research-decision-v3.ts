@@ -297,7 +297,7 @@ export type ProposedPortfolioDecisionV3 = z.infer<
 >
 export type ResearchCandidateV3 = z.infer<typeof researchCandidateV3Schema>
 
-const evidenceSnapshotMetadataSchema = z
+export const evidenceSnapshotMetadataSchema = z
   .object({
     provider: z.enum(["ALPACA", "FMP", "EXA"]),
     source: z.string().trim().min(1).max(128),
@@ -350,7 +350,7 @@ export type ResearchDecisionValidationResult =
       issues: readonly ResearchDecisionValidationIssue[]
     }
 
-const validationContextSchema = z
+export const researchDecisionValidationContextSchema = z
   .object({
     evaluatedAt: timestamp,
     snapshots: z.record(boundedIdentifier, evidenceSnapshotMetadataSchema),
@@ -363,7 +363,7 @@ const validationContextSchema = z
  * @param path - Property keys reported by Zod for a validation issue.
  * @returns A path containing only strings and numeric indexes.
  */
-const schemaIssuePath = (path: readonly PropertyKey[]) =>
+export const researchDecisionSchemaIssuePath = (path: readonly PropertyKey[]) =>
   path.map((part) => (typeof part === "symbol" ? String(part) : part))
 
 /**
@@ -383,13 +383,13 @@ export function validateResearchDecisionV3(
   context: ResearchDecisionValidationContext,
 ): ResearchDecisionValidationResult {
   // Reject invalid trusted metadata before inspecting model-authored references.
-  const parsedContext = validationContextSchema.safeParse(context)
+  const parsedContext = researchDecisionValidationContextSchema.safeParse(context)
   if (!parsedContext.success) {
     return {
       success: false,
       issues: parsedContext.error.issues.map(({ path }) => ({
         code: "CONTEXT_INVALID",
-        path: schemaIssuePath(path),
+        path: researchDecisionSchemaIssuePath(path),
       })),
     }
   }

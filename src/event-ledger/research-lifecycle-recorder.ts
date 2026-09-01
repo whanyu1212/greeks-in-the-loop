@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto"
 import type {
   ResearchCycleOutcomeSink,
   ResearchCycleTerminalRecordV3,
+  ResearchCycleTerminalRecordV4,
 } from "../research/cycle/outcome.js"
 import {
   RESEARCH_INVOCATION_VERSION,
@@ -125,7 +126,7 @@ const persist = async <T>(
 }
 
 const completionEvents = (
-  record: ResearchCycleTerminalRecordV3,
+  record: ResearchCycleTerminalRecordV3 | ResearchCycleTerminalRecordV4,
   identity: ResearchCycleIdentity,
   startEventId: string,
   occurredAt: string,

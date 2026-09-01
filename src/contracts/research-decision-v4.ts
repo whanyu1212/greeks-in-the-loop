@@ -12,11 +12,16 @@ import {
 import { optionUnderlyingV1Schema } from "../shared/alpaca-option-identity.js"
 import {
   agentReportedEvidenceSchema,
+  type ResearchDecisionValidationContext,
+  type ResearchDecisionValidationIssue,
   NO_ACTION_REASON_CODES,
   proposalEvidenceClaimV3Schema,
   proposalQuoteSnapshotRef,
+  researchDecisionSchemaIssuePath,
+  researchDecisionValidationContextSchema,
   TRADE_PROPOSAL_LIMIT,
 } from "./research-decision-v3.js"
+import { safeSchemaDiagnostics } from "../shared/schema-diagnostics.js"
 
 export const RESEARCH_DECISION_V4_CONTRACT_VERSION = "4.0.0" as const
 
@@ -134,3 +139,99 @@ export type TradeProposalV4 = z.infer<typeof tradeProposalV4Schema>
 export type ProposedPortfolioDecisionV4 = z.infer<
   typeof proposedPortfolioDecisionV4Schema
 >
+
+export type ResearchDecisionValidationResultV4 =
+  | Readonly<{ success: true; data: ResearchDecisionV4 }>
+  | Readonly<{
+      success: false
+      issues: readonly ResearchDecisionValidationIssue[]
+    }>
+
+/** Validates V4 proposal evidence against application-owned snapshot metadata. */
+export function validateResearchDecisionV4(
+  input: unknown,
+  context: ResearchDecisionValidationContext,
+): ResearchDecisionValidationResultV4 {
+  const parsedContext = researchDecisionValidationContextSchema.safeParse(context)
+  if (!parsedContext.success) {
+    return {
+      success: false,
+      issues: parsedContext.error.issues.map(({ path }) => ({
+        code: "CONTEXT_INVALID",
+        path: researchDecisionSchemaIssuePath(path),
+      })),
+    }
+  }
+  const parsedDecision = researchDecisionV4Schema.safeParse(input)
+  if (!parsedDecision.success) {
+    return {
+      success: false,
+      issues: safeSchemaDiagnostics(parsedDecision.error.issues, input),
+    }
+  }
+  if (parsedDecision.data.outcome === "NO_ACTION") {
+    return { success: true, data: parsedDecision.data }
+  }
+
+  const issues: ResearchDecisionValidationIssue[] = []
+  const evaluatedAt = Date.parse(parsedContext.data.evaluatedAt)
+  parsedDecision.data.proposals.forEach((proposal, proposalIndex) => {
+    const claims = new Map<string, "SOURCED_FACT" | "INFERENCE">()
+    const evidencePath = ["proposals", proposalIndex, "evidence"] as const
+    proposal.evidence.forEach((evidence, index) => {
+      if (claims.has(evidence.claimId)) {
+        issues.push({
+          code: "DUPLICATE_CLAIM_ID",
+          path: [...evidencePath, index, "claimId"],
+        })
+      } else claims.set(evidence.claimId, evidence.kind)
+    })
+    proposal.evidence.forEach((evidence, index) => {
+      if (evidence.kind === "INFERENCE") {
+        evidence.basedOn.forEach((claimId, referenceIndex) => {
+          const kind = claims.get(claimId)
+          if (kind === undefined) {
+            issues.push({
+              code: "UNKNOWN_INFERENCE_REFERENCE",
+              path: [...evidencePath, index, "basedOn", referenceIndex],
+            })
+          } else if (kind !== "SOURCED_FACT") {
+            issues.push({
+              code: "INFERENCE_REFERENCE_NOT_FACT",
+              path: [...evidencePath, index, "basedOn", referenceIndex],
+            })
+          }
+        })
+        return
+      }
+      const snapshot = Object.hasOwn(
+          parsedContext.data.snapshots,
+          evidence.snapshotRef,
+        )
+        ? parsedContext.data.snapshots[evidence.snapshotRef]
+        : undefined
+      if (snapshot === undefined) {
+        issues.push({
+          code: "UNKNOWN_SNAPSHOT",
+          path: [...evidencePath, index, "snapshotRef"],
+        })
+      } else {
+        if (Date.parse(snapshot.retrievedAt) > evaluatedAt) {
+          issues.push({
+            code: "SNAPSHOT_FROM_FUTURE",
+            path: [...evidencePath, index, "snapshotRef"],
+          })
+        }
+        if (Date.parse(snapshot.freshUntil) < evaluatedAt) {
+          issues.push({
+            code: "STALE_SNAPSHOT",
+            path: [...evidencePath, index, "snapshotRef"],
+          })
+        }
+      }
+    })
+  })
+  return issues.length === 0
+    ? { success: true, data: parsedDecision.data }
+    : { success: false, issues }
+}

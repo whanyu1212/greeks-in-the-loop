@@ -147,12 +147,12 @@ describe("research agent policy", () => {
     expect(systemPrompt).toContain("Do not substitute provider payload field names")
   })
 
-  it("spells out the strict candidate-leg role enum", () => {
-    expect(systemPrompt).toContain("exactly one `LONG` and one `SHORT` leg")
+  it("spells out the strict ordered candidate-leg intents", () => {
+    expect(systemPrompt).toContain("ordered legs `[BUY_TO_OPEN, SELL_TO_OPEN]`")
   })
 
   it("defines spread-Greek arithmetic and comparison criteria", () => {
-    expect(systemPrompt).toContain("long leg minus short leg")
+    expect(systemPrompt).toContain("position-weighted sum")
     expect(systemPrompt).toContain("Bullish net delta must be 0.10 through 0.40")
     expect(systemPrompt).toContain("bearish net delta -0.40 through -0.10")
     expect(systemPrompt).toContain("theta cost")

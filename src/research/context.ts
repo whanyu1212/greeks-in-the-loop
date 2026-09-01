@@ -50,6 +50,16 @@ export type ResearchContextProposalV1 = Readonly<{
   expiration: string
   longContractSymbol: string
   shortContractSymbol: string
+}> | Readonly<{
+  cycleId: string
+  direction: "BULLISH" | "BEARISH" | "NEUTRAL" | "VOLATILITY"
+  underlying: string
+  strategy: string
+  legs: readonly Readonly<{
+    contractSymbol: string
+    positionIntent: "BUY_TO_OPEN" | "SELL_TO_OPEN"
+    ratioQuantity: number
+  }>[]
 }>
 
 export type ResearchContextRejectionCountV1 = Readonly<{
@@ -248,16 +258,25 @@ export function projectResearchContextV1(
     }
     const primaryProposal = decision.proposals[0]
     if (primaryProposal === undefined) continue
-    latestValidatedProposal = {
-      cycleId,
-      direction: primaryProposal.direction,
-      underlying: primaryProposal.candidate.underlying,
-      structure: primaryProposal.candidate.structure,
-      expiration: primaryProposal.candidate.expiration,
-      longContractSymbol: primaryProposal.candidate.longLeg.contractSymbol,
-      shortContractSymbol: primaryProposal.candidate.shortLeg.contractSymbol,
-      sequence: event.sequence,
-    }
+    latestValidatedProposal = "strategy" in primaryProposal.candidate
+      ? {
+          cycleId,
+          direction: primaryProposal.direction,
+          underlying: primaryProposal.candidate.underlying,
+          strategy: primaryProposal.candidate.strategy,
+          legs: primaryProposal.candidate.legs,
+          sequence: event.sequence,
+        }
+      : {
+          cycleId,
+          direction: primaryProposal.direction as "BULLISH" | "BEARISH",
+          underlying: primaryProposal.candidate.underlying,
+          structure: primaryProposal.candidate.structure,
+          expiration: primaryProposal.candidate.expiration,
+          longContractSymbol: primaryProposal.candidate.longLeg.contractSymbol,
+          shortContractSymbol: primaryProposal.candidate.shortLeg.contractSymbol,
+          sequence: event.sequence,
+        }
   }
 
   const newestFirst = <T extends { sequence: number }>(values: readonly T[]) =>
@@ -297,6 +316,11 @@ export function projectResearchContextV1(
     )
 
   const assemble = () => {
+    const retainedProposal = latestValidatedProposal === undefined
+      ? undefined
+      : (({ sequence: _sequence, ...proposal }) => proposal)(
+          latestValidatedProposal,
+        )
     const references = Object.fromEntries(
       retainedEvidence.map(({ key, sequence: _sequence, ...reference }) => [
         key,
@@ -306,19 +330,9 @@ export function projectResearchContextV1(
     const value = {
       generatedAt: options.generatedAt,
       nextCycleNumber: latestCycleNumber + 1,
-      ...(latestValidatedProposal === undefined
+      ...(retainedProposal === undefined
         ? {}
-        : {
-            latestValidatedProposal: {
-              cycleId: latestValidatedProposal.cycleId,
-              direction: latestValidatedProposal.direction,
-              underlying: latestValidatedProposal.underlying,
-              structure: latestValidatedProposal.structure,
-              expiration: latestValidatedProposal.expiration,
-              longContractSymbol: latestValidatedProposal.longContractSymbol,
-              shortContractSymbol: latestValidatedProposal.shortContractSymbol,
-            },
-          }),
+        : { latestValidatedProposal: retainedProposal }),
       recentTerminalOutcomes: retainedOutcomes.map(
         ({ sequence: _sequence, ...outcome }) => outcome,
       ),

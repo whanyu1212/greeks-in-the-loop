@@ -6,6 +6,13 @@ import type {
   ResearchDecisionValidationIssue,
   TradeProposalV3,
 } from "../../contracts/research-decision-v3.js"
+import type {
+  NoActionDecisionV4,
+  ProposedPortfolioDecisionV4,
+  ResearchDecisionV4,
+  TradeProposalV4,
+} from "../../contracts/research-decision-v4.js"
+import type { ResearchReportV7 } from "../../contracts/research-report-v7.js"
 import type { ResearchReportV6 } from "../../contracts/research-report-v6.js"
 import type {
   TradeIntentDerivationReason,
@@ -18,7 +25,7 @@ import type { ShadowRiskResultV1 } from "../../risk/shadow-risk-v1.js"
 import type { ResearchInvocationV1 } from "../invocation.js"
 import type { SymbolScreenResultV2 } from "../symbol-screen.js"
 
-export const RESEARCH_CYCLE_OUTCOME_VERSION = "3.0.0" as const
+export const RESEARCH_CYCLE_OUTCOME_VERSION = "4.0.0" as const
 
 export type DecisionRejectionIssue =
   | ResearchDecisionValidationIssue
@@ -56,11 +63,48 @@ export type ResearchProposalDispositionV1 = ProposalIdentity &
       }>
   )
 
+export type ResearchProposalDispositionV2 = ProposalIdentity &
+  (
+    | Readonly<{
+        status: "DECISION_REJECTED"
+        issues: readonly DecisionRejectionIssue[]
+      }>
+    | Readonly<{
+        status: "INTENT_DERIVATION_REJECTED"
+        reasons: readonly IntentDerivationRejectionReason[]
+      }>
+    | Readonly<{
+        status: "RISK_EVALUATED"
+        proposal: TradeProposalV4
+        intent: TradeIntentV3
+        shadowRisk: ShadowRiskResultV1
+        selected: boolean
+      }>
+  )
+
 export type ResearchCycleOutcomeV3 =
+  | Readonly<{
+      outcomeVersion: "3.0.0"
+      status: "VALIDATED_NO_ACTION"
+      decision: NoActionDecisionV3
+    }>
+  | Readonly<{
+      outcomeVersion: "3.0.0"
+      status: "DECISION_REJECTED"
+      issues: readonly DecisionRejectionIssue[]
+    }>
+  | Readonly<{
+      outcomeVersion: "3.0.0"
+      status: "PORTFOLIO_EVALUATED"
+      decision: ProposedPortfolioDecisionV3
+      proposals: readonly ResearchProposalDispositionV1[]
+    }>
+
+export type ResearchCycleOutcomeV4 =
   | Readonly<{
       outcomeVersion: typeof RESEARCH_CYCLE_OUTCOME_VERSION
       status: "VALIDATED_NO_ACTION"
-      decision: NoActionDecisionV3
+      decision: NoActionDecisionV4
     }>
   | Readonly<{
       outcomeVersion: typeof RESEARCH_CYCLE_OUTCOME_VERSION
@@ -70,8 +114,8 @@ export type ResearchCycleOutcomeV3 =
   | Readonly<{
       outcomeVersion: typeof RESEARCH_CYCLE_OUTCOME_VERSION
       status: "PORTFOLIO_EVALUATED"
-      decision: ProposedPortfolioDecisionV3
-      proposals: readonly ResearchProposalDispositionV1[]
+      decision: ProposedPortfolioDecisionV4
+      proposals: readonly ResearchProposalDispositionV2[]
     }>
 
 export type ResearchCycleEvidenceSnapshotReferenceV1 = Readonly<{
@@ -92,9 +136,18 @@ export type ResearchCycleTerminalRecordV3 = Readonly<{
   researchReport?: ResearchReportV6
 }>
 
+export type ResearchCycleTerminalRecordV4 = Readonly<{
+  outcome: ResearchCycleOutcomeV4
+  symbolScreen: SymbolScreenResultV2
+  evidenceSnapshots: readonly ResearchCycleEvidenceSnapshotReferenceV1[]
+  researchInvocation: ResearchInvocationV1
+  validatedDecision?: ResearchDecisionV4
+  researchReport?: ResearchReportV7
+}>
+
 export type ResearchCycleOutcomeSink = Readonly<{
   record(
-    record: ResearchCycleTerminalRecordV3,
+    record: ResearchCycleTerminalRecordV3 | ResearchCycleTerminalRecordV4,
     signal: AbortSignal,
   ): Promise<void>
 }>

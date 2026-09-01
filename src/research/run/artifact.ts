@@ -4,7 +4,9 @@ import { join } from "node:path"
 import { z } from "zod"
 
 import type { ResearchDecisionV3 } from "../../contracts/research-decision-v3.js"
+import type { ResearchDecisionV4 } from "../../contracts/research-decision-v4.js"
 import type { ResearchReportV6 } from "../../contracts/research-report-v6.js"
+import type { ResearchReportV7 } from "../../contracts/research-report-v7.js"
 import type { TradeIntentV3 } from "../../contracts/trade-intent-v3.js"
 import {
   LEDGER_EVENT_VERSION,
@@ -27,8 +29,8 @@ import type {
   SymbolScreenResultV2,
 } from "../symbol-screen.js"
 
-export const RESEARCH_RUN_VERSION = "6.0.0" as const
-export const SUPPORTED_RESEARCH_RUN_VERSIONS = [RESEARCH_RUN_VERSION] as const
+export const RESEARCH_RUN_VERSION = "7.0.0" as const
+export const SUPPORTED_RESEARCH_RUN_VERSIONS = ["6.0.0", RESEARCH_RUN_VERSION] as const
 export const DEFAULT_RESEARCH_ARTIFACT_ROOT = "workspace/research" as const
 
 type RejectionIssue = Readonly<{
@@ -39,19 +41,23 @@ type RejectionIssue = Readonly<{
 
 export type ResearchRunOutcomeV1 =
   | Readonly<{
-      outcomeVersion: "3.0.0"
+      outcomeVersion: "3.0.0" | "4.0.0"
       status: "VALIDATED_NO_ACTION"
-      decision: Extract<ResearchDecisionV3, { outcome: "NO_ACTION" }>
+      decision:
+        | Extract<ResearchDecisionV3, { outcome: "NO_ACTION" }>
+        | Extract<ResearchDecisionV4, { outcome: "NO_ACTION" }>
     }>
   | Readonly<{
-      outcomeVersion: "3.0.0"
+      outcomeVersion: "3.0.0" | "4.0.0"
       status: "DECISION_REJECTED"
       issues: readonly RejectionIssue[]
     }>
   | Readonly<{
-      outcomeVersion: "3.0.0"
+      outcomeVersion: "3.0.0" | "4.0.0"
       status: "PORTFOLIO_EVALUATED"
-      decision: Extract<ResearchDecisionV3, { outcome: "PROPOSE_TRADES" }>
+      decision:
+        | Extract<ResearchDecisionV3, { outcome: "PROPOSE_TRADES" }>
+        | Extract<ResearchDecisionV4, { outcome: "PROPOSE_TRADES" }>
       intents: readonly TradeIntentV3[]
       selectedUnderlyings: readonly string[]
     }>
@@ -78,8 +84,8 @@ export type ResearchRunV1 = Readonly<{
     freshUntil: string
     temporalClass?: "LIVE" | "DELAYED" | "PRIOR_CLOSE" | undefined
   }>[]
-  researchReport?: ResearchReportV6
-  validatedDecision?: ResearchDecisionV3
+  researchReport?: ResearchReportV6 | ResearchReportV7
+  validatedDecision?: ResearchDecisionV3 | ResearchDecisionV4
   shadowRisk?: Readonly<{
     decision: ShadowRiskDecisionV1
     breakerTransitions: readonly RiskBreakerTransitionV1[]
@@ -197,12 +203,20 @@ export function projectResearchRunV1(
   switch (completed.payload.status) {
     case "VALIDATED_NO_ACTION":
       if (decisionEvent?.payload.decision.outcome !== "NO_ACTION") throw new Error("Validated no-action decision is missing")
-      outcome = { outcomeVersion: "3.0.0", status: completed.payload.status, decision: decisionEvent.payload.decision }
+      outcome = {
+        outcomeVersion: decisionEvent.payload.decision.contractVersion === "4.0.0"
+          ? "4.0.0"
+          : "3.0.0",
+        status: completed.payload.status,
+        decision: decisionEvent.payload.decision,
+      }
       break
     case "DECISION_REJECTED":
       if (decisionRejectionEvent === undefined) throw new Error("Decision rejection details are missing")
       outcome = {
-        outcomeVersion: "3.0.0",
+        outcomeVersion: reportEvent?.payload.report.reportVersion === "7.0.0"
+          ? "4.0.0"
+          : "3.0.0",
         status: completed.payload.status,
         issues: decisionRejectionEvent.payload.issues.map((issue) => ({
           code: issue.code,
@@ -221,7 +235,9 @@ export function projectResearchRunV1(
         throw new Error("Evaluated portfolio or its validated decision is missing")
       }
       outcome = {
-        outcomeVersion: "3.0.0",
+        outcomeVersion: decisionEvent.payload.decision.contractVersion === "4.0.0"
+          ? "4.0.0"
+          : "3.0.0",
         status: completed.payload.status,
         decision: decisionEvent.payload.decision,
         intents: intentEvents.map(({ payload }) => payload.intent),
@@ -265,7 +281,11 @@ export function projectResearchRunV1(
   const sessionId = start.sessionId
   if (cycleId === undefined || sessionId === undefined) throw new Error("Research cycle identity is incomplete")
   return {
-    runVersion: RESEARCH_RUN_VERSION,
+    runVersion:
+      decisionEvent?.payload.decision.contractVersion === "4.0.0" ||
+        reportEvent?.payload.report.reportVersion === "7.0.0"
+        ? RESEARCH_RUN_VERSION
+        : "6.0.0",
     cycle: {
       cycleId,
       cycleNumber: start.payload.cycleNumber,

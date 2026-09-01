@@ -5,8 +5,10 @@ import {
   researchCandidateV3Schema,
   researchDecisionV3Schema,
 } from "../contracts/research-decision-v3.js"
+import { researchDecisionV4Schema } from "../contracts/research-decision-v4.js"
 import { tradeIntentV3Schema } from "../contracts/trade-intent-v3.js"
 import { researchReportV6Schema } from "../contracts/research-report-v6.js"
+import { researchReportV7Schema } from "../contracts/research-report-v7.js"
 import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
 import {
   RESEARCH_MODEL_DRIFT_CODES,
@@ -128,12 +130,12 @@ const payloadSchemas = {
     ),
   RESEARCH_REPORT_RECORDED: z
     .object({
-      report: researchReportV6Schema,
+      report: z.union([researchReportV6Schema, researchReportV7Schema]),
     })
     .strict(),
   RESEARCH_DECISION_VALIDATED: z
     .object({
-      decision: researchDecisionV3Schema,
+      decision: z.union([researchDecisionV3Schema, researchDecisionV4Schema]),
     })
     .strict(),
   RESEARCH_DECISION_REJECTED: z

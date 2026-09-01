@@ -1,7 +1,7 @@
 import type {
-  ResearchDecisionV3,
-} from "../../contracts/research-decision-v3.js"
-import type { ResearchReportV6 } from "../../contracts/research-report-v6.js"
+  ResearchDecisionV4,
+} from "../../contracts/research-decision-v4.js"
+import type { ResearchReportV7 } from "../../contracts/research-report-v7.js"
 import type {
   TradeIntentDerivationReason,
   TradeIntentV3,
@@ -18,13 +18,13 @@ import {
 import type { ShadowRiskResultV1 } from "../../risk/shadow-risk-v1.js"
 import type {
   DecisionRejectionIssue,
-  ResearchCycleTerminalRecordV3,
+  ResearchCycleTerminalRecordV4,
 } from "./outcome.js"
 
 export type ResearchCycleStageReports = Readonly<{
   researchReportRejected(issues: readonly DecisionRejectionIssue[]): void
-  researchReportCompleted(report: ResearchReportV6): void
-  decisionValidated(decision: ResearchDecisionV3): void
+  researchReportCompleted(report: ResearchReportV7): void
+  decisionValidated(decision: ResearchDecisionV4): void
   quotesRejected(
     reasons: readonly OptionQuoteConfirmationFailureCode[],
   ): void
@@ -32,8 +32,8 @@ export type ResearchCycleStageReports = Readonly<{
   intentRejected(reasons: readonly TradeIntentDerivationReason[]): void
   intentDerived(intent: TradeIntentV3): void
   riskEvaluated(result: ShadowRiskResultV1): void
-  ledgerCommitted(record: ResearchCycleTerminalRecordV3): void
-  cycleOutcomeRecorded(record: ResearchCycleTerminalRecordV3): void
+  ledgerCommitted(record: ResearchCycleTerminalRecordV4): void
+  cycleOutcomeRecorded(record: ResearchCycleTerminalRecordV4): void
 }>
 
 /**
