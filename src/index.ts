@@ -43,7 +43,7 @@ import {
   RESEARCH_INVOCATION_PROVENANCE_BY_VERSION,
   RESEARCH_INVOCATION_VERSION,
   type ResearchInvocationV1,
-} from "./research/invocation-v1.js"
+} from "./research/invocation.js"
 import { startOpencode } from "./opencode-runtime.js"
 import {
   buildResearchCyclePrompt,
@@ -58,11 +58,12 @@ import {
 import {
   loadResearchContextV1,
   reconstructResearchContextV1,
-} from "./research/context-v1.js"
+} from "./research/context.js"
 import {
   processResearchCycle,
   repairResearchReportV6ResponseOnce,
 } from "./research/cycle.js"
+import { screenOptionUniverseV1 } from "./research/symbol-screen.js"
 import { createAlpacaRiskStateProvider } from "./risk/alpaca-risk-state-provider.js"
 import {
   createLedgerDurableRiskControlStateLoader,
@@ -501,6 +502,15 @@ try {
                   ({ underlying }) => underlying,
                 ),
               })
+              const symbolScreen = screenOptionUniverseV1(optionUniverse)
+              stageReporter.report("universe.screen", "COMPLETED", {
+                policyVersion: symbolScreen.policyVersion,
+                actionableUnderlyings: symbolScreen.results.flatMap((result) =>
+                  result.actionability === "ACTIONABLE"
+                    ? [result.underlying]
+                    : [],
+                ),
+              })
               const response = await cycleTrace.run(
                 "opencode.session.prompt",
                 async () => {
@@ -673,6 +683,7 @@ try {
                 rawResponse: response.text,
                 cycleStartedAt: cycle.startedAt,
                 optionUniverse,
+                symbolScreen,
                 signal,
                 quoteProvider,
                 shadowRiskEvaluator,

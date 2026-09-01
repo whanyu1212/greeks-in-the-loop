@@ -12,7 +12,7 @@ import {
   SUPPORTED_RESEARCH_RUN_VERSIONS,
   type ResearchRunV1,
 } from "../research/run/artifact.js"
-import { researchInvocationV1Schema } from "../research/invocation-v1.js"
+import { researchInvocationV1Schema } from "../research/invocation.js"
 import {
   ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS,
   ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE,

@@ -17,7 +17,7 @@ import {
   projectResearchContextV1,
   reconstructResearchContextV1,
   researchContextEvidenceKey,
-} from "../src/research/context-v1.js"
+} from "../src/research/context.js"
 
 const temporaryDirectories: string[] = []
 const recordedAt = "2026-08-26T14:00:00.000Z"

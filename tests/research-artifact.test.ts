@@ -18,7 +18,7 @@ import {
   writeResearchRunArtifact,
 } from "../src/research/run/artifact.js"
 import type { StoredLedgerEventV4 } from "../src/event-ledger/ledger-event-v1.js"
-import type { ResearchCycleOutcomeV3 } from "../src/research/cycle/outcome-v3.js"
+import type { ResearchCycleOutcomeV3 } from "../src/research/cycle/outcome.js"
 
 const researchInvocation = {
   invocationVersion: "3.0.0" as const,
@@ -226,14 +226,31 @@ describe("research cycle artifact", () => {
       {
         ...base,
         sequence: 3,
-        eventId: "event-decision",
+        eventId: "event-symbol-screen",
         causationEventId: "event-start",
+        eventType: "RESEARCH_SYMBOL_SCREEN_RECORDED",
+        payload: {
+          screen: {
+            screenVersion: "1.0.0",
+            policyVersion: "1.0.0",
+            mode: "SHADOW",
+            evaluatedAt: "2026-08-26T12:00:00.000Z",
+            universeSnapshotId: `option-universe-v2-${"a".repeat(64)}`,
+            results: [],
+          },
+        },
+      },
+      {
+        ...base,
+        sequence: 4,
+        eventId: "event-decision",
+        causationEventId: "event-symbol-screen",
         eventType: "RESEARCH_DECISION_VALIDATED",
         payload: { decision },
       },
       {
         ...base,
-        sequence: 4,
+        sequence: 5,
         eventId: "event-completed",
         causationEventId: "event-decision",
         eventType: "RESEARCH_CYCLE_COMPLETED",
@@ -254,10 +271,15 @@ describe("research cycle artifact", () => {
         reason: "DRY_RUN_RESEARCH_ONLY",
       },
       validatedDecision: decision,
+      symbolScreen: {
+        screenVersion: "1.0.0",
+        policyVersion: "1.0.0",
+        mode: "SHADOW",
+      },
       outcome: { status: "VALIDATED_NO_ACTION", decision },
       ledger: {
         firstSequence: 2,
-        lastSequence: 4,
+        lastSequence: 5,
         terminalEventId: "event-completed",
       },
     })

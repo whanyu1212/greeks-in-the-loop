@@ -6,9 +6,10 @@ import type {
   ResearchCycleOutcomeSink,
   ResearchCycleOutcomeV3,
   ResearchCycleTerminalRecordV3,
-} from "./outcome-v3.js"
+} from "./outcome.js"
 import type { ResearchCycleStageReports } from "./stage-reporting.js"
-import type { ResearchInvocationV1 } from "../invocation-v1.js"
+import type { ResearchInvocationV1 } from "../invocation.js"
+import type { SymbolScreenResultV1 } from "../symbol-screen.js"
 
 export const MAX_TERMINAL_REJECTION_DETAILS = 64
 
@@ -26,6 +27,7 @@ export type RecordResearchCycleOutcomeContext = Readonly<{
   sink: ResearchCycleOutcomeSink
   signal: AbortSignal
   researchInvocation: ResearchInvocationV1
+  symbolScreen: SymbolScreenResultV1
   researchReport?: ResearchReportV6
   trace: ResearchCycleTrace
   stages: ResearchCycleStageReports
@@ -34,6 +36,7 @@ export type RecordResearchCycleOutcomeContext = Readonly<{
 export type ProcessedResearchCycle = Readonly<{
   outcome: ResearchCycleOutcomeV3
   report: string
+  symbolScreen: SymbolScreenResultV1
   researchReport?: ResearchReportV6
   shadowRisks?: readonly ShadowRiskResultV1[]
 }>
@@ -82,6 +85,7 @@ export async function recordResearchCycleOutcome(
   const record: ResearchCycleTerminalRecordV3 = {
     outcome: boundedOutcome,
     researchInvocation: context.researchInvocation,
+    symbolScreen: context.symbolScreen,
     evidenceSnapshots: metadata.evidenceSnapshots ?? [],
     ...(metadata.validatedDecision === undefined
       ? {}
@@ -110,6 +114,7 @@ export async function recordResearchCycleOutcome(
 
   return {
     outcome: boundedOutcome,
+    symbolScreen: context.symbolScreen,
     report: `Research cycle outcome: ${boundedOutcome.status}${
       boundedOutcome.status === "PORTFOLIO_EVALUATED"
         ? `\nSelected shadow proposals: ${selectedCount}`

@@ -21,7 +21,8 @@ import {
   newYorkDate,
   type ResearchEligibilityV1,
 } from "../../scheduling/research-eligibility.js"
-import type { ResearchInvocationV1 } from "../invocation-v1.js"
+import type { ResearchInvocationV1 } from "../invocation.js"
+import type { SymbolScreenResultV1 } from "../symbol-screen.js"
 
 export const RESEARCH_RUN_VERSION = "6.0.0" as const
 export const SUPPORTED_RESEARCH_RUN_VERSIONS = [RESEARCH_RUN_VERSION] as const
@@ -65,6 +66,7 @@ export type ResearchRunV1 = Readonly<{
   }>
   initialEligibility?: ResearchEligibilityV1
   researchInvocation?: ResearchInvocationV1
+  symbolScreen?: SymbolScreenResultV1
   evidenceSnapshots: readonly Readonly<{
     snapshotRef: string
     provider: "ALPACA" | "FMP" | "EXA"
@@ -152,6 +154,12 @@ export function projectResearchRunV1(
   const reportEvent = optionalOne(
     events.filter((event) => event.eventType === "RESEARCH_REPORT_RECORDED"),
     "research-report",
+  )
+  const symbolScreenEvent = optionalOne(
+    events.filter(
+      (event) => event.eventType === "RESEARCH_SYMBOL_SCREEN_RECORDED",
+    ),
+    "research-symbol-screen",
   )
   const decisionEvent = optionalOne(
     events.filter((event) => event.eventType === "RESEARCH_DECISION_VALIDATED"),
@@ -269,6 +277,9 @@ export function projectResearchRunV1(
     ...(completed.payload.researchInvocation === undefined
       ? {}
       : { researchInvocation: completed.payload.researchInvocation }),
+    ...(symbolScreenEvent === undefined
+      ? {}
+      : { symbolScreen: symbolScreenEvent.payload.screen }),
     evidenceSnapshots: events
       .filter((event) => event.eventType === "EVIDENCE_SNAPSHOT_REFERENCED")
       .map((event) => event.payload),

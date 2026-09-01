@@ -14,12 +14,22 @@ import type {
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { createResearchLifecycleRecorder } from "../src/event-ledger/research-lifecycle-recorder.js"
 import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
-import type { ResearchCycleTerminalRecordV3 } from "../src/research/cycle/outcome-v3.js"
-import type { ResearchInvocationV1 } from "../src/research/invocation-v1.js"
+import type { ResearchCycleTerminalRecordV3 } from "../src/research/cycle/outcome.js"
+import type { ResearchInvocationV1 } from "../src/research/invocation.js"
+import type { SymbolScreenResultV1 } from "../src/research/symbol-screen.js"
 
 const TIMESTAMP = "2026-08-26T10:00:00.000Z"
 const SNAPSHOT_REF = proposalQuoteSnapshotRef("SPY")
 const signal = new AbortController().signal
+
+const symbolScreen: SymbolScreenResultV1 = {
+  screenVersion: "1.0.0",
+  policyVersion: "1.0.0",
+  mode: "SHADOW",
+  evaluatedAt: TIMESTAMP,
+  universeSnapshotId: `option-universe-v2-${"a".repeat(64)}`,
+  results: [],
+}
 
 const researchInvocation: ResearchInvocationV1 = {
   invocationVersion: "3.0.0",
@@ -266,6 +276,7 @@ const terminalMappingCases: readonly {
     name: "validated no action",
     record: {
       researchInvocation,
+      symbolScreen,
       outcome: {
         outcomeVersion: "3.0.0",
         status: "VALIDATED_NO_ACTION",
@@ -276,6 +287,7 @@ const terminalMappingCases: readonly {
       researchReport,
     },
     eventTypes: [
+      "RESEARCH_SYMBOL_SCREEN_RECORDED",
       "RESEARCH_REPORT_RECORDED",
       "RESEARCH_DECISION_VALIDATED",
       "RESEARCH_CYCLE_COMPLETED",
@@ -285,6 +297,7 @@ const terminalMappingCases: readonly {
     name: "decision rejection",
     record: {
       researchInvocation,
+      symbolScreen,
       outcome: {
         outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
@@ -297,6 +310,7 @@ const terminalMappingCases: readonly {
       evidenceSnapshots,
     },
     eventTypes: [
+      "RESEARCH_SYMBOL_SCREEN_RECORDED",
       "EVIDENCE_SNAPSHOT_REFERENCED",
       "EVIDENCE_SNAPSHOT_REFERENCED",
       "RESEARCH_DECISION_REJECTED",
@@ -307,6 +321,7 @@ const terminalMappingCases: readonly {
     name: "portfolio intent derivation rejection with a validated decision",
     record: {
       researchInvocation,
+      symbolScreen,
       outcome: {
         outcomeVersion: "3.0.0",
         status: "PORTFOLIO_EVALUATED",
@@ -322,6 +337,7 @@ const terminalMappingCases: readonly {
       validatedDecision: proposedDecision,
     },
     eventTypes: [
+      "RESEARCH_SYMBOL_SCREEN_RECORDED",
       "EVIDENCE_SNAPSHOT_REFERENCED",
       "RESEARCH_DECISION_VALIDATED",
       "TRADE_INTENT_DERIVATION_REJECTED",
@@ -333,6 +349,7 @@ const terminalMappingCases: readonly {
     name: "evaluated portfolio without duplicate decision or intent events",
     record: {
       researchInvocation,
+      symbolScreen,
       outcome: {
         outcomeVersion: "3.0.0",
         status: "PORTFOLIO_EVALUATED",
@@ -351,6 +368,7 @@ const terminalMappingCases: readonly {
       validatedDecision: proposedDecision,
     },
     eventTypes: [
+      "RESEARCH_SYMBOL_SCREEN_RECORDED",
       "EVIDENCE_SNAPSHOT_REFERENCED",
       "RESEARCH_DECISION_VALIDATED",
       "TRADE_INTENT_DERIVED",
@@ -596,6 +614,7 @@ describe("createResearchLifecycleRecorder", () => {
 
     await cycle.outcomeSink.record(
       {
+        symbolScreen,
         outcome: {
           outcomeVersion: "3.0.0",
           status: "DECISION_REJECTED",
@@ -612,6 +631,7 @@ describe("createResearchLifecycleRecorder", () => {
     )
 
     expect(state.events.slice(1).map(({ payload }) => payload)).toEqual([
+      { screen: symbolScreen },
       evidenceSnapshots[0],
       evidenceSnapshots[1],
       {
@@ -654,6 +674,7 @@ describe("createResearchLifecycleRecorder", () => {
     const state = setup()
     const cycle = await startCycle(state)
     const terminalRecord: ResearchCycleTerminalRecordV3 = {
+      symbolScreen,
       outcome: {
         outcomeVersion: "3.0.0",
         status: "VALIDATED_NO_ACTION",
@@ -675,6 +696,7 @@ describe("createResearchLifecycleRecorder", () => {
     await cycle.outcomeSink.record(terminalRecord, signal)
     expect(state.events.map(({ eventType }) => eventType)).toEqual([
       "RESEARCH_CYCLE_STARTED",
+      "RESEARCH_SYMBOL_SCREEN_RECORDED",
       "RESEARCH_DECISION_VALIDATED",
       "RESEARCH_CYCLE_COMPLETED",
     ])
@@ -698,6 +720,7 @@ describe("createResearchLifecycleRecorder", () => {
 
     const completion = cycle.outcomeSink.record(
       {
+        symbolScreen,
         outcome: {
           outcomeVersion: "3.0.0",
           status: "VALIDATED_NO_ACTION",
@@ -716,6 +739,7 @@ describe("createResearchLifecycleRecorder", () => {
     await Promise.all([completion, interruption])
     expect(state.events.map(({ eventType }) => eventType)).toEqual([
       "RESEARCH_CYCLE_STARTED",
+      "RESEARCH_SYMBOL_SCREEN_RECORDED",
       "RESEARCH_DECISION_VALIDATED",
       "RESEARCH_CYCLE_COMPLETED",
     ])
@@ -728,6 +752,7 @@ describe("createResearchLifecycleRecorder", () => {
     await cycle.interrupt("PROCESS_RESTART", signal)
     await cycle.outcomeSink.record(
       {
+        symbolScreen,
         outcome: {
           outcomeVersion: "3.0.0",
           status: "VALIDATED_NO_ACTION",
@@ -760,6 +785,7 @@ describe("createResearchLifecycleRecorder", () => {
 
     const completion = cycle.outcomeSink.record(
       {
+        symbolScreen,
         outcome: {
           outcomeVersion: "3.0.0",
           status: "VALIDATED_NO_ACTION",
@@ -878,6 +904,7 @@ describe("createResearchLifecycleRecorder", () => {
 
     await cycle.outcomeSink.record(
       {
+        symbolScreen,
         outcome: {
           outcomeVersion: "3.0.0",
           status: "PORTFOLIO_EVALUATED",
@@ -912,6 +939,7 @@ describe("createResearchLifecycleRecorder", () => {
     const stored = await store.list({ cycleId: cycle.cycleId, limit: 10 })
     expect(stored.map(({ eventType }) => eventType)).toEqual([
       "RESEARCH_CYCLE_STARTED",
+      "RESEARCH_SYMBOL_SCREEN_RECORDED",
       "EVIDENCE_SNAPSHOT_REFERENCED",
       "RESEARCH_DECISION_VALIDATED",
       "TRADE_INTENT_DERIVED",

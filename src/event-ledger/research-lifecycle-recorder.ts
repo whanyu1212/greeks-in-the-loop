@@ -3,11 +3,11 @@ import { randomUUID } from "node:crypto"
 import type {
   ResearchCycleOutcomeSink,
   ResearchCycleTerminalRecordV3,
-} from "../research/cycle/outcome-v3.js"
+} from "../research/cycle/outcome.js"
 import {
   RESEARCH_INVOCATION_VERSION,
   type ResearchModelDriftCode,
-} from "../research/invocation-v1.js"
+} from "../research/invocation.js"
 import {
   researchEligibilityV1Schema,
   type ResearchEligibilityV1,
@@ -149,6 +149,17 @@ const completionEvents = (
     causationEventId,
     cycleId: identity.cycleId,
     sessionId: identity.sessionId,
+  })
+
+  append({
+    ...envelope(),
+    eventType: "RESEARCH_SYMBOL_SCREEN_RECORDED",
+    payload: {
+      screen: {
+        ...record.symbolScreen,
+        results: [...record.symbolScreen.results],
+      },
+    },
   })
 
   for (const snapshot of record.evidenceSnapshots) {

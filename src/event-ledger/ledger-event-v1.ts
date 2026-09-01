@@ -12,7 +12,8 @@ import {
   RESEARCH_MODEL_DRIFT_CODES,
   researchInvocationV1Schema,
   SUPPORTED_RESEARCH_INVOCATION_VERSIONS,
-} from "../research/invocation-v1.js"
+} from "../research/invocation.js"
+import { symbolScreenResultV1Schema } from "../research/symbol-screen.js"
 import { SCHEMA_VIOLATION_CATEGORIES } from "../shared/schema-diagnostics.js"
 import {
   riskBreakerTransitionV1Schema,
@@ -27,6 +28,7 @@ export const MAX_LEDGER_EVENT_PAYLOAD_BYTES = 256 * 1024
 export const LEDGER_EVENT_TYPES = [
   "OPENCODE_SESSION_STARTED",
   "RESEARCH_CYCLE_STARTED",
+  "RESEARCH_SYMBOL_SCREEN_RECORDED",
   "EVIDENCE_SNAPSHOT_REFERENCED",
   "RESEARCH_REPORT_RECORDED",
   "RESEARCH_DECISION_VALIDATED",
@@ -98,6 +100,11 @@ const payloadSchemas = {
         })
       }
     }),
+  RESEARCH_SYMBOL_SCREEN_RECORDED: z
+    .object({
+      screen: symbolScreenResultV1Schema,
+    })
+    .strict(),
   EVIDENCE_SNAPSHOT_REFERENCED: z
     .object({
       snapshotRef: identifier,

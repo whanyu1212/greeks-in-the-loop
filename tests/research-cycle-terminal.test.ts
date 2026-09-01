@@ -1,13 +1,23 @@
 import { describe, expect, it, vi } from "vitest"
 
 import { NOOP_RESEARCH_CYCLE_TRACE } from "../src/observability/research-telemetry.js"
-import type { ResearchCycleOutcomeSink } from "../src/research/cycle/outcome-v3.js"
+import type { ResearchCycleOutcomeSink } from "../src/research/cycle/outcome.js"
 import { createResearchCycleStageReports } from "../src/research/cycle/stage-reporting.js"
 import {
   MAX_TERMINAL_REJECTION_DETAILS,
   recordResearchCycleOutcome,
 } from "../src/research/cycle/terminal.js"
-import type { ResearchInvocationV1 } from "../src/research/invocation-v1.js"
+import type { ResearchInvocationV1 } from "../src/research/invocation.js"
+import type { SymbolScreenResultV1 } from "../src/research/symbol-screen.js"
+
+const symbolScreen: SymbolScreenResultV1 = {
+  screenVersion: "1.0.0",
+  policyVersion: "1.0.0",
+  mode: "SHADOW",
+  evaluatedAt: "2026-08-25T14:30:00.000Z",
+  universeSnapshotId: `option-universe-v2-${"a".repeat(64)}`,
+  results: [],
+}
 
 const researchInvocation: ResearchInvocationV1 = {
   invocationVersion: "6.0.0",
@@ -33,6 +43,7 @@ const context = (record: ResearchCycleOutcomeSink["record"]) => ({
   sink: { record },
   signal: new AbortController().signal,
   researchInvocation,
+  symbolScreen,
   trace: NOOP_RESEARCH_CYCLE_TRACE,
   stages: createResearchCycleStageReports(),
 })

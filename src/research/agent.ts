@@ -3,7 +3,7 @@ import {
   DRY_RUN_MODE,
   type ResearchEligibilityV1,
 } from "../scheduling/research-eligibility.js"
-import type { ResearchContextV1 } from "./context-v1.js"
+import type { ResearchContextV1 } from "./context.js"
 
 /**
  * Fixed identity and request construction for the unattended research agent.

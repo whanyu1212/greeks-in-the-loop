@@ -9,9 +9,10 @@ import type { ResearchEligibilityV1 } from "../src/scheduling/research-eligibili
 import type {
   ResearchCycleOutcomeSink,
   ResearchCycleTerminalRecordV3,
-} from "../src/research/cycle/outcome-v3.js"
+} from "../src/research/cycle/outcome.js"
 import { processResearchCycle } from "../src/research/cycle.js"
-import type { ResearchInvocationV1 } from "../src/research/invocation-v1.js"
+import type { ResearchInvocationV1 } from "../src/research/invocation.js"
+import { screenOptionUniverseV1 } from "../src/research/symbol-screen.js"
 
 const underlyings = ["SPY", "QQQ", "NVDA"] as const
 const observedAt = "2026-08-26T14:30:00.000Z"
@@ -380,6 +381,7 @@ const run = async (
   }> = {},
 ) => {
   const records: ResearchCycleTerminalRecordV3[] = []
+  const selectedUniverse = options.universe ?? optionUniverse
   const outcomeSink: ResearchCycleOutcomeSink = {
     async record(record) {
       records.push(record)
@@ -388,7 +390,8 @@ const run = async (
   const processed = await processResearchCycle({
     rawResponse: typeof report === "string" ? report : JSON.stringify(report),
     cycleStartedAt: "2026-08-26T14:28:00.000Z",
-    optionUniverse: options.universe ?? optionUniverse,
+    optionUniverse: selectedUniverse,
+    symbolScreen: screenOptionUniverseV1(selectedUniverse),
     signal: new AbortController().signal,
     quoteProvider: options.quotes ?? quoteProvider,
     shadowRiskEvaluator: options.risk ?? approvedRisk,
@@ -413,6 +416,18 @@ describe("processResearchCycle", () => {
     expect(quotes.confirmQuotes).not.toHaveBeenCalled()
     expect(risk.evaluate).not.toHaveBeenCalled()
     expect(records).toHaveLength(1)
+    expect(records[0]!.symbolScreen).toMatchObject({
+      screenVersion: "1.0.0",
+      policyVersion: "1.0.0",
+      mode: "SHADOW",
+      universeSnapshotId: optionUniverse.snapshotId,
+      results: underlyings.map((underlying) => ({
+        underlying,
+        actionability: "ACTIONABLE",
+        direction: "BULLISH",
+        structure: "BULL_CALL_SPREAD",
+      })),
+    })
   })
 
   it("rejects overall no-action when a symbol is marked actionable", async () => {

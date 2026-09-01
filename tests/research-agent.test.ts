@@ -12,7 +12,7 @@ import {
   RESEARCH_PROMPT_VERSION,
   researchToolBudgetViolation,
 } from "../src/research/agent.js"
-import { projectResearchContextV1 } from "../src/research/context-v1.js"
+import { projectResearchContextV1 } from "../src/research/context.js"
 
 const optionUniverse = {
   snapshotVersion: "2.0.0",

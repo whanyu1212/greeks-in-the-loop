@@ -25,7 +25,7 @@ import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
   type DecisionRejectionIssue,
   type ResearchCycleOutcomeSink,
-} from "./cycle/outcome-v3.js"
+} from "./cycle/outcome.js"
 import {
   isProposedPortfolioReport,
   processResearchProposalPath,
@@ -37,7 +37,8 @@ import {
   type ProcessedResearchCycle,
   type ResearchCycleTerminalResolution,
 } from "./cycle/terminal.js"
-import type { ResearchInvocationV1 } from "./invocation-v1.js"
+import type { ResearchInvocationV1 } from "./invocation.js"
+import type { SymbolScreenResultV1 } from "./symbol-screen.js"
 
 export {
   PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
@@ -114,6 +115,7 @@ export type ProcessResearchCycleOptions = Readonly<{
   rawResponse: string
   cycleStartedAt: string
   optionUniverse: OptionUniverseSnapshotV2
+  symbolScreen: SymbolScreenResultV1
   signal: AbortSignal
   quoteProvider: OptionQuoteProvider
   shadowRiskEvaluator: ShadowRiskEvaluator
@@ -151,6 +153,7 @@ export async function processResearchCycle({
   rawResponse,
   cycleStartedAt,
   optionUniverse,
+  symbolScreen,
   signal,
   quoteProvider,
   shadowRiskEvaluator,
@@ -181,6 +184,7 @@ export async function processResearchCycle({
         sink: outcomeSink,
         signal,
         researchInvocation,
+        symbolScreen,
         trace,
         stages,
       },
@@ -196,6 +200,7 @@ export async function processResearchCycle({
       sink: outcomeSink,
       signal,
       researchInvocation,
+      symbolScreen,
       researchReport,
       trace,
       stages,

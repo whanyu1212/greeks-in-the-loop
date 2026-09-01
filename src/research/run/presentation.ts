@@ -4,7 +4,7 @@ import { basename, dirname, join, relative } from "node:path"
 import {
   evaluateResearchRunV1,
   type ResearchRunEvaluationV1,
-} from "../../evaluation/research-run-evaluation-v1.js"
+} from "../../evaluation/research-run-evaluation.js"
 import {
   DEFAULT_RESEARCH_ARTIFACT_ROOT,
   writeResearchRunArtifact,
@@ -237,6 +237,39 @@ export function buildResearchRunPresentation(
         [`${indicator.underlying} completed-session volume ratio`, `${indicator.completedSessionVolumeRatio20.toFixed(2)}x`] as const,
       ]))
     }
+  }
+
+  if (run.symbolScreen !== undefined) {
+    lines.push("## Deterministic Symbol Screen", "")
+    table(lines, [
+      ["Mode", run.symbolScreen.mode],
+      ["Policy version", run.symbolScreen.policyVersion],
+      ["Evaluated", run.symbolScreen.evaluatedAt],
+      ...run.symbolScreen.results.flatMap((result) => {
+        const agentEvaluation = report?.analysis.symbolEvaluations.find(
+          ({ underlying }) => underlying === result.underlying,
+        )
+        return [
+          [`${result.underlying} actionability`, result.actionability] as const,
+          [`${result.underlying} direction`, result.direction] as const,
+          [`${result.underlying} structure`, result.structure ?? "NONE"] as const,
+          [
+            `${result.underlying} reasons`,
+            result.reasonCodes.length === 0
+              ? "NONE"
+              : result.reasonCodes.join(", "),
+          ] as const,
+          [
+            `${result.underlying} agent disposition`,
+            agentEvaluation?.disposition ?? "UNAVAILABLE",
+          ] as const,
+          [
+            `${result.underlying} agent direction`,
+            agentEvaluation?.direction ?? "UNAVAILABLE",
+          ] as const,
+        ]
+      }),
+    ])
   }
 
   const selectedUnderlying = run.outcome.status === "PORTFOLIO_EVALUATED"

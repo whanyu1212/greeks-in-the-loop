@@ -64,6 +64,21 @@ const noActionRun = (): ResearchRunV1 => {
       reason: "OUTSIDE_TRADE_INTENT_WINDOW",
     },
     evidenceSnapshots: [],
+    symbolScreen: {
+      screenVersion: "1.0.0",
+      policyVersion: "1.0.0",
+      mode: "SHADOW",
+      evaluatedAt: "2026-08-27T15:35:59.000Z",
+      universeSnapshotId: `option-universe-v2-${"a".repeat(64)}`,
+      results: [{
+        rank: 1,
+        underlying: "SPY",
+        actionability: "WATCH",
+        direction: "NEUTRAL",
+        reasonCodes: ["SESSION_MOVE_BELOW_THRESHOLD"],
+        evidence: { sessionPercentChange: 0.2 },
+      }],
+    },
     researchReport: {
       reportVersion: "6.0.0",
       result: decision,
@@ -326,6 +341,11 @@ describe("research run presentation", () => {
     ])
     expect(first.markdown).toContain("## Offline Audit")
     expect(first.markdown).toContain("## Universe Indicator Context")
+    expect(first.markdown).toContain("## Deterministic Symbol Screen")
+    expect(first.markdown).toContain("| SPY actionability | WATCH |")
+    expect(first.markdown).toContain(
+      "| SPY agent disposition | UNAVAILABLE |",
+    )
     expect(first.markdown).toContain("SPY 20-day return | 3.00%")
     expect(first.markdown).toContain(
       "mixed-regime \\[ALPACA LIVE, 2026-08-27T15:36:45.000Z\\]: The retained market regime signal was mixed.",

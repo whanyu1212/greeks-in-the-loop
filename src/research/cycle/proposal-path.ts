@@ -21,7 +21,7 @@ import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
   type ResearchCycleEvidenceSnapshotReferenceV1,
   type ResearchProposalDispositionV1,
-} from "./outcome-v3.js"
+} from "./outcome.js"
 import type { ResearchCycleStageReports } from "./stage-reporting.js"
 import type { ResearchCycleTerminalResolution } from "./terminal.js"
 

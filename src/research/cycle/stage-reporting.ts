@@ -19,7 +19,7 @@ import type { ShadowRiskResultV1 } from "../../risk/shadow-risk-v1.js"
 import type {
   DecisionRejectionIssue,
   ResearchCycleTerminalRecordV3,
-} from "./outcome-v3.js"
+} from "./outcome.js"
 
 export type ResearchCycleStageReports = Readonly<{
   researchReportRejected(issues: readonly DecisionRejectionIssue[]): void
