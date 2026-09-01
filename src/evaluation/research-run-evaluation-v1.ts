@@ -11,8 +11,8 @@ import { tradeIntentV3Schema } from "../contracts/trade-intent-v3.js"
 import {
   SUPPORTED_RESEARCH_RUN_VERSIONS,
   type ResearchRunV1,
-} from "../research/research-artifact.js"
-import { researchInvocationV1Schema } from "../research/research-invocation-v1.js"
+} from "../research/run/artifact.js"
+import { researchInvocationV1Schema } from "../research/invocation-v1.js"
 import {
   ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS,
   ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE,

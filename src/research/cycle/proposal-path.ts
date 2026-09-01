@@ -3,27 +3,27 @@ import {
   proposalQuoteSnapshotRef,
   validateResearchDecisionV3,
   type TradeProposalV3,
-} from "../contracts/research-decision-v3.js"
-import type { ResearchReportV6 } from "../contracts/research-report-v6.js"
+} from "../../contracts/research-decision-v3.js"
+import type { ResearchReportV6 } from "../../contracts/research-report-v6.js"
 import type {
   TradeIntentDerivationContextV3,
   TradeIntentDerivationResultV3,
-} from "../contracts/trade-intent-v3.js"
-import type { OptionQuoteProvider } from "../market-data/alpaca-option-quotes.js"
-import type { ResearchCycleTrace } from "../observability/research-telemetry.js"
-import type { TerminalStageReporter } from "../observability/terminal-stage-reporter.js"
-import type { ShadowRiskEvaluator } from "../risk/shadow-risk-service.js"
+} from "../../contracts/trade-intent-v3.js"
+import type { OptionQuoteProvider } from "../../market-data/alpaca-option-quotes.js"
+import type { ResearchCycleTrace } from "../../observability/research-telemetry.js"
+import type { TerminalStageReporter } from "../../observability/terminal-stage-reporter.js"
+import type { ShadowRiskEvaluator } from "../../risk/shadow-risk-service.js"
 import {
   newYorkLocalTime,
   type ResearchEligibilityV1,
-} from "../scheduling/research-eligibility.js"
+} from "../../scheduling/research-eligibility.js"
 import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
   type ResearchCycleEvidenceSnapshotReferenceV1,
   type ResearchProposalDispositionV1,
-} from "./research-cycle-outcome-v3.js"
-import type { ResearchCycleStageReports } from "./research-cycle-stage-reporting.js"
-import type { ResearchCycleTerminalResolution } from "./research-cycle-terminal.js"
+} from "./outcome-v3.js"
+import type { ResearchCycleStageReports } from "./stage-reporting.js"
+import type { ResearchCycleTerminalResolution } from "./terminal.js"
 
 const MAX_PROPOSAL_MARKET_REGIME_AGE_MS = 60_000
 const MAX_PROPOSAL_ACCOUNT_CHECK_AGE_MS = 5 * 60_000

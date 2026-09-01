@@ -21,7 +21,7 @@ import {
 import {
   buildResearchCyclePrompt,
   RESEARCH_AGENT_NAME,
-} from "../research/research-agent.js"
+} from "../research/agent.js"
 import {
   evaluateResearchBehavior,
   type ResearchBehaviorExpectation,

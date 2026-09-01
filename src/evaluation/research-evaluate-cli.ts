@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { parse as parseEnv } from "dotenv"
 
 import { createSqliteLedgerStore } from "../event-ledger/sqlite-ledger-store.js"
-import { loadResearchRunV1 } from "../research/research-artifact.js"
+import { loadResearchRunV1 } from "../research/run/artifact.js"
 import { evaluateResearchRunV1 } from "./research-run-evaluation-v1.js"
 
 type Options = Readonly<{

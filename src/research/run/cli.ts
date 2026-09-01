@@ -3,12 +3,12 @@ import { pathToFileURL } from "node:url"
 
 import { parse as parseEnv } from "dotenv"
 
-import { createSqliteLedgerStore } from "../event-ledger/sqlite-ledger-store.js"
-import { loadResearchRunV1 } from "./research-artifact.js"
+import { createSqliteLedgerStore } from "../../event-ledger/sqlite-ledger-store.js"
+import { loadResearchRunV1 } from "./artifact.js"
 import {
   buildResearchRunPresentation,
   writeResearchRunArtifacts,
-} from "./research-run-presentation.js"
+} from "./presentation.js"
 
 export type ResearchRunOutputFormat = "json" | "markdown"
 

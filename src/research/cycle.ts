@@ -25,19 +25,19 @@ import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
   type DecisionRejectionIssue,
   type ResearchCycleOutcomeSink,
-} from "./research-cycle-outcome-v3.js"
+} from "./cycle/outcome-v3.js"
 import {
   isProposedPortfolioReport,
   processResearchProposalPath,
   type ProposalIntentDeriver,
-} from "./research-proposal-path.js"
-import { createResearchCycleStageReports } from "./research-cycle-stage-reporting.js"
+} from "./cycle/proposal-path.js"
+import { createResearchCycleStageReports } from "./cycle/stage-reporting.js"
 import {
   recordResearchCycleOutcome,
   type ProcessedResearchCycle,
   type ResearchCycleTerminalResolution,
-} from "./research-cycle-terminal.js"
-import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
+} from "./cycle/terminal.js"
+import type { ResearchInvocationV1 } from "./invocation-v1.js"
 
 export {
   PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
@@ -45,11 +45,11 @@ export {
   proposalAccountChecksAreFresh,
   proposalHistoryIssuePath,
   proposalMarketRegimeIsFresh,
-} from "./research-proposal-path.js"
+} from "./cycle/proposal-path.js"
 export {
   MAX_TERMINAL_REJECTION_DETAILS,
   type ProcessedResearchCycle,
-} from "./research-cycle-terminal.js"
+} from "./cycle/terminal.js"
 
 export const MAX_RESEARCH_RESPONSE_BYTES = 256 * 1024
 

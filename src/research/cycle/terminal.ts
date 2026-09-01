@@ -1,14 +1,14 @@
-import type { ResearchDecisionV3 } from "../contracts/research-decision-v3.js"
-import type { ResearchReportV6 } from "../contracts/research-report-v6.js"
-import type { ResearchCycleTrace } from "../observability/research-telemetry.js"
-import type { ShadowRiskResultV1 } from "../risk/shadow-risk-v1.js"
+import type { ResearchDecisionV3 } from "../../contracts/research-decision-v3.js"
+import type { ResearchReportV6 } from "../../contracts/research-report-v6.js"
+import type { ResearchCycleTrace } from "../../observability/research-telemetry.js"
+import type { ShadowRiskResultV1 } from "../../risk/shadow-risk-v1.js"
 import type {
   ResearchCycleOutcomeSink,
   ResearchCycleOutcomeV3,
   ResearchCycleTerminalRecordV3,
-} from "./research-cycle-outcome-v3.js"
-import type { ResearchCycleStageReports } from "./research-cycle-stage-reporting.js"
-import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
+} from "./outcome-v3.js"
+import type { ResearchCycleStageReports } from "./stage-reporting.js"
+import type { ResearchInvocationV1 } from "../invocation-v1.js"
 
 export const MAX_TERMINAL_REJECTION_DETAILS = 64
 

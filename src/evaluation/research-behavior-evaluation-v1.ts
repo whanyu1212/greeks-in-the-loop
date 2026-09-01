@@ -11,7 +11,7 @@ import {
   RESEARCH_MAX_EXA_CALLS,
   RESEARCH_MAX_FMP_CALLS,
   RESEARCH_MAX_TOOL_CALLS,
-} from "../research/research-agent.js"
+} from "../research/agent.js"
 
 // Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
 // when grader semantics change, so stored artifacts stay attributable to the

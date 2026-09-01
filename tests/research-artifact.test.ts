@@ -16,9 +16,9 @@ import {
   projectResearchRunV1,
   type ResearchRunV1,
   writeResearchRunArtifact,
-} from "../src/research/research-artifact.js"
+} from "../src/research/run/artifact.js"
 import type { StoredLedgerEventV4 } from "../src/event-ledger/ledger-event-v1.js"
-import type { ResearchCycleOutcomeV3 } from "../src/research/research-cycle-outcome-v3.js"
+import type { ResearchCycleOutcomeV3 } from "../src/research/cycle/outcome-v3.js"
 
 const researchInvocation = {
   invocationVersion: "3.0.0" as const,

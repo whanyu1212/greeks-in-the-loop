@@ -11,8 +11,8 @@ import {
   RESEARCH_MAX_TOOL_CALLS,
   RESEARCH_PROMPT_VERSION,
   researchToolBudgetViolation,
-} from "../src/research/research-agent.js"
-import { projectResearchContextV1 } from "../src/research/research-context-v1.js"
+} from "../src/research/agent.js"
+import { projectResearchContextV1 } from "../src/research/context-v1.js"
 
 const optionUniverse = {
   snapshotVersion: "2.0.0",

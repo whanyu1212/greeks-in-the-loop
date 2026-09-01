@@ -11,7 +11,7 @@ import {
   RESEARCH_MAX_EXA_CALLS,
   RESEARCH_MAX_FMP_CALLS,
   RESEARCH_MAX_TOOL_CALLS,
-} from "../src/research/research-agent.js"
+} from "../src/research/agent.js"
 
 const issueCodes = (evaluation: ResearchBehaviorEvaluationV1) =>
   Object.values(evaluation.dimensions).flatMap(({ issueCodes }) => issueCodes)

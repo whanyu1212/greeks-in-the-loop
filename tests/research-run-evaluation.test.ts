@@ -10,7 +10,7 @@ import {
   evaluateResearchRunV1,
   researchRunEvaluationV1Schema,
 } from "../src/evaluation/research-run-evaluation-v1.js"
-import type { ResearchRunV1 } from "../src/research/research-artifact.js"
+import type { ResearchRunV1 } from "../src/research/run/artifact.js"
 
 const SESSION_DATE = "2026-08-26"
 const EXPIRATION = "2026-09-18"

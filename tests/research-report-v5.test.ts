@@ -4,7 +4,7 @@ import { researchReportV6Schema } from "../src/contracts/research-report-v6.js"
 import {
   parseResearchReportV6Response,
   repairResearchReportV6ResponseOnce,
-} from "../src/research/research-cycle.js"
+} from "../src/research/cycle.js"
 import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 
 const noAction = {

@@ -12,7 +12,7 @@ import {
   RESEARCH_MODEL_DRIFT_CODES,
   researchInvocationV1Schema,
   SUPPORTED_RESEARCH_INVOCATION_VERSIONS,
-} from "../research/research-invocation-v1.js"
+} from "../research/invocation-v1.js"
 import { SCHEMA_VIOLATION_CATEGORIES } from "../shared/schema-diagnostics.js"
 import {
   riskBreakerTransitionV1Schema,

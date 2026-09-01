@@ -13,12 +13,12 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import type { ResearchRunV1 } from "../src/research/research-artifact.js"
+import type { ResearchRunV1 } from "../src/research/run/artifact.js"
 import type { ShadowRiskStateProvenanceV1 } from "../src/risk/shadow-risk-v1.js"
 import {
   buildResearchRunPresentation,
   writeResearchRunArtifacts,
-} from "../src/research/research-run-presentation.js"
+} from "../src/research/run/presentation.js"
 
 const temporaryDirectories: string[] = []
 

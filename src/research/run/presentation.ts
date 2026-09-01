@@ -4,13 +4,13 @@ import { basename, dirname, join, relative } from "node:path"
 import {
   evaluateResearchRunV1,
   type ResearchRunEvaluationV1,
-} from "../evaluation/research-run-evaluation-v1.js"
+} from "../../evaluation/research-run-evaluation-v1.js"
 import {
   DEFAULT_RESEARCH_ARTIFACT_ROOT,
   writeResearchRunArtifact,
   type ResearchRunV1,
-} from "./research-artifact.js"
-import { deriveVerticalSpreadGreeksV1 } from "../shared/vertical-spread-greeks.js"
+} from "./artifact.js"
+import { deriveVerticalSpreadGreeksV1 } from "../../shared/vertical-spread-greeks.js"
 
 export type ResearchRunActionability =
   | "NO_ACTION"

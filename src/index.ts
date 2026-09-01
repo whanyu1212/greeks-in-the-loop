@@ -43,26 +43,26 @@ import {
   RESEARCH_INVOCATION_PROVENANCE_BY_VERSION,
   RESEARCH_INVOCATION_VERSION,
   type ResearchInvocationV1,
-} from "./research/research-invocation-v1.js"
+} from "./research/invocation-v1.js"
 import { startOpencode } from "./opencode-runtime.js"
 import {
   buildResearchCyclePrompt,
   buildResearchReportRepairPrompt,
   researchToolBudgetViolation,
-} from "./research/research-agent.js"
-import { loadResearchRunV1 } from "./research/research-artifact.js"
+} from "./research/agent.js"
+import { loadResearchRunV1 } from "./research/run/artifact.js"
 import {
   buildResearchRunPresentation,
   writeResearchRunArtifacts,
-} from "./research/research-run-presentation.js"
+} from "./research/run/presentation.js"
 import {
   loadResearchContextV1,
   reconstructResearchContextV1,
-} from "./research/research-context-v1.js"
+} from "./research/context-v1.js"
 import {
   processResearchCycle,
   repairResearchReportV6ResponseOnce,
-} from "./research/research-cycle.js"
+} from "./research/cycle.js"
 import { createAlpacaRiskStateProvider } from "./risk/alpaca-risk-state-provider.js"
 import {
   createLedgerDurableRiskControlStateLoader,

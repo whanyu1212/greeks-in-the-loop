@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { parseResearchRunCliOptions } from "../src/research/research-run-cli.js"
+import { parseResearchRunCliOptions } from "../src/research/run/cli.js"
 
 describe("research run CLI", () => {
   it("preserves JSON output defaults", () => {

@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vitest"
 
 import { NOOP_RESEARCH_CYCLE_TRACE } from "../src/observability/research-telemetry.js"
-import type { ResearchCycleOutcomeSink } from "../src/research/research-cycle-outcome-v3.js"
-import { createResearchCycleStageReports } from "../src/research/research-cycle-stage-reporting.js"
+import type { ResearchCycleOutcomeSink } from "../src/research/cycle/outcome-v3.js"
+import { createResearchCycleStageReports } from "../src/research/cycle/stage-reporting.js"
 import {
   MAX_TERMINAL_REJECTION_DETAILS,
   recordResearchCycleOutcome,
-} from "../src/research/research-cycle-terminal.js"
-import type { ResearchInvocationV1 } from "../src/research/research-invocation-v1.js"
+} from "../src/research/cycle/terminal.js"
+import type { ResearchInvocationV1 } from "../src/research/invocation-v1.js"
 
 const researchInvocation: ResearchInvocationV1 = {
   invocationVersion: "6.0.0",

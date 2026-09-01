@@ -7,7 +7,7 @@ import {
   RESEARCH_INVOCATION_VERSION,
   researchInvocationV1Schema,
   SUPPORTED_RESEARCH_INVOCATION_VERSIONS,
-} from "../src/research/research-invocation-v1.js"
+} from "../src/research/invocation-v1.js"
 
 const versions = {
   agentName: "research",

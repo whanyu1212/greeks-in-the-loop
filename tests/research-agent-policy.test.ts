@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
 import { NO_ACTION_REASON_CODES } from "../src/contracts/research-decision-v3.js"
-import { RESEARCH_MAX_AGENT_STEPS } from "../src/research/research-agent.js"
+import { RESEARCH_MAX_AGENT_STEPS } from "../src/research/agent.js"
 
 type PermissionAction = "allow" | "ask" | "deny"
 

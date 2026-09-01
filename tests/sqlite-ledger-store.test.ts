@@ -9,7 +9,7 @@ import {
   MAX_LEDGER_EVENT_PAYLOAD_BYTES,
   type LedgerEventV4,
 } from "../src/event-ledger/ledger-event-v1.js"
-import { loadResearchContextV1 } from "../src/research/research-context-v1.js"
+import { loadResearchContextV1 } from "../src/research/context-v1.js"
 import {
   createSqliteLedgerStore as createConfiguredSqliteLedgerStore,
   type CreateSqliteLedgerStoreOptions,

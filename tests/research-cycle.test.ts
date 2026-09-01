@@ -9,9 +9,9 @@ import type { ResearchEligibilityV1 } from "../src/scheduling/research-eligibili
 import type {
   ResearchCycleOutcomeSink,
   ResearchCycleTerminalRecordV3,
-} from "../src/research/research-cycle-outcome-v3.js"
-import { processResearchCycle } from "../src/research/research-cycle.js"
-import type { ResearchInvocationV1 } from "../src/research/research-invocation-v1.js"
+} from "../src/research/cycle/outcome-v3.js"
+import { processResearchCycle } from "../src/research/cycle.js"
+import type { ResearchInvocationV1 } from "../src/research/invocation-v1.js"
 
 const underlyings = ["SPY", "QQQ", "NVDA"] as const
 const observedAt = "2026-08-26T14:30:00.000Z"

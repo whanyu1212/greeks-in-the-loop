@@ -5,17 +5,17 @@ import type {
   ResearchDecisionV3,
   ResearchDecisionValidationIssue,
   TradeProposalV3,
-} from "../contracts/research-decision-v3.js"
-import type { ResearchReportV6 } from "../contracts/research-report-v6.js"
+} from "../../contracts/research-decision-v3.js"
+import type { ResearchReportV6 } from "../../contracts/research-report-v6.js"
 import type {
   TradeIntentDerivationReason,
   TradeIntentV3,
-} from "../contracts/trade-intent-v3.js"
+} from "../../contracts/trade-intent-v3.js"
 import type {
   OptionQuoteConfirmationFailureCode,
-} from "../market-data/alpaca-option-quotes.js"
-import type { ShadowRiskResultV1 } from "../risk/shadow-risk-v1.js"
-import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
+} from "../../market-data/alpaca-option-quotes.js"
+import type { ShadowRiskResultV1 } from "../../risk/shadow-risk-v1.js"
+import type { ResearchInvocationV1 } from "../invocation-v1.js"
 
 export const RESEARCH_CYCLE_OUTCOME_VERSION = "3.0.0" as const
 

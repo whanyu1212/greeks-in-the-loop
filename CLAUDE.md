@@ -41,7 +41,7 @@ OptionUniverseSnapshotV1
   -> append ledger events
 ```
 
-`src/index.ts` is the composition root. `src/research/research-cycle.ts` orchestrates one cycle.
+`src/index.ts` is the composition root. `src/research/cycle.ts` orchestrates one cycle.
 
 ## Boundaries
 

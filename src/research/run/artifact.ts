@@ -3,25 +3,25 @@ import { join } from "node:path"
 
 import { z } from "zod"
 
-import type { ResearchDecisionV3 } from "../contracts/research-decision-v3.js"
-import type { ResearchReportV6 } from "../contracts/research-report-v6.js"
-import type { TradeIntentV3 } from "../contracts/trade-intent-v3.js"
+import type { ResearchDecisionV3 } from "../../contracts/research-decision-v3.js"
+import type { ResearchReportV6 } from "../../contracts/research-report-v6.js"
+import type { TradeIntentV3 } from "../../contracts/trade-intent-v3.js"
 import {
   LEDGER_EVENT_VERSION,
   type StoredLedgerEvent,
   type StoredLedgerEventV4,
-} from "../event-ledger/ledger-event-v1.js"
-import type { LedgerStore } from "../event-ledger/ledger-store.js"
-import type { SchemaViolationCategory } from "../shared/schema-diagnostics.js"
+} from "../../event-ledger/ledger-event-v1.js"
+import type { LedgerStore } from "../../event-ledger/ledger-store.js"
+import type { SchemaViolationCategory } from "../../shared/schema-diagnostics.js"
 import type {
   RiskBreakerTransitionV1,
   ShadowRiskDecisionV1,
-} from "../risk/shadow-risk-v1.js"
+} from "../../risk/shadow-risk-v1.js"
 import {
   newYorkDate,
   type ResearchEligibilityV1,
-} from "../scheduling/research-eligibility.js"
-import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
+} from "../../scheduling/research-eligibility.js"
+import type { ResearchInvocationV1 } from "../invocation-v1.js"
 
 export const RESEARCH_RUN_VERSION = "6.0.0" as const
 export const SUPPORTED_RESEARCH_RUN_VERSIONS = [RESEARCH_RUN_VERSION] as const

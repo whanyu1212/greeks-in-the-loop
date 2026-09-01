@@ -14,8 +14,8 @@ import type {
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { createResearchLifecycleRecorder } from "../src/event-ledger/research-lifecycle-recorder.js"
 import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
-import type { ResearchCycleTerminalRecordV3 } from "../src/research/research-cycle-outcome-v3.js"
-import type { ResearchInvocationV1 } from "../src/research/research-invocation-v1.js"
+import type { ResearchCycleTerminalRecordV3 } from "../src/research/cycle/outcome-v3.js"
+import type { ResearchInvocationV1 } from "../src/research/invocation-v1.js"
 
 const TIMESTAMP = "2026-08-26T10:00:00.000Z"
 const SNAPSHOT_REF = proposalQuoteSnapshotRef("SPY")

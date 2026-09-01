@@ -3,11 +3,11 @@ import { randomUUID } from "node:crypto"
 import type {
   ResearchCycleOutcomeSink,
   ResearchCycleTerminalRecordV3,
-} from "../research/research-cycle-outcome-v3.js"
+} from "../research/cycle/outcome-v3.js"
 import {
   RESEARCH_INVOCATION_VERSION,
   type ResearchModelDriftCode,
-} from "../research/research-invocation-v1.js"
+} from "../research/invocation-v1.js"
 import {
   researchEligibilityV1Schema,
   type ResearchEligibilityV1,
