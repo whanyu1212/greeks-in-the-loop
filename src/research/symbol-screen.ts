@@ -304,7 +304,7 @@ const assessedStrategy = (
     : { strategy, actionability: "REJECTED", reasonCodes: ["DIRECTION_MISMATCH"] }
 }
 
-/** Screens application-owned universe evidence without affecting proposal flow. */
+/** Screens application-owned universe evidence for proposal actionability. */
 export function screenOptionUniverseV2(
   universe: OptionUniverseSnapshotV2,
 ): SymbolScreenResultV2 {

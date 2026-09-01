@@ -4,6 +4,7 @@ import {
   type ResearchEligibilityV1,
 } from "../scheduling/research-eligibility.js"
 import type { ResearchContextV1 } from "./context.js"
+import type { SymbolScreenResultV2 } from "./symbol-screen.js"
 
 /**
  * Fixed identity and request construction for the unattended research agent.
@@ -15,7 +16,7 @@ import type { ResearchContextV1 } from "./context.js"
 /** Checked-in OpenCode primary agent used by every unattended cycle. */
 export const RESEARCH_AGENT_NAME = "research" as const
 /** Increment when the system prompt or cycle-request behavior changes. */
-export const RESEARCH_PROMPT_VERSION = "6.1.1" as const
+export const RESEARCH_PROMPT_VERSION = "6.2.0" as const
 
 /** Hard OpenCode turn bound mirrored by the checked-in agent configuration. */
 export const RESEARCH_MAX_AGENT_STEPS = 32
@@ -81,6 +82,7 @@ export function buildResearchReportRepairPrompt(
  * @param optionUniverse Application-authoritative candidate shortlist.
  * @param operatorObjective Optional operator research objective.
  * @param durableContext Bounded application-generated context from prior cycles.
+ * @param symbolScreen Application-authoritative strategy actionability.
  * @returns Plain-text cycle request for OpenCode.
  */
 export function buildResearchCyclePrompt(
@@ -90,6 +92,7 @@ export function buildResearchCyclePrompt(
   operatorObjective?: string,
   durableContext?: ResearchContextV1,
   eligibility?: ResearchEligibilityV1,
+  symbolScreen?: SymbolScreenResultV2,
 ) {
   const underlyings = optionUniverse.candidates.map(({ underlying }) => underlying)
   return [
@@ -99,6 +102,17 @@ export function buildResearchCyclePrompt(
     underlyings.length === 0
       ? "The dynamic shortlist is empty. Return NO_ACTION with INSUFFICIENT_UNDERLYING_DATA and do not substitute a symbol."
       : `Lightly evaluate every shortlisted underlying (${underlyings.join(", ")}), promote at most three to deep option research, and return either NO_ACTION or one to three ranked BULL_CALL_SPREAD or BEAR_PUT_SPREAD proposals.`,
+    symbolScreen
+      ? [
+          "The application-authoritative symbol-strategy screen follows. Return a proposal only for an exact underlying and strategy pair marked ACTIONABLE. WATCH, REJECTED, and UNAVAILABLE pairs are not proposal candidates; catalog presence, Alpaca capability, or account approval does not override this screen.",
+          JSON.stringify({
+            policyVersion: symbolScreen.policyVersion,
+            evaluatedAt: symbolScreen.evaluatedAt,
+            universeSnapshotId: symbolScreen.universeSnapshotId,
+            symbols: symbolScreen.symbols,
+          }),
+        ].join("\n")
+      : undefined,
     eligibility
       ? [
           "Application-authoritative research and trade-intent eligibility follows. Do not override it with model reasoning or provider prose.",

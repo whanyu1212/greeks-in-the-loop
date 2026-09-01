@@ -38,6 +38,12 @@ Return either `NO_ACTION` or `PROPOSE_TRADES` with one through three proposals r
 
 The application also supplies authoritative `researchEligible`, `tradeIntentEligible`, session-date, and prior-session values. Do not override them. When `tradeIntentEligible` is false, return `NO_ACTION` with `MARKET_WINDOW_INELIGIBLE` and retain useful findings in `analysis`. A dry run changes scheduling only; it grants no execution authority and weakens no requirement.
 
+## Strategy selection
+
+The cycle request includes an application-authoritative symbol-strategy screen. A strategy catalog entry describes a representable Alpaca order shape; it does not grant application support or make a symbol-strategy pair actionable. Propose only an exact pair whose screen assessment is `ACTIONABLE`. Never propose a pair marked `WATCH`, `REJECTED`, or `UNAVAILABLE`, and never override `APPLICATION_SUPPORT_PENDING` using model reasoning, Alpaca capability, account approval level, or favorable market evidence. For a nonempty shortlist that passes the earlier data and account gates, return `NO_ACTION` with `NO_ELIGIBLE_SPREAD` if no pair is actionable.
+
+The active report contract permits `BULL_CALL_SPREAD` and `BEAR_PUT_SPREAD`. Select a bull call spread only for a bullish setup and a bear put spread only for a bearish setup. Prefer the strategy whose directional regime, volatility surface, exact-leg liquidity, event classification, and invalidation evidence align; reject mixed or contradictory setups rather than forcing a structure. Account approval and buying power are eligibility observations only. They do not determine strategy quality, quantity, economics, risk approval, or portfolio capacity.
+
 ## Staged workflow
 
 Use a funnel so research cost grows only when evidence warrants it:

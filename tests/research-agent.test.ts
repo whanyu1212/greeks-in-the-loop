@@ -13,6 +13,7 @@ import {
   researchToolBudgetViolation,
 } from "../src/research/agent.js"
 import { projectResearchContextV1 } from "../src/research/context.js"
+import { screenOptionUniverseV2 } from "../src/research/symbol-screen.js"
 
 const optionUniverse = {
   snapshotVersion: "2.0.0",
@@ -31,7 +32,7 @@ const optionUniverse = {
 describe("research agent request construction", () => {
   it("uses the fixed checked-in agent identity", () => {
     expect(RESEARCH_AGENT_NAME).toBe("research")
-    expect(RESEARCH_PROMPT_VERSION).toBe("6.1.1")
+    expect(RESEARCH_PROMPT_VERSION).toBe("6.2.0")
   })
 
   it("publishes bounded research budgets", () => {
@@ -88,6 +89,30 @@ describe("research agent request construction", () => {
         optionUniverse,
       ),
     ).not.toContain("Current operator objective")
+  })
+
+  it("renders the application-authoritative strategy screen", () => {
+    const symbolScreen = screenOptionUniverseV2(optionUniverse)
+    const prompt = buildResearchCyclePrompt(
+      1,
+      new Date("2026-08-25T13:30:00.000Z"),
+      optionUniverse,
+      undefined,
+      undefined,
+      undefined,
+      symbolScreen,
+    )
+
+    expect(prompt).toContain("exact underlying and strategy pair marked ACTIONABLE")
+    expect(prompt).toContain("WATCH, REJECTED, and UNAVAILABLE pairs")
+    expect(prompt).toContain("account approval does not override this screen")
+    expect(prompt).toContain(JSON.stringify({
+      policyVersion: symbolScreen.policyVersion,
+      evaluatedAt: symbolScreen.evaluatedAt,
+      universeSnapshotId: symbolScreen.universeSnapshotId,
+      symbols: symbolScreen.symbols,
+    }))
+    expect(prompt).not.toContain('"mode":"SHADOW"')
   })
 
   it("builds a bounded schema-only correction request", () => {

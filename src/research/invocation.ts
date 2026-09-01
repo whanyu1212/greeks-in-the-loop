@@ -5,7 +5,7 @@ import {
   type OpenCodeInvocationSummary,
 } from "../observability/opencode-telemetry-summary.js"
 import type { ResearchTraceVersions } from "../observability/research-telemetry.js"
-export const RESEARCH_INVOCATION_VERSION = "6.1.1" as const
+export const RESEARCH_INVOCATION_VERSION = "6.2.0" as const
 export const SUPPORTED_RESEARCH_INVOCATION_VERSIONS = Object.freeze([
   "3.0.0",
   "3.1.0",
@@ -15,6 +15,7 @@ export const SUPPORTED_RESEARCH_INVOCATION_VERSIONS = Object.freeze([
   "5.0.0",
   "6.0.0",
   "6.1.0",
+  "6.1.1",
   RESEARCH_INVOCATION_VERSION,
 ] as const)
 export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = Object.freeze({
@@ -82,9 +83,17 @@ export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = Object.freeze({
     providerId: "openai",
     modelId: "gpt-5.6-sol",
   }),
-  [RESEARCH_INVOCATION_VERSION]: Object.freeze({
+  "6.1.1": Object.freeze({
     agentName: "research",
     promptVersion: "6.1.1",
+    decisionContractVersion: "3.0.0",
+    reportVersion: "6.0.0",
+    providerId: "openai",
+    modelId: "gpt-5.6-sol",
+  }),
+  [RESEARCH_INVOCATION_VERSION]: Object.freeze({
+    agentName: "research",
+    promptVersion: "6.2.0",
     decisionContractVersion: "3.0.0",
     reportVersion: "6.0.0",
     providerId: "openai",

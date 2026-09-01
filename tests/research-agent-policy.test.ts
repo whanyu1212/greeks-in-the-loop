@@ -94,6 +94,11 @@ describe("research agent policy", () => {
   it("keeps strategy selection inside the generic research prompt", () => {
     expect(systemPrompt).toContain("dynamic shortlist containing zero through eight symbols")
     expect(systemPrompt).toContain("Promote no more than three symbols")
+    expect(systemPrompt).toContain("symbol-strategy screen")
+    expect(systemPrompt).toContain("Propose only an exact pair")
+    expect(systemPrompt).toContain("APPLICATION_SUPPORT_PENDING")
+    expect(systemPrompt).toContain("catalog entry describes a representable Alpaca order shape")
+    expect(systemPrompt).toContain("Account approval and buying power are eligibility observations only")
     expect(systemPrompt).not.toContain("spy-debit-spread-research")
   })
 

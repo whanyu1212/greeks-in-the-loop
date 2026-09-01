@@ -583,6 +583,7 @@ try {
                       task,
                       researchContext,
                       initialEligibility,
+                      symbolScreen,
                     ),
                   )
                   const resolvedResponse = await repairResearchReportV6ResponseOnce(
