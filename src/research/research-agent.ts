@@ -1,9 +1,9 @@
-import type { ResearchContextV1 } from "./research-context-v1.js"
+import type { OptionUniverseSnapshotV2 } from "../contracts/option-universe-v2.js"
 import {
   DRY_RUN_MODE,
   type ResearchEligibilityV1,
 } from "../scheduling/research-eligibility.js"
-import { ALLOWED_OPTION_UNDERLYINGS_V1 } from "../shared/alpaca-option-identity.js"
+import type { ResearchContextV1 } from "./research-context-v1.js"
 
 /**
  * Fixed identity and request construction for the unattended research agent.
@@ -15,12 +15,12 @@ import { ALLOWED_OPTION_UNDERLYINGS_V1 } from "../shared/alpaca-option-identity.
 /** Checked-in OpenCode primary agent used by every unattended cycle. */
 export const RESEARCH_AGENT_NAME = "research" as const
 /** Increment when the system prompt or cycle-request behavior changes. */
-export const RESEARCH_PROMPT_VERSION = "3.0.3" as const
+export const RESEARCH_PROMPT_VERSION = "6.0.0" as const
 
 /** Hard OpenCode turn bound mirrored by the checked-in agent configuration. */
-export const RESEARCH_MAX_AGENT_STEPS = 24
+export const RESEARCH_MAX_AGENT_STEPS = 32
 /** Initial post-run budget for all research tool calls. */
-export const RESEARCH_MAX_TOOL_CALLS = 32
+export const RESEARCH_MAX_TOOL_CALLS = 64
 /** Initial post-run budget for Exa calls in one research cycle. */
 export const RESEARCH_MAX_EXA_CALLS = 4
 /** Initial post-run budget for FMP calls in one research cycle. */
@@ -58,7 +58,7 @@ export function buildResearchReportRepairPrompt(
   }>[],
 ) {
   return [
-    "Your prior response failed deterministic ResearchReportV3 validation.",
+    "Your prior response failed deterministic ResearchReportV6 validation.",
     "Do not call tools or add new research. Correct the complete existing report using only facts already gathered, then return exactly one bare JSON object with no Markdown or commentary.",
     "Every invalidation field is an array of strings. Every date-time uses UTC ISO 8601 with exactly three fractional digits, for example 2026-08-31T07:43:13.082Z.",
     "NO_ACTION evidence is a non-empty array of timestamped ALPACA, EXA, or FMP sourced facts and optional inferences grounded in those fact claim IDs.",
@@ -75,6 +75,7 @@ export function buildResearchReportRepairPrompt(
  *
  * @param cycle One-based cycle number.
  * @param startedAt Timestamp captured for this cycle.
+ * @param optionUniverse Application-authoritative candidate shortlist.
  * @param operatorObjective Optional operator research objective.
  * @param durableContext Bounded application-generated context from prior cycles.
  * @returns Plain-text cycle request for OpenCode.
@@ -82,25 +83,31 @@ export function buildResearchReportRepairPrompt(
 export function buildResearchCyclePrompt(
   cycle: number,
   startedAt: Date,
+  optionUniverse: OptionUniverseSnapshotV2,
   operatorObjective?: string,
   durableContext?: ResearchContextV1,
   eligibility?: ResearchEligibilityV1,
 ) {
+  const underlyings = optionUniverse.candidates.map(({ underlying }) => underlying)
   return [
     `Run structured research cycle ${cycle} at ${startedAt.toISOString()}.`,
-    `Compare ${ALLOWED_OPTION_UNDERLYINGS_V1.join(", ")} using current regime evidence, select at most one underlying, then research one eligible BULL_CALL_SPREAD or BEAR_PUT_SPREAD candidate or conclude NO_ACTION.`,
+    "The application-authoritative option universe follows. Copy it exactly into analysis.optionUniverse; do not add or substitute symbols.",
+    JSON.stringify(optionUniverse),
+    underlyings.length === 0
+      ? "The dynamic shortlist is empty. Return NO_ACTION with INSUFFICIENT_UNDERLYING_DATA and do not substitute a symbol."
+      : `Lightly evaluate every shortlisted underlying (${underlyings.join(", ")}), promote at most three to deep option research, and return either NO_ACTION or one to three ranked BULL_CALL_SPREAD or BEAR_PUT_SPREAD proposals.`,
     eligibility
       ? [
           "Application-authoritative research and trade-intent eligibility follows. Do not override it with model reasoning or provider prose.",
           eligibility.researchMode === DRY_RUN_MODE
             ? eligibility.tradeIntentEligible
-              ? "This is a non-executing dry run. A fresh PROPOSE_TRADE may be returned for deterministic shadow-risk evaluation."
-              : "This is a research-only dry run. Never return PROPOSE_TRADE; return PRELIMINARY_RESEARCH or NO_ACTION."
+              ? "This is a non-executing dry run. Fresh PROPOSE_TRADES candidates may be returned for deterministic shadow-risk evaluation."
+              : "This is a research-only dry run. Never return PROPOSE_TRADES; return NO_ACTION with MARKET_WINDOW_INELIGIBLE while retaining useful research in analysis."
             : undefined,
           JSON.stringify(eligibility),
           eligibility.tradeIntentEligible
-            ? "A fresh PROPOSE_TRADE may be returned if every strategy requirement passes."
-            : "Do not return PROPOSE_TRADE. Return PRELIMINARY_RESEARCH for useful findings that require refresh, or NO_ACTION when no useful finding exists.",
+            ? "Fresh PROPOSE_TRADES candidates may be returned if every strategy requirement passes. Rank them by priority; deterministic code independently evaluates each and selects within current portfolio capacity."
+            : "Do not return PROPOSE_TRADES. Return NO_ACTION with MARKET_WINDOW_INELIGIBLE while retaining useful research in analysis.",
         ]
           .filter((line) => line !== undefined)
           .join("\n")

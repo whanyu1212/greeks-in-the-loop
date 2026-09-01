@@ -1,12 +1,11 @@
 import type {
-  ResearchDecisionV2,
-} from "../contracts/research-decision-v2.js"
-import type { PreliminaryResearchV2 } from "../contracts/preliminary-research-v2.js"
-import type { ResearchReportV3 } from "../contracts/research-report-v3.js"
+  ResearchDecisionV3,
+} from "../contracts/research-decision-v3.js"
+import type { ResearchReportV6 } from "../contracts/research-report-v6.js"
 import type {
   TradeIntentDerivationReason,
-  TradeIntentV2,
-} from "../contracts/trade-intent-v2.js"
+  TradeIntentV3,
+} from "../contracts/trade-intent-v3.js"
 import type {
   ConfirmedOptionQuoteSnapshotV1,
   OptionQuoteConfirmationFailureCode,
@@ -19,23 +18,22 @@ import {
 import type { ShadowRiskResultV1 } from "../risk/shadow-risk-v1.js"
 import type {
   DecisionRejectionIssue,
-  ResearchCycleTerminalRecordV1,
-} from "./research-cycle-outcome-v1.js"
+  ResearchCycleTerminalRecordV3,
+} from "./research-cycle-outcome-v3.js"
 
 export type ResearchCycleStageReports = Readonly<{
   researchReportRejected(issues: readonly DecisionRejectionIssue[]): void
-  researchReportCompleted(report: ResearchReportV3): void
-  preliminaryValidated(research: PreliminaryResearchV2): void
-  decisionValidated(decision: ResearchDecisionV2): void
+  researchReportCompleted(report: ResearchReportV6): void
+  decisionValidated(decision: ResearchDecisionV3): void
   quotesRejected(
     reasons: readonly OptionQuoteConfirmationFailureCode[],
   ): void
   quotesConfirmed(snapshot: ConfirmedOptionQuoteSnapshotV1): void
   intentRejected(reasons: readonly TradeIntentDerivationReason[]): void
-  intentDerived(intent: TradeIntentV2): void
+  intentDerived(intent: TradeIntentV3): void
   riskEvaluated(result: ShadowRiskResultV1): void
-  ledgerCommitted(record: ResearchCycleTerminalRecordV1): void
-  cycleOutcomeRecorded(record: ResearchCycleTerminalRecordV1): void
+  ledgerCommitted(record: ResearchCycleTerminalRecordV3): void
+  cycleOutcomeRecorded(record: ResearchCycleTerminalRecordV3): void
 }>
 
 /**
@@ -58,18 +56,9 @@ export function createResearchCycleStageReports(
         reportVersion: report.reportVersion,
         resultOutcome: result.outcome,
         externalSourceCount: report.analysis.externalContext.length,
-        hasCandidate:
-          result.outcome === "PROPOSE_TRADE" ||
-          (result.outcome === "PRELIMINARY_RESEARCH" &&
-            result.candidate !== undefined),
-      })
-    },
-    preliminaryValidated(research) {
-      reporter.report("preliminary.validate", "COMPLETED", {
-        direction: research.direction,
-        targetSessionDate: research.targetSessionDate,
-        evidenceCount: research.evidence.length,
-        hasCandidate: research.candidate !== undefined,
+        proposalCount: result.outcome === "PROPOSE_TRADES"
+          ? result.proposals.length
+          : 0,
       })
     },
     decisionValidated(decision) {
@@ -82,10 +71,14 @@ export function createResearchCycleStageReports(
       }
       reporter.report("decision.validate", "COMPLETED", {
         outcome: decision.outcome,
-        direction: decision.direction,
-        structure: decision.candidate.structure,
-        expiration: decision.candidate.expiration,
-        evidenceCount: decision.evidence.length,
+        proposalCount: decision.proposals.length,
+        candidates: decision.proposals.map(
+          ({ candidate }) => candidate.underlying,
+        ),
+        evidenceCount: decision.proposals.reduce(
+          (total, proposal) => total + proposal.evidence.length,
+          0,
+        ),
       })
     },
     quotesRejected(reasons) {
@@ -122,6 +115,9 @@ export function createResearchCycleStageReports(
           : riskDecision.evaluation.outcome === "REJECTED"
             ? riskDecision.evaluation.reasonCodes
             : []
+      const spreadGreeks = riskDecision.stage === "EVALUATED"
+        ? riskDecision.evaluation.spreadGreeks
+        : undefined
       reporter.report(
         "risk.evaluate",
         riskDecision.outcome === "APPROVED" ? "COMPLETED" : "REJECTED",
@@ -129,6 +125,14 @@ export function createResearchCycleStageReports(
           evaluationStage: riskDecision.stage,
           outcome: riskDecision.outcome,
           reasonCodes,
+          ...(spreadGreeks === undefined
+            ? {}
+            : {
+                netDelta: spreadGreeks.netDelta,
+                netGamma: spreadGreeks.netGamma,
+                netTheta: spreadGreeks.netTheta,
+                netVega: spreadGreeks.netVega,
+              }),
           breakerTransitions: result.breakerTransitions.map(
             ({ breaker }) => breaker,
           ),
@@ -139,7 +143,11 @@ export function createResearchCycleStageReports(
       reporter.report("ledger.commit", "COMPLETED", {
         outcomeStatus: record.outcome.status,
         evidenceSnapshotCount: record.evidenceSnapshots.length,
-        shadowRiskRecorded: "shadowRisk" in record,
+        shadowRiskCount: record.outcome.status === "PORTFOLIO_EVALUATED"
+          ? record.outcome.proposals.filter(
+              ({ status }) => status === "RISK_EVALUATED",
+            ).length
+          : 0,
       })
     },
     cycleOutcomeRecorded(record) {
@@ -151,21 +159,18 @@ export function createResearchCycleStageReports(
         details.issues = outcome.issues.map(
           ({ code, path }) => `${code}:${path.join(".")}`,
         )
-      } else if (outcome.status === "INTENT_DERIVATION_REJECTED") {
-        details.reasonCodes = outcome.reasons
       } else if (outcome.status === "VALIDATED_NO_ACTION") {
         details.reasonCodes = outcome.decision.reasonCodes
-      } else if (outcome.status === "PRELIMINARY_RESEARCH_RETAINED") {
-        details.direction = outcome.research.direction
       } else {
-        details.direction = outcome.decision.direction
-        details.riskOutcome = record.shadowRisk!.decision.outcome
+        details.proposalCount = outcome.proposals.length
+        details.selectedCount = outcome.proposals.filter(
+          (proposal) => proposal.status === "RISK_EVALUATED" && proposal.selected,
+        ).length
       }
       reporter.report(
         "cycle.outcome",
-        outcome.status === "INTENT_DERIVED" ||
-          outcome.status === "VALIDATED_NO_ACTION" ||
-          outcome.status === "PRELIMINARY_RESEARCH_RETAINED"
+        outcome.status === "PORTFOLIO_EVALUATED" ||
+          outcome.status === "VALIDATED_NO_ACTION"
           ? "COMPLETED"
           : "REJECTED",
         details,

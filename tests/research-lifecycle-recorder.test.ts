@@ -1,15 +1,14 @@
 import { describe, expect, it, vi } from "vitest"
 
 import type {
-  NoActionDecisionV2,
+  NoActionDecisionV3,
   ProposedTradeDecisionV2,
-} from "../src/contracts/research-decision-v2.js"
-import type { PreliminaryResearchV2 } from "../src/contracts/preliminary-research-v2.js"
-import type { ResearchReportV3 } from "../src/contracts/research-report-v3.js"
-import type { TradeIntentV2 } from "../src/contracts/trade-intent-v2.js"
+} from "../src/contracts/research-decision-v3.js"
+import type { ResearchReportV6 } from "../src/contracts/research-report-v6.js"
+import type { TradeIntentV3 } from "../src/contracts/trade-intent-v3.js"
 import type {
-  LedgerEventV2,
-  StoredLedgerEventV2,
+  LedgerEventV4,
+  StoredLedgerEventV4,
 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { createResearchLifecycleRecorder } from "../src/event-ledger/research-lifecycle-recorder.js"
@@ -25,8 +24,8 @@ const researchInvocation: ResearchInvocationV1 = {
   agentName: "research",
   cycleMode: "STANDARD",
   promptVersion: "1.3.0",
-  decisionContractVersion: "2.0.0",
-  reportVersion: "3.0.0",
+  decisionContractVersion: "3.0.0",
+  reportVersion: "6.0.0",
   providerId: "test-provider",
   modelId: "test-model",
   responseError: false,
@@ -40,8 +39,8 @@ const researchInvocation: ResearchInvocationV1 = {
   },
 }
 
-const noActionDecision: NoActionDecisionV2 = {
-  contractVersion: "2.0.0",
+const noActionDecision: NoActionDecisionV3 = {
+  contractVersion: "3.0.0",
   outcome: "NO_ACTION",
   reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
   evidence: [{
@@ -54,8 +53,8 @@ const noActionDecision: NoActionDecisionV2 = {
   }],
 }
 
-const researchReport: ResearchReportV3 = {
-  reportVersion: "3.0.0",
+const researchReport: ResearchReportV6 = {
+  reportVersion: "6.0.0",
   result: noActionDecision,
   analysis: {
     provenance: "AGENT_REPORTED",
@@ -94,28 +93,8 @@ const researchReport: ResearchReportV3 = {
   },
 }
 
-const preliminaryResearch: PreliminaryResearchV2 = {
-  contractVersion: "2.0.0",
-  outcome: "PRELIMINARY_RESEARCH",
-  targetSessionDate: "2026-08-26",
-  direction: "UNDETERMINED",
-  thesis: "Prior-close observations warrant a fresh regular-session check.",
-  invalidation: ["Reject if live evidence is unavailable."],
-  evidence: [
-    {
-      claimId: "prior-close-1",
-      kind: "SOURCED_FACT",
-      claim: "The prior session supplied the latest completed daily bar.",
-      provider: "ALPACA",
-      temporalClass: "PRIOR_CLOSE",
-      observedAt: "2026-08-25T20:00:00.000Z",
-    },
-  ],
-  requiresRefresh: true,
-}
-
 const proposedDecision: ProposedTradeDecisionV2 = {
-  contractVersion: "2.0.0",
+  contractVersion: "3.0.0",
   outcome: "PROPOSE_TRADE",
   direction: "BULLISH",
   thesis: "Daily and intraday direction agree.",
@@ -143,9 +122,9 @@ const proposedDecision: ProposedTradeDecisionV2 = {
   ],
 }
 
-const intent: TradeIntentV2 = {
-  contractVersion: "2.0.0",
-  decisionContractVersion: "2.0.0",
+const intent: TradeIntentV3 = {
+  contractVersion: "3.0.0",
+  decisionContractVersion: "3.0.0",
   direction: "BULLISH",
   structure: "BULL_CALL_SPREAD",
   expiration: "2026-09-18",
@@ -207,17 +186,17 @@ const evidenceSnapshots = [
 ] as const
 
 const asStored = (
-  event: LedgerEventV2,
+  event: LedgerEventV4,
   sequence: number,
-): StoredLedgerEventV2 =>
+): StoredLedgerEventV4 =>
   ({
     ...event,
     sequence,
     recordedAt: TIMESTAMP,
-  }) as StoredLedgerEventV2
+  }) as StoredLedgerEventV4
 
 const setup = () => {
-  const events: LedgerEventV2[] = []
+  const events: LedgerEventV4[] = []
   const append = vi.fn<LedgerStore["append"]>(async (event, appendSignal) => {
     appendSignal?.throwIfAborted()
     events.push(event)
@@ -273,31 +252,14 @@ const assertCausalChain = (
 const terminalMappingCases: readonly {
   name: string
   record: ResearchCycleTerminalRecordV1
-  eventTypes: readonly LedgerEventV2["eventType"][]
+  eventTypes: readonly LedgerEventV4["eventType"][]
 }[] = [
-  {
-    name: "retained preliminary research",
-    record: {
-      researchInvocation,
-      outcome: {
-        outcomeVersion: "1.0.0",
-        status: "PRELIMINARY_RESEARCH_RETAINED",
-        research: preliminaryResearch,
-      },
-      evidenceSnapshots: [],
-      preliminaryResearch,
-    },
-    eventTypes: [
-      "PRELIMINARY_RESEARCH_RECORDED",
-      "RESEARCH_CYCLE_COMPLETED",
-    ],
-  },
   {
     name: "validated no action",
     record: {
       researchInvocation,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "VALIDATED_NO_ACTION",
         decision: noActionDecision,
       },
@@ -316,7 +278,7 @@ const terminalMappingCases: readonly {
     record: {
       researchInvocation,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [{
           code: "SCHEMA_INVALID",
@@ -338,7 +300,7 @@ const terminalMappingCases: readonly {
     record: {
       researchInvocation,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["QUOTE_STALE"],
       },
@@ -357,7 +319,7 @@ const terminalMappingCases: readonly {
     record: {
       researchInvocation,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVED",
         decision: proposedDecision,
         intent,
@@ -385,7 +347,7 @@ describe("createResearchLifecycleRecorder", () => {
     expect(state.events).toEqual([
       {
         eventId: "id-1",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "OPENCODE_SESSION_STARTED",
         occurredAt: TIMESTAMP,
         correlationId: "id-2",
@@ -411,7 +373,7 @@ describe("createResearchLifecycleRecorder", () => {
     expect(state.events).toEqual([
       {
         eventId: "id-1",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "RESEARCH_LOOP_BREAKER_LATCHED",
         occurredAt: TIMESTAMP,
         correlationId: "id-2",
@@ -425,7 +387,7 @@ describe("createResearchLifecycleRecorder", () => {
       },
       {
         eventId: "id-3",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "RESEARCH_LOOP_BREAKER_RESET",
         occurredAt: TIMESTAMP,
         correlationId: "id-4",
@@ -454,7 +416,7 @@ describe("createResearchLifecycleRecorder", () => {
     expect(state.events).toEqual([
       {
         eventId: "id-3",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "RESEARCH_CYCLE_STARTED",
         occurredAt: TIMESTAMP,
         correlationId: "id-2",
@@ -479,7 +441,7 @@ describe("createResearchLifecycleRecorder", () => {
     expect(state.events).toEqual([
       {
         eventId: "id-4",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "RESEARCH_INVOCATION_IDENTITY_REJECTED",
         occurredAt: TIMESTAMP,
         correlationId: "id-2",
@@ -487,7 +449,7 @@ describe("createResearchLifecycleRecorder", () => {
         cycleId: "id-1",
         sessionId: "session-1",
         payload: {
-          invocationVersion: "3.0.0",
+          invocationVersion: "5.0.0",
           reason: "MODEL_DRIFT",
           expected: "gpt-5.6-sol",
           observed: "gpt-5.6-sol-fast",
@@ -586,7 +548,7 @@ describe("createResearchLifecycleRecorder", () => {
     const cycle = await startCycle(state)
     const missingInvocation = {
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "VALIDATED_NO_ACTION",
         decision: noActionDecision,
       },
@@ -612,7 +574,7 @@ describe("createResearchLifecycleRecorder", () => {
     await cycle.outcomeSink.record(
       {
         outcome: {
-          outcomeVersion: "1.0.0",
+          outcomeVersion: "3.0.0",
           status: "DECISION_REJECTED",
           issues: [{
             code: "SCHEMA_INVALID",
@@ -654,7 +616,7 @@ describe("createResearchLifecycleRecorder", () => {
 
     expect(state.events.at(-1)).toEqual({
       eventId: "id-4",
-      eventVersion: "2.0.0",
+      eventVersion: "4.0.0",
       eventType: "RESEARCH_CYCLE_INTERRUPTED",
       occurredAt: TIMESTAMP,
       correlationId: cycle.correlationId,
@@ -670,7 +632,7 @@ describe("createResearchLifecycleRecorder", () => {
     const cycle = await startCycle(state)
     const terminalRecord: ResearchCycleTerminalRecordV1 = {
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "VALIDATED_NO_ACTION",
         decision: noActionDecision,
       },
@@ -714,7 +676,7 @@ describe("createResearchLifecycleRecorder", () => {
     const completion = cycle.outcomeSink.record(
       {
         outcome: {
-          outcomeVersion: "1.0.0",
+          outcomeVersion: "3.0.0",
           status: "VALIDATED_NO_ACTION",
           decision: noActionDecision,
         },
@@ -744,7 +706,7 @@ describe("createResearchLifecycleRecorder", () => {
     await cycle.outcomeSink.record(
       {
         outcome: {
-          outcomeVersion: "1.0.0",
+          outcomeVersion: "3.0.0",
           status: "VALIDATED_NO_ACTION",
           decision: noActionDecision,
         },
@@ -768,7 +730,7 @@ describe("createResearchLifecycleRecorder", () => {
     let rejectWrite!: (error: Error) => void
     state.appendBatch.mockImplementationOnce(
       async () =>
-        new Promise<readonly StoredLedgerEventV2[]>((_resolve, reject) => {
+        new Promise<readonly StoredLedgerEventV4[]>((_resolve, reject) => {
           rejectWrite = reject
         }),
     )
@@ -776,7 +738,7 @@ describe("createResearchLifecycleRecorder", () => {
     const completion = cycle.outcomeSink.record(
       {
         outcome: {
-          outcomeVersion: "1.0.0",
+          outcomeVersion: "3.0.0",
           status: "VALIDATED_NO_ACTION",
           decision: noActionDecision,
         },
@@ -894,7 +856,7 @@ describe("createResearchLifecycleRecorder", () => {
     await cycle.outcomeSink.record(
       {
         outcome: {
-          outcomeVersion: "1.0.0",
+          outcomeVersion: "3.0.0",
           status: "INTENT_DERIVED",
           decision: proposedDecision,
           intent,

@@ -21,16 +21,18 @@ Run one test with `pnpm vitest run tests/<file>.test.ts`. Node 22 and pnpm 10 ar
 
 The agent proposes; deterministic code disposes.
 
-- One research agent selects among `SPY`, `QQQ`, and `IWM`, performs strategy-driven research, and returns at most one directional debit vertical.
+- Application code discovers three active, optionable, high-activity underlyings each cycle; one research agent compares that exact snapshot and returns at most one directional debit vertical.
 - `evaluateTradeIntentRiskV1` in `src/risk/risk-evaluation-v1.ts` is pure: no I/O, history, database access, or ambient state.
 - Only candidate identity crosses from research into risk. Application code refreshes quotes, contracts, account state, portfolio state, and clock data.
+- Application code calculates vertical-spread Greeks from refreshed legs as long minus short; only signed directional net delta is currently a hard Greek limit.
 - Money is integer cents; exit marks are half-cents per share.
 - No order-submission code exists. Runtime ends with a shadow decision in the ledger.
 
 ## Pipeline
 
 ```text
-ResearchReportV3
+OptionUniverseSnapshotV1
+  -> ResearchReportV5
   -> validateResearchDecisionV2
   -> confirm exact-leg quotes
   -> deriveTradeIntentV2
@@ -44,18 +46,18 @@ ResearchReportV3
 ## Boundaries
 
 - `src/contracts/`: strict Zod trust boundaries and pure derivation.
-- `src/research/`: generic agent prompt, orchestration, retained context.
+- `src/research/`: orchestration and retained context; OpenCode agent policies live in `.opencode/agents/`.
 - `src/market-data/`: read-only Alpaca normalization and freshness.
 - `src/risk/`: state capture, reconciliation, pure risk gate, shadow result.
 - `src/scheduling/`: standard and dry-run eligibility.
 - `src/event-ledger/`: append-only SQLite lifecycle.
 - `src/backtest/`: self-contained deterministic replay.
 
-`opencode.json` is deny-by-default. The research agent has no shell, subagent, skill, arbitrary web, or broker-mutation authority. It can write only under `workspace/`.
+`opencode.json` is globally deny-by-default. The checked-in `research` agent has read-only market authority and no arbitrary skill-loading, shell, subagent, web, or broker-mutation authority. The separate `trader` agent may read Alpaca state and submit option orders only through the paper-pinned Alpaca MCP; it has no stock, crypto, cancellation, replacement, filesystem, or external-research authority. The application worker does not invoke the trader yet and still ends with a shadow decision.
 
 ## Contract rules
 
-Current breaking contracts are `ResearchDecisionV2`, `PreliminaryResearchV2`, `TradeIntentV2`, and `ResearchReportV3`. Schemas are strict on proposal paths; safe `NO_ACTION` strips irrelevant prose. Do not add compatibility parsers without an explicit requirement.
+Current breaking contracts are `OptionUniverseSnapshotV1`, `ResearchDecisionV2`, `ResearchReportV5`, and `TradeIntentV2`. Schemas are strict on proposal paths; safe `NO_ACTION` strips irrelevant prose. Do not add compatibility parsers without an explicit requirement.
 
 Failures expose bounded reason codes, never raw model or provider input.
 

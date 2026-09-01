@@ -1,9 +1,10 @@
-import { deriveTradeIntentV2 } from "../contracts/trade-intent-v2.js"
-import { validateResearchDecisionV2 } from "../contracts/research-decision-v2.js"
+import { deriveTradeIntentV3 } from "../contracts/trade-intent-v3.js"
+import type { OptionUniverseSnapshotV2 } from "../contracts/option-universe-v2.js"
+import { validateResearchDecisionV3 } from "../contracts/research-decision-v3.js"
 import {
-  researchReportV3Schema,
-  type ResearchReportV3,
-} from "../contracts/research-report-v3.js"
+  researchReportV6Schema,
+  type ResearchReportV6,
+} from "../contracts/research-report-v6.js"
 import { MAX_LEDGER_EVENT_PAYLOAD_BYTES } from "../event-ledger/ledger-event-v1.js"
 import type {
   OptionQuoteProvider,
@@ -18,14 +19,15 @@ import {
 } from "../observability/terminal-stage-reporter.js"
 import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
 import type { ShadowRiskEvaluator } from "../risk/shadow-risk-service.js"
+import { canonicalJson } from "../shared/canonical-json.js"
 import { safeSchemaDiagnostics } from "../shared/schema-diagnostics.js"
 import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
   type DecisionRejectionIssue,
   type ResearchCycleOutcomeSink,
-} from "./research-cycle-outcome-v1.js"
+} from "./research-cycle-outcome-v3.js"
 import {
-  isProposedTradeReport,
+  isProposedPortfolioReport,
   processResearchProposalPath,
   type ProposalIntentDeriver,
 } from "./research-proposal-path.js"
@@ -39,7 +41,7 @@ import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
 
 export {
   PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
-  PROPOSAL_QUOTE_SNAPSHOT_REF,
+  MAX_SELECTED_SHADOW_PROPOSALS,
   proposalAccountChecksAreFresh,
   proposalHistoryIssuePath,
   proposalMarketRegimeIsFresh,
@@ -49,14 +51,14 @@ export {
   type ProcessedResearchCycle,
 } from "./research-cycle-terminal.js"
 
-export const MAX_RESEARCH_RESPONSE_BYTES = 64 * 1024
+export const MAX_RESEARCH_RESPONSE_BYTES = 256 * 1024
 
 export type ResearchReportResponseParseResult =
-  | Readonly<{ success: true; report: ResearchReportV3 }>
+  | Readonly<{ success: true; report: ResearchReportV6 }>
   | Readonly<{ success: false; issues: readonly DecisionRejectionIssue[] }>
 
 /** Parses an untrusted response without retaining rejected model content. */
-export function parseResearchReportV3Response(
+export function parseResearchReportV6Response(
   rawResponse: string,
 ): ResearchReportResponseParseResult {
   if (Buffer.byteLength(rawResponse, "utf8") > MAX_RESEARCH_RESPONSE_BYTES) {
@@ -74,7 +76,7 @@ export function parseResearchReportV3Response(
       issues: [{ code: "MALFORMED_JSON", path: [] }],
     }
   }
-  const report = researchReportV3Schema.safeParse(input)
+  const report = researchReportV6Schema.safeParse(input)
   if (!report.success) {
     return {
       success: false,
@@ -94,11 +96,11 @@ export function parseResearchReportV3Response(
 }
 
 /** Allows at most one model correction before the normal trust boundary runs. */
-export async function repairResearchReportV3ResponseOnce(
+export async function repairResearchReportV6ResponseOnce(
   rawResponse: string,
   repair: (issues: readonly DecisionRejectionIssue[]) => Promise<string>,
 ) {
-  const parsed = parseResearchReportV3Response(rawResponse)
+  const parsed = parseResearchReportV6Response(rawResponse)
   if (parsed.success) {
     return { rawResponse, schemaRepairAttempted: false } as const
   }
@@ -111,6 +113,7 @@ export async function repairResearchReportV3ResponseOnce(
 export type ProcessResearchCycleOptions = Readonly<{
   rawResponse: string
   cycleStartedAt: string
+  optionUniverse: OptionUniverseSnapshotV2
   signal: AbortSignal
   quoteProvider: OptionQuoteProvider
   shadowRiskEvaluator: ShadowRiskEvaluator
@@ -122,6 +125,17 @@ export type ProcessResearchCycleOptions = Readonly<{
   trace?: ResearchCycleTrace
   stageReporter?: TerminalStageReporter
 }>
+
+const optionUniverseIssuePath = (
+  report: ResearchReportV6,
+  expected: OptionUniverseSnapshotV2,
+): readonly (string | number)[] | undefined => {
+  if (
+    report.analysis.optionUniverse === undefined ||
+    canonicalJson(report.analysis.optionUniverse) !== canonicalJson(expected)
+  ) return ["analysis", "optionUniverse"]
+  return undefined
+}
 
 /**
  * Parses, validates, confirms, and derives one research-agent response.
@@ -136,6 +150,7 @@ export type ProcessResearchCycleOptions = Readonly<{
 export async function processResearchCycle({
   rawResponse,
   cycleStartedAt,
+  optionUniverse,
   signal,
   quoteProvider,
   shadowRiskEvaluator,
@@ -143,14 +158,14 @@ export async function processResearchCycle({
   getEligibility,
   researchInvocation,
   now = () => new Date(),
-  deriveIntent = deriveTradeIntentV2,
+  deriveIntent = deriveTradeIntentV3,
   trace = NOOP_RESEARCH_CYCLE_TRACE,
   stageReporter = NOOP_TERMINAL_STAGE_REPORTER,
 }: ProcessResearchCycleOptions): Promise<ProcessedResearchCycle> {
   signal.throwIfAborted()
   const stages = createResearchCycleStageReports(stageReporter)
   const parsed = await trace.run("research.report.parse", () =>
-    parseResearchReportV3Response(rawResponse),
+    parseResearchReportV6Response(rawResponse),
   )
   if (!parsed.success) {
     stages.researchReportRejected(parsed.issues)
@@ -187,6 +202,19 @@ export async function processResearchCycle({
     })
   stages.researchReportCompleted(researchReport)
   const processingEvaluatedAt = now()
+  const universeIssuePath = optionUniverseIssuePath(
+    researchReport,
+    optionUniverse,
+  )
+  if (universeIssuePath !== undefined) {
+    return recordReportResolution({
+      outcome: {
+        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+        status: "DECISION_REJECTED",
+        issues: [{ code: "CONTEXT_INVALID", path: universeIssuePath }],
+      },
+    })
+  }
   const cycleStartTime = Date.parse(cycleStartedAt)
   if (
     !Number.isFinite(processingEvaluatedAt.getTime()) ||
@@ -229,59 +257,9 @@ export async function processResearchCycle({
     })
   }
 
-  if (result.outcome === "PRELIMINARY_RESEARCH") {
-    const preliminaryIssuePath = await trace.run(
-      "research.decision.validate",
-      () => {
-        const eligibility = getEligibility()
-        const eligibilityTime = Date.parse(eligibility.evaluatedAt)
-        const futureObservationIndex = result.evidence.findIndex(
-          (claim) =>
-            claim.kind === "SOURCED_FACT" &&
-            Date.parse(claim.observedAt) > eligibilityTime,
-        )
-        if (
-          eligibility.researchEligible &&
-          eligibility.sessionDate === result.targetSessionDate &&
-          Number.isFinite(eligibilityTime) &&
-          Date.parse(researchReport.analysis.asOf) <= eligibilityTime &&
-          futureObservationIndex < 0
-        ) {
-          return undefined
-        }
-        return futureObservationIndex >= 0
-          ? ["evidence", futureObservationIndex, "observedAt"] as const
-          : ["targetSessionDate"] as const
-      },
-    )
-    if (preliminaryIssuePath !== undefined) {
-      return recordReportResolution({
-        outcome: {
-          outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-          status: "DECISION_REJECTED",
-          issues: [
-            {
-              code: "CONTEXT_INVALID",
-              path: preliminaryIssuePath,
-            },
-          ],
-        },
-      })
-    }
-    stages.preliminaryValidated(result)
-    return recordReportResolution({
-      outcome: {
-        outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
-        status: "PRELIMINARY_RESEARCH_RETAINED",
-        research: result,
-      },
-      metadata: { preliminaryResearch: result },
-    })
-  }
-
   if (result.outcome === "NO_ACTION") {
     const validation = await trace.run("research.decision.validate", () =>
-      validateResearchDecisionV2(result, {
+      validateResearchDecisionV3(result, {
         evaluatedAt: processingEvaluatedAt.toISOString(),
         snapshots: {},
       }),
@@ -308,8 +286,8 @@ export async function processResearchCycle({
     })
   }
 
-  if (!isProposedTradeReport(researchReport)) {
-    throw new Error("Proposal path requires a proposed trade report")
+  if (!isProposedPortfolioReport(researchReport)) {
+    throw new Error("Proposal path requires a proposed portfolio report")
   }
 
   const proposalResolution = await processResearchProposalPath({

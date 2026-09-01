@@ -5,8 +5,8 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
-  type LedgerEventV2,
-  type StoredLedgerEventV2,
+  type LedgerEventV4,
+  type StoredLedgerEventV4,
 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
@@ -23,16 +23,16 @@ const temporaryDirectories: string[] = []
 const recordedAt = "2026-08-26T14:00:00.000Z"
 
 const stored = (
-  event: LedgerEventV2,
+  event: LedgerEventV4,
   sequence: number,
-): StoredLedgerEventV2 => ({ ...event, sequence, recordedAt })
+): StoredLedgerEventV4 => ({ ...event, sequence, recordedAt })
 
 const cycleStarted = (
   cycleNumber: number,
   cycleId = `cycle-${cycleNumber}`,
-): LedgerEventV2 => ({
+): LedgerEventV4 => ({
   eventId: `started-${cycleId}`,
-  eventVersion: "2.0.0",
+  eventVersion: "4.0.0",
   eventType: "RESEARCH_CYCLE_STARTED",
   occurredAt: `2026-08-26T13:${String(cycleNumber).padStart(2, "0")}:00.000Z`,
   correlationId: `correlation-${cycleId}`,
@@ -45,11 +45,10 @@ const cycleCompleted = (
   cycleNumber: number,
   status:
     | "VALIDATED_NO_ACTION"
-    | "PRELIMINARY_RESEARCH_RETAINED"
-    | "INTENT_DERIVED" = "VALIDATED_NO_ACTION",
-): LedgerEventV2 => ({
+    | "PORTFOLIO_EVALUATED" = "VALIDATED_NO_ACTION",
+): LedgerEventV4 => ({
   eventId: `completed-cycle-${cycleNumber}`,
-  eventVersion: "2.0.0",
+  eventVersion: "4.0.0",
   eventType: "RESEARCH_CYCLE_COMPLETED",
   occurredAt: `2026-08-26T13:${String(cycleNumber).padStart(2, "0")}:30.000Z`,
   correlationId: `correlation-cycle-${cycleNumber}`,
@@ -59,9 +58,9 @@ const cycleCompleted = (
   payload: { status },
 })
 
-const validatedProposal = (): LedgerEventV2 => ({
+const validatedProposal = (): LedgerEventV4 => ({
   eventId: "validated-proposal",
-  eventVersion: "2.0.0",
+  eventVersion: "4.0.0",
   eventType: "RESEARCH_DECISION_VALIDATED",
   occurredAt: "2026-08-26T13:01:10.000Z",
   correlationId: "correlation-cycle-1",
@@ -69,8 +68,10 @@ const validatedProposal = (): LedgerEventV2 => ({
   sessionId: "session-cycle-1",
   payload: {
     decision: {
-      contractVersion: "2.0.0",
-      outcome: "PROPOSE_TRADE",
+      contractVersion: "3.0.0",
+      outcome: "PROPOSE_TRADES",
+      proposals: [{
+      priority: 1,
       direction: "BULLISH",
       thesis: "PROSE_THESIS_MUST_NOT_SURVIVE",
       candidate: {
@@ -86,9 +87,10 @@ const validatedProposal = (): LedgerEventV2 => ({
           claimId: "claim-1",
           kind: "SOURCED_FACT",
           claim: "PROSE_EVIDENCE_CLAIM_MUST_NOT_SURVIVE",
-          snapshotRef: "snapshot-1",
+          snapshotRef: "alpaca-proposal-quotes-v2-SPY",
         },
       ],
+      }],
     },
   },
 })
@@ -97,9 +99,9 @@ const evidenceReferenced = (
   snapshotRef: string,
   cycleId = "cycle-1",
   source = "option-quotes",
-): LedgerEventV2 => ({
+): LedgerEventV4 => ({
   eventId: `evidence-${cycleId}-${snapshotRef}`,
-  eventVersion: "2.0.0",
+  eventVersion: "4.0.0",
   eventType: "EVIDENCE_SNAPSHOT_REFERENCED",
   occurredAt: "2026-08-26T13:01:05.000Z",
   correlationId: `correlation-${cycleId}`,
@@ -113,38 +115,6 @@ const evidenceReferenced = (
   },
 })
 
-const preliminaryRecorded = (): LedgerEventV2 => ({
-  eventId: "preliminary-cycle-1",
-  eventVersion: "2.0.0",
-  eventType: "PRELIMINARY_RESEARCH_RECORDED",
-  occurredAt: "2026-08-26T13:01:10.000Z",
-  correlationId: "correlation-cycle-1",
-  causationEventId: "started-cycle-1",
-  cycleId: "cycle-1",
-  sessionId: "session-cycle-1",
-  payload: {
-    research: {
-      contractVersion: "2.0.0",
-      outcome: "PRELIMINARY_RESEARCH",
-      targetSessionDate: "2026-08-26",
-      direction: "UNDETERMINED",
-      thesis: "Refresh the prior-close setup during the regular session.",
-      invalidation: ["Reject if live evidence is unavailable."],
-      evidence: [
-        {
-          claimId: "prior-close",
-          kind: "SOURCED_FACT",
-          claim: "The latest completed daily bar is from the prior close.",
-          provider: "ALPACA",
-          temporalClass: "PRIOR_CLOSE",
-          observedAt: "2026-08-25T20:00:00.000Z",
-        },
-      ],
-      requiresRefresh: true,
-    },
-  },
-})
-
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { force: true, recursive: true })
@@ -152,76 +122,15 @@ afterEach(() => {
 })
 
 describe("ResearchContextV1", () => {
-  it("carries the latest preliminary finding forward with mandatory refresh", () => {
-    const context = projectResearchContextV1(
-      [
-        stored(cycleStarted(1), 1),
-        stored(preliminaryRecorded(), 2),
-        stored(cycleCompleted(1, "PRELIMINARY_RESEARCH_RETAINED"), 3),
-      ],
-      { generatedAt: "2026-08-26T14:00:00.000Z" },
-    )
-
-    expect(context.latestPreliminaryResearch).toMatchObject({
-      cycleId: "cycle-1",
-      targetSessionDate: "2026-08-26",
-      direction: "UNDETERMINED",
-      sourcedObservations: [
-        {
-          provider: "ALPACA",
-          temporalClass: "PRIOR_CLOSE",
-          observedAt: "2026-08-25T20:00:00.000Z",
-        },
-      ],
-      requiresRefresh: true,
-    })
-    expect(JSON.stringify(context)).not.toContain("Refresh the prior-close setup")
-    // The model authors claimId and this projection re-enters a later prompt,
-    // so the identifier string must not be carried across.
-    expect(JSON.stringify(context)).not.toContain("prior-close")
-    expect(JSON.stringify(context)).not.toContain("latest completed daily bar")
-    expect(context.requiredRefreshes).toContainEqual({
-      cycleId: "cycle-1",
-      reason: "PRELIMINARY_RESEARCH",
-    })
-  })
-
-  it("clears preliminary refresh after a later proposal is freshly validated", () => {
-    const laterProposal: LedgerEventV2 = {
-      ...validatedProposal(),
-      eventId: "validated-proposal-cycle-2",
-      correlationId: "correlation-cycle-2",
-      cycleId: "cycle-2",
-      sessionId: "session-cycle-2",
-    }
-    const context = projectResearchContextV1(
-      [
-        stored(cycleStarted(1), 1),
-        stored(preliminaryRecorded(), 2),
-        stored(cycleCompleted(1, "PRELIMINARY_RESEARCH_RETAINED"), 3),
-        stored(cycleStarted(2), 4),
-        stored(laterProposal, 5),
-        stored(cycleCompleted(2, "INTENT_DERIVED"), 6),
-      ],
-      { generatedAt: "2026-08-26T14:00:00.000Z" },
-    )
-
-    expect(context.latestPreliminaryResearch).toBeUndefined()
-    expect(context.requiredRefreshes).not.toContainEqual({
-      cycleId: "cycle-1",
-      reason: "PRELIMINARY_RESEARCH",
-    })
-  })
-
   it("projects normalized bounded memory without decision prose", () => {
-    const events: StoredLedgerEventV2[] = [
+    const events: StoredLedgerEventV4[] = [
       stored(cycleStarted(1), 1),
       stored(evidenceReferenced("snapshot-1"), 2),
       stored(validatedProposal(), 3),
       stored(
         {
           eventId: "rejected-1",
-          eventVersion: "2.0.0",
+          eventVersion: "4.0.0",
           eventType: "RESEARCH_DECISION_REJECTED",
           occurredAt: "2026-08-26T13:01:20.000Z",
           correlationId: "correlation-cycle-1",
@@ -235,19 +144,19 @@ describe("ResearchContextV1", () => {
         },
         4,
       ),
-      stored(cycleCompleted(1, "INTENT_DERIVED"), 5),
+      stored(cycleCompleted(1, "PORTFOLIO_EVALUATED"), 5),
       stored(cycleStarted(2), 6),
       stored(
         {
           eventId: "validated-no-action",
-          eventVersion: "2.0.0",
+          eventVersion: "4.0.0",
           eventType: "RESEARCH_DECISION_VALIDATED",
           occurredAt: "2026-08-26T13:02:10.000Z",
           correlationId: "correlation-cycle-2",
           cycleId: "cycle-2",
           payload: {
             decision: {
-              contractVersion: "2.0.0",
+              contractVersion: "3.0.0",
               outcome: "NO_ACTION",
               reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
               evidence: [{
@@ -268,7 +177,7 @@ describe("ResearchContextV1", () => {
       stored(
         {
           eventId: "interrupted-cycle-3",
-          eventVersion: "2.0.0",
+          eventVersion: "4.0.0",
           eventType: "RESEARCH_CYCLE_INTERRUPTED",
           occurredAt: "2026-08-26T13:03:20.000Z",
           correlationId: "correlation-cycle-3",
@@ -342,7 +251,7 @@ describe("ResearchContextV1", () => {
     // over its serialized budget. The byte cap alone does not say *which*
     // collection loses items, so these counts are the contract a reshape of the
     // trim policy has to justify changing.
-    const events: StoredLedgerEventV2[] = []
+    const events: StoredLedgerEventV4[] = []
     let sequence = 1
     for (let cycle = 1; cycle <= 60; cycle += 1) {
       const cycleId = `cycle-${cycle}`
@@ -365,7 +274,7 @@ describe("ResearchContextV1", () => {
         stored(
           {
             eventId: `interrupted-${cycleId}`,
-            eventVersion: "2.0.0",
+            eventVersion: "4.0.0",
             eventType: "RESEARCH_CYCLE_INTERRUPTED",
             occurredAt: "2026-08-26T13:02:00.000Z",
             correlationId: `correlation-${cycleId}`,
@@ -411,7 +320,7 @@ describe("ResearchContextV1", () => {
   })
 
   it("enforces event, collection, and final UTF-8 bounds deterministically", () => {
-    const events: StoredLedgerEventV2[] = []
+    const events: StoredLedgerEventV4[] = []
     for (let index = 1; index <= 700; index += 1) {
       events.push(stored(cycleStarted(index), index * 2 - 1))
       events.push(stored(cycleCompleted(index), index * 2))
@@ -454,8 +363,7 @@ describe("ResearchContextV1", () => {
     await firstStore.migrate()
     await firstStore.appendBatch([
       cycleStarted(1),
-      preliminaryRecorded(),
-      cycleCompleted(1, "PRELIMINARY_RESEARCH_RETAINED"),
+      cycleCompleted(1),
       cycleStarted(2),
     ])
     await firstStore.close()
@@ -477,14 +385,9 @@ describe("ResearchContextV1", () => {
       {
         cycleId: "cycle-1",
         cycleNumber: 1,
-        status: "PRELIMINARY_RESEARCH_RETAINED",
+        status: "VALIDATED_NO_ACTION",
       },
     ])
-    expect(context.latestPreliminaryResearch).toMatchObject({
-      cycleId: "cycle-1",
-      targetSessionDate: "2026-08-26",
-      requiresRefresh: true,
-    })
     expect(context.recentInterruptions).toMatchObject([
       {
         cycleId: "cycle-2",
@@ -526,11 +429,6 @@ describe("ResearchContextV1", () => {
     expect(reopenedContext.recentInterruptions).toMatchObject([
       { cycleId: "cycle-2", reason: "PROCESS_RESTART" },
     ])
-    expect(reopenedContext.latestPreliminaryResearch).toMatchObject({
-      cycleId: "cycle-1",
-      direction: "UNDETERMINED",
-      requiresRefresh: true,
-    })
     await thirdStore.close()
   })
 })

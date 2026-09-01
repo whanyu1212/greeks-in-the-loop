@@ -1,8 +1,8 @@
-import type { ProposedTradeDecisionV2 } from "../contracts/research-decision-v2.js"
+import type { TradeProposalV3 } from "../contracts/research-decision-v3.js"
 import {
-  deriveTradeIntentV2,
-  type TradeIntentV2,
-} from "../contracts/trade-intent-v2.js"
+  deriveTradeIntentV3,
+  type TradeIntentV3,
+} from "../contracts/trade-intent-v3.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import { LedgerPersistenceError } from "../event-ledger/research-lifecycle-recorder.js"
 import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
@@ -37,8 +37,8 @@ export type DurableRiskControlStateLoader = Readonly<{
 
 export type ShadowRiskEvaluator = Readonly<{
   evaluate(input: Readonly<{
-    decision: ProposedTradeDecisionV2
-    sourceIntent: TradeIntentV2
+    decision: TradeProposalV3
+    sourceIntent: TradeIntentV3
     captureEligibility: ResearchEligibilityV1 & Readonly<{
       sessionDate: string
       tradeIntentWindow: NonNullable<ResearchEligibilityV1["tradeIntentWindow"]>
@@ -161,10 +161,10 @@ const breakerTransitionsFor = (
 export function createShadowRiskEvaluator(options: Readonly<{
   provider: RiskStateProvider
   durableControl: DurableRiskControlStateLoader
-  deriveIntent?: typeof deriveTradeIntentV2
+  deriveIntent?: typeof deriveTradeIntentV3
   evaluateRisk?: typeof evaluateTradeIntentRiskV1
 }>): ShadowRiskEvaluator {
-  const deriveIntent = options.deriveIntent ?? deriveTradeIntentV2
+  const deriveIntent = options.deriveIntent ?? deriveTradeIntentV3
   const evaluateRisk = options.evaluateRisk ?? evaluateTradeIntentRiskV1
   return {
     async evaluate(input) {

@@ -10,10 +10,10 @@ import {
   writeResearchRunArtifact,
   type ResearchRunV1,
 } from "./research-artifact.js"
+import { deriveVerticalSpreadGreeksV1 } from "../shared/vertical-spread-greeks.js"
 
 export type ResearchRunActionability =
   | "NO_ACTION"
-  | "RESEARCH_ONLY_REFRESH_REQUIRED"
   | "REJECTED"
   | "NON_EXECUTING_INTENT"
   | "SHADOW_APPROVED_NON_EXECUTING"
@@ -107,12 +107,9 @@ const actionabilityFor = (run: ResearchRunV1): ResearchRunActionability => {
   switch (run.outcome.status) {
     case "VALIDATED_NO_ACTION":
       return "NO_ACTION"
-    case "PRELIMINARY_RESEARCH_RETAINED":
-      return "RESEARCH_ONLY_REFRESH_REQUIRED"
     case "DECISION_REJECTED":
-    case "INTENT_DERIVATION_REJECTED":
       return "REJECTED"
-    case "INTENT_DERIVED":
+    case "PORTFOLIO_EVALUATED":
       if (run.shadowRisk?.decision.outcome === "APPROVED") {
         return "SHADOW_APPROVED_NON_EXECUTING"
       }
@@ -135,10 +132,7 @@ const outcomeReasons = (run: ResearchRunV1) => {
           : ` (${issue.schemaCategory})`
         return `${issue.code} at ${path}${category}`
       })
-    case "INTENT_DERIVATION_REJECTED":
-      return run.outcome.reasons
-    case "PRELIMINARY_RESEARCH_RETAINED":
-    case "INTENT_DERIVED":
+    case "PORTFOLIO_EVALUATED":
       return []
   }
 }
@@ -178,36 +172,28 @@ export function buildResearchRunPresentation(
   ])
 
   lines.push("## Decision", "")
-  const result = run.researchReport?.result ??
-    run.preliminaryResearch ??
-    run.validatedDecision
+  const result = run.researchReport?.result ?? run.validatedDecision
   if (result === undefined) {
     lines.push("No schema-valid research result was retained.", "")
   } else if (result.outcome === "NO_ACTION") {
     lines.push(`**Result:** NO_ACTION`, "")
     bullets(lines, "Reason Codes", result.reasonCodes)
   } else {
-    lines.push(
-      `**Result:** ${result.outcome}`,
-      `**Direction:** ${result.direction}`,
-      `**Thesis:** ${markdownText(result.thesis)}`,
-      "",
-    )
-    if (result.outcome === "PRELIMINARY_RESEARCH") {
+    lines.push(`**Result:** ${result.outcome}`, "")
+    for (const proposal of result.proposals) {
       lines.push(
-        `**Target session:** ${result.targetSessionDate}`,
-        `**Refresh required:** ${result.requiresRefresh ? "yes" : "no"}`,
+        `**${proposal.priority}. ${proposal.candidate.underlying} / ${proposal.direction}:** ${markdownText(proposal.thesis)}`,
         "",
       )
+      bullets(lines, "Invalidation", proposal.invalidation)
     }
-    bullets(lines, "Invalidation", result.invalidation)
   }
   bullets(lines, "Terminal Reasons", outcomeReasons(run))
 
   const report = run.researchReport
   if (report !== undefined) {
     const account = report.analysis.accountChecks
-    const market = report.analysis.marketRegime
+    const market = report.analysis.marketRegimes[0]
     lines.push("## Market And Account Context", "")
     table(lines, [
       ["Analysis as of", report.analysis.asOf],
@@ -215,25 +201,33 @@ export function buildResearchRunPresentation(
       ["Account status", account.accountStatus],
       ["Options approved", account.optionsTradingApproved],
       ["Conflicting exposure", account.conflictingStrategyExposure],
-      ["Market observed", market.observedAt],
-      ["Temporal class", market.temporalClass],
-      ["Signal", market.signal],
-      ...(market.dailyClose === undefined
+      ...(market === undefined
+        ? []
+        : [
+            ["Market observed", market.observedAt] as const,
+            ["Temporal class", market.temporalClass] as const,
+            ["Signal", market.signal] as const,
+          ]),
+      ...(market?.dailyClose === undefined
         ? []
         : [["Daily close", market.dailyClose] as const]),
-      ...(market.sma20 === undefined ? [] : [["SMA 20", market.sma20] as const]),
-      ...(market.sma50 === undefined ? [] : [["SMA 50", market.sma50] as const]),
-      ...(market.sessionVwap === undefined
+      ...(market?.sma20 === undefined ? [] : [["SMA 20", market.sma20] as const]),
+      ...(market?.sma50 === undefined ? [] : [["SMA 50", market.sma50] as const]),
+      ...(market?.sessionVwap === undefined
         ? []
         : [["Session VWAP", market.sessionVwap] as const]),
-      ...(market.spotMidpoint === undefined
+      ...(market?.spotMidpoint === undefined
         ? []
         : [["Spot midpoint", market.spotMidpoint] as const]),
-      ["Daily sessions", market.dailySessionCount],
-      ["Intraday bars", market.intradayBarCount],
+      ...(market === undefined
+        ? []
+        : [
+            ["Daily sessions", market.dailySessionCount] as const,
+            ["Intraday bars", market.intradayBarCount] as const,
+          ]),
     ])
     if (report.analysis.symbolIndicators !== undefined) {
-      lines.push("## ETF Indicator Context", "")
+      lines.push("## Universe Indicator Context", "")
       table(lines, report.analysis.symbolIndicators.flatMap((indicator) => [
         [`${indicator.underlying} through`, indicator.throughSessionDate] as const,
         [`${indicator.underlying} 5-day return`, percentFromRatio(indicator.return5d)] as const,
@@ -245,10 +239,10 @@ export function buildResearchRunPresentation(
     }
   }
 
-  const candidate = result?.outcome === "PRELIMINARY_RESEARCH" ||
-      result?.outcome === "PROPOSE_TRADE"
-    ? result.candidate
+  const primaryProposal = result?.outcome === "PROPOSE_TRADES"
+    ? result.proposals[0]
     : undefined
+  const candidate = primaryProposal?.candidate
   if (candidate !== undefined) {
     lines.push("## Candidate", "")
     table(lines, [
@@ -265,7 +259,9 @@ export function buildResearchRunPresentation(
       ],
     ])
 
-    const diagnostics = report?.analysis.candidateEvaluation
+    const diagnostics = report?.analysis.candidateEvaluations.find(
+      ({ underlying }) => underlying === candidate.underlying,
+    )
     if (diagnostics !== undefined) {
       lines.push(`**Diagnostics observed:** ${diagnostics.observedAt}`, "")
       table(lines, [
@@ -287,14 +283,28 @@ export function buildResearchRunPresentation(
             : [[`${leg.role} bid-ask spread`, percentFromRatio(leg.bidAskSpreadPercent)] as const]),
         ]),
       ])
+      const longLeg = diagnostics.legs.find(({ role }) => role === "LONG")
+      const shortLeg = diagnostics.legs.find(({ role }) => role === "SHORT")
+      const spreadGreeks = longLeg === undefined || shortLeg === undefined
+        ? undefined
+        : deriveVerticalSpreadGreeksV1(longLeg, shortLeg)
+      if (spreadGreeks !== undefined) {
+        lines.push("**Agent-reported spread Greeks (long minus short):**", "")
+        table(lines, [
+          ["Net delta", spreadGreeks.netDelta],
+          ["Net gamma", spreadGreeks.netGamma],
+          ["Net theta", spreadGreeks.netTheta],
+          ["Net vega", spreadGreeks.netVega],
+        ])
+      }
     }
   }
 
-  if (run.outcome.status === "INTENT_DERIVED") {
+  if (run.outcome.status === "PORTFOLIO_EVALUATED" && run.outcome.intents[0]) {
     const evaluatedRisk = run.shadowRisk?.decision.stage === "EVALUATED"
       ? run.shadowRisk.decision
       : undefined
-    const intent = evaluatedRisk?.evaluatedIntent ?? run.outcome.intent
+    const intent = evaluatedRisk?.evaluatedIntent ?? run.outcome.intents[0]
     lines.push("## Derived Intent", "")
     table(lines, [
       ["Basis", evaluatedRisk === undefined ? "INITIAL_DERIVATION" : "SHADOW_RISK_REFRESH"],
@@ -317,7 +327,10 @@ export function buildResearchRunPresentation(
     bullets(lines, "Contradicting Factors", report.analysis.contradictingFactors)
     bullets(lines, "Conflicts", report.analysis.conflicts)
 
-    const claims = report.result.evidence.map((claim) => {
+    const evidence = report.result.outcome === "NO_ACTION"
+      ? report.result.evidence
+      : report.result.proposals.flatMap(({ evidence }) => evidence)
+    const claims = evidence.map((claim) => {
       if (claim.kind === "INFERENCE") {
         return `${claim.claimId} [INFERENCE from ${claim.basedOn.join(", ")}]: ${claim.claim}`
       }
@@ -361,6 +374,9 @@ export function buildResearchRunPresentation(
         : risk.evaluation.outcome === "REJECTED"
           ? risk.evaluation.reasonCodes
           : []
+    const spreadGreeks = risk.stage === "EVALUATED"
+      ? risk.evaluation.spreadGreeks
+      : undefined
     lines.push("## Shadow Risk", "")
     table(lines, [
       ["Mode", risk.mode],
@@ -368,6 +384,14 @@ export function buildResearchRunPresentation(
       ["Outcome", risk.outcome],
       ["Evaluated", riskEvaluatedAt ?? "unavailable"],
       ["Rule version", risk.ruleVersion],
+      ...(spreadGreeks === undefined
+        ? []
+        : [
+            ["Verified net delta", spreadGreeks.netDelta] as const,
+            ["Verified net gamma", spreadGreeks.netGamma] as const,
+            ["Verified net theta", spreadGreeks.netTheta] as const,
+            ["Verified net vega", spreadGreeks.netVega] as const,
+          ]),
     ])
     bullets(lines, "Risk Reasons", riskReasons)
     bullets(

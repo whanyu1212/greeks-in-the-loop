@@ -1,13 +1,18 @@
 import { z } from "zod"
 
-import { tradeIntentV2Schema } from "../contracts/trade-intent-v2.js"
+import { tradeIntentV3Schema } from "../contracts/trade-intent-v3.js"
 import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
 import { parseRfc3339Nanoseconds } from "../shared/value-normalization.js"
+import {
+  deriveVerticalSpreadGreeksV1,
+  verticalSpreadGreeksV1Schema,
+} from "../shared/vertical-spread-greeks.js"
 
 export const RISK_EVALUATION_VERSION = "1.0.0" as const
-export const RISK_RULE_VERSION = "1.1.0" as const
+export const RISK_RULE_VERSION = "1.2.0" as const
 export const SUPPORTED_RISK_RULE_VERSIONS = [
   "1.0.0",
+  "1.1.0",
   RISK_RULE_VERSION,
 ] as const
 
@@ -23,6 +28,7 @@ export const RISK_REJECTION_CODES = [
   "EXPIRATION_INELIGIBLE",
   "SPREAD_WIDTH_INELIGIBLE",
   "CONTRACT_METRICS_INELIGIBLE",
+  "SPREAD_GREEKS_INELIGIBLE",
   "LIQUIDITY_INELIGIBLE",
   "ENTRY_PRICE_INELIGIBLE",
   "MAX_LOSS_EXCEEDED",
@@ -48,6 +54,8 @@ const MAX_SPREAD_WIDTH_CENTS = 1_000
 const MAX_LEG_QUOTE_WIDTH_CENTS = 20
 const MIN_VOLUME = 100
 const MIN_OPEN_INTEREST = 500
+export const MIN_DIRECTIONAL_NET_DELTA = 0.1
+export const MAX_DIRECTIONAL_NET_DELTA = 0.4
 const MAX_LOSS_CENTS = 50_000
 const DAILY_DRAWDOWN_CENTS = 150_000
 const COMPETITION_BREAKER_EQUITY_CENTS = 9_250_000
@@ -147,7 +155,7 @@ export type ContractSnapshotV1 = Readonly<
 
 export const riskEvaluationInputV1Schema = z
   .object({
-    intent: tradeIntentV2Schema,
+    intent: tradeIntentV3Schema,
     context: z
       .object({
         provenance: z.literal("APPLICATION_VERIFIED"),
@@ -173,6 +181,8 @@ const approvedRiskEvaluationV1Schema = z
     approvedQuantity: z.literal(1),
     maxLossCents: positiveSafeInteger,
     projectedBuyingPowerCents: nonnegativeSafeInteger,
+    // Optional only so stored rule 1.0/1.1 decisions remain readable.
+    spreadGreeks: verticalSpreadGreeksV1Schema.optional(),
   })
   .strict()
 
@@ -183,6 +193,8 @@ const rejectedRiskEvaluationV1Schema = z
     outcome: z.literal("REJECTED"),
     evaluatedAt: timestamp.nullable(),
     reasonCodes: z.array(z.enum(RISK_REJECTION_CODES)).min(1),
+    // Input-invalid decisions cannot derive Greeks; older decisions predate them.
+    spreadGreeks: verticalSpreadGreeksV1Schema.optional(),
   })
   .strict()
 
@@ -344,6 +356,7 @@ export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
 
   const longLeg = contracts.legs.find(({ role }) => role === "LONG")!
   const shortLeg = contracts.legs.find(({ role }) => role === "SHORT")!
+  const spreadGreeks = deriveVerticalSpreadGreeksV1(longLeg, shortLeg)
   if (
     longLeg.contractSymbol !== intent.longContractSymbol ||
     shortLeg.contractSymbol !== intent.shortContractSymbol
@@ -409,6 +422,20 @@ export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
     shortAbsoluteDelta > 0.35
   ) {
     reject("CONTRACT_METRICS_INELIGIBLE")
+  }
+  if (spreadGreeks === undefined) {
+    reject("CONTRACT_METRICS_INELIGIBLE")
+  } else {
+    const direction = intent.direction === "BULLISH" ? 1 : -1
+    const directionalNetDelta = direction * spreadGreeks.netDelta
+    if (
+      direction * longLeg.delta <= 0 ||
+      direction * shortLeg.delta <= 0 ||
+      directionalNetDelta < MIN_DIRECTIONAL_NET_DELTA ||
+      directionalNetDelta > MAX_DIRECTIONAL_NET_DELTA
+    ) {
+      reject("SPREAD_GREEKS_INELIGIBLE")
+    }
   }
 
   const combinedQuoteWidth =
@@ -511,6 +538,7 @@ export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
       outcome: "REJECTED",
       evaluatedAt: eligibility.evaluatedAt,
       reasonCodes: reasons,
+      ...(spreadGreeks === undefined ? {} : { spreadGreeks }),
     }
   }
 
@@ -522,5 +550,6 @@ export function evaluateTradeIntentRiskV1(input: unknown): RiskEvaluationV1 {
     approvedQuantity: 1,
     maxLossCents: intent.maxLossCentsPerContract,
     projectedBuyingPowerCents: Number(projectedBuyingPower),
+    spreadGreeks: spreadGreeks!,
   }
 }

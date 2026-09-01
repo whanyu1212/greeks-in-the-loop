@@ -1,22 +1,26 @@
 # greeks-in-the-loop
 
-A non-executing options research worker. One agent selects the best current opportunity from a small ETF universe, researches it, and proposes at most one directional debit spread. Deterministic application code validates the proposal, refreshes financial inputs, and runs the risk gate.
+A non-executing options research worker. One agent selects the best current opportunity from an application-generated option universe, researches it, and proposes at most one directional debit spread. Deterministic application code validates the proposal, refreshes financial inputs, and runs the risk gate.
 
 No order-submission code exists in this repository.
 
 ## Pipeline
 
 ```text
-research + strategy selection (agent)
-  -> ResearchReportV3
-  -> ResearchDecisionV2 / PreliminaryResearchV2
+optionable + most-active + mover discovery (application)
+  -> 14-30 DTE open-interest liquidity ranking
+  -> three-underlying universe snapshot
+  -> research + strategy selection (agent)
+  -> ResearchReportV5 (ResearchDecisionV2)
   -> application-owned quote confirmation
   -> TradeIntentV2
   -> deterministic shadow risk gate
   -> append-only ledger
 ```
 
-The agent may choose one of `SPY`, `QQQ`, or `IWM`. It may propose only a `BULL_CALL_SPREAD` or `BEAR_PUT_SPREAD`. The allowlist is intentionally small; add another underlying only when liquidity and operational evidence justify it.
+Each cycle intersects Alpaca's active, tradable, options-enabled assets with its most-active stocks and screens up to 20 names. A candidate must have a 14–30 DTE American option series with at least two strikes whose open interest is at least 500. The application ranks viable names by liquid-series count, liquid-contract count, total open interest, absolute session move, and activity rank. The top three become an immutable snapshot. The agent must compare exactly those three and may propose only a `BULL_CALL_SPREAD` or `BEAR_PUT_SPREAD`.
+
+The pinned option-research skill separates broad-market context from the selected underlying, evaluates ATR, trend slope, extension, realized volatility, and dollar-volume participation, then analyzes target-expiration IV value, implied move, term structure, skew, smile curvature, quote coverage, and event risk. `ResearchReportV5` requires this evidence for proposals.
 
 The central invariant is: **the agent proposes; deterministic code disposes**. Research never supplies trusted prices, account state, buying power, sizing, or risk approval.
 
@@ -58,7 +62,7 @@ pnpm agent:once -- --dry-run --ledger .state/my-dry-run.sqlite
 `--dry-run` requires a single cycle and defaults to `.state/dry-run.sqlite`. It can never use the configured production ledger.
 
 - A current-session dry run may reach quote confirmation and deterministic shadow risk, even outside the normal entry window.
-- A historical or latest-completed-session dry run is research-only and may return `PreliminaryResearchV2`, never a trade intent.
+- A historical or latest-completed-session dry run is research-only and returns `NO_ACTION` with `MARKET_WINDOW_INELIGIBLE`, never a trade intent.
 - Dry run changes scheduling, not permissions, freshness rules, validation, or risk thresholds.
 
 The old `--research-anytime` and `--shadow-anytime` flags are intentionally unsupported.
@@ -84,9 +88,9 @@ Replay accepts self-contained exact risk inputs and monitor cycles. It calls the
 
 ## Safety boundary
 
-`opencode.json` is deny-by-default. The research agent can use reviewed Alpaca, FMP, Exa, and trusted-time tools; it cannot use shell, subagents, arbitrary web access, skills, or mutation tools. It may write only under `workspace/`.
+`opencode.json` is globally deny-by-default. `.opencode/agents/research.md` owns the read-only research policy and `.opencode/agents/trader.md` owns the paper-only option-submission policy. Neither agent can load arbitrary skills, use shell or subagents, or access the arbitrary web. The application worker currently invokes only `research`; `trader` is configured for a later execution workflow.
 
-The risk evaluator is pure and all monetary values use integer cents. Application code re-fetches proposed-leg quotes and account/portfolio state before evaluating risk. The pipeline ends at a recorded shadow decision.
+The risk evaluator is pure and all monetary values use integer cents. Application code re-fetches proposed-leg quotes, Greeks, and account/portfolio state before evaluating risk. It records long-minus-short net delta, gamma, theta, and vega and enforces signed directional net-delta limits. The pipeline ends at a recorded shadow decision.
 
 ## Verification
 

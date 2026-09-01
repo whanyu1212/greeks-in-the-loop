@@ -30,7 +30,7 @@ afterEach(() => {
 
 const noActionRun = (): ResearchRunV1 => {
   const decision = {
-    contractVersion: "2.0.0" as const,
+    contractVersion: "3.0.0" as const,
     outcome: "NO_ACTION" as const,
     reasonCodes: ["SIGNAL_NOT_ACTIONABLE" as const],
     evidence: [{
@@ -44,7 +44,7 @@ const noActionRun = (): ResearchRunV1 => {
     }],
   }
   return {
-    runVersion: "3.0.0",
+    runVersion: "5.0.0",
     cycle: {
       cycleId: "cycle-presentation-1",
       cycleNumber: 3,
@@ -65,7 +65,7 @@ const noActionRun = (): ResearchRunV1 => {
     },
     evidenceSnapshots: [],
     researchReport: {
-      reportVersion: "3.0.0",
+      reportVersion: "6.0.0",
       result: decision,
       analysis: {
         provenance: "AGENT_REPORTED",
@@ -140,7 +140,7 @@ const noActionRun = (): ResearchRunV1 => {
     },
     validatedDecision: decision,
     outcome: {
-      outcomeVersion: "1.0.0",
+      outcomeVersion: "3.0.0",
       status: "VALIDATED_NO_ACTION",
       decision,
     },
@@ -153,8 +153,8 @@ const noActionRun = (): ResearchRunV1 => {
 }
 
 const derivedIntent = {
-  contractVersion: "2.0.0",
-  decisionContractVersion: "2.0.0",
+  contractVersion: "3.0.0",
+  decisionContractVersion: "3.0.0",
   direction: "BULLISH",
   structure: "BULL_CALL_SPREAD",
   expiration: "2026-09-18",
@@ -187,7 +187,7 @@ const derivedIntent = {
 const intentRun = (): ResearchRunV1 => {
   const source = noActionRun()
   const decision = {
-    contractVersion: "2.0.0" as const,
+    contractVersion: "3.0.0" as const,
     outcome: "PROPOSE_TRADE" as const,
     direction: "BULLISH" as const,
     thesis: "Trend and intraday confirmation align.",
@@ -271,7 +271,7 @@ const intentRun = (): ResearchRunV1 => {
     },
     validatedDecision: decision,
     outcome: {
-      outcomeVersion: "1.0.0",
+      outcomeVersion: "3.0.0",
       status: "INTENT_DERIVED",
       decision,
       intent: derivedIntent,
@@ -308,7 +308,7 @@ describe("research run presentation", () => {
       "**Result:** NO_ACTION",
     ])
     expect(first.markdown).toContain("## Offline Audit")
-    expect(first.markdown).toContain("## ETF Indicator Context")
+    expect(first.markdown).toContain("## Universe Indicator Context")
     expect(first.markdown).toContain("SPY 20-day return | 3.00%")
     expect(first.markdown).toContain(
       "mixed-regime \\[ALPACA LIVE, 2026-08-27T15:36:45.000Z\\]: The retained market regime signal was mixed.",
@@ -324,18 +324,10 @@ describe("research run presentation", () => {
 
   it("maps every terminal outcome to non-executing actionability", () => {
     const source = noActionRun()
-    const preliminary = {
-      ...source,
-      outcome: {
-        outcomeVersion: "1.0.0",
-        status: "PRELIMINARY_RESEARCH_RETAINED",
-        research: {},
-      },
-    } as unknown as ResearchRunV1
     const decisionRejected = {
       ...source,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [{ code: "SCHEMA_INVALID", path: ["result"] }],
       },
@@ -343,15 +335,12 @@ describe("research run presentation", () => {
     const derivationRejected = {
       ...source,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["QUOTE_STALE"],
       },
     } as ResearchRunV1
 
-    expect(buildResearchRunPresentation(preliminary).actionability).toBe(
-      "RESEARCH_ONLY_REFRESH_REQUIRED",
-    )
     expect(buildResearchRunPresentation(decisionRejected).actionability).toBe(
       "REJECTED",
     )
@@ -364,6 +353,10 @@ describe("research run presentation", () => {
     )
     expect(intent.markdown).toContain("| Maximum loss | $101.00 per contract |")
     expect(intent.markdown).toContain("| Stop-loss mark | $0.505 per share |")
+    expect(intent.markdown).toContain(
+      "**Agent-reported spread Greeks (long minus short):**",
+    )
+    expect(intent.markdown).toContain("| Net delta | 0.24 |")
   })
 
   it.each([
@@ -441,6 +434,13 @@ describe("research run presentation", () => {
                   approvedQuantity: 1 as const,
                   maxLossCents: 10_100,
                   projectedBuyingPowerCents: 1_000_000,
+                  spreadGreeks: {
+                    calculation: "LONG_MINUS_SHORT" as const,
+                    netDelta: 0.24,
+                    netGamma: 0.005,
+                    netTheta: -0.02,
+                    netVega: 0.03,
+                  },
                 }
               : {
                   evaluationVersion: "1.0.0" as const,
@@ -448,6 +448,13 @@ describe("research run presentation", () => {
                   outcome: "REJECTED" as const,
                   evaluatedAt: "2026-08-27T15:37:21.000Z",
                   reasonCodes: ["MAX_LOSS_EXCEEDED" as const],
+                  spreadGreeks: {
+                    calculation: "LONG_MINUS_SHORT" as const,
+                    netDelta: 0.24,
+                    netGamma: 0.005,
+                    netTheta: -0.02,
+                    netVega: 0.03,
+                  },
                 },
           }
     const presentation = buildResearchRunPresentation({
@@ -473,6 +480,7 @@ describe("research run presentation", () => {
       expect(presentation.markdown).not.toContain(
         "| Maximum loss | $101.00 per contract |",
       )
+      expect(presentation.markdown).toContain("| Verified net delta | 0.24 |")
     }
   })
 

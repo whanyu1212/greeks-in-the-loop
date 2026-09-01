@@ -12,19 +12,27 @@ import {
 const versions = {
   agentName: "research",
   cycleMode: "DRY_RUN" as const,
-  promptVersion: "3.0.3",
-  decisionContractVersion: "2.0.0",
-  reportVersion: "3.0.0",
+  promptVersion: "6.0.0",
+  decisionContractVersion: "3.0.0",
+  reportVersion: "6.0.0",
 }
 
 describe("ResearchInvocationV1", () => {
-  it("supports only the current generic-agent provenance", () => {
-    expect(SUPPORTED_RESEARCH_INVOCATION_VERSIONS).toEqual(["3.0.0"])
+  it("retains old provenance while selecting the current prompt", () => {
+    expect(SUPPORTED_RESEARCH_INVOCATION_VERSIONS).toEqual([
+      "3.0.0",
+      "3.1.0",
+      "4.0.0",
+      "4.1.0",
+      "4.2.0",
+      "5.0.0",
+      "6.0.0",
+    ])
     expect(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[RESEARCH_INVOCATION_VERSION]).toEqual({
       agentName: "research",
-      promptVersion: "3.0.3",
-      decisionContractVersion: "2.0.0",
-      reportVersion: "3.0.0",
+      promptVersion: "6.0.0",
+      decisionContractVersion: "3.0.0",
+      reportVersion: "6.0.0",
       providerId: "openai",
       modelId: "gpt-5.6-sol",
     })

@@ -11,13 +11,13 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import type { ResearchReportV3 } from "../src/contracts/research-report-v3.js"
+import type { ResearchReportV6 } from "../src/contracts/research-report-v6.js"
 import {
   projectResearchRunV1,
   type ResearchRunV1,
   writeResearchRunArtifact,
 } from "../src/research/research-artifact.js"
-import type { StoredLedgerEventV2 } from "../src/event-ledger/ledger-event-v1.js"
+import type { StoredLedgerEventV4 } from "../src/event-ledger/ledger-event-v1.js"
 import type { ResearchCycleOutcomeV1 } from "../src/research/research-cycle-outcome-v1.js"
 
 const researchInvocation = {
@@ -25,8 +25,8 @@ const researchInvocation = {
   agentName: "research",
   cycleMode: "DRY_RUN" as const,
   promptVersion: "1.3.0",
-  decisionContractVersion: "2.0.0",
-  reportVersion: "3.0.0",
+  decisionContractVersion: "3.0.0",
+  reportVersion: "6.0.0",
   providerId: "test-provider",
   modelId: "test-model",
   responseError: false,
@@ -51,7 +51,7 @@ afterEach(() => {
 describe("research cycle artifact", () => {
   it("integrates a bounded shadow-risk decision and breaker transitions", () => {
     const base = {
-      eventVersion: "2.0.0",
+      eventVersion: "4.0.0",
       occurredAt: "2026-08-27T14:30:00.000Z",
       recordedAt: "2026-08-27T14:30:00.001Z",
       correlationId: "correlation-risk",
@@ -80,7 +80,7 @@ describe("research cycle artifact", () => {
         eventId: "risk-intent",
         causationEventId: "risk-decision-source",
         eventType: "TRADE_INTENT_DERIVED",
-        payload: { intent: { contractVersion: "2.0.0" } },
+        payload: { intent: { contractVersion: "3.0.0" } },
       },
       {
         ...base,
@@ -122,10 +122,10 @@ describe("research cycle artifact", () => {
         eventType: "RESEARCH_CYCLE_COMPLETED",
         payload: { status: "INTENT_DERIVED" },
       },
-    ] as unknown as StoredLedgerEventV2[]
+    ] as unknown as StoredLedgerEventV4[]
 
     expect(projectResearchRunV1(events)).toMatchObject({
-      runVersion: "3.0.0",
+      runVersion: "5.0.0",
       shadowRisk: {
         decision: {
           stage: "STATE_CAPTURE_FAILED",
@@ -139,7 +139,7 @@ describe("research cycle artifact", () => {
 
   it("projects the complete run from the committed ledger timeline", () => {
     const decision = {
-      contractVersion: "2.0.0" as const,
+      contractVersion: "3.0.0" as const,
       outcome: "NO_ACTION" as const,
       reasonCodes: ["SIGNAL_NOT_ACTIONABLE" as const],
       evidence: [{
@@ -152,14 +152,14 @@ describe("research cycle artifact", () => {
       }],
     }
     const base = {
-      eventVersion: "2.0.0" as const,
+      eventVersion: "4.0.0" as const,
       occurredAt: "2026-08-26T12:00:00.000Z",
       recordedAt: "2026-08-26T12:00:00.001Z",
       correlationId: "correlation-1",
       cycleId: "cycle-1",
       sessionId: "session-1",
     }
-    const events: StoredLedgerEventV2[] = [
+    const events: StoredLedgerEventV4[] = [
       {
         ...base,
         sequence: 2,
@@ -197,7 +197,7 @@ describe("research cycle artifact", () => {
     ]
 
     expect(projectResearchRunV1(events)).toMatchObject({
-      runVersion: "3.0.0",
+      runVersion: "5.0.0",
       cycle: {
         cycleId: "cycle-1",
         cycleNumber: 1,
@@ -238,10 +238,10 @@ describe("research cycle artifact", () => {
             payload: { ...event.payload, researchInvocation },
           }
         : event,
-    ) as StoredLedgerEventV2[]
+    ) as StoredLedgerEventV4[]
     const currentRun = projectResearchRunV1(currentEvents)
     expect(currentRun).toMatchObject({
-      runVersion: "3.0.0",
+      runVersion: "5.0.0",
       researchInvocation,
     })
     const latestInvocation = {
@@ -256,9 +256,9 @@ describe("research cycle artifact", () => {
             payload: { ...event.payload, researchInvocation: latestInvocation },
           }
         : event,
-    ) as StoredLedgerEventV2[]
+    ) as StoredLedgerEventV4[]
     expect(projectResearchRunV1(latestEvents)).toMatchObject({
-      runVersion: "3.0.0",
+      runVersion: "5.0.0",
       researchInvocation: latestInvocation,
     })
   })
@@ -267,15 +267,12 @@ describe("research cycle artifact", () => {
     const root = mkdtempSync(join(tmpdir(), "research-artifact-test-"))
     temporaryDirectories.push(root)
     const outcome: ResearchCycleOutcomeV1 = {
-      outcomeVersion: "1.0.0",
-      status: "PRELIMINARY_RESEARCH_RETAINED",
-      research: {
-        contractVersion: "2.0.0",
-        outcome: "PRELIMINARY_RESEARCH",
-        targetSessionDate: "2026-08-26",
-        direction: "UNDETERMINED",
-        thesis: "Full validated thesis.",
-        invalidation: ["Refresh after the regular session opens."],
+      outcomeVersion: "3.0.0",
+      status: "VALIDATED_NO_ACTION",
+      decision: {
+        contractVersion: "3.0.0",
+        outcome: "NO_ACTION",
+        reasonCodes: ["MARKET_WINDOW_INELIGIBLE"],
         evidence: [
           {
             claimId: "prior-close",
@@ -286,12 +283,11 @@ describe("research cycle artifact", () => {
             observedAt: "2026-08-25T20:00:00.000Z",
           },
         ],
-        requiresRefresh: true,
       },
     }
-    const researchReport: ResearchReportV3 = {
-      reportVersion: "3.0.0",
-      result: outcome.research,
+    const researchReport: ResearchReportV6 = {
+      reportVersion: "6.0.0",
+      result: outcome.decision,
       analysis: {
         provenance: "AGENT_REPORTED",
         asOf: "2026-08-26T12:00:00.000Z",
@@ -330,7 +326,7 @@ describe("research cycle artifact", () => {
     }
 
     const run: ResearchRunV1 = {
-      runVersion: "3.0.0",
+      runVersion: "5.0.0",
       cycle: {
         cycleId: "cycle-1",
         cycleNumber: 1,
@@ -343,7 +339,7 @@ describe("research cycle artifact", () => {
       evidenceSnapshots: [],
       outcome,
       researchReport,
-      preliminaryResearch: outcome.research,
+      validatedDecision: outcome.decision,
       ledger: {
         firstSequence: 2,
         lastSequence: 5,
@@ -361,7 +357,7 @@ describe("research cycle artifact", () => {
     })
     expect(
       createHash("sha256").update(readFileSync(path)).digest("hex"),
-    ).toBe("06ae170cb818ee700eb3e7f87e2a9a3c0a0032ee5e064b636ecf096675812082")
+    ).toBe("865b43e00984f7dd082a94f762fb874a312b1540672e7b11ea2690761017e9ce")
     expect(statSync(path).mode & 0o777).toBe(0o600)
 
     chmodSync(path, 0o644)
@@ -373,10 +369,10 @@ describe("research cycle artifact", () => {
     const root = mkdtempSync(join(tmpdir(), "research-artifact-test-"))
     temporaryDirectories.push(root)
     const outcome: ResearchCycleOutcomeV1 = {
-      outcomeVersion: "1.0.0",
+      outcomeVersion: "3.0.0",
       status: "VALIDATED_NO_ACTION",
       decision: {
-        contractVersion: "2.0.0",
+        contractVersion: "3.0.0",
         outcome: "NO_ACTION",
         reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
         evidence: [{
@@ -390,7 +386,7 @@ describe("research cycle artifact", () => {
       },
     }
     const run: ResearchRunV1 = {
-      runVersion: "3.0.0",
+      runVersion: "5.0.0",
       cycle: {
         cycleId: "cycle-1",
         cycleNumber: 1,

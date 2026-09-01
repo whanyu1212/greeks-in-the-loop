@@ -4,12 +4,10 @@ import {
   LEDGER_EVENT_VERSION,
   LEDGER_EVENT_TYPES,
   type LedgerEvent,
-  type LedgerEventV2,
+  type LedgerEventV4,
   type StoredLedgerEvent,
 } from "../event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
-import type { PreliminaryResearchV2 } from "../contracts/preliminary-research-v2.js"
-import type { AllowedOptionUnderlyingV1 } from "../shared/alpaca-option-identity.js"
 
 /** Ledger query window: how much history is read, not how much survives. */
 export const MAX_RESEARCH_CONTEXT_EVENTS = 500
@@ -25,11 +23,11 @@ const TERMINAL_EVENT_TYPES = [
 const RESEARCH_CONTEXT_EVENT_TYPES = LEDGER_EVENT_TYPES
 
 type TerminalStatus = Extract<
-  LedgerEventV2,
+  LedgerEventV4,
   { eventType: "RESEARCH_CYCLE_COMPLETED" }
 >["payload"]["status"]
 type InterruptionReason = Extract<
-  LedgerEventV2,
+  LedgerEventV4,
   { eventType: "RESEARCH_CYCLE_INTERRUPTED" }
 >["payload"]["reason"]
 type RejectionSource =
@@ -47,7 +45,7 @@ export type ResearchContextTerminalOutcomeV1 = Readonly<{
 export type ResearchContextProposalV1 = Readonly<{
   cycleId: string
   direction: "BULLISH" | "BEARISH"
-  underlying: AllowedOptionUnderlyingV1
+  underlying: string
   structure: "BULL_CALL_SPREAD" | "BEAR_PUT_SPREAD"
   expiration: string
   longContractSymbol: string
@@ -79,35 +77,14 @@ export type ResearchContextInterruptionV1 = Readonly<{
 
 export type ResearchContextRefreshMarkerV1 = Readonly<{
   cycleId: string
-  reason: "STALE_EVIDENCE" | "INTERRUPTED_CYCLE" | "PRELIMINARY_RESEARCH"
+  reason: "STALE_EVIDENCE" | "INTERRUPTED_CYCLE"
   snapshotRef?: string
-}>
-
-export type ResearchContextPreliminaryResearchV2 = Readonly<{
-  cycleId: string
-  occurredAt: string
-  targetSessionDate: string
-  direction: PreliminaryResearchV2["direction"]
-  candidate?: PreliminaryResearchV2["candidate"]
-  /**
-   * Counts and provenance only. The model authors `claimId`, and this payload
-   * re-enters a later prompt, so the identifier string is deliberately not
-   * carried: nothing downstream reads it, and it is the one field here that
-   * could smuggle model-authored text back in.
-   */
-  sourcedObservations: readonly Readonly<{
-    provider: "ALPACA" | "FMP" | "EXA"
-    temporalClass: "LIVE" | "DELAYED" | "PRIOR_CLOSE"
-    observedAt: string
-  }>[]
-  requiresRefresh: true
 }>
 
 export type ResearchContextV1 = Readonly<{
   generatedAt: string
   nextCycleNumber: number
   latestValidatedProposal?: ResearchContextProposalV1
-  latestPreliminaryResearch?: ResearchContextPreliminaryResearchV2
   recentTerminalOutcomes: readonly ResearchContextTerminalOutcomeV1[]
   recurringRejectionCounts: readonly ResearchContextRejectionCountV1[]
   evidenceReferences: Readonly<
@@ -175,9 +152,6 @@ export function projectResearchContextV1(
   let latestValidatedProposal:
     | (ResearchContextProposalV1 & { sequence: number })
     | undefined
-  let latestPreliminaryResearch:
-    | (ResearchContextPreliminaryResearchV2 & { sequence: number })
-    | undefined
   const terminalOutcomes: Array<ResearchContextTerminalOutcomeV1 & {
     sequence: number
   }> = []
@@ -201,6 +175,7 @@ export function projectResearchContextV1(
   }
 
   for (const event of events) {
+    if (event.eventVersion !== LEDGER_EVENT_VERSION) continue
     const cycleId = event.cycleId
     if (event.eventType === "RESEARCH_CYCLE_STARTED") {
       if (cycleId !== undefined) {
@@ -250,27 +225,6 @@ export function projectResearchContextV1(
       })
       continue
     }
-    if (event.eventType === "PRELIMINARY_RESEARCH_RECORDED") {
-      latestPreliminaryResearch = {
-        cycleId,
-        occurredAt: event.occurredAt,
-        targetSessionDate: event.payload.research.targetSessionDate,
-        direction: event.payload.research.direction,
-        ...(event.payload.research.candidate === undefined
-          ? {}
-          : { candidate: event.payload.research.candidate }),
-        sourcedObservations: event.payload.research.evidence
-          .filter((claim) => claim.kind === "SOURCED_FACT")
-          .map(({ provider, temporalClass, observedAt }) => ({
-            provider,
-            temporalClass,
-            observedAt,
-          })),
-        requiresRefresh: true,
-        sequence: event.sequence,
-      }
-      continue
-    }
     if (event.eventType === "RESEARCH_DECISION_REJECTED") {
       for (const issue of event.payload.issues) {
         countRejection(issue.code, "DECISION_VALIDATION")
@@ -292,24 +246,19 @@ export function projectResearchContextV1(
       }
       continue
     }
+    const primaryProposal = decision.proposals[0]
+    if (primaryProposal === undefined) continue
     latestValidatedProposal = {
       cycleId,
-      direction: decision.direction,
-      underlying: decision.candidate.underlying,
-      structure: decision.candidate.structure,
-      expiration: decision.candidate.expiration,
-      longContractSymbol: decision.candidate.longLeg.contractSymbol,
-      shortContractSymbol: decision.candidate.shortLeg.contractSymbol,
+      direction: primaryProposal.direction,
+      underlying: primaryProposal.candidate.underlying,
+      structure: primaryProposal.candidate.structure,
+      expiration: primaryProposal.candidate.expiration,
+      longContractSymbol: primaryProposal.candidate.longLeg.contractSymbol,
+      shortContractSymbol: primaryProposal.candidate.shortLeg.contractSymbol,
       sequence: event.sequence,
     }
   }
-
-  const pendingPreliminaryResearch =
-    latestPreliminaryResearch !== undefined &&
-    (latestValidatedProposal === undefined ||
-      latestPreliminaryResearch.sequence > latestValidatedProposal.sequence)
-      ? latestPreliminaryResearch
-      : undefined
 
   const newestFirst = <T extends { sequence: number }>(values: readonly T[]) =>
     [...values].sort((left, right) => right.sequence - left.sequence)
@@ -326,15 +275,6 @@ export function projectResearchContextV1(
     }))
     .sort((left, right) => right.count - left.count || left.code.localeCompare(right.code))
   let retainedRefreshes: SequencedRefreshMarker[] = [
-    ...(pendingPreliminaryResearch === undefined
-      ? []
-      : [
-          {
-            cycleId: pendingPreliminaryResearch.cycleId,
-            reason: "PRELIMINARY_RESEARCH" as const,
-            sequence: pendingPreliminaryResearch.sequence,
-          },
-        ]),
     ...retainedEvidence
       .filter(({ freshUntil }) => Date.parse(freshUntil) < generatedAt)
       .map(({ cycleId, snapshotRef, sequence }) => ({
@@ -377,22 +317,6 @@ export function projectResearchContextV1(
               expiration: latestValidatedProposal.expiration,
               longContractSymbol: latestValidatedProposal.longContractSymbol,
               shortContractSymbol: latestValidatedProposal.shortContractSymbol,
-            },
-          }),
-      ...(pendingPreliminaryResearch === undefined
-        ? {}
-        : {
-            latestPreliminaryResearch: {
-              cycleId: pendingPreliminaryResearch.cycleId,
-              occurredAt: pendingPreliminaryResearch.occurredAt,
-              targetSessionDate: pendingPreliminaryResearch.targetSessionDate,
-              direction: pendingPreliminaryResearch.direction,
-              ...(pendingPreliminaryResearch.candidate === undefined
-                ? {}
-                : { candidate: pendingPreliminaryResearch.candidate }),
-              sourcedObservations:
-                pendingPreliminaryResearch.sourcedObservations,
-              requiresRefresh: true as const,
             },
           }),
       recentTerminalOutcomes: retainedOutcomes.map(
@@ -544,7 +468,7 @@ export async function reconstructResearchContextV1(
   const starts = [...openCycles.values()].sort(
     (left, right) => left.sequence - right.sequence,
   )
-  const interruptions: LedgerEventV2[] = starts.map((start, recoveryIndex) => {
+  const interruptions: LedgerEventV4[] = starts.map((start, recoveryIndex) => {
     if (start.cycleId === undefined) {
       throw new Error("Research cycle start is missing its cycle identity")
     }

@@ -2,13 +2,12 @@ import { z } from "zod"
 
 import type {
   ConfirmedOptionQuoteV2,
-} from "../contracts/trade-intent-v2.js"
+} from "../contracts/trade-intent-v3.js"
 import type {
   EvidenceSnapshotMetadata,
-} from "../contracts/research-decision-v2.js"
+} from "../contracts/research-decision-v3.js"
 import {
   parseAlpacaOptionSymbol,
-  validateOptionUniverseV1,
 } from "../shared/alpaca-option-identity.js"
 import {
   floorNanosecondsToIsoMilliseconds,
@@ -216,8 +215,6 @@ export function createAlpacaOptionQuoteProvider(
       if (
         !longIdentity.success ||
         !shortIdentity.success ||
-        !validateOptionUniverseV1(longIdentity.identity).success ||
-        !validateOptionUniverseV1(shortIdentity.identity).success ||
         longIdentity.identity.root !== shortIdentity.identity.root
       ) {
         return failure("QUOTE_SYMBOL_MISSING")

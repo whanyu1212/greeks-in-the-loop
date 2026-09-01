@@ -87,8 +87,8 @@ const versions = {
   agentName: "research",
   cycleMode: "STANDARD" as const,
   promptVersion: "1.0.0",
-  decisionContractVersion: "2.0.0",
-  reportVersion: "3.0.0",
+  decisionContractVersion: "3.0.0",
+  reportVersion: "6.0.0",
 }
 
 describe("startResearchTelemetry", () => {

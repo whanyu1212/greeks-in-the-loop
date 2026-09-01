@@ -47,8 +47,9 @@ const makeIntent = ({
   )
   const widthCentsPerShare = Math.abs(longStrikeCents - shortStrikeCents)
   return {
-    contractVersion: "2.0.0",
-    decisionContractVersion: "2.0.0",
+    contractVersion: "3.0.0",
+    decisionContractVersion: "3.0.0",
+    underlying: "SPY",
     direction: "BULLISH",
     structure: "BULL_CALL_SPREAD",
     expiration,
@@ -127,9 +128,9 @@ const makeInput = (intent = makeIntent()) => ({
           multiplier: 100,
           delta: 0.5,
           impliedVolatility: 0.2,
-          gamma: 0.01,
-          theta: -0.02,
-          vega: 0.05,
+          gamma: 0.02,
+          theta: -0.1,
+          vega: 0.15,
           volume: 100,
           volumeDate: "2026-08-27",
           openInterest: 500,
@@ -144,9 +145,9 @@ const makeInput = (intent = makeIntent()) => ({
           multiplier: 100,
           delta: 0.3,
           impliedVolatility: 0.2,
-          gamma: 0.01,
-          theta: -0.02,
-          vega: 0.05,
+          gamma: 0.015,
+          theta: -0.08,
+          vega: 0.12,
           volume: 100,
           volumeDate: "2026-08-27",
           openInterest: 500,
@@ -184,14 +185,21 @@ describe("evaluateTradeIntentRiskV1", () => {
     const evaluation = evaluateTradeIntentRiskV1(input)
     expect(evaluation).toEqual({
       evaluationVersion: "1.0.0",
-      ruleVersion: "1.1.0",
+      ruleVersion: "1.2.0",
       outcome: "APPROVED",
       evaluatedAt: "2026-08-27T14:30:00.000Z",
       approvedQuantity: 1,
       maxLossCents: 20_000,
       projectedBuyingPowerCents: 19_980_000,
+      spreadGreeks: {
+        calculation: "LONG_MINUS_SHORT",
+        netDelta: 0.2,
+        netGamma: 0.005,
+        netTheta: -0.02,
+        netVega: 0.03,
+      },
     })
-    expect(canonicalJsonSha256(evaluation)).toBe("5c168d147ce2787330851daaed510273f91483c7f9a4429e5078e63e753b629d")
+    expect(canonicalJsonSha256(evaluation)).toBe("f7d8a919642fb9a389f631ba92d3a14599fcccf9959331d5cf9b92532c8ab386")
 
     expect(
       riskEvaluationV1Schema.safeParse({
@@ -202,9 +210,57 @@ describe("evaluateTradeIntentRiskV1", () => {
     expect(
       riskEvaluationV1Schema.safeParse({
         ...evaluation,
-        ruleVersion: "1.2.0",
+        ruleVersion: "1.1.0",
+      }).success,
+    ).toBe(true)
+    expect(
+      riskEvaluationV1Schema.safeParse({
+        ...evaluation,
+        ruleVersion: "1.3.0",
       }).success,
     ).toBe(false)
+  })
+
+  it("approves correctly signed bearish put-spread exposure", () => {
+    const input = makeInput()
+    const longContractSymbol = optionSymbol("2026-09-11", "P", 60_500)
+    const shortContractSymbol = optionSymbol("2026-09-11", "P", 60_000)
+    const bearish = {
+      ...input,
+      intent: {
+        ...input.intent,
+        direction: "BEARISH",
+        structure: "BEAR_PUT_SPREAD",
+        longContractSymbol,
+        shortContractSymbol,
+        longQuote: { ...input.intent.longQuote, contractSymbol: longContractSymbol },
+        shortQuote: { ...input.intent.shortQuote, contractSymbol: shortContractSymbol },
+      },
+      context: {
+        ...input.context,
+        contracts: {
+          ...input.context.contracts,
+          legs: [
+            {
+              ...input.context.contracts.legs[0]!,
+              contractSymbol: longContractSymbol,
+              delta: -0.5,
+            },
+            {
+              ...input.context.contracts.legs[1]!,
+              contractSymbol: shortContractSymbol,
+              delta: -0.3,
+            },
+          ],
+        },
+      },
+    }
+
+    expect(riskEvaluationInputV1Schema.safeParse(bearish).success).toBe(true)
+    expect(evaluateTradeIntentRiskV1(bearish)).toMatchObject({
+      outcome: "APPROVED",
+      spreadGreeks: { netDelta: -0.2 },
+    })
   })
 
   const untrustedInput = makeInput()
@@ -216,7 +272,7 @@ describe("evaluateTradeIntentRiskV1", () => {
     (input) => {
       expect(evaluateTradeIntentRiskV1(input)).toEqual({
         evaluationVersion: "1.0.0",
-        ruleVersion: "1.1.0",
+        ruleVersion: "1.2.0",
         outcome: "REJECTED",
         evaluatedAt: null,
         reasonCodes: ["RISK_INPUT_INVALID"],
@@ -290,7 +346,7 @@ describe("evaluateTradeIntentRiskV1", () => {
     malformed.context.contracts.legs[0]!.contractSymbol = "not-a-symbol"
     expect(evaluateTradeIntentRiskV1(malformed)).toEqual({
       evaluationVersion: "1.0.0",
-      ruleVersion: "1.1.0",
+      ruleVersion: "1.2.0",
       outcome: "REJECTED",
       evaluatedAt: null,
       reasonCodes: ["RISK_INPUT_INVALID"],
@@ -348,6 +404,10 @@ describe("evaluateTradeIntentRiskV1", () => {
     expectRejection((input) => {
       input.context.contracts.legs[1]!.impliedVolatility = 0
     }, "CONTRACT_METRICS_INELIGIBLE")
+    expectRejection((input) => {
+      input.context.contracts.legs[0]!.delta = -0.5
+      input.context.contracts.legs[1]!.delta = -0.3
+    }, "SPREAD_GREEKS_INELIGIBLE")
     expectRejection((input) => {
       input.context.contracts.legs[1]!.volume = 99
     }, "LIQUIDITY_INELIGIBLE")

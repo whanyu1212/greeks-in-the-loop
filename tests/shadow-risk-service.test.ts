@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
 
-import type { ProposedTradeDecisionV2 } from "../src/contracts/research-decision-v2.js"
-import { deriveTradeIntentV2 } from "../src/contracts/trade-intent-v2.js"
+import type { TradeProposalV3 } from "../src/contracts/research-decision-v3.js"
+import { deriveTradeIntentV3 } from "../src/contracts/trade-intent-v3.js"
 import type { RiskStateProvider } from "../src/risk/alpaca-risk-state-provider.js"
-import type { StoredLedgerEventV2 } from "../src/event-ledger/ledger-event-v1.js"
+import type { StoredLedgerEventV4 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { LedgerPersistenceError } from "../src/event-ledger/research-lifecycle-recorder.js"
 import { buildRiskReportV1 } from "../src/risk/risk-report-v1.js"
@@ -20,9 +20,8 @@ const evaluatedAt = "2026-08-27T14:30:30.000Z"
 const longSymbol = "SPY260918C00600000"
 const shortSymbol = "SPY260918C00605000"
 
-const decision: ProposedTradeDecisionV2 = {
-  contractVersion: "2.0.0",
-  outcome: "PROPOSE_TRADE",
+const decision: TradeProposalV3 = {
+  priority: 1,
   direction: "BULLISH",
   thesis: "Daily and intraday direction agree.",
   candidate: {
@@ -37,7 +36,7 @@ const decision: ProposedTradeDecisionV2 = {
     claimId: "quote-fact",
     kind: "SOURCED_FACT",
     claim: "The exact proposed legs were confirmed.",
-    snapshotRef: "alpaca-proposal-quotes-v1",
+    snapshotRef: "alpaca-proposal-quotes-v2-SPY",
   }],
 }
 
@@ -59,8 +58,8 @@ const quotes = (timestamp: string) => ({
 })
 
 const sourceIntent = (() => {
-  const result = deriveTradeIntentV2(decision, {
-    quoteSnapshotRef: "alpaca-proposal-quotes-v1",
+  const result = deriveTradeIntentV3(decision, {
+    quoteSnapshotRef: "alpaca-proposal-quotes-v2-SPY",
     evaluatedAt: "2026-08-27T14:30:10.000Z",
     ...quotes("2026-08-27T14:30:00.000000000Z"),
   })
@@ -202,9 +201,19 @@ describe("shadow risk evaluator", () => {
       mode: "SHADOW",
       stage: "EVALUATED",
       outcome: "APPROVED",
+      ruleVersion: "1.2.0",
       evaluatedIntent: {
         quoteSnapshotRef: SHADOW_RISK_QUOTE_SNAPSHOT_REF,
         evaluatedAt,
+      },
+      evaluation: {
+        spreadGreeks: {
+          calculation: "LONG_MINUS_SHORT",
+          netDelta: 0.2,
+          netGamma: 0,
+          netTheta: 0,
+          netVega: 0,
+        },
       },
     })
     expect(result.breakerTransitions).toEqual([])
@@ -241,7 +250,7 @@ describe("shadow risk evaluator", () => {
     const events = [
       {
         eventId: "cycle-start",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "RESEARCH_CYCLE_STARTED",
         occurredAt: evaluatedAt,
         recordedAt: evaluatedAt,
@@ -256,7 +265,7 @@ describe("shadow risk evaluator", () => {
       },
       {
         eventId: "risk-1",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "RISK_SHADOW_DECISION_RECORDED",
         occurredAt: evaluatedAt,
         recordedAt: evaluatedAt,
@@ -277,7 +286,7 @@ describe("shadow risk evaluator", () => {
           },
         },
       },
-    ] as StoredLedgerEventV2[]
+    ] as StoredLedgerEventV4[]
 
     expect(buildRiskReportV1(events, sessionDate)).toMatchObject({
       tradingDate: sessionDate,

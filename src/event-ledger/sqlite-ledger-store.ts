@@ -3,13 +3,13 @@ import { z } from "zod"
 
 import {
   ledgerEventSchema,
-  ledgerEventV2Schema,
+  ledgerEventV4Schema,
   LEDGER_EVENT_VERSION,
   MAX_LEDGER_EVENT_PAYLOAD_BYTES,
   STORED_LEDGER_EVENT_TYPES,
-  type LedgerEventV2,
+  type LedgerEventV4,
   type StoredLedgerEvent,
-  type StoredLedgerEventV2,
+  type StoredLedgerEventV4,
 } from "./ledger-event-v1.js"
 import type {
   LedgerEventQuery,
@@ -119,7 +119,7 @@ const decodeRow = (row: LedgerRow): StoredLedgerEvent => {
 }
 
 const toInsertParameters = (
-  event: LedgerEventV2,
+  event: LedgerEventV4,
   recordedAt: string,
 ) => ({
   eventId: event.eventId,
@@ -193,9 +193,9 @@ export function createSqliteLedgerStore({
   }
 
   const appendValidated = (
-    events: readonly LedgerEventV2[],
+    events: readonly LedgerEventV4[],
     recordedAt: string,
-  ): StoredLedgerEventV2[] => {
+  ): StoredLedgerEventV4[] => {
     const insert = database.prepare(INSERT_EVENT_SQL)
     const getById = database.prepare(`
       SELECT ${SELECT_COLUMNS}
@@ -220,7 +220,7 @@ export function createSqliteLedgerStore({
   }
 
   const appendBatch = async (
-    events: readonly LedgerEventV2[],
+    events: readonly LedgerEventV4[],
     signal?: AbortSignal,
   ) => {
     signal?.throwIfAborted()
@@ -233,7 +233,7 @@ export function createSqliteLedgerStore({
 
     assertPersistenceSafe(events, protectedCredentialValues)
     const validated = events.map((event, index) => {
-      const parsed = ledgerEventV2Schema.safeParse(event)
+      const parsed = ledgerEventV4Schema.safeParse(event)
       if (!parsed.success) {
         throw new Error(`Invalid ledger event at batch index ${index}`)
       }

@@ -47,6 +47,7 @@
     "mcp-remote": "0.1.49",
     "opencode-ai": "1.18.21",
     "picocolors": "^1.1.1",
+    "undici": "7.29.0",
     "zod": "4.4.3"
   },
   "devDependencies": {

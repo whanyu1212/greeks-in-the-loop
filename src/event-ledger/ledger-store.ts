@@ -1,8 +1,8 @@
 import type {
   LedgerEvent,
-  LedgerEventV2,
+  LedgerEventV4,
   StoredLedgerEvent,
-  StoredLedgerEventV2,
+  StoredLedgerEventV4,
 } from "./ledger-event-v1.js"
 
 export type LedgerEventQuery = Readonly<{
@@ -19,13 +19,13 @@ export type LedgerEventQuery = Readonly<{
 export type LedgerStore = Readonly<{
   migrate(signal?: AbortSignal): Promise<void>
   append(
-    event: LedgerEventV2,
+    event: LedgerEventV4,
     signal?: AbortSignal,
-  ): Promise<StoredLedgerEventV2>
+  ): Promise<StoredLedgerEventV4>
   appendBatch(
-    events: readonly LedgerEventV2[],
+    events: readonly LedgerEventV4[],
     signal?: AbortSignal,
-  ): Promise<readonly StoredLedgerEventV2[]>
+  ): Promise<readonly StoredLedgerEventV4[]>
   getByEventId(eventId: string): Promise<StoredLedgerEvent | undefined>
   list(query: LedgerEventQuery): Promise<readonly StoredLedgerEvent[]>
   close(): Promise<void>

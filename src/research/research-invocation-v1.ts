@@ -5,16 +5,70 @@ import {
   type OpenCodeInvocationSummary,
 } from "../observability/opencode-telemetry-summary.js"
 import type { ResearchTraceVersions } from "../observability/research-telemetry.js"
-export const RESEARCH_INVOCATION_VERSION = "3.0.0" as const
+export const RESEARCH_INVOCATION_VERSION = "6.0.0" as const
 export const SUPPORTED_RESEARCH_INVOCATION_VERSIONS = Object.freeze([
+  "3.0.0",
+  "3.1.0",
+  "4.0.0",
+  "4.1.0",
+  "4.2.0",
+  "5.0.0",
   RESEARCH_INVOCATION_VERSION,
 ] as const)
 export const RESEARCH_INVOCATION_PROVENANCE_BY_VERSION = Object.freeze({
-  [RESEARCH_INVOCATION_VERSION]: Object.freeze({
+  "3.0.0": Object.freeze({
     agentName: "research",
     promptVersion: "3.0.3",
     decisionContractVersion: "2.0.0",
     reportVersion: "3.0.0",
+    providerId: "openai",
+    modelId: "gpt-5.6-sol",
+  }),
+  "3.1.0": Object.freeze({
+    agentName: "research",
+    promptVersion: "3.1.0",
+    decisionContractVersion: "2.0.0",
+    reportVersion: "3.0.0",
+    providerId: "openai",
+    modelId: "gpt-5.6-sol",
+  }),
+  "4.0.0": Object.freeze({
+    agentName: "research",
+    promptVersion: "4.0.0",
+    decisionContractVersion: "2.0.0",
+    reportVersion: "4.0.0",
+    providerId: "openai",
+    modelId: "gpt-5.6-sol",
+  }),
+  "4.1.0": Object.freeze({
+    agentName: "research",
+    promptVersion: "4.1.0",
+    decisionContractVersion: "2.0.0",
+    reportVersion: "4.0.0",
+    providerId: "openai",
+    modelId: "gpt-5.6-sol",
+  }),
+  "4.2.0": Object.freeze({
+    agentName: "research",
+    promptVersion: "4.2.0",
+    decisionContractVersion: "2.0.0",
+    reportVersion: "4.0.0",
+    providerId: "openai",
+    modelId: "gpt-5.6-sol",
+  }),
+  "5.0.0": Object.freeze({
+    agentName: "research",
+    promptVersion: "5.0.0",
+    decisionContractVersion: "2.0.0",
+    reportVersion: "5.0.0",
+    providerId: "openai",
+    modelId: "gpt-5.6-sol",
+  }),
+  [RESEARCH_INVOCATION_VERSION]: Object.freeze({
+    agentName: "research",
+    promptVersion: "6.0.0",
+    decisionContractVersion: "3.0.0",
+    reportVersion: "6.0.0",
     providerId: "openai",
     modelId: "gpt-5.6-sol",
   }),
@@ -100,7 +154,7 @@ export function assertResearchModelIdentityV1(
   }
   return { ok: true }
 }
-export const MAX_RESEARCH_INVOCATION_TOOL_CALLS = 32
+export const MAX_RESEARCH_INVOCATION_TOOL_CALLS = 64
 
 const boundedText = z.string().trim().min(1).max(128)
 const safeCount = z.number().int().nonnegative().safe()

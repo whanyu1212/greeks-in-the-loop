@@ -1,10 +1,43 @@
-import { NO_ACTION_REASON_CODES } from "../contracts/research-decision-v2.js"
-import { ALLOWED_OPTION_UNDERLYINGS_V1 } from "../shared/alpaca-option-identity.js"
+import { NO_ACTION_REASON_CODES } from "../contracts/research-decision-v3.js"
 import type {
   ResearchBehaviorExpectation,
   ResearchBehaviorIssueCode,
   ResearchBehaviorToolCall,
 } from "./research-behavior-evaluation-v1.js"
+
+export const RESEARCH_EVALUATION_OPTION_UNDERLYINGS = [
+  "TSLA",
+  "NVDA",
+  "AMD",
+] as const
+export type ResearchEvaluationOptionUnderlying =
+  (typeof RESEARCH_EVALUATION_OPTION_UNDERLYINGS)[number]
+
+/** Captured dynamic-discovery output used only by deterministic evaluations. */
+export const RESEARCH_EVALUATION_OPTION_UNIVERSE = {
+  snapshotVersion: "2.0.0",
+  policyVersion: "4.0.0",
+  snapshotId: `option-universe-v2-${"0".repeat(64)}`,
+  generatedAt: "2026-08-26T14:19:00.000Z",
+  sessionDate: "2026-08-26",
+  source: "ALPACA_OPTIONS_SCREENERS",
+  candidates: RESEARCH_EVALUATION_OPTION_UNDERLYINGS.map(
+    (underlying, index) => ({
+      rank: index + 1 as 1 | 2 | 3,
+      underlying,
+      activityRank: index + 1,
+      optionLiquidity: {
+        expirationCount: 2,
+        viableSeriesCount: 4 - index,
+        liquidSeriesCount: 3 - index,
+        contractCount: 40 - index * 4,
+        liquidContractCount: 24 - index * 4,
+        totalOpenInterest: 24_000 - index * 4_000,
+        openInterestCoverage: 1,
+      },
+    }),
+  ),
+} as const
 
 export type ResearchBehaviorScenario = Readonly<{
   id: string
@@ -40,6 +73,7 @@ const exaSource = (
 const baseAnalysis = () => ({
   provenance: "AGENT_REPORTED" as const,
   asOf: "2026-08-26T14:30:00.000Z",
+  optionUniverse: RESEARCH_EVALUATION_OPTION_UNIVERSE,
   accountChecks: {
     verification: "AGENT_REPORTED" as const,
     observedAt: "2026-08-26T14:30:00.000Z",
@@ -47,14 +81,24 @@ const baseAnalysis = () => ({
     optionsTradingApproved: true,
     conflictingStrategyExposure: false,
   },
-  marketRegime: {
+  symbolEvaluations: RESEARCH_EVALUATION_OPTION_UNDERLYINGS.map(
+    (underlying) => ({
+      underlying,
+      disposition: "WATCH" as const,
+      direction: "NEUTRAL" as const,
+      summary: "No actionable candidate was retained.",
+    }),
+  ),
+  marketRegimes: [{
     verification: "AGENT_REPORTED" as const,
     temporalClass: "LIVE" as const,
     observedAt: "2026-08-26T14:20:00.000Z",
     signal: "UNAVAILABLE" as const,
     dailySessionCount: 0,
     intradayBarCount: 0,
-  },
+  }],
+  optionSurfaces: [],
+  candidateEvaluations: [],
   externalContext: [exaSource("exa-neutral", "NEUTRAL")],
   supportingFactors: [] as string[],
   contradictingFactors: [] as string[],
@@ -63,31 +107,46 @@ const baseAnalysis = () => ({
 
 const symbolIndicators = [
   {
-    underlying: "SPY",
+    underlying: "TSLA",
     throughSessionDate: "2026-08-25",
     return5d: 0.0020764119601328623,
     return20d: 0.008357709987463435,
     relativeStrengthRank20d: 1,
     realizedVolatility20: 0.00001626418287454355,
     completedSessionVolumeRatio20: 1.0020839535576065,
+    atrPercent20: 0.004973062577704103,
+    ewmaRealizedVolatility20: 0.006600661923000069,
+    sma20Slope5d: 0.0020846362309776545,
+    completedSessionDollarVolumeRatio20: 1.006460744271627,
+    rangePosition20: 0.8709677419354839,
   },
   {
-    underlying: "QQQ",
+    underlying: "NVDA",
     throughSessionDate: "2026-08-25",
     return5d: -0.0009996001599360538,
     return20d: -0.003986446083316775,
     relativeStrengthRank20d: 3,
     realizedVolatility20: 0.000003746108709082082,
     completedSessionVolumeRatio20: 1.0023790642347343,
+    atrPercent20: 0.005403241945167077,
+    ewmaRealizedVolatility20: 0.0031717398676301633,
+    sma20Slope5d: -0.0009977052778609163,
+    completedSessionDollarVolumeRatio20: 1.000278725868041,
+    rangePosition20: 0.23913043478261542,
   },
   {
-    underlying: "IWM",
+    underlying: "AMD",
     throughSessionDate: "2026-08-25",
     return5d: 0,
     return20d: 0.0072033135242211,
     relativeStrengthRank20d: 2,
     realizedVolatility20: 0.029199705708874733,
     completedSessionVolumeRatio20: 1.0031140329197765,
+    atrPercent20: 0.010727695333452428,
+    ewmaRealizedVolatility20: 0.02883105525867162,
+    sma20Slope5d: 0.0017956545160713322,
+    completedSessionDollarVolumeRatio20: 1.005988201530389,
+    rangePosition20: 0.6428571428571449,
   },
 ] as const
 
@@ -123,15 +182,15 @@ const noActionReport = (
       : analysis.accountChecks.optionsTradingApproved,
   }
   const marketRegime = options.marketRegime === undefined
-    ? analysis.marketRegime
+    ? analysis.marketRegimes[0]!
     : {
         verification: "AGENT_REPORTED" as const,
         ...options.marketRegime,
       }
   return {
-    reportVersion: "3.0.0",
+    reportVersion: "6.0.0",
     result: {
-      contractVersion: "2.0.0",
+      contractVersion: "3.0.0",
       outcome: "NO_ACTION",
       reasonCodes: [reasonCode],
       evidence: [{
@@ -153,7 +212,7 @@ const noActionReport = (
     analysis: {
       ...analysis,
       accountChecks,
-      marketRegime,
+      marketRegimes: [marketRegime],
       externalContext: options.externalContext ?? analysis.externalContext,
       conflicts: options.conflicts ?? analysis.conflicts,
     },
@@ -164,35 +223,49 @@ const proposalReport = (externalContext = [
   exaSource("exa-support", "SUPPORTS"),
   exaSource("exa-challenge", "CONTRADICTS"),
 ]) => ({
-  reportVersion: "3.0.0",
+  reportVersion: "6.0.0",
   result: {
-    contractVersion: "2.0.0",
-    outcome: "PROPOSE_TRADE",
-    direction: "BULLISH",
-    thesis: "Current completed-session and intraday evidence support a bullish setup.",
-    candidate: {
-      underlying: "SPY",
-      structure: "BULL_CALL_SPREAD",
-      expiration: "2026-09-16",
-      longLeg: {
-        contractSymbol: "SPY260916C00600000",
-        strike: 600,
+    contractVersion: "3.0.0",
+    outcome: "PROPOSE_TRADES",
+    proposals: [{
+      priority: 1,
+      direction: "BULLISH",
+      thesis: "Current completed-session and intraday evidence support a bullish setup.",
+      candidate: {
+        underlying: "TSLA",
+        structure: "BULL_CALL_SPREAD",
+        expiration: "2026-09-16",
+        longLeg: {
+          contractSymbol: "TSLA260916C00600000",
+          strike: 600,
+        },
+        shortLeg: {
+          contractSymbol: "TSLA260916C00605000",
+          strike: 605,
+        },
       },
-      shortLeg: {
-        contractSymbol: "SPY260916C00605000",
-        strike: 605,
-      },
-    },
-    invalidation: ["Abandon if refreshed evidence changes the direction or legs."],
-    evidence: [{
-      claimId: "quote-fact",
-      kind: "SOURCED_FACT",
-      claim: "The application-owned quote snapshot contains both exact legs.",
-      snapshotRef: "alpaca-proposal-quotes-v1",
+      invalidation: ["Abandon if refreshed evidence changes the direction or legs."],
+      evidence: [{
+        claimId: "quote-fact",
+        kind: "SOURCED_FACT",
+        claim: "The application-owned quote snapshot contains both exact legs.",
+        snapshotRef: "alpaca-proposal-quotes-v2-TSLA",
+      }],
     }],
   },
   analysis: {
     ...baseAnalysis(),
+    broadMarketContext: {
+      verification: "AGENT_REPORTED",
+      temporalClass: "LIVE",
+      observedAt: "2026-08-26T14:30:00.000Z",
+      benchmark: "SPY",
+      signal: "BULLISH",
+      dailyClose: 650,
+      sma20: 645,
+      sma50: 640,
+      realizedVolatility20: 0.16,
+    },
     accountChecks: {
       verification: "AGENT_REPORTED",
       observedAt: "2026-08-26T14:30:00.000Z",
@@ -200,28 +273,77 @@ const proposalReport = (externalContext = [
       optionsTradingApproved: true,
       conflictingStrategyExposure: false,
     },
-    marketRegime: {
+    symbolEvaluations: [
+      {
+        underlying: "TSLA",
+        disposition: "PROPOSE",
+        direction: "BULLISH",
+        summary: "The strongest executable directional setup.",
+      },
+      {
+        underlying: "NVDA",
+        disposition: "WATCH",
+        direction: "BEARISH",
+        summary: "Weaker than the selected setup.",
+      },
+      {
+        underlying: "AMD",
+        disposition: "REJECT",
+        direction: "NEUTRAL",
+        summary: "No sufficiently coherent directional setup.",
+      },
+    ],
+    marketRegimes: [{
       verification: "AGENT_REPORTED",
       temporalClass: "LIVE",
       observedAt: "2026-08-26T14:30:00.000Z",
       signal: "BULLISH",
+      underlying: "TSLA",
       dailyClose: 603.25,
       sma20: 600.875,
       sma50: 597.125,
       sessionVwap: 603.787479,
       spotMidpoint: 606,
+      gapPercent: 0.004,
+      distanceFromSma20: 0.008530287140595228,
+      distanceFromSessionVwap: 0.003664402317379127,
+      intradayRealizedVolatility: 0.22,
       dailySessionCount: 50,
       intradayBarCount: 60,
-    },
+    }],
     symbolIndicators,
-    candidateEvaluation: {
+    optionSurfaces: [{
       verification: "AGENT_REPORTED",
       observedAt: "2026-08-26T14:30:00.000Z",
+      underlying: "TSLA",
+      expiration: "2026-09-16",
+      feed: "INDICATIVE",
+      atmImpliedVolatility: 0.2,
+      forecastRealizedVolatility: 0.006600661923000069,
+      ivRvVarianceSpread: 0.039956431262178266,
+      impliedMovePercent: 0.025,
+      termStructureSlope: 0.01,
+      putCallSkew25Delta: 0.03,
+      verticalLegIvDifference: 0.01,
+      smileCurvature: 0.015,
+      quoteCoverage: 1,
+      eventRisk: {
+        verification: "AGENT_REPORTED",
+        status: "CLEAR",
+        eventBeforeExpiration: false,
+        macroEvents: [],
+      },
+    }],
+    candidateEvaluations: [{
+      verification: "AGENT_REPORTED",
+      observedAt: "2026-08-26T14:30:00.000Z",
+      underlying: "TSLA",
+      expiration: "2026-09-16",
       dte: 21,
       legs: [
         {
           role: "LONG",
-          contractSymbol: "SPY260916C00600000",
+          contractSymbol: "TSLA260916C00600000",
           delta: 0.52,
           impliedVolatility: 0.2,
           gamma: 0.02,
@@ -233,7 +355,7 @@ const proposalReport = (externalContext = [
         },
         {
           role: "SHORT",
-          contractSymbol: "SPY260916C00605000",
+          contractSymbol: "TSLA260916C00605000",
           delta: 0.29,
           impliedVolatility: 0.19,
           gamma: 0.015,
@@ -244,7 +366,14 @@ const proposalReport = (externalContext = [
           openInterestDate: "2026-08-26",
         },
       ],
-    },
+      spreadGreeks: {
+        calculation: "LONG_MINUS_SHORT",
+        netDelta: 0.23,
+        netGamma: 0.005,
+        netTheta: -0.02,
+        netVega: 0.03,
+      },
+    }],
     externalContext,
     supportingFactors: ["Daily and intraday price relationships agree."],
     contradictingFactors: ["A current source identifies a bounded downside catalyst."],
@@ -267,19 +396,19 @@ const completed = (
   }
 }
 
-const screeningToolExpectations = ALLOWED_OPTION_UNDERLYINGS_V1.flatMap(
+const screeningToolExpectations = RESEARCH_EVALUATION_OPTION_UNDERLYINGS.flatMap(
   (symbol) => [
     {
       pattern: "alpaca_get_stock_bars",
-      input: { symbol, timeframe: "1Day", adjustment: "all", feed: "iex" },
+      input: { symbols: symbol, timeframe: "1Day", adjustment: "all", feed: "iex" },
     },
     {
       pattern: "alpaca_get_stock_bars",
-      input: { symbol, timeframe: "1Min", feed: "iex" },
+      input: { symbols: symbol, timeframe: "1Min", feed: "iex" },
     },
     {
       pattern: "alpaca_get_stock_latest_quote",
-      input: { symbol, feed: "iex" },
+      input: { symbols: symbol, feed: "iex" },
     },
   ],
 )
@@ -291,19 +420,30 @@ const screeningToolCalls = screeningToolExpectations.map(({ pattern, input }) =>
 const completeProposalToolCalls = (
   exaCallCount: number,
 ): readonly ResearchBehaviorToolCall[] => [
-  completed("alpaca_get_account"),
+  completed("alpaca_get_account_info"),
   completed("trusted_time"),
-  completed("alpaca_get_account_configurations"),
+  completed("alpaca_get_account_config"),
   completed("alpaca_get_all_positions"),
   completed("alpaca_get_orders"),
   completed("alpaca_get_calendar"),
-  ...Array.from({ length: exaCallCount }, () => completed("exa_search")),
+  completed("fmp_economics", {
+    endpoint: "economics-calendar",
+    from_date: "2026-08-26",
+    to_date: "2026-09-16",
+  }),
+  ...Array.from({ length: exaCallCount }, (_, index) =>
+    completed("exa_web_search_exa", {
+      query: index === 0
+        ? "TSLA options thesis current catalysts"
+        : "TSLA options thesis contradicting risks",
+    })
+  ),
   ...screeningToolCalls,
   completed("alpaca_get_option_chain", {
-    symbol: "SPY",
+    underlying_symbol: "TSLA",
     feed: "indicative",
   }),
-  completed("alpaca_get_option_contracts", { symbol: "SPY" }),
+  completed("alpaca_get_option_contracts", { underlying_symbols: "TSLA" }),
   completed("trusted_time"),
   completed("alpaca_get_clock"),
   completed("trusted_time"),
@@ -312,11 +452,12 @@ const completeProposalToolCalls = (
 const completeProposalToolExpectation = {
   expectedSymbolIndicators: symbolIndicators,
   requiredTools: [
-    "alpaca_get_account",
-    "alpaca_get_account_configurations",
+    "alpaca_get_account_info",
+    "alpaca_get_account_config",
     "alpaca_get_all_positions",
     "alpaca_get_orders",
     "alpaca_get_calendar",
+    "fmp_economics",
     "alpaca_get_stock_bars",
     "alpaca_get_stock_latest_quote",
     "alpaca_get_option_chain",
@@ -346,48 +487,51 @@ const completeProposalToolExpectation = {
     })),
     {
       pattern: "alpaca_get_option_chain",
-      input: { symbol: "SPY", feed: "indicative" },
+      input: { underlying_symbol: "TSLA", feed: "indicative" },
       minimum: 1,
       maximum: 1,
     },
     {
       pattern: "alpaca_get_option_contracts",
-      input: { symbol: "SPY" },
+      input: { underlying_symbols: "TSLA" },
       minimum: 1,
       maximum: 1,
     },
   ],
   requiredCompletedToolPrefix: [
-    "alpaca_get_account",
+    "alpaca_get_account_info",
     "trusted_time",
-    "alpaca_get_account_configurations",
+    "alpaca_get_account_config",
     "alpaca_get_all_positions",
     "alpaca_get_orders",
   ],
   requiredCompletedToolSequence: [
-    "alpaca_get_account",
+    "alpaca_get_account_info",
     "trusted_time",
-    "alpaca_get_account_configurations",
+    "alpaca_get_account_config",
     "alpaca_get_all_positions",
     "alpaca_get_orders",
     "alpaca_get_calendar",
     ...screeningToolExpectations,
     {
       pattern: "alpaca_get_option_chain",
-      input: { symbol: "SPY", feed: "indicative" },
+      input: { underlying_symbol: "TSLA", feed: "indicative" },
     },
     {
       pattern: "alpaca_get_option_contracts",
-      input: { symbol: "SPY" },
+      input: { underlying_symbols: "TSLA" },
     },
     "trusted_time",
     "alpaca_get_clock",
     "trusted_time",
   ],
   requiredAdjacentToolPairs: [
-    ["alpaca_get_account", "trusted_time"],
+    ["alpaca_get_account_info", "trusted_time"],
     [
-      { pattern: "alpaca_get_option_contracts", input: { symbol: "SPY" } },
+      {
+        pattern: "alpaca_get_option_contracts",
+        input: { underlying_symbols: "TSLA" },
+      },
       "trusted_time",
     ],
     ["alpaca_get_clock", "trusted_time"],
@@ -409,15 +553,15 @@ const completeProposalToolExpectation = {
   expectedAccountObservedAt: "2026-08-26T14:30:00.000Z",
   expectedSnapshotObservedAt: "2026-08-26T14:30:00.000Z",
   expectedProposalCandidate: {
-    underlying: "SPY",
+    underlying: "TSLA",
     structure: "BULL_CALL_SPREAD",
     expiration: "2026-09-16",
     longLeg: {
-      contractSymbol: "SPY260916C00600000",
+      contractSymbol: "TSLA260916C00600000",
       strike: 600,
     },
     shortLeg: {
-      contractSymbol: "SPY260916C00605000",
+      contractSymbol: "TSLA260916C00605000",
       strike: 605,
     },
   },
@@ -426,7 +570,7 @@ const completeProposalToolExpectation = {
     legs: [
       {
         role: "LONG",
-        contractSymbol: "SPY260916C00600000",
+        contractSymbol: "TSLA260916C00600000",
         delta: 0.52,
         impliedVolatility: 0.2,
         gamma: 0.02,
@@ -438,7 +582,7 @@ const completeProposalToolExpectation = {
       },
       {
         role: "SHORT",
-        contractSymbol: "SPY260916C00605000",
+        contractSymbol: "TSLA260916C00605000",
         delta: 0.29,
         impliedVolatility: 0.19,
         gamma: 0.015,
@@ -501,12 +645,12 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     description: "A recent but neutral Exa citation does not establish directional relevance.",
     rawResponse: json(noActionReport("SIGNAL_NOT_ACTIONABLE")),
     toolCalls: [
-      completed("alpaca_get_account"),
+      completed("alpaca_get_account_info"),
       completed("trusted_time"),
-      completed("alpaca_get_account_configurations"),
+      completed("alpaca_get_account_config"),
       completed("alpaca_get_all_positions"),
       completed("alpaca_get_orders"),
-      completed("exa_search"),
+      completed("exa_web_search_exa", { query: "TSLA current risks" }),
     ],
     expected: {
       outcome: "NO_ACTION",
@@ -631,7 +775,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     rawResponse: json(proposalReport()),
     toolCalls: completeProposalToolCalls(2),
     expected: {
-      outcome: "PROPOSE_TRADE",
+      outcome: "PROPOSE_TRADES",
       ...completeProposalToolExpectation,
       completedToolCounts: [
         ...completeProposalToolExpectation.completedToolCounts,
@@ -668,23 +812,23 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       completed("alpaca_get_orders"),
       completed("exa_search"),
       ...screeningToolCalls,
-      completed("alpaca_get_option_chain", { symbol: "SPY", feed: "indicative" }),
-      completed("alpaca_get_option_contracts", { symbol: "SPY" }),
+      completed("alpaca_get_option_chain", { symbol: "TSLA", feed: "indicative" }),
+      completed("alpaca_get_option_contracts", { symbol: "TSLA" }),
       completed("trusted_time"),
       completed("alpaca_get_stock_bars", {
-        symbol: "SPY",
+        symbol: "TSLA",
         timeframe: "1Day",
         adjustment: "all",
         feed: "iex",
       }),
       completed("alpaca_get_stock_bars", {
-        symbol: "SPY",
+        symbol: "TSLA",
         timeframe: "1Min",
         feed: "iex",
       }),
-      completed("alpaca_get_stock_latest_quote", { symbol: "SPY", feed: "iex" }),
-      completed("alpaca_get_option_chain", { symbol: "SPY", feed: "indicative" }),
-      completed("alpaca_get_option_contracts", { symbol: "SPY" }),
+      completed("alpaca_get_stock_latest_quote", { symbol: "TSLA", feed: "iex" }),
+      completed("alpaca_get_option_chain", { symbol: "TSLA", feed: "indicative" }),
+      completed("alpaca_get_option_contracts", { symbol: "TSLA" }),
       completed("trusted_time"),
     ],
     expected: {
@@ -709,7 +853,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       ],
       completedToolInputCounts: [
         ...screeningToolExpectations
-          .filter(({ input }) => input.symbol !== "SPY")
+          .filter(({ input }) => input.symbols !== "TSLA")
           .map(({ pattern, input }) => ({
             pattern,
             input,
@@ -719,7 +863,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         {
           pattern: "alpaca_get_stock_bars",
           input: {
-            symbol: "SPY",
+            symbols: "TSLA",
             timeframe: "1Day",
             adjustment: "all",
             feed: "iex",
@@ -729,25 +873,25 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         },
         {
           pattern: "alpaca_get_stock_bars",
-          input: { symbol: "SPY", timeframe: "1Min", feed: "iex" },
+          input: { symbols: "TSLA", timeframe: "1Min", feed: "iex" },
           minimum: 2,
           maximum: 2,
         },
         {
           pattern: "alpaca_get_stock_latest_quote",
-          input: { symbol: "SPY", feed: "iex" },
+          input: { symbols: "TSLA", feed: "iex" },
           minimum: 2,
           maximum: 2,
         },
         {
           pattern: "alpaca_get_option_chain",
-          input: { symbol: "SPY", feed: "indicative" },
+          input: { underlying_symbol: "TSLA", feed: "indicative" },
           minimum: 2,
           maximum: 2,
         },
         {
           pattern: "alpaca_get_option_contracts",
-          input: { symbol: "SPY" },
+          input: { underlying_symbols: "TSLA" },
           minimum: 2,
           maximum: 2,
         },
@@ -762,17 +906,17 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         ...screeningToolExpectations,
         {
           pattern: "alpaca_get_option_chain",
-          input: { symbol: "SPY", feed: "indicative" },
+          input: { symbol: "TSLA", feed: "indicative" },
         },
         {
           pattern: "alpaca_get_option_contracts",
-          input: { symbol: "SPY" },
+          input: { symbol: "TSLA" },
         },
         "trusted_time",
         {
           pattern: "alpaca_get_stock_bars",
           input: {
-            symbol: "SPY",
+            symbols: "TSLA",
             timeframe: "1Day",
             adjustment: "all",
             feed: "iex",
@@ -780,19 +924,19 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         },
         {
           pattern: "alpaca_get_stock_bars",
-          input: { symbol: "SPY", timeframe: "1Min", feed: "iex" },
+          input: { symbols: "TSLA", timeframe: "1Min", feed: "iex" },
         },
         {
           pattern: "alpaca_get_stock_latest_quote",
-          input: { symbol: "SPY", feed: "iex" },
+          input: { symbols: "TSLA", feed: "iex" },
         },
         {
           pattern: "alpaca_get_option_chain",
-          input: { symbol: "SPY", feed: "indicative" },
+          input: { underlying_symbol: "TSLA", feed: "indicative" },
         },
         {
           pattern: "alpaca_get_option_contracts",
-          input: { symbol: "SPY" },
+          input: { underlying_symbols: "TSLA" },
         },
         "trusted_time",
       ],
@@ -800,7 +944,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       completedAdjacentToolCounts: [{
         before: {
           pattern: "alpaca_get_option_contracts",
-          input: { symbol: "SPY" },
+            input: { underlying_symbols: "TSLA" },
         },
         after: "trusted_time",
         minimum: 2,
@@ -809,7 +953,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       forbiddenAfterAdjacentToolPairs: [{
         before: {
           pattern: "alpaca_get_option_contracts",
-          input: { symbol: "SPY" },
+            input: { underlying_symbols: "TSLA" },
         },
         after: "trusted_time",
         tools: ["*"],
@@ -835,12 +979,12 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       completed("exa_search"),
       ...screeningToolCalls,
       completed("alpaca_get_option_chain", {
-        symbol: "SPY",
+        underlying_symbol: "TSLA",
         feed: "indicative",
       }),
       completed("trusted_time"),
-      completed("alpaca_get_option_chain", {
-        symbols: ["SPY260916C00600000", "SPY260916C00605000"],
+      completed("alpaca_get_option_snapshot", {
+        symbols: "TSLA260916C00600000,TSLA260916C00605000",
         feed: "indicative",
       }),
     ],
@@ -848,58 +992,51 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       outcome: "NO_ACTION",
       reasonCode: "CANDIDATE_CHANGED",
       requiredTools: [
-        "alpaca_get_account",
+        "alpaca_get_account_info",
         "trusted_time",
-        "alpaca_get_account_configurations",
+        "alpaca_get_account_config",
         "alpaca_get_all_positions",
         "alpaca_get_orders",
         "exa_*",
       ],
-      requiredCompletedToolPrefix: ["alpaca_get_account"],
-      requiredAdjacentToolPairs: [["alpaca_get_account", "trusted_time"]],
+      requiredCompletedToolPrefix: ["alpaca_get_account_info"],
+      requiredAdjacentToolPairs: [["alpaca_get_account_info", "trusted_time"]],
       expectedAccountObservedAt: "2026-08-26T14:30:00.000Z",
       completedToolCounts: [
-        { pattern: "alpaca_get_option_chain", minimum: 2, maximum: 2 },
+        { pattern: "alpaca_get_option_chain", minimum: 1, maximum: 1 },
+        { pattern: "alpaca_get_option_snapshot", minimum: 1, maximum: 1 },
       ],
       completedToolInputCounts: [
         {
           pattern: "alpaca_get_option_chain",
-          input: { symbol: "SPY", feed: "indicative" },
+          input: { underlying_symbol: "TSLA", feed: "indicative" },
           minimum: 1,
-          maximum: 2,
+          maximum: 1,
         },
       ],
       requiredCompletedToolSequence: [
-        "alpaca_get_account",
+        "alpaca_get_account_info",
         "trusted_time",
-        "alpaca_get_account_configurations",
+        "alpaca_get_account_config",
         "alpaca_get_all_positions",
         "alpaca_get_orders",
         "exa_*",
         {
           pattern: "alpaca_get_option_chain",
-          input: { symbol: "SPY", feed: "indicative" },
+          input: { underlying_symbol: "TSLA", feed: "indicative" },
         },
         "trusted_time",
         {
-          anyOf: [
-            {
-              pattern: "alpaca_get_option_chain",
-              input: { symbol: "SPY", feed: "indicative" },
-            },
-            {
-              pattern: "alpaca_get_option_chain",
-              input: {
-                symbols: ["SPY260916C00600000", "SPY260916C00605000"],
-                feed: "indicative",
-              },
-            },
-          ],
+          pattern: "alpaca_get_option_snapshot",
+          input: {
+            symbols: "TSLA260916C00600000,TSLA260916C00605000",
+            feed: "indicative",
+          },
         },
       ],
       forbiddenAfterCompletedToolOccurrence: [{
-        anchor: "alpaca_get_option_chain",
-        occurrence: 2,
+        anchor: "alpaca_get_option_snapshot",
+        occurrence: 1,
         tools: ["*"],
       }],
     },
@@ -910,7 +1047,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     rawResponse: json(proposalReport()),
     toolCalls: completeProposalToolCalls(2),
     expected: {
-      outcome: "PROPOSE_TRADE",
+      outcome: "PROPOSE_TRADES",
       ...completeProposalToolExpectation,
       completedToolCounts: [
         ...completeProposalToolExpectation.completedToolCounts,
@@ -972,7 +1109,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
           pattern,
           input,
           minimum: 1,
-          maximum: input.symbol === "SPY" ? 2 : 1,
+            maximum: input.symbols === "TSLA" ? 2 : 1,
         })),
       ],
       requiredCompletedToolPrefix: ["alpaca_get_account"],
@@ -991,13 +1128,13 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         [
           {
             anyOf: [
-              ...ALLOWED_OPTION_UNDERLYINGS_V1.map((symbol) => ({
+              ...RESEARCH_EVALUATION_OPTION_UNDERLYINGS.map((symbol) => ({
                 pattern: "alpaca_get_stock_latest_quote",
                 input: { symbol, feed: "iex" },
               })),
               {
                 pattern: "alpaca_get_option_chain",
-                input: { symbol: "SPY", feed: "indicative" },
+                input: { symbol: "TSLA", feed: "indicative" },
               },
             ],
           },
@@ -1007,13 +1144,13 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       forbiddenAfterAdjacentToolPairs: [{
         before: {
           anyOf: [
-            ...ALLOWED_OPTION_UNDERLYINGS_V1.map((symbol) => ({
+            ...RESEARCH_EVALUATION_OPTION_UNDERLYINGS.map((symbol) => ({
               pattern: "alpaca_get_stock_latest_quote",
               input: { symbol, feed: "iex" },
             })),
             {
               pattern: "alpaca_get_option_chain",
-              input: { symbol: "SPY", feed: "indicative" },
+              input: { symbol: "TSLA", feed: "indicative" },
             },
           ],
         },
@@ -1065,7 +1202,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     rawResponse: json(noActionReport("SIGNAL_NOT_ACTIONABLE")),
     toolCalls: [completed("trusted_time")],
     expected: {
-      outcome: "PROPOSE_TRADE",
+      outcome: "PROPOSE_TRADES",
       reasonCode: "NO_ELIGIBLE_SPREAD",
     },
     graderOnly: true,
@@ -1100,7 +1237,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     description: "Retrieval before the account gate leaves the order unsatisfied.",
     rawResponse: json(noActionReport("SIGNAL_NOT_ACTIONABLE")),
     toolCalls: [
-      completed("exa_search", { query: "SPY outlook" }),
+      completed("exa_search", { query: "TSLA outlook" }),
       completed("alpaca_get_account"),
     ],
     expected: {
@@ -1119,7 +1256,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       completed("exa_search", { query: "two" }),
       completed("exa_search", { query: "three" }),
       completed("alpaca_get_stock_bars", {
-        symbol: "SPY",
+        symbol: "TSLA",
         timeframe: "1Day",
         adjustment: "all",
         feed: "sip",
@@ -1130,7 +1267,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       completedToolInputCounts: [{
         pattern: "alpaca_get_stock_bars",
         input: {
-          symbol: "SPY",
+          symbol: "TSLA",
           timeframe: "1Day",
           adjustment: "all",
           feed: "iex",
@@ -1150,7 +1287,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
       completed("alpaca_get_account"),
       completed("alpaca_get_all_positions"),
       completed("trusted_time"),
-      completed("exa_search", { query: "SPY outlook" }),
+      completed("exa_search", { query: "TSLA outlook" }),
     ],
     expected: {
       requiredCompletedToolPrefix: ["alpaca_get_account", "trusted_time"],
@@ -1197,7 +1334,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         externalContext: [exaSource("kept-source", "NEUTRAL")],
       }),
     ),
-    toolCalls: [completed("exa_search", { query: "SPY" })],
+    toolCalls: [completed("exa_search", { query: "TSLA" })],
     expected: {
       requiredExternalSourceIds: ["dropped-source"],
       requiredExternalSourceRelevances: ["CONTRADICTS"],
@@ -1216,7 +1353,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         ],
       }),
     ),
-    toolCalls: [completed("exa_search", { query: "SPY" })],
+    toolCalls: [completed("exa_search", { query: "TSLA" })],
     expected: { forbiddenExternalSourceIds: ["retracted-story"] },
     graderOnly: true,
     expectedIssues: ["FORBIDDEN_SOURCE_RETAINED"],
@@ -1233,7 +1370,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         conflicts: [],
       }),
     ),
-    toolCalls: [completed("exa_search", { query: "SPY" })],
+    toolCalls: [completed("exa_search", { query: "TSLA" })],
     expected: { requireMaterialConflict: true },
     graderOnly: true,
     expectedIssues: ["MATERIAL_CONFLICT_NOT_RETAINED"],
@@ -1246,7 +1383,7 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
         externalContext: [exaSource("exa-support", "SUPPORTS")],
       }),
     ),
-    toolCalls: [completed("exa_search", { query: "SPY" })],
+    toolCalls: [completed("exa_search", { query: "TSLA" })],
     expected: {
       requiredExternalSources: [{
         url: "https://example.com/exa-support",
@@ -1264,15 +1401,15 @@ export const researchBehaviorScenarios: readonly ResearchBehaviorScenario[] = [
     toolCalls: completeProposalToolCalls(2),
     expected: {
       ...completeProposalToolExpectation,
-      outcome: "PROPOSE_TRADE",
+      outcome: "PROPOSE_TRADES",
       expectedAccountObservedAt: "2026-08-26T13:00:00.000Z",
       expectedAccountChecks: { accountStatus: "UNKNOWN" },
       expectedProposalCandidate: {
-        underlying: "SPY",
+        underlying: "TSLA",
         structure: "BULL_CALL_SPREAD",
         expiration: "2026-09-18",
-        longLeg: { contractSymbol: "SPY260918C00600000", strike: 600 },
-        shortLeg: { contractSymbol: "SPY260918C00605000", strike: 605 },
+        longLeg: { contractSymbol: "TSLA260918C00600000", strike: 600 },
+        shortLeg: { contractSymbol: "TSLA260918C00605000", strike: 605 },
       },
     },
     graderOnly: true,

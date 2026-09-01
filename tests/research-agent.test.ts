@@ -14,15 +14,29 @@ import {
 } from "../src/research/research-agent.js"
 import { projectResearchContextV1 } from "../src/research/research-context-v1.js"
 
+const optionUniverse = {
+  snapshotVersion: "2.0.0",
+  policyVersion: "4.0.0",
+  snapshotId: `option-universe-v2-${"0".repeat(64)}`,
+  generatedAt: "2026-08-25T13:29:00.000Z",
+  sessionDate: "2026-08-25",
+  source: "ALPACA_OPTIONS_SCREENERS",
+  candidates: [
+    { rank: 1, underlying: "TSLA", activityRank: 2, sessionPercentChange: 4.2 },
+    { rank: 2, underlying: "NVDA", activityRank: 1, sessionPercentChange: -3.1 },
+    { rank: 3, underlying: "AMD", activityRank: 8, sessionPercentChange: 2.4 },
+  ],
+} as const
+
 describe("research agent request construction", () => {
   it("uses the fixed checked-in agent identity", () => {
     expect(RESEARCH_AGENT_NAME).toBe("research")
-    expect(RESEARCH_PROMPT_VERSION).toBe("3.0.3")
+    expect(RESEARCH_PROMPT_VERSION).toBe("6.0.0")
   })
 
   it("publishes bounded research budgets", () => {
-    expect(RESEARCH_MAX_AGENT_STEPS).toBe(24)
-    expect(RESEARCH_MAX_TOOL_CALLS).toBe(32)
+    expect(RESEARCH_MAX_AGENT_STEPS).toBe(32)
+    expect(RESEARCH_MAX_TOOL_CALLS).toBe(64)
     expect(RESEARCH_MAX_EXA_CALLS).toBe(4)
     expect(RESEARCH_MAX_FMP_CALLS).toBe(3)
     expect(RESEARCH_MAX_SNAPSHOT_REBUILDS).toBe(1)
@@ -52,12 +66,15 @@ describe("research agent request construction", () => {
       buildResearchCyclePrompt(
         3,
         new Date("2026-08-25T13:30:00.000Z"),
+        optionUniverse,
         "Compare downside catalysts.",
       ),
     ).toBe(
       [
         "Run structured research cycle 3 at 2026-08-25T13:30:00.000Z.",
-        "Compare SPY, QQQ, IWM using current regime evidence, select at most one underlying, then research one eligible BULL_CALL_SPREAD or BEAR_PUT_SPREAD candidate or conclude NO_ACTION.",
+        "The application-authoritative option universe follows. Copy it exactly into analysis.optionUniverse; do not add or substitute symbols.",
+        JSON.stringify(optionUniverse),
+        "Lightly evaluate every shortlisted underlying (TSLA, NVDA, AMD), promote at most three to deep option research, and return either NO_ACTION or one to three ranked BULL_CALL_SPREAD or BEAR_PUT_SPREAD proposals.",
         "Current operator objective: Compare downside catalysts.",
       ].join("\n"),
     )
@@ -65,7 +82,11 @@ describe("research agent request construction", () => {
 
   it("does not add an empty operator objective", () => {
     expect(
-      buildResearchCyclePrompt(1, new Date("2026-08-25T13:30:00.000Z")),
+      buildResearchCyclePrompt(
+        1,
+        new Date("2026-08-25T13:30:00.000Z"),
+        optionUniverse,
+      ),
     ).not.toContain("Current operator objective")
   })
 
@@ -92,6 +113,7 @@ describe("research agent request construction", () => {
     const prompt = buildResearchCyclePrompt(
       1,
       new Date("2026-08-25T13:30:00.000Z"),
+      optionUniverse,
       undefined,
       context,
     )
@@ -108,6 +130,7 @@ describe("research agent request construction", () => {
     const prompt = buildResearchCyclePrompt(
       1,
       new Date("2026-08-25T12:00:00.000Z"),
+      optionUniverse,
       undefined,
       undefined,
       {
@@ -121,13 +144,14 @@ describe("research agent request construction", () => {
 
     expect(prompt).toContain("Application-authoritative")
     expect(prompt).toContain('"tradeIntentEligible":false')
-    expect(prompt).toContain("Do not return PROPOSE_TRADE")
+    expect(prompt).toContain("Do not return PROPOSE_TRADES")
   })
 
   it("labels anytime dry runs as research-only", () => {
     const prompt = buildResearchCyclePrompt(
       1,
       new Date("2026-08-25T23:00:00.000Z"),
+      optionUniverse,
       undefined,
       undefined,
       {
@@ -141,7 +165,7 @@ describe("research agent request construction", () => {
     )
 
     expect(prompt).toContain("research-only dry run")
-    expect(prompt).toContain("Never return PROPOSE_TRADE")
+    expect(prompt).toContain("Never return PROPOSE_TRADES")
     expect(prompt).toContain('"researchMode":"DRY_RUN"')
   })
 
@@ -149,6 +173,7 @@ describe("research agent request construction", () => {
     const prompt = buildResearchCyclePrompt(
       1,
       new Date("2026-08-25T23:00:00.000Z"),
+      optionUniverse,
       undefined,
       undefined,
       {
@@ -165,8 +190,8 @@ describe("research agent request construction", () => {
     )
 
     expect(prompt).toContain("non-executing dry run")
-    expect(prompt).toContain("A fresh PROPOSE_TRADE may be returned")
+    expect(prompt).toContain("Fresh PROPOSE_TRADES candidates may be returned")
     expect(prompt).toContain('"researchMode":"DRY_RUN"')
-    expect(prompt).not.toContain("Never return PROPOSE_TRADE")
+    expect(prompt).not.toContain("Never return PROPOSE_TRADES")
   })
 })

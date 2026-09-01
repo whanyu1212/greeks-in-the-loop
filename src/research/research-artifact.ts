@@ -3,14 +3,13 @@ import { join } from "node:path"
 
 import { z } from "zod"
 
-import type { PreliminaryResearchV2 } from "../contracts/preliminary-research-v2.js"
-import type { ResearchDecisionV2 } from "../contracts/research-decision-v2.js"
-import type { ResearchReportV3 } from "../contracts/research-report-v3.js"
-import type { TradeIntentV2 } from "../contracts/trade-intent-v2.js"
+import type { ResearchDecisionV3 } from "../contracts/research-decision-v3.js"
+import type { ResearchReportV6 } from "../contracts/research-report-v6.js"
+import type { TradeIntentV3 } from "../contracts/trade-intent-v3.js"
 import {
   LEDGER_EVENT_VERSION,
   type StoredLedgerEvent,
-  type StoredLedgerEventV2,
+  type StoredLedgerEventV4,
 } from "../event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import type { SchemaViolationCategory } from "../shared/schema-diagnostics.js"
@@ -24,7 +23,7 @@ import {
 } from "../scheduling/research-eligibility.js"
 import type { ResearchInvocationV1 } from "./research-invocation-v1.js"
 
-export const RESEARCH_RUN_VERSION = "3.0.0" as const
+export const RESEARCH_RUN_VERSION = "6.0.0" as const
 export const SUPPORTED_RESEARCH_RUN_VERSIONS = [RESEARCH_RUN_VERSION] as const
 export const DEFAULT_RESEARCH_ARTIFACT_ROOT = "workspace/research" as const
 
@@ -36,30 +35,21 @@ type RejectionIssue = Readonly<{
 
 export type ResearchRunOutcomeV1 =
   | Readonly<{
-      outcomeVersion: "1.0.0"
-      status: "PRELIMINARY_RESEARCH_RETAINED"
-      research: PreliminaryResearchV2
-    }>
-  | Readonly<{
-      outcomeVersion: "1.0.0"
+      outcomeVersion: "3.0.0"
       status: "VALIDATED_NO_ACTION"
-      decision: Extract<ResearchDecisionV2, { outcome: "NO_ACTION" }>
+      decision: Extract<ResearchDecisionV3, { outcome: "NO_ACTION" }>
     }>
   | Readonly<{
-      outcomeVersion: "1.0.0"
+      outcomeVersion: "3.0.0"
       status: "DECISION_REJECTED"
       issues: readonly RejectionIssue[]
     }>
   | Readonly<{
-      outcomeVersion: "1.0.0"
-      status: "INTENT_DERIVATION_REJECTED"
-      reasons: readonly string[]
-    }>
-  | Readonly<{
-      outcomeVersion: "1.0.0"
-      status: "INTENT_DERIVED"
-      decision: Extract<ResearchDecisionV2, { outcome: "PROPOSE_TRADE" }>
-      intent: TradeIntentV2
+      outcomeVersion: "3.0.0"
+      status: "PORTFOLIO_EVALUATED"
+      decision: Extract<ResearchDecisionV3, { outcome: "PROPOSE_TRADES" }>
+      intents: readonly TradeIntentV3[]
+      selectedUnderlyings: readonly string[]
     }>
 
 export type ResearchRunV1 = Readonly<{
@@ -83,13 +73,16 @@ export type ResearchRunV1 = Readonly<{
     freshUntil: string
     temporalClass?: "LIVE" | "DELAYED" | "PRIOR_CLOSE" | undefined
   }>[]
-  preliminaryResearch?: PreliminaryResearchV2
-  researchReport?: ResearchReportV3
-  validatedDecision?: ResearchDecisionV2
+  researchReport?: ResearchReportV6
+  validatedDecision?: ResearchDecisionV3
   shadowRisk?: Readonly<{
     decision: ShadowRiskDecisionV1
     breakerTransitions: readonly RiskBreakerTransitionV1[]
   }>
+  shadowRiskResults?: readonly Readonly<{
+    decision: ShadowRiskDecisionV1
+    breakerTransitions: readonly RiskBreakerTransitionV1[]
+  }>[]
   outcome: ResearchRunOutcomeV1
   ledger: Readonly<{
     firstSequence: number
@@ -118,11 +111,11 @@ export function projectResearchRunV1(
 ): ResearchRunV1 {
   if (inputEvents.length === 0) throw new Error("Research cycle was not found")
   const currentEvents = inputEvents.filter(
-    (event): event is StoredLedgerEventV2 =>
+    (event): event is StoredLedgerEventV4 =>
       event.eventVersion === LEDGER_EVENT_VERSION,
   )
   if (currentEvents.length !== inputEvents.length) {
-    throw new Error("Legacy ledger cycles cannot be exported as research run V3")
+    throw new Error("Legacy ledger cycles cannot be exported as research run V5")
   }
   const events = [...currentEvents].sort(
     (left, right) => left.sequence - right.sequence,
@@ -156,10 +149,6 @@ export function projectResearchRunV1(
     }
   }
 
-  const preliminaryEvent = optionalOne(
-    events.filter((event) => event.eventType === "PRELIMINARY_RESEARCH_RECORDED"),
-    "preliminary-research",
-  )
   const reportEvent = optionalOne(
     events.filter((event) => event.eventType === "RESEARCH_REPORT_RECORDED"),
     "research-report",
@@ -168,47 +157,41 @@ export function projectResearchRunV1(
     events.filter((event) => event.eventType === "RESEARCH_DECISION_VALIDATED"),
     "validated-decision",
   )
-  const decisionRejectionEvent = optionalOne(
-    events.filter((event) => event.eventType === "RESEARCH_DECISION_REJECTED"),
-    "decision-rejection",
+  const decisionRejectionEvents = events.filter(
+    (event) => event.eventType === "RESEARCH_DECISION_REJECTED",
   )
-  const derivationRejectionEvent = optionalOne(
+  const decisionRejectionEvent = decisionRejectionEvents.find(
+    ({ payload }) => payload.proposal === undefined,
+  )
+  const intentEvents = events.filter(
+    (event) => event.eventType === "TRADE_INTENT_DERIVED",
+  )
+  const riskEvents = events.filter(
+    (event) => event.eventType === "RISK_SHADOW_DECISION_RECORDED",
+  )
+  const portfolioPlanEvent = optionalOne(
     events.filter(
-      (event) => event.eventType === "TRADE_INTENT_DERIVATION_REJECTED",
+      (event) => event.eventType === "PORTFOLIO_SHADOW_PLAN_RECORDED",
     ),
-    "intent-derivation-rejection",
-  )
-  const intentEvent = optionalOne(
-    events.filter((event) => event.eventType === "TRADE_INTENT_DERIVED"),
-    "trade-intent",
-  )
-  const riskEvent = optionalOne(
-    events.filter(
-      (event) => event.eventType === "RISK_SHADOW_DECISION_RECORDED",
-    ),
-    "shadow-risk-decision",
+    "portfolio-shadow-plan",
   )
   const breakerEvents = events.filter(
     (event) => event.eventType === "RISK_BREAKER_LATCHED",
   )
-  if (riskEvent === undefined && breakerEvents.length > 0) {
+  if (riskEvents.length === 0 && breakerEvents.length > 0) {
     throw new Error("Breaker transitions require a shadow-risk decision")
   }
 
   let outcome: ResearchRunOutcomeV1
   switch (completed.payload.status) {
-    case "PRELIMINARY_RESEARCH_RETAINED":
-      if (preliminaryEvent === undefined) throw new Error("Retained preliminary research is missing")
-      outcome = { outcomeVersion: "1.0.0", status: completed.payload.status, research: preliminaryEvent.payload.research }
-      break
     case "VALIDATED_NO_ACTION":
       if (decisionEvent?.payload.decision.outcome !== "NO_ACTION") throw new Error("Validated no-action decision is missing")
-      outcome = { outcomeVersion: "1.0.0", status: completed.payload.status, decision: decisionEvent.payload.decision }
+      outcome = { outcomeVersion: "3.0.0", status: completed.payload.status, decision: decisionEvent.payload.decision }
       break
     case "DECISION_REJECTED":
       if (decisionRejectionEvent === undefined) throw new Error("Decision rejection details are missing")
       outcome = {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: completed.payload.status,
         issues: decisionRejectionEvent.payload.issues.map((issue) => ({
           code: issue.code,
@@ -219,20 +202,41 @@ export function projectResearchRunV1(
         })),
       }
       break
-    case "INTENT_DERIVATION_REJECTED":
-      if (derivationRejectionEvent === undefined) throw new Error("Intent derivation rejection details are missing")
-      outcome = { outcomeVersion: "1.0.0", status: completed.payload.status, reasons: derivationRejectionEvent.payload.reasons }
-      break
-    case "INTENT_DERIVED":
-      if (decisionEvent?.payload.decision.outcome !== "PROPOSE_TRADE" || intentEvent === undefined) {
-        throw new Error("Derived intent or its validated decision is missing")
+    case "PORTFOLIO_EVALUATED":
+      if (
+        decisionEvent?.payload.decision.outcome !== "PROPOSE_TRADES" ||
+        portfolioPlanEvent === undefined
+      ) {
+        throw new Error("Evaluated portfolio or its validated decision is missing")
       }
-      outcome = { outcomeVersion: "1.0.0", status: completed.payload.status, decision: decisionEvent.payload.decision, intent: intentEvent.payload.intent }
+      outcome = {
+        outcomeVersion: "3.0.0",
+        status: completed.payload.status,
+        decision: decisionEvent.payload.decision,
+        intents: intentEvents.map(({ payload }) => payload.intent),
+        selectedUnderlyings: portfolioPlanEvent.payload.selectedUnderlyings,
+      }
       break
   }
-  if (riskEvent !== undefined && outcome.status !== "INTENT_DERIVED") {
-    throw new Error("Shadow risk requires a derived trade intent")
+  if (riskEvents.length > 0 && outcome.status !== "PORTFOLIO_EVALUATED") {
+    throw new Error("Shadow risk requires an evaluated portfolio")
   }
+
+  const shadowRiskResults = riskEvents.map((riskEvent) => ({
+    decision: riskEvent.payload.decision,
+    breakerTransitions: [] as readonly RiskBreakerTransitionV1[],
+  }))
+  const selectedUnderlying = outcome.status === "PORTFOLIO_EVALUATED"
+    ? outcome.selectedUnderlyings[0]
+    : undefined
+  const selectedIntentIndex = selectedUnderlying === undefined
+    ? -1
+    : intentEvents.findIndex(({ payload }) =>
+        payload.intent.longContractSymbol.startsWith(selectedUnderlying)
+      )
+  const primaryShadowRisk = selectedIntentIndex >= 0
+    ? shadowRiskResults[selectedIntentIndex]
+    : shadowRiskResults[0]
 
   const cycleId = start.cycleId
   const sessionId = start.sessionId
@@ -256,17 +260,12 @@ export function projectResearchRunV1(
     evidenceSnapshots: events
       .filter((event) => event.eventType === "EVIDENCE_SNAPSHOT_REFERENCED")
       .map((event) => event.payload),
-    ...(preliminaryEvent === undefined ? {} : { preliminaryResearch: preliminaryEvent.payload.research }),
     ...(reportEvent === undefined ? {} : { researchReport: reportEvent.payload.report }),
     ...(decisionEvent === undefined ? {} : { validatedDecision: decisionEvent.payload.decision }),
-    ...(riskEvent === undefined
+    ...(primaryShadowRisk === undefined
       ? {}
-      : {
-          shadowRisk: {
-            decision: riskEvent.payload.decision,
-            breakerTransitions: breakerEvents.map((event) => event.payload),
-          },
-        }),
+      : { shadowRisk: primaryShadowRisk }),
+    ...(shadowRiskResults.length === 0 ? {} : { shadowRiskResults }),
     outcome,
     ledger: {
       firstSequence: start.sequence,

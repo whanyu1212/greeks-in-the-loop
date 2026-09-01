@@ -116,8 +116,8 @@ describe("risk-state reconciliation v1", () => {
   })
 
   it.each([
-    ["unsupported", "DIA260918C00600000", "DIA260918C00605000"],
     ["impossible-date", "SPY260431C00600000", "SPY260431C00605000"],
+    ["malformed", "SPY-bad", "SPY-worse"],
   ])("fails closed for a %s option position", (_case, long, short) => {
     const positions = [position(long, 1), position(short, -1)]
     const result = reconcile({
@@ -145,7 +145,7 @@ describe("risk-state reconciliation v1", () => {
     })
   })
 
-  it("maps a non-allowlisted opening order to existing bounded reasons", () => {
+  it("recognizes a pending entry for a dynamically selected OCC root", () => {
     const pending = order({
       legs: [
         {
@@ -165,14 +165,14 @@ describe("risk-state reconciliation v1", () => {
       finalBrokerState: { positions: [], openOrders: [pending] },
     })
 
-    expect(result.success && result.portfolio.consistent).toBe(false)
-    expect(result.success && result.reasonCodes).toEqual([
-      "UNKNOWN_OPEN_ORDER",
-      "UNMATCHED_PENDING_ENTRY",
-    ])
+    expect(result.success && result.portfolio).toMatchObject({
+      consistent: true,
+      pendingEntryCount: 1,
+    })
+    expect(result.success && result.reasonCodes).toEqual([])
   })
 
-  it("rejects a spread whose legs use different allowlisted underlyings", () => {
+  it("rejects a spread whose legs use different underlyings", () => {
     const positions = [
       position("SPY260918C00600000", 1),
       position("QQQ260918C00605000", -1),

@@ -2,9 +2,8 @@ import { z } from "zod"
 
 import type { ConfirmedOptionQuoteSnapshotV1 } from "../market-data/alpaca-option-quotes.js"
 import {
+  alpacaOptionSymbolSchema,
   parseAlpacaOptionSymbol,
-  allowedAlpacaOptionSymbolV1Schema,
-  validateOptionUniverseV1,
 } from "../shared/alpaca-option-identity.js"
 import {
   applicationVerifiedAccountV1Schema,
@@ -30,7 +29,7 @@ const positiveProviderNumber = z
   .positive()
   .max(Number.MAX_SAFE_INTEGER)
 const brokerIdentifier = z.string().min(1).max(128)
-const optionSymbol = allowedAlpacaOptionSymbolV1Schema
+const optionSymbol = alpacaOptionSymbolSchema
 
 export const durableRiskControlStateV1Schema = z
   .object({
@@ -158,8 +157,6 @@ const isSupportedSpread = (
   if (
     !long.success ||
     !short.success ||
-    !validateOptionUniverseV1(long.identity).success ||
-    !validateOptionUniverseV1(short.identity).success ||
     long.identity.root !== short.identity.root ||
     long.identity.expiration !== short.identity.expiration ||
     long.identity.optionType !== short.identity.optionType

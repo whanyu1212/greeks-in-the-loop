@@ -29,6 +29,7 @@ import {
 } from "./event-ledger/research-lifecycle-recorder.js"
 import { createSqliteLedgerStore } from "./event-ledger/sqlite-ledger-store.js"
 import { createAlpacaOptionQuoteProvider } from "./market-data/alpaca-option-quotes.js"
+import { createAlpacaOptionUniverseProvider } from "./market-data/alpaca-option-universe.js"
 import { createAlpacaCalendarClient } from "./market-data/alpaca-calendar-client.js"
 import { summarizeOpenCodeInvocation } from "./observability/opencode-telemetry-summary.js"
 import { startResearchTelemetry } from "./observability/research-telemetry.js"
@@ -60,7 +61,7 @@ import {
 } from "./research/research-context-v1.js"
 import {
   processResearchCycle,
-  repairResearchReportV3ResponseOnce,
+  repairResearchReportV6ResponseOnce,
 } from "./research/research-cycle.js"
 import { createAlpacaRiskStateProvider } from "./risk/alpaca-risk-state-provider.js"
 import {
@@ -204,7 +205,7 @@ if (maxBackoffMs / 2 < intervalMs) {
 if (maxBackoffMs > MAX_AGENT_LOOP_DELAY_MS) {
   throw new Error(`AGENT_MAX_BACKOFF_MS must not exceed ${MAX_AGENT_LOOP_DELAY_MS}`)
 }
-const cycleTimeoutMs = readPositiveInteger("AGENT_CYCLE_TIMEOUT_MS", 5 * 60 * 1000)
+const cycleTimeoutMs = readPositiveInteger("AGENT_CYCLE_TIMEOUT_MS", 10 * 60 * 1000)
 const cycleAbortTimeoutMs = readPositiveInteger("AGENT_CYCLE_ABORT_TIMEOUT_MS", 5_000)
 const maxCycles = once
   ? 1
@@ -229,6 +230,16 @@ const quoteProvider = createAlpacaOptionQuoteProvider({
   baseUrl:
     readSetting("ALPACA_MARKET_DATA_BASE_URL")?.trim() ||
     "https://data.alpaca.markets",
+})
+const optionUniverseProvider = createAlpacaOptionUniverseProvider({
+  apiKey: alpacaApiKey,
+  secretKey: alpacaSecretKey,
+  dataBaseUrl:
+    readSetting("ALPACA_MARKET_DATA_BASE_URL")?.trim() ||
+    "https://data.alpaca.markets",
+  tradingBaseUrl:
+    readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
+    "https://paper-api.alpaca.markets",
 })
 const riskStateProvider = createAlpacaRiskStateProvider({
   apiKey: alpacaApiKey,
@@ -479,6 +490,17 @@ try {
             timeoutMs: cycleTimeoutMs,
             shutdownSignal: abortController.signal,
             run: async (signal) => {
+              stageReporter.report("universe.discover", "STARTED")
+              const optionUniverse = await cycleTrace.run(
+                "market.option_universe.discover",
+                () => optionUniverseProvider.discover(sessionDate, signal),
+              )
+              stageReporter.report("universe.discover", "COMPLETED", {
+                snapshotId: optionUniverse.snapshotId,
+                candidates: optionUniverse.candidates.map(
+                  ({ underlying }) => underlying,
+                ),
+              })
               const response = await cycleTrace.run(
                 "opencode.session.prompt",
                 async () => {
@@ -541,12 +563,13 @@ try {
                     buildResearchCyclePrompt(
                       cycleNumber,
                       new Date(cycle.startedAt),
+                      optionUniverse,
                       task,
                       researchContext,
                       initialEligibility,
                     ),
                   )
-                  const resolvedResponse = await repairResearchReportV3ResponseOnce(
+                  const resolvedResponse = await repairResearchReportV6ResponseOnce(
                     textResponse(initialResponse.parts),
                     async (issues) => {
                       const availableTools = await runtime.client.tool.ids({ signal })
@@ -649,6 +672,7 @@ try {
               return processResearchCycle({
                 rawResponse: response.text,
                 cycleStartedAt: cycle.startedAt,
+                optionUniverse,
                 signal,
                 quoteProvider,
                 shadowRiskEvaluator,

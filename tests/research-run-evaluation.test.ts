@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import type { PreliminaryResearchV2 } from "../src/contracts/preliminary-research-v2.js"
 import {
-  validateResearchDecisionV2,
+  validateResearchDecisionV3,
   type ProposedTradeDecisionV2,
-} from "../src/contracts/research-decision-v2.js"
-import type { ResearchReportV3 } from "../src/contracts/research-report-v3.js"
-import { deriveTradeIntentV2 } from "../src/contracts/trade-intent-v2.js"
+} from "../src/contracts/research-decision-v3.js"
+import type { ResearchReportV6 } from "../src/contracts/research-report-v6.js"
+import { deriveTradeIntentV3 } from "../src/contracts/trade-intent-v3.js"
 import {
   evaluateResearchRunV1,
   researchRunEvaluationV1Schema,
@@ -17,13 +16,13 @@ import {
   PROPOSAL_QUOTE_SNAPSHOT_REF,
 } from "../src/research/research-cycle.js"
 
-const preliminaryResearch = (): PreliminaryResearchV2 => ({
-  contractVersion: "2.0.0",
-  outcome: "PRELIMINARY_RESEARCH",
-  targetSessionDate: "2026-08-26",
-  direction: "UNDETERMINED",
-  thesis: "private-thesis-marker",
-  invalidation: ["private-invalidation-marker"],
+const noActionDecision = (): Extract<
+  ResearchReportV6["result"],
+  { outcome: "NO_ACTION" }
+> => ({
+  contractVersion: "3.0.0",
+  outcome: "NO_ACTION",
+  reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
   evidence: [
     {
       claimId: "prior-close",
@@ -41,12 +40,13 @@ const preliminaryResearch = (): PreliminaryResearchV2 => ({
       basedOn: ["prior-close"],
     },
   ],
-  requiresRefresh: true,
 })
 
-const reportFor = (research: PreliminaryResearchV2): ResearchReportV3 => ({
-  reportVersion: "3.0.0",
-  result: research,
+const reportFor = (
+  result: ResearchReportV6["result"],
+): ResearchReportV6 => ({
+  reportVersion: "6.0.0",
+  result,
   analysis: {
     provenance: "AGENT_REPORTED",
     asOf: "2026-08-26T12:04:00.000Z",
@@ -84,10 +84,10 @@ const reportFor = (research: PreliminaryResearchV2): ResearchReportV3 => ({
   },
 })
 
-const preliminaryRun = (): ResearchRunV1 => {
-  const research = preliminaryResearch()
+const noActionRun = (): ResearchRunV1 => {
+  const decision = noActionDecision()
   return {
-    runVersion: "3.0.0",
+    runVersion: "5.0.0",
     cycle: {
       cycleId: "cycle-evaluation-1",
       cycleNumber: 1,
@@ -105,12 +105,12 @@ const preliminaryRun = (): ResearchRunV1 => {
       reason: "OUTSIDE_TRADE_INTENT_WINDOW",
     },
     evidenceSnapshots: [],
-    preliminaryResearch: research,
-    researchReport: reportFor(research),
+    validatedDecision: decision,
+    researchReport: reportFor(decision),
     outcome: {
-      outcomeVersion: "1.0.0",
-      status: "PRELIMINARY_RESEARCH_RETAINED",
-      research,
+      outcomeVersion: "3.0.0",
+      status: "VALIDATED_NO_ACTION",
+      decision,
     },
     ledger: {
       firstSequence: 1,
@@ -120,49 +120,13 @@ const preliminaryRun = (): ResearchRunV1 => {
   }
 }
 
-const noActionRun = (): ResearchRunV1 => {
-  const sourceRun = preliminaryRun()
-  const {
-    preliminaryResearch: _preliminaryResearch,
-    researchReport: _researchReport,
-    ...base
-  } = sourceRun
-  const decision = {
-    contractVersion: "2.0.0" as const,
-    outcome: "NO_ACTION" as const,
-    reasonCodes: ["SIGNAL_NOT_ACTIONABLE" as const],
-    evidence: [{
-      claimId: "mixed-regime",
-      kind: "SOURCED_FACT" as const,
-      claim: "The retained market regime signal was mixed.",
-      provider: "ALPACA" as const,
-      temporalClass: "PRIOR_CLOSE" as const,
-      observedAt: "2026-08-25T20:00:00.000Z",
-      locator: "analysis.marketRegime.signal",
-    }],
-  }
-  return {
-    ...base,
-    researchReport: {
-      ...sourceRun.researchReport!,
-      result: decision,
-    },
-    validatedDecision: decision,
-    outcome: {
-      outcomeVersion: "1.0.0",
-      status: "VALIDATED_NO_ACTION",
-      decision,
-    },
-  }
-}
-
 const currentInvocation = {
   invocationVersion: "3.0.0" as const,
   agentName: "research",
   cycleMode: "STANDARD" as const,
   promptVersion: "1.4.0",
-  decisionContractVersion: "2.0.0",
-  reportVersion: "3.0.0",
+  decisionContractVersion: "3.0.0",
+  reportVersion: "6.0.0",
   providerId: "test-provider",
   modelId: "test-model",
   responseError: false,
@@ -182,14 +146,39 @@ const priorInvocation = {
   promptVersion: "1.3.0",
 }
 
+const proposalOptionUniverse: NonNullable<
+  ResearchReportV6["analysis"]["optionUniverse"]
+> = {
+  snapshotVersion: "2.0.0",
+  policyVersion: "4.0.0",
+  snapshotId: `option-universe-v2-${"d".repeat(64)}`,
+  generatedAt: "2026-08-26T14:00:30.000Z",
+  sessionDate: "2026-08-26",
+  source: "ALPACA_OPTIONS_SCREENERS",
+  candidates: [
+    { rank: 1, underlying: "SPY", activityRank: 1,
+      optionLiquidity: { expirationCount: 2, viableSeriesCount: 4,
+        liquidSeriesCount: 3, contractCount: 40, liquidContractCount: 24,
+        totalOpenInterest: 24_000, openInterestCoverage: 1 } },
+    { rank: 2, underlying: "QQQ", activityRank: 2,
+      optionLiquidity: { expirationCount: 2, viableSeriesCount: 4,
+        liquidSeriesCount: 2, contractCount: 36, liquidContractCount: 20,
+        totalOpenInterest: 20_000, openInterestCoverage: 1 } },
+    { rank: 3, underlying: "IWM", activityRank: 3,
+      optionLiquidity: { expirationCount: 2, viableSeriesCount: 3,
+        liquidSeriesCount: 1, contractCount: 30, liquidContractCount: 16,
+        totalOpenInterest: 16_000, openInterestCoverage: 1 } },
+  ],
+}
+
 const derivedIntentRun = (): ResearchRunV1 => {
   const {
-    preliminaryResearch: _preliminaryResearch,
+    validatedDecision: _validatedDecision,
     researchReport: _researchReport,
     ...base
-  } = preliminaryRun()
+  } = noActionRun()
   const decision: ProposedTradeDecisionV2 = {
-    contractVersion: "2.0.0",
+    contractVersion: "3.0.0",
     outcome: "PROPOSE_TRADE",
     direction: "BULLISH",
     thesis: "private-proposal-marker",
@@ -216,7 +205,7 @@ const derivedIntentRun = (): ResearchRunV1 => {
       },
     ],
   }
-  const derived = deriveTradeIntentV2(decision, {
+  const derived = deriveTradeIntentV3(decision, {
     quoteSnapshotRef: PROPOSAL_QUOTE_SNAPSHOT_REF,
     evaluatedAt: "2026-08-26T14:04:00.000Z",
     longQuote: {
@@ -236,12 +225,13 @@ const derivedIntentRun = (): ResearchRunV1 => {
   })
   if (!derived.success) throw new Error("Expected valid derived-intent fixture")
 
-  const researchReport: ResearchReportV3 = {
-    reportVersion: "3.0.0",
+  const researchReport: ResearchReportV6 = {
+    reportVersion: "6.0.0",
     result: decision,
     analysis: {
       provenance: "AGENT_REPORTED",
       asOf: "2026-08-26T14:03:30.000Z",
+      optionUniverse: proposalOptionUniverse,
       accountChecks: {
         verification: "AGENT_REPORTED",
         observedAt: "2026-08-26T14:01:00.000Z",
@@ -249,16 +239,32 @@ const derivedIntentRun = (): ResearchRunV1 => {
         optionsTradingApproved: true,
         conflictingStrategyExposure: false,
       },
+      broadMarketContext: {
+        verification: "AGENT_REPORTED",
+        temporalClass: "LIVE",
+        observedAt: "2026-08-26T14:03:30.000Z",
+        benchmark: "SPY",
+        signal: "BULLISH",
+        dailyClose: 600,
+        sma20: 595,
+        sma50: 590,
+        realizedVolatility20: 0.16,
+      },
       marketRegime: {
         verification: "AGENT_REPORTED",
         temporalClass: "LIVE",
         observedAt: "2026-08-26T14:03:30.000Z",
         signal: "BULLISH",
+        underlying: "SPY",
         dailyClose: 600,
         sma20: 595,
         sma50: 590,
         sessionVwap: 598,
         spotMidpoint: 600,
+        gapPercent: 0.003,
+        distanceFromSma20: 0.008403361344537785,
+        distanceFromSessionVwap: 0.0033444816053511683,
+        intradayRealizedVolatility: 0.18,
         dailySessionCount: 50,
         intradayBarCount: 33,
       },
@@ -271,6 +277,11 @@ const derivedIntentRun = (): ResearchRunV1 => {
           relativeStrengthRank20d: 1,
           realizedVolatility20: 0.16,
           completedSessionVolumeRatio20: 1.1,
+          atrPercent20: 0.012,
+          ewmaRealizedVolatility20: 0.17,
+          sma20Slope5d: 0.004,
+          completedSessionDollarVolumeRatio20: 1.12,
+          rangePosition20: 0.8,
         },
         {
           underlying: "QQQ",
@@ -280,6 +291,11 @@ const derivedIntentRun = (): ResearchRunV1 => {
           relativeStrengthRank20d: 2,
           realizedVolatility20: 0.21,
           completedSessionVolumeRatio20: 0.9,
+          atrPercent20: 0.018,
+          ewmaRealizedVolatility20: 0.22,
+          sma20Slope5d: -0.002,
+          completedSessionDollarVolumeRatio20: 0.88,
+          rangePosition20: 0.45,
         },
         {
           underlying: "IWM",
@@ -289,8 +305,35 @@ const derivedIntentRun = (): ResearchRunV1 => {
           relativeStrengthRank20d: 3,
           realizedVolatility20: 0.24,
           completedSessionVolumeRatio20: 1.2,
+          atrPercent20: 0.021,
+          ewmaRealizedVolatility20: 0.25,
+          sma20Slope5d: -0.006,
+          completedSessionDollarVolumeRatio20: 1.18,
+          rangePosition20: 0.2,
         },
       ],
+      optionSurface: {
+        verification: "AGENT_REPORTED",
+        observedAt: "2026-08-26T14:03:30.000Z",
+        underlying: "SPY",
+        expiration: "2026-09-18",
+        feed: "INDICATIVE",
+        atmImpliedVolatility: 0.2,
+        forecastRealizedVolatility: 0.17,
+        ivRvVarianceSpread: 0.0111,
+        impliedMovePercent: 0.025,
+        termStructureSlope: 0.01,
+        putCallSkew25Delta: 0.025,
+        verticalLegIvDifference: 0,
+        smileCurvature: 0.0125,
+        quoteCoverage: 1,
+        eventRisk: {
+          verification: "AGENT_REPORTED",
+          status: "CLEAR",
+          eventBeforeExpiration: false,
+          macroEvents: [],
+        },
+      },
       candidateEvaluation: {
         verification: "AGENT_REPORTED",
         observedAt: "2026-08-26T14:03:30.000Z",
@@ -321,6 +364,13 @@ const derivedIntentRun = (): ResearchRunV1 => {
             openInterestDate: "2026-08-25",
           },
         ],
+        spreadGreeks: {
+          calculation: "LONG_MINUS_SHORT",
+          netDelta: 0.25,
+          netGamma: 0,
+          netTheta: 0,
+          netVega: 0,
+        },
       },
       externalContext: [
         {
@@ -374,7 +424,7 @@ const derivedIntentRun = (): ResearchRunV1 => {
     researchReport,
     validatedDecision: decision,
     outcome: {
-      outcomeVersion: "1.0.0",
+      outcomeVersion: "3.0.0",
       status: "INTENT_DERIVED",
       decision,
       intent: derived.intent,
@@ -386,7 +436,7 @@ describe("research run evaluation", () => {
   it("accepts the additive shadow-risk research run version", () => {
     const evaluation = evaluateResearchRunV1({
       ...noActionRun(),
-      runVersion: "3.0.0",
+      runVersion: "5.0.0",
     })
 
     expect(evaluation.dimensions.contractCompliance.issueCodes).not.toContain(
@@ -394,8 +444,8 @@ describe("research run evaluation", () => {
     )
   })
 
-  it("evaluates a healthy preliminary run deterministically", () => {
-    const run = preliminaryRun()
+  it("evaluates a healthy no-action run deterministically", () => {
+    const run = noActionRun()
     const first = evaluateResearchRunV1(run)
     const second = evaluateResearchRunV1(run)
 
@@ -418,11 +468,8 @@ describe("research run evaluation", () => {
     })
   })
 
-  it.each([
-    ["preliminary research", preliminaryRun],
-    ["no action", noActionRun],
-  ])("accepts healthy research-only anytime %s", (_name, fixture) => {
-    const run = fixture()
+  it("accepts healthy research-only anytime no action", () => {
+    const run = noActionRun()
     const evaluation = evaluateResearchRunV1({
       ...run,
       initialEligibility: {
@@ -443,7 +490,7 @@ describe("research run evaluation", () => {
   })
 
   it("never copies retained research content into evaluation output", () => {
-    const serialized = JSON.stringify(evaluateResearchRunV1(preliminaryRun()))
+    const serialized = JSON.stringify(evaluateResearchRunV1(noActionRun()))
 
     for (const marker of [
       "private-thesis-marker",
@@ -460,68 +507,6 @@ describe("research run evaluation", () => {
     ]) {
       expect(serialized).not.toContain(marker)
     }
-  })
-
-  it("validates the preliminary target against retained session context", () => {
-    const run = preliminaryRun()
-    if (run.outcome.status !== "PRELIMINARY_RESEARCH_RETAINED") {
-      throw new Error("Expected a preliminary-research fixture")
-    }
-    const research = {
-      ...run.preliminaryResearch!,
-      targetSessionDate: "2026-08-27",
-    }
-    const evaluation = evaluateResearchRunV1({
-      ...run,
-      preliminaryResearch: research,
-      researchReport: { ...run.researchReport!, result: research },
-      outcome: { ...run.outcome, research },
-    })
-
-    expect(evaluation.dimensions.temporalIntegrity).toEqual({
-      status: "FAIL",
-      issueCodes: ["PRELIMINARY_TARGET_SESSION_MISMATCH"],
-    })
-  })
-
-  it("does not mark legacy preliminary runs without session context safe", () => {
-    const run = preliminaryRun()
-    const { initialEligibility: _initialEligibility, ...legacyRun } = run
-
-    const evaluation = evaluateResearchRunV1(legacyRun)
-
-    expect(evaluation.dimensions.temporalIntegrity).toEqual({
-      status: "FAIL",
-      issueCodes: ["PRELIMINARY_SESSION_CONTEXT_MISSING"],
-    })
-  })
-
-  it("rejects preliminary evidence observed after cycle completion", () => {
-    const run = preliminaryRun()
-    if (
-      run.preliminaryResearch === undefined ||
-      run.outcome.status !== "PRELIMINARY_RESEARCH_RETAINED"
-    ) {
-      throw new Error("Expected a preliminary-research fixture")
-    }
-    const research: PreliminaryResearchV2 = {
-      ...run.preliminaryResearch,
-      evidence: run.preliminaryResearch.evidence.map((claim) =>
-        claim.kind === "SOURCED_FACT"
-          ? { ...claim, observedAt: "2026-08-26T12:05:01.000Z" }
-          : claim,
-      ),
-    }
-    const evaluation = evaluateResearchRunV1({
-      ...run,
-      preliminaryResearch: research,
-      researchReport: { ...run.researchReport!, result: research },
-      outcome: { ...run.outcome, research },
-    })
-
-    expect(evaluation.dimensions.temporalIntegrity.issueCodes).toContain(
-      "PRELIMINARY_OBSERVATION_AFTER_CYCLE",
-    )
   })
 
   it("evaluates valid no-action and derived-intent outcomes", () => {
@@ -619,13 +604,13 @@ describe("research run evaluation", () => {
   it("requires intent-derivation rejections to retain their report", () => {
     const {
       researchReport: _researchReport,
-      preliminaryResearch: _preliminaryResearch,
+      validatedDecision: _validatedDecision,
       ...base
-    } = preliminaryRun()
+    } = noActionRun()
     const evaluation = evaluateResearchRunV1({
       ...base,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["MARKET_WINDOW_INELIGIBLE"],
       },
@@ -638,12 +623,12 @@ describe("research run evaluation", () => {
   })
 
   it("evaluates malformed reports without throwing", () => {
-    const run = preliminaryRun()
+    const run = noActionRun()
     const evaluation = evaluateResearchRunV1({
       ...run,
       researchReport: {
-        reportVersion: "3.0.0",
-      } as unknown as ResearchReportV3,
+        reportVersion: "6.0.0",
+      } as unknown as ResearchReportV6,
     })
 
     expect(researchRunEvaluationV1Schema.safeParse(evaluation).success).toBe(
@@ -657,7 +642,7 @@ describe("research run evaluation", () => {
     const intentRejection = evaluateResearchRunV1({
       ...withoutDecision,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["MARKET_WINDOW_INELIGIBLE"],
       },
@@ -665,7 +650,7 @@ describe("research run evaluation", () => {
     const decisionRejection = evaluateResearchRunV1({
       ...noAction,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [{ code: "SCHEMA_INVALID", path: ["outcome"] }],
       },
@@ -679,37 +664,6 @@ describe("research run evaluation", () => {
     )
   })
 
-  it("rejects opposite retained record types on successful outcomes", () => {
-    const preliminary = preliminaryRun()
-    const noAction = noActionRun()
-    const derived = derivedIntentRun()
-    const extraPreliminary = preliminary.preliminaryResearch
-    const extraDecision = noAction.validatedDecision
-    if (extraPreliminary === undefined || extraDecision === undefined) {
-      throw new Error("Expected retained result fixtures")
-    }
-    const evaluations = [
-      evaluateResearchRunV1({
-        ...preliminary,
-        validatedDecision: extraDecision,
-      }),
-      evaluateResearchRunV1({
-        ...noAction,
-        preliminaryResearch: extraPreliminary,
-      }),
-      evaluateResearchRunV1({
-        ...derived,
-        preliminaryResearch: extraPreliminary,
-      }),
-    ]
-
-    for (const evaluation of evaluations) {
-      expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
-        "OUTCOME_RECORD_MISMATCH",
-      )
-    }
-  })
-
   it("matches intent-rejection reasons to retained quote and proposal records", () => {
     const run = derivedIntentRun()
     const { validatedDecision: _validatedDecision, ...withoutDecision } = run
@@ -720,7 +674,7 @@ describe("research run evaluation", () => {
     const quoteFailure = evaluateResearchRunV1({
       ...run,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["QUOTE_REQUEST_FAILED"],
       },
@@ -728,7 +682,7 @@ describe("research run evaluation", () => {
     const derivationFailure = evaluateResearchRunV1({
       ...run,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["NON_POSITIVE_NET_DEBIT"],
       },
@@ -736,7 +690,7 @@ describe("research run evaluation", () => {
     const multipleDerivationFailures = evaluateResearchRunV1({
       ...run,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["NON_POSITIVE_NET_DEBIT", "ARITHMETIC_OVERFLOW"],
       },
@@ -745,7 +699,7 @@ describe("research run evaluation", () => {
       ...withoutDecision,
       evidenceSnapshots: [],
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["QUOTE_REQUEST_FAILED", "QUOTE_RESPONSE_INVALID"],
       },
@@ -758,7 +712,7 @@ describe("research run evaluation", () => {
       },
       evidenceSnapshots: [],
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["QUOTE_REQUEST_FAILED"],
       },
@@ -770,7 +724,7 @@ describe("research run evaluation", () => {
         tradeIntentEligible: false,
       },
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["NON_POSITIVE_NET_DEBIT"],
       },
@@ -785,7 +739,7 @@ describe("research run evaluation", () => {
         },
       },
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["NON_POSITIVE_NET_DEBIT"],
       },
@@ -797,7 +751,7 @@ describe("research run evaluation", () => {
         startedAt: run.initialEligibility!.tradeIntentWindow!.deadline,
       },
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["NON_POSITIVE_NET_DEBIT"],
       },
@@ -805,7 +759,7 @@ describe("research run evaluation", () => {
     const unsupportedPrecision = evaluateResearchRunV1({
       ...run,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["STRIKE_PRECISION_UNSUPPORTED"],
       },
@@ -817,7 +771,7 @@ describe("research run evaluation", () => {
       evaluateResearchRunV1({
         ...run,
         outcome: {
-          outcomeVersion: "1.0.0",
+          outcomeVersion: "3.0.0",
           status: "INTENT_DERIVATION_REJECTED",
           reasons: [reason],
         },
@@ -851,13 +805,13 @@ describe("research run evaluation", () => {
   it("requires reachable issues for report-free decision rejections", () => {
     const {
       researchReport: _researchReport,
-      preliminaryResearch: _preliminaryResearch,
+      validatedDecision: _validatedDecision,
       ...base
-    } = preliminaryRun()
+    } = noActionRun()
     const malformed = evaluateResearchRunV1({
       ...base,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [{ code: "MALFORMED_JSON", path: [] }],
       },
@@ -865,7 +819,7 @@ describe("research run evaluation", () => {
     const arbitrary = evaluateResearchRunV1({
       ...base,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [{ code: "CONTEXT_INVALID", path: ["result"] }],
       },
@@ -893,7 +847,7 @@ describe("research run evaluation", () => {
         },
       },
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [{ code: "CONTEXT_INVALID", path: ["analysis", "asOf"] }],
       },
@@ -908,7 +862,7 @@ describe("research run evaluation", () => {
         },
       },
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [{ code: "CONTEXT_INVALID", path: ["analysis", "asOf"] }],
       },
@@ -951,7 +905,7 @@ describe("research run evaluation", () => {
         })),
       ],
     }
-    const validation = validateResearchDecisionV2(
+    const validation = validateResearchDecisionV3(
       decision,
       PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
     )
@@ -968,7 +922,7 @@ describe("research run evaluation", () => {
       evidenceSnapshots: [],
       researchReport: { ...run.researchReport, result: decision },
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: validation.issues.slice(0, 64),
       },
@@ -990,7 +944,7 @@ describe("research run evaluation", () => {
         completedAt: "2026-08-26T14:04:30.000Z",
       },
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["MARKET_WINDOW_INELIGIBLE"],
       },
@@ -1003,7 +957,7 @@ describe("research run evaluation", () => {
       },
       evidenceSnapshots: [],
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["MARKET_WINDOW_INELIGIBLE"],
       },
@@ -1027,7 +981,7 @@ describe("research run evaluation", () => {
         source: "unrelated-context",
       })),
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["NON_POSITIVE_NET_DEBIT"],
       },
@@ -1050,7 +1004,7 @@ describe("research run evaluation", () => {
         freshUntil: "2026-08-26T16:04:00.000Z",
       })),
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["NON_POSITIVE_NET_DEBIT"],
       },
@@ -1084,7 +1038,7 @@ describe("research run evaluation", () => {
           ? { validatedDecision: undefined }
           : {}),
         outcome: {
-          outcomeVersion: "1.0.0",
+          outcomeVersion: "3.0.0",
           status: "INTENT_DERIVATION_REJECTED",
           reasons: [reason],
         },
@@ -1116,7 +1070,7 @@ describe("research run evaluation", () => {
         },
       },
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["QUOTE_REQUEST_FAILED"],
       },
@@ -1131,7 +1085,7 @@ describe("research run evaluation", () => {
     const run = derivedIntentRun()
     const { validatedDecision: _validatedDecision, ...base } = run
     const rejectedOutcome = {
-      outcomeVersion: "1.0.0" as const,
+      outcomeVersion: "3.0.0" as const,
       status: "DECISION_REJECTED" as const,
       issues: [{ code: "CONTEXT_INVALID", path: ["analysis"] }],
     }
@@ -1169,7 +1123,7 @@ describe("research run evaluation", () => {
     }
     const { validatedDecision: _validatedDecision, ...proposalBase } = proposalRun
     const rejectedOutcome = {
-      outcomeVersion: "1.0.0" as const,
+      outcomeVersion: "3.0.0" as const,
       status: "DECISION_REJECTED" as const,
       issues: [{ code: "CONTEXT_INVALID", path: ["analysis"] }],
     }
@@ -1207,7 +1161,7 @@ describe("research run evaluation", () => {
     const staleProposal = evaluateResearchRunV1({
       ...staleProposalBase,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [
           {
@@ -1234,26 +1188,21 @@ describe("research run evaluation", () => {
   })
 
   it("rejects decision-rejected statuses for otherwise retainable reports", () => {
-    const preliminary = preliminaryRun()
     const noAction = noActionRun()
-    const { preliminaryResearch: _preliminaryResearch, ...preliminaryBase } =
-      preliminary
     const { validatedDecision: _validatedDecision, ...noActionBase } = noAction
     const rejectedOutcome = {
-      outcomeVersion: "1.0.0" as const,
+      outcomeVersion: "3.0.0" as const,
       status: "DECISION_REJECTED" as const,
       issues: [{ code: "CONTEXT_INVALID", path: ["result"] }],
     }
 
-    for (const run of [preliminaryBase, noActionBase]) {
-      const evaluation = evaluateResearchRunV1({
-        ...run,
-        outcome: rejectedOutcome,
-      })
-      expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
-        "OUTCOME_RECORD_MISMATCH",
-      )
-    }
+    const evaluation = evaluateResearchRunV1({
+      ...noActionBase,
+      outcome: rejectedOutcome,
+    })
+    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
+      "OUTCOME_RECORD_MISMATCH",
+    )
   })
 
   it("keeps a schema-invalid no-action report reachable as rejected", () => {
@@ -1270,7 +1219,7 @@ describe("research run evaluation", () => {
       ...base,
       researchReport: { ...run.researchReport, result: invalidDecision },
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [
           {
@@ -1310,7 +1259,7 @@ describe("research run evaluation", () => {
       evidenceSnapshots: [],
       researchReport: { ...run.researchReport, result: decision },
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [
           {
@@ -1367,7 +1316,7 @@ describe("research run evaluation", () => {
         },
       },
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [
           {
@@ -1445,7 +1394,7 @@ describe("research run evaluation", () => {
         },
       },
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [
           {
@@ -1472,7 +1421,7 @@ describe("research run evaluation", () => {
       ...base,
       evidenceSnapshots: [],
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [{ code: "CONTEXT_INVALID", path: ["result"] }],
       },
@@ -1481,7 +1430,7 @@ describe("research run evaluation", () => {
       ...base,
       evidenceSnapshots: [],
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [
           {
@@ -1496,7 +1445,7 @@ describe("research run evaluation", () => {
       cycle: { ...base.cycle, completedAt: "2026-08-26T14:04:00.000Z" },
       evidenceSnapshots: [],
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [
           {
@@ -1510,7 +1459,7 @@ describe("research run evaluation", () => {
       ...base,
       evidenceSnapshots: [],
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [
           {
@@ -1537,210 +1486,6 @@ describe("research run evaluation", () => {
     }
   })
 
-  it("requires exact issues for rejected preliminary reports", () => {
-    const run = preliminaryRun()
-    if (
-      run.preliminaryResearch === undefined ||
-      run.researchReport === undefined
-    ) {
-      throw new Error("Expected a preliminary report fixture")
-    }
-    const { preliminaryResearch: _preliminaryResearch, ...base } = run
-    const research: PreliminaryResearchV2 = {
-      ...run.preliminaryResearch,
-      targetSessionDate: "2026-08-27",
-    }
-    const rejectedRun = {
-      ...base,
-      researchReport: { ...run.researchReport, result: research },
-      outcome: {
-        outcomeVersion: "1.0.0",
-        status: "DECISION_REJECTED",
-        issues: [{ code: "CONTEXT_INVALID", path: ["targetSessionDate"] }],
-      },
-    } as ResearchRunV1
-    const evaluation = evaluateResearchRunV1(rejectedRun)
-    const misattributed = evaluateResearchRunV1({
-      ...rejectedRun,
-      outcome: {
-        ...rejectedRun.outcome,
-        issues: [{ code: "CONTEXT_INVALID", path: ["evidence"] }],
-      },
-    } as ResearchRunV1)
-
-    expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
-    expect(misattributed.dimensions.contractCompliance.issueCodes).toContain(
-      "OUTCOME_RECORD_MISMATCH",
-    )
-  })
-
-  it("allows preliminary rejection when eligibility expires during processing", () => {
-    const run = preliminaryRun()
-    const { preliminaryResearch: _preliminaryResearch, ...base } = run
-    const evaluation = evaluateResearchRunV1({
-      ...base,
-      cycle: {
-        ...base.cycle,
-        completedAt: "2026-08-26T20:05:00.000Z",
-      },
-      outcome: {
-        outcomeVersion: "1.0.0",
-        status: "DECISION_REJECTED",
-        issues: [{ code: "CONTEXT_INVALID", path: ["targetSessionDate"] }],
-      },
-    })
-
-    expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
-  })
-
-  it("allows anytime preliminary rejection after New York date rollover", () => {
-    const run = preliminaryRun()
-    if (run.researchReport === undefined) {
-      throw new Error("Expected a preliminary report fixture")
-    }
-    const { preliminaryResearch: _preliminaryResearch, ...base } = run
-    const evaluation = evaluateResearchRunV1({
-      ...base,
-      cycle: {
-        ...base.cycle,
-        startedAt: "2026-08-27T03:58:00.000Z",
-        completedAt: "2026-08-27T04:01:00.000Z",
-      },
-      initialEligibility: {
-        ...base.initialEligibility!,
-        evaluatedAt: "2026-08-27T03:57:59.000Z",
-        researchMode: "DRY_RUN",
-        reason: "DRY_RUN_RESEARCH_ONLY",
-      },
-      researchReport: {
-        ...run.researchReport,
-        analysis: {
-          ...run.researchReport.analysis,
-          asOf: "2026-08-27T03:59:30.000Z",
-          externalContext: run.researchReport.analysis.externalContext.map(
-            (source) => ({
-              ...source,
-              retrievedAt: "2026-08-27T03:59:00.000Z",
-            }),
-          ),
-        },
-      },
-      outcome: {
-        outcomeVersion: "1.0.0",
-        status: "DECISION_REJECTED",
-        issues: [{ code: "CONTEXT_INVALID", path: ["targetSessionDate"] }],
-      },
-    })
-
-    expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
-  })
-
-  it("rejects anytime preliminary rejection before New York date rollover", () => {
-    const run = preliminaryRun()
-    if (run.researchReport === undefined) {
-      throw new Error("Expected a preliminary report fixture")
-    }
-    const { preliminaryResearch: _preliminaryResearch, ...base } = run
-    const evaluation = evaluateResearchRunV1({
-      ...base,
-      cycle: {
-        ...base.cycle,
-        startedAt: "2026-08-26T20:01:00.000Z",
-        completedAt: "2026-08-26T20:05:00.000Z",
-      },
-      initialEligibility: {
-        ...base.initialEligibility!,
-        evaluatedAt: "2026-08-26T20:00:59.000Z",
-        researchMode: "DRY_RUN",
-        reason: "DRY_RUN_RESEARCH_ONLY",
-      },
-      researchReport: {
-        ...run.researchReport,
-        analysis: {
-          ...run.researchReport.analysis,
-          asOf: "2026-08-26T20:04:00.000Z",
-          externalContext: run.researchReport.analysis.externalContext.map(
-            (source) => ({
-              ...source,
-              retrievedAt: "2026-08-26T20:02:00.000Z",
-            }),
-          ),
-        },
-      },
-      outcome: {
-        outcomeVersion: "1.0.0",
-        status: "DECISION_REJECTED",
-        issues: [{ code: "CONTEXT_INVALID", path: ["targetSessionDate"] }],
-      },
-    })
-
-    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
-      "OUTCOME_RECORD_MISMATCH",
-    )
-  })
-
-  it("rejects a preliminary observation no later than report processing", () => {
-    const run = preliminaryRun()
-    if (
-      run.preliminaryResearch === undefined ||
-      run.researchReport === undefined
-    ) {
-      throw new Error("Expected a preliminary report fixture")
-    }
-    const { preliminaryResearch: _preliminaryResearch, ...base } = run
-    const research: PreliminaryResearchV2 = {
-      ...run.preliminaryResearch,
-      evidence: run.preliminaryResearch.evidence.map((claim) =>
-        claim.kind === "SOURCED_FACT"
-          ? { ...claim, observedAt: "2026-08-26T12:04:30.000Z" }
-          : claim,
-      ),
-    }
-    const evaluation = evaluateResearchRunV1({
-      ...base,
-      researchReport: {
-        ...run.researchReport,
-        result: research,
-        analysis: {
-          ...run.researchReport.analysis,
-          asOf: "2026-08-26T12:04:30.000Z",
-        },
-      },
-      outcome: {
-        outcomeVersion: "1.0.0",
-        status: "DECISION_REJECTED",
-        issues: [
-          { code: "CONTEXT_INVALID", path: ["evidence", 0, "observedAt"] },
-        ],
-      },
-    })
-
-    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
-      "OUTCOME_RECORD_MISMATCH",
-    )
-  })
-
-  it("rejects preliminary eligibility failure before retained session close", () => {
-    const run = preliminaryRun()
-    const { preliminaryResearch: _preliminaryResearch, ...base } = run
-    const evaluation = evaluateResearchRunV1({
-      ...base,
-      initialEligibility: {
-        ...base.initialEligibility!,
-        sessionClose: "2026-08-26T20:00:00.000Z",
-      },
-      outcome: {
-        outcomeVersion: "1.0.0",
-        status: "DECISION_REJECTED",
-        issues: [{ code: "CONTEXT_INVALID", path: ["targetSessionDate"] }],
-      },
-    })
-
-    expect(evaluation.dimensions.contractCompliance.issueCodes).toContain(
-      "OUTCOME_RECORD_MISMATCH",
-    )
-  })
-
   it("evaluates malformed retained results without throwing", () => {
     const {
       researchReport: _researchReport,
@@ -1748,10 +1493,6 @@ describe("research run evaluation", () => {
       ...withoutReport
     } = noActionRun()
     const runs = [
-      {
-        ...preliminaryRun(),
-        preliminaryResearch: null,
-      },
       {
         ...noActionRun(),
         validatedDecision: 7,
@@ -1816,27 +1557,26 @@ describe("research run evaluation", () => {
     })
   })
 
-  it("rejects snapshots on preliminary and no-action outcomes", () => {
-    for (const run of [preliminaryRun(), noActionRun()]) {
-      const evaluation = evaluateResearchRunV1({
-        ...run,
-        evidenceSnapshots: [
-          {
-            snapshotRef: "unexpected-snapshot",
-            provider: "EXA",
-            source: "web-search",
-            retrievedAt: "2026-08-26T12:02:00.000Z",
-            freshUntil: "2026-08-26T12:05:00.000Z",
-            temporalClass: "LIVE",
-          },
-        ],
-      })
+  it("rejects snapshots on no-action outcomes", () => {
+    const run = noActionRun()
+    const evaluation = evaluateResearchRunV1({
+      ...run,
+      evidenceSnapshots: [
+        {
+          snapshotRef: "unexpected-snapshot",
+          provider: "EXA",
+          source: "web-search",
+          retrievedAt: "2026-08-26T12:02:00.000Z",
+          freshUntil: "2026-08-26T12:05:00.000Z",
+          temporalClass: "LIVE",
+        },
+      ],
+    })
 
-      expect(evaluation.dimensions.grounding).toEqual({
-        status: "FAIL",
-        issueCodes: ["UNEXPECTED_SNAPSHOT_REFERENCE"],
-      })
-    }
+    expect(evaluation.dimensions.grounding).toEqual({
+      status: "FAIL",
+      issueCodes: ["UNEXPECTED_SNAPSHOT_REFERENCE"],
+    })
   })
 
   it("reports decision references to unknown snapshots", () => {
@@ -2004,7 +1744,7 @@ describe("research run evaluation", () => {
   })
 
   it("reports report and source timestamps outside the cycle", () => {
-    const run = preliminaryRun()
+    const run = noActionRun()
     const report = {
       ...run.researchReport!,
       analysis: {
@@ -2076,6 +1816,10 @@ describe("research run evaluation", () => {
             ...run.researchReport.analysis.candidateEvaluation!,
             observedAt: "2026-08-26T14:02:59.999Z",
           },
+          optionSurface: {
+            ...run.researchReport.analysis.optionSurface!,
+            observedAt: "2026-08-26T14:02:59.999Z",
+          },
         },
       },
     })
@@ -2115,23 +1859,25 @@ describe("research run evaluation", () => {
   })
 
   it("reports inference references that do not resolve to sourced facts", () => {
-    const run = preliminaryRun()
-    const research = {
-      ...run.preliminaryResearch!,
-      evidence: run.preliminaryResearch!.evidence.map((claim) =>
+    const run = noActionRun()
+    if (
+      run.validatedDecision?.outcome !== "NO_ACTION" ||
+      run.outcome.status !== "VALIDATED_NO_ACTION"
+    ) {
+      throw new Error("Expected a no-action fixture")
+    }
+    const decision = {
+      ...run.validatedDecision,
+      evidence: run.validatedDecision.evidence.map((claim) =>
         claim.kind === "INFERENCE" ? { ...claim, basedOn: ["missing-fact"] } : claim,
       ),
-    } as PreliminaryResearchV2
+    }
 
     const evaluation = evaluateResearchRunV1({
       ...run,
-      preliminaryResearch: research,
-      researchReport: { ...run.researchReport!, result: research },
-      outcome: {
-        outcomeVersion: "1.0.0",
-        status: "PRELIMINARY_RESEARCH_RETAINED",
-        research,
-      },
+      validatedDecision: decision,
+      researchReport: { ...run.researchReport!, result: decision },
+      outcome: { ...run.outcome, decision },
     })
 
     expect(evaluation.dimensions.grounding).toEqual({
@@ -2181,7 +1927,7 @@ describe("research run evaluation", () => {
       },
       validatedDecision: decision,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["NON_POSITIVE_NET_DEBIT"],
       },
@@ -2197,71 +1943,28 @@ describe("research run evaluation", () => {
   })
 
   it("detects candidate identity drift between retained records", () => {
-    const run = preliminaryRun()
-    const research: PreliminaryResearchV2 = {
-      ...run.preliminaryResearch!,
-      direction: "BULLISH",
-      candidate: {
-        underlying: "SPY",
-        structure: "BULL_CALL_SPREAD",
-        expiration: "2026-09-18",
-        longLeg: {
-          contractSymbol: "SPY260918C00600000",
-          strike: 600,
-        },
-        shortLeg: {
-          contractSymbol: "SPY260918C00610000",
-          strike: 610,
-        },
-      },
+    const run = derivedIntentRun()
+    if (
+      run.validatedDecision?.outcome !== "PROPOSE_TRADE" ||
+      run.outcome.status !== "INTENT_DERIVED"
+    ) {
+      throw new Error("Expected a derived-intent fixture")
     }
-    const report: ResearchReportV3 = {
-      ...reportFor(research),
-      analysis: {
-        ...reportFor(research).analysis,
-        candidateEvaluation: {
-          verification: "AGENT_REPORTED",
-          observedAt: "2026-08-26T12:01:00.000Z",
-          dte: 23,
-          legs: [
-            {
-              role: "LONG",
-              contractSymbol: "SPY260918C00590000",
-              delta: 0.5,
-              impliedVolatility: 0.2,
-              gamma: 0.01,
-              theta: -0.05,
-              vega: 0.1,
-              volume: 100,
-              openInterest: 500,
-              openInterestDate: "2026-08-26",
-            },
-            {
-              role: "SHORT",
-              contractSymbol: "SPY260918C00620000",
-              delta: 0.25,
-              impliedVolatility: 0.2,
-              gamma: 0.01,
-              theta: -0.05,
-              vega: 0.1,
-              volume: 100,
-              openInterest: 500,
-              openInterestDate: "2026-08-26",
-            },
-          ],
+    const decision: ProposedTradeDecisionV2 = {
+      ...run.validatedDecision,
+      candidate: {
+        ...run.validatedDecision.candidate,
+        longLeg: {
+          contractSymbol: "SPY260918C00590000",
+          strike: 590,
         },
       },
     }
 
     const evaluation = evaluateResearchRunV1({
       ...run,
-      preliminaryResearch: research,
-      researchReport: report,
-      outcome: {
-        outcomeVersion: "1.0.0",
-        status: "PRELIMINARY_RESEARCH_RETAINED",
-        research,
-      },
+      validatedDecision: decision,
+      outcome: { ...run.outcome, decision },
     })
 
     expect(evaluation.dimensions.candidateIdentity).toEqual({
@@ -2383,7 +2086,7 @@ describe("research run evaluation", () => {
         },
       },
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "INTENT_DERIVATION_REJECTED",
         reasons: ["QUOTE_REQUEST_FAILED"],
       },
@@ -2415,7 +2118,7 @@ describe("research run evaluation", () => {
         ...run,
         researchReport: reportWithoutDiagnostics,
         outcome: {
-          outcomeVersion: "1.0.0",
+          outcomeVersion: "3.0.0",
           status: "INTENT_DERIVATION_REJECTED",
           reasons: ["NON_POSITIVE_NET_DEBIT"],
         },
@@ -2425,7 +2128,7 @@ describe("research run evaluation", () => {
         evidenceSnapshots: [],
         researchReport: reportWithoutDiagnostics,
         outcome: {
-          outcomeVersion: "1.0.0",
+          outcomeVersion: "3.0.0",
           status: "INTENT_DERIVATION_REJECTED",
           reasons: ["QUOTE_REQUEST_FAILED"],
         },
@@ -2466,9 +2169,9 @@ describe("research run evaluation", () => {
   })
 
   it("fails closed when an ineligible cycle claims to derive an intent", () => {
-    const run = preliminaryRun()
+    const run = noActionRun()
     const invalidOutcome = {
-      outcomeVersion: "1.0.0",
+      outcomeVersion: "3.0.0",
       status: "INTENT_DERIVED",
       decision: {},
       intent: {

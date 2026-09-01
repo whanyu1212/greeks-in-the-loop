@@ -91,5 +91,5 @@ describe("research-loop breaker reset command", () => {
     expect(missing.status).not.toBe(0)
     expect(missing.stderr).toContain("Research ledger does not exist")
     expect(existsSync(missingPath)).toBe(false)
-  })
+  }, 15_000)
 })

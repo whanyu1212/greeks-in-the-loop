@@ -2,18 +2,17 @@ import { z } from "zod"
 
 import {
   alpacaOptionStrikeCents,
+  alpacaOptionSymbolSchema,
+  optionUnderlyingV1Schema,
   parseAlpacaOptionSymbol,
-  allowedAlpacaOptionSymbolV1Schema,
-  validateOptionUniverseV1,
 } from "../shared/alpaca-option-identity.js"
 import { parseRfc3339Nanoseconds } from "../shared/value-normalization.js"
-import { calculateDebitSpreadEconomicsV1 } from "./debit-spread-economics-v1.js"
 import {
   RESEARCH_DECISION_CONTRACT_VERSION,
-  type ProposedTradeDecisionV2,
-} from "./research-decision-v2.js"
+  type TradeProposalV3,
+} from "./research-decision-v3.js"
 
-export const TRADE_INTENT_CONTRACT_VERSION = "2.0.0" as const
+export const TRADE_INTENT_CONTRACT_VERSION = "3.0.0" as const
 
 const MAX_QUOTE_AGE_NANOSECONDS = 60_000_000_000n
 const timestamp = z.iso.datetime({ offset: true })
@@ -28,9 +27,83 @@ const positiveSafeInteger = z
   .positive()
   .max(Number.MAX_SAFE_INTEGER)
 
+type DebitSpreadEconomicsFailure =
+  | "NON_POSITIVE_NET_DEBIT"
+  | "ENTRY_LIMIT_NOT_BELOW_WIDTH"
+  | "ARITHMETIC_OVERFLOW"
+
+const calculateDebitSpreadEconomics = (
+  longQuote: Readonly<{
+    bidCentsPerShare: number
+    askCentsPerShare: number
+  }>,
+  shortQuote: Readonly<{
+    bidCentsPerShare: number
+    askCentsPerShare: number
+  }>,
+  longStrikeCents: number,
+  shortStrikeCents: number,
+):
+  | {
+      success: true
+      economics: Readonly<{
+        entryLimitCentsPerShare: number
+        widthCentsPerShare: number
+        maxLossCentsPerContract: number
+        maxProfitCentsPerContract: number
+        stopLossMarkHalfCentsPerShare: number
+        profitTargetMarkHalfCentsPerShare: number
+      }>
+    }
+  | { success: false; reason: DebitSpreadEconomicsFailure } => {
+  const widthCents = BigInt(Math.abs(longStrikeCents - shortStrikeCents))
+  const netMidpointHalfCents =
+    BigInt(longQuote.bidCentsPerShare) +
+    BigInt(longQuote.askCentsPerShare) -
+    BigInt(shortQuote.bidCentsPerShare) -
+    BigInt(shortQuote.askCentsPerShare)
+
+  if (netMidpointHalfCents <= 0n) {
+    return { success: false, reason: "NON_POSITIVE_NET_DEBIT" }
+  }
+
+  const entryLimitCents = (netMidpointHalfCents + 1n) / 2n
+  if (entryLimitCents >= widthCents) {
+    return { success: false, reason: "ENTRY_LIMIT_NOT_BELOW_WIDTH" }
+  }
+
+  const maxLossCents = entryLimitCents * 100n
+  const maxProfitCents = (widthCents - entryLimitCents) * 100n
+  const profitTargetMarkHalfCents = entryLimitCents + widthCents
+  if (
+    [
+      widthCents,
+      entryLimitCents,
+      maxLossCents,
+      maxProfitCents,
+      profitTargetMarkHalfCents,
+    ].some((value) => value > BigInt(Number.MAX_SAFE_INTEGER))
+  ) {
+    return { success: false, reason: "ARITHMETIC_OVERFLOW" }
+  }
+
+  const entryLimitCentsPerShare = Number(entryLimitCents)
+  return {
+    success: true,
+    economics: {
+      entryLimitCentsPerShare,
+      widthCentsPerShare: Number(widthCents),
+      maxLossCentsPerContract: Number(maxLossCents),
+      maxProfitCentsPerContract: Number(maxProfitCents),
+      stopLossMarkHalfCentsPerShare: entryLimitCentsPerShare,
+      profitTargetMarkHalfCentsPerShare: Number(profitTargetMarkHalfCents),
+    },
+  }
+}
+
 export const confirmedOptionQuoteV2Schema = z
   .object({
-    contractSymbol: allowedAlpacaOptionSymbolV1Schema,
+    contractSymbol: alpacaOptionSymbolSchema,
     feed: z.literal("INDICATIVE"),
     bidCentsPerShare: positiveSafeInteger,
     askCentsPerShare: positiveSafeInteger,
@@ -51,15 +124,16 @@ export type ConfirmedOptionQuoteV2 = Readonly<
   z.infer<typeof confirmedOptionQuoteV2Schema>
 >
 
-export const tradeIntentV2Schema = z
+export const tradeIntentV3Schema = z
   .object({
     contractVersion: z.literal(TRADE_INTENT_CONTRACT_VERSION),
     decisionContractVersion: z.literal(RESEARCH_DECISION_CONTRACT_VERSION),
+    underlying: optionUnderlyingV1Schema,
     direction: z.enum(["BULLISH", "BEARISH"]),
     structure: z.enum(["BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"]),
     expiration: expirationDate,
-    longContractSymbol: allowedAlpacaOptionSymbolV1Schema,
-    shortContractSymbol: allowedAlpacaOptionSymbolV1Schema,
+    longContractSymbol: alpacaOptionSymbolSchema,
+    shortContractSymbol: alpacaOptionSymbolSchema,
     quoteSnapshotRef: z.string().min(1).max(128),
     evaluatedAt: evaluatedAtTimestamp,
     longQuote: confirmedOptionQuoteV2Schema,
@@ -100,8 +174,7 @@ export const tradeIntentV2Schema = z
     if (
       !longSymbol.success ||
       !shortSymbol.success ||
-      !validateOptionUniverseV1(longSymbol.identity).success ||
-      !validateOptionUniverseV1(shortSymbol.identity).success ||
+      longSymbol.identity.root !== intent.underlying ||
       longSymbol.identity.root !== shortSymbol.identity.root ||
       longSymbol.identity.expiration !== intent.expiration ||
       shortSymbol.identity.expiration !== intent.expiration ||
@@ -161,7 +234,7 @@ export const tradeIntentV2Schema = z
       }
     }
 
-    const calculation = calculateDebitSpreadEconomicsV1(
+    const calculation = calculateDebitSpreadEconomics(
       intent.longQuote,
       intent.shortQuote,
       longStrike.strikeCentsPerShare,
@@ -194,9 +267,9 @@ export const tradeIntentV2Schema = z
     }
   })
 
-export type TradeIntentV2 = Readonly<z.infer<typeof tradeIntentV2Schema>>
+export type TradeIntentV3 = Readonly<z.infer<typeof tradeIntentV3Schema>>
 
-export type TradeIntentDerivationContext = Readonly<{
+export type TradeIntentDerivationContextV3 = Readonly<{
   quoteSnapshotRef: string
   evaluatedAt: string
   longQuote: ConfirmedOptionQuoteV2
@@ -211,10 +284,10 @@ export type TradeIntentDerivationReason =
   | "ENTRY_LIMIT_NOT_BELOW_WIDTH"
   | "ARITHMETIC_OVERFLOW"
 
-export type TradeIntentDerivationResult =
+export type TradeIntentDerivationResultV3 =
   | {
       success: true
-      intent: TradeIntentV2
+      intent: TradeIntentV3
     }
   | {
       success: false
@@ -242,10 +315,10 @@ const derivationContextSchema = z
  * @param context Application-owned exact-leg quote context.
  * @returns A deterministic intent or bounded derivation reasons.
  */
-export function deriveTradeIntentV2(
-  decision: ProposedTradeDecisionV2,
-  context: TradeIntentDerivationContext,
-): TradeIntentDerivationResult {
+export function deriveTradeIntentV3(
+  decision: TradeProposalV3,
+  context: TradeIntentDerivationContextV3,
+): TradeIntentDerivationResultV3 {
   const parsedContext = derivationContextSchema.safeParse(context)
   if (!parsedContext.success) {
     return { success: false, reasons: ["DERIVATION_INPUT_INVALID"] }
@@ -268,9 +341,7 @@ export function deriveTradeIntentV2(
   )
   if (
     !longSymbol.success ||
-    !shortSymbol.success ||
-    !validateOptionUniverseV1(longSymbol.identity).success ||
-    !validateOptionUniverseV1(shortSymbol.identity).success
+    !shortSymbol.success
   ) {
     return { success: false, reasons: ["DERIVATION_INPUT_INVALID"] }
   }
@@ -281,7 +352,7 @@ export function deriveTradeIntentV2(
     return { success: false, reasons: ["STRIKE_PRECISION_UNSUPPORTED"] }
   }
 
-  const calculation = calculateDebitSpreadEconomicsV1(
+  const calculation = calculateDebitSpreadEconomics(
     parsedContext.data.longQuote,
     parsedContext.data.shortQuote,
     longStrike.strikeCentsPerShare,
@@ -291,9 +362,10 @@ export function deriveTradeIntentV2(
     return { success: false, reasons: [calculation.reason] }
   }
 
-  const parsedIntent = tradeIntentV2Schema.safeParse({
+  const parsedIntent = tradeIntentV3Schema.safeParse({
     contractVersion: TRADE_INTENT_CONTRACT_VERSION,
     decisionContractVersion: RESEARCH_DECISION_CONTRACT_VERSION,
+    underlying: decision.candidate.underlying,
     direction: decision.direction,
     structure: decision.candidate.structure,
     expiration: decision.candidate.expiration,

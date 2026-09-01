@@ -7,7 +7,7 @@ import {
 } from "../market-data/alpaca-option-quotes.js"
 import { newYorkLocalTime } from "../scheduling/research-eligibility.js"
 import {
-  allowedAlpacaOptionSymbolV1Schema,
+  alpacaOptionSymbolSchema,
   parseAlpacaOptionSymbol,
 } from "../shared/alpaca-option-identity.js"
 import {
@@ -40,8 +40,8 @@ const captureInputSchema = z
   .object({
     sessionDate: z.iso.date(),
     slotStartedAt: z.iso.datetime({ offset: true, precision: 3 }),
-    longContractSymbol: allowedAlpacaOptionSymbolV1Schema,
-    shortContractSymbol: allowedAlpacaOptionSymbolV1Schema,
+    longContractSymbol: alpacaOptionSymbolSchema,
+    shortContractSymbol: alpacaOptionSymbolSchema,
     durableControl: durableRiskControlStateV1Schema,
   })
   .strict()

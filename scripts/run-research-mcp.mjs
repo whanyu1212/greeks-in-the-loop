@@ -67,7 +67,13 @@ const fmpPreloadPath = fileURLToPath(
 const createServers = {
   alpaca: () => ({
     command: "uvx",
-    args: ["--from", "alpaca-mcp-server==2.2.1", "alpaca-mcp-server"],
+    args: [
+      "--from",
+      "alpaca-mcp-server==2.2.1",
+      "--with",
+      "fastmcp==3.4.7",
+      "alpaca-mcp-server",
+    ],
     environment: {
       ALPACA_API_KEY: readRequiredSetting("ALPACA_API_KEY"),
       ALPACA_SECRET_KEY: readRequiredSetting("ALPACA_SECRET_KEY"),

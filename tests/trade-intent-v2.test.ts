@@ -1,16 +1,15 @@
 import { describe, expect, it } from "vitest"
 
 import {
-  deriveTradeIntentV2,
-  tradeIntentV2Schema,
+  deriveTradeIntentV3,
+  tradeIntentV3Schema,
   type ConfirmedOptionQuoteV2,
-} from "../src/contracts/trade-intent-v2.js"
-import type { ProposedTradeDecisionV2 } from "../src/contracts/research-decision-v2.js"
+} from "../src/contracts/trade-intent-v3.js"
+import type { TradeProposalV3 } from "../src/contracts/research-decision-v3.js"
 import { canonicalJsonSha256 } from "../src/shared/canonical-json.js"
 
-const bullishDecision: ProposedTradeDecisionV2 = {
-  contractVersion: "2.0.0",
-  outcome: "PROPOSE_TRADE",
+const bullishDecision: TradeProposalV3 = {
+  priority: 1,
   direction: "BULLISH",
   thesis: "Daily and intraday direction agree.",
   candidate: {
@@ -32,7 +31,7 @@ const bullishDecision: ProposedTradeDecisionV2 = {
       claimId: "fact-1",
       kind: "SOURCED_FACT",
       claim: "The proposed contracts were present in the quote snapshot.",
-      snapshotRef: "alpaca-proposal-quotes-v1",
+      snapshotRef: "alpaca-proposal-quotes-v2-SPY",
     },
   ],
 }
@@ -50,27 +49,28 @@ const quote = (
 })
 
 const context = {
-  quoteSnapshotRef: "alpaca-proposal-quotes-v1",
+  quoteSnapshotRef: "alpaca-proposal-quotes-v2-SPY",
   evaluatedAt: "2026-08-25T14:31:00.000Z",
   longQuote: quote("SPY260918C00650000", 220, 223),
   shortQuote: quote("SPY260918C00655000", 120, 121),
 } as const
 
-describe("deriveTradeIntentV2", () => {
+describe("deriveTradeIntentV3", () => {
   it("derives exact economics and half-cent exit marks", () => {
-    const result = deriveTradeIntentV2(bullishDecision, context)
+    const result = deriveTradeIntentV3(bullishDecision, context)
 
     expect(result).toEqual({
       success: true,
       intent: {
-        contractVersion: "2.0.0",
-        decisionContractVersion: "2.0.0",
+        contractVersion: "3.0.0",
+        decisionContractVersion: "3.0.0",
+        underlying: "SPY",
         direction: "BULLISH",
         structure: "BULL_CALL_SPREAD",
         expiration: "2026-09-18",
         longContractSymbol: "SPY260918C00650000",
         shortContractSymbol: "SPY260918C00655000",
-        quoteSnapshotRef: "alpaca-proposal-quotes-v1",
+        quoteSnapshotRef: "alpaca-proposal-quotes-v2-SPY",
         evaluatedAt: "2026-08-25T14:31:00.000Z",
         longQuote: context.longQuote,
         shortQuote: context.shortQuote,
@@ -85,7 +85,7 @@ describe("deriveTradeIntentV2", () => {
   })
 
   it("rounds an odd half-cent net midpoint upward", () => {
-    const result = deriveTradeIntentV2(bullishDecision, {
+    const result = deriveTradeIntentV3(bullishDecision, {
       ...context,
       longQuote: quote("SPY260918C00650000", 220, 222),
       shortQuote: quote("SPY260918C00655000", 120, 121),
@@ -97,7 +97,7 @@ describe("deriveTradeIntentV2", () => {
   })
 
   it("derives a bearish put spread without changing the arithmetic", () => {
-    const bearishDecision: ProposedTradeDecisionV2 = {
+    const bearishDecision: TradeProposalV3 = {
       ...bullishDecision,
       direction: "BEARISH",
       candidate: {
@@ -114,7 +114,7 @@ describe("deriveTradeIntentV2", () => {
       },
     }
 
-    const result = deriveTradeIntentV2(bearishDecision, {
+    const result = deriveTradeIntentV3(bearishDecision, {
       ...context,
       longQuote: quote("SPY260918P00650000", 220, 223),
       shortQuote: quote("SPY260918P00645000", 120, 121),
@@ -130,7 +130,7 @@ describe("deriveTradeIntentV2", () => {
   })
 
   it("derives an intent for a matching QQQ candidate", () => {
-    const decision: ProposedTradeDecisionV2 = {
+    const decision: TradeProposalV3 = {
       ...bullishDecision,
       candidate: {
         ...bullishDecision.candidate,
@@ -140,7 +140,7 @@ describe("deriveTradeIntentV2", () => {
       },
     }
 
-    expect(deriveTradeIntentV2(decision, {
+    expect(deriveTradeIntentV3(decision, {
       ...context,
       longQuote: quote("QQQ260918C00650000", 220, 223),
       shortQuote: quote("QQQ260918C00655000", 120, 121),
@@ -148,21 +148,21 @@ describe("deriveTradeIntentV2", () => {
   })
 
   it("returns identical intents for fixed inputs", () => {
-    expect(deriveTradeIntentV2(bullishDecision, context)).toEqual(
-      deriveTradeIntentV2(bullishDecision, context),
+    expect(deriveTradeIntentV3(bullishDecision, context)).toEqual(
+      deriveTradeIntentV3(bullishDecision, context),
     )
   })
 
   it("preserves the canonical trade intent bytes", () => {
-    const derived = deriveTradeIntentV2(bullishDecision, context)
+    const derived = deriveTradeIntentV3(bullishDecision, context)
     if (!derived.success) throw new Error("Expected intent derivation")
 
-    expect(canonicalJsonSha256(derived.intent)).toBe("c22a2c06e60477b67d2644371507bfd91e3e76a476051a1842e9d80b291ffd15")
+    expect(canonicalJsonSha256(derived.intent)).toBe("4848f26fd7800a7977779abde9725f51e6a05d61d6e5cd891149c59f4753ab9a")
   })
 
   it("rejects quote symbols that do not match the proposed legs", () => {
     expect(
-      deriveTradeIntentV2(bullishDecision, {
+      deriveTradeIntentV3(bullishDecision, {
         ...context,
         longQuote: quote("SPY260918C00660000", 220, 223),
       }),
@@ -174,7 +174,7 @@ describe("deriveTradeIntentV2", () => {
 
   it("rejects a non-positive net debit", () => {
     expect(
-      deriveTradeIntentV2(bullishDecision, {
+      deriveTradeIntentV3(bullishDecision, {
         ...context,
         longQuote: quote("SPY260918C00650000", 100, 101),
         shortQuote: quote("SPY260918C00655000", 110, 111),
@@ -187,7 +187,7 @@ describe("deriveTradeIntentV2", () => {
 
   it("rejects an entry limit equal to the spread width", () => {
     expect(
-      deriveTradeIntentV2(bullishDecision, {
+      deriveTradeIntentV3(bullishDecision, {
         ...context,
         longQuote: quote("SPY260918C00650000", 600, 601),
         shortQuote: quote("SPY260918C00655000", 100, 101),
@@ -199,7 +199,7 @@ describe("deriveTradeIntentV2", () => {
   })
 
   it("rejects unsupported sub-cent strike encoding", () => {
-    const decision: ProposedTradeDecisionV2 = {
+    const decision: TradeProposalV3 = {
       ...bullishDecision,
       candidate: {
         ...bullishDecision.candidate,
@@ -211,7 +211,7 @@ describe("deriveTradeIntentV2", () => {
     }
 
     expect(
-      deriveTradeIntentV2(decision, {
+      deriveTradeIntentV3(decision, {
         ...context,
         longQuote: quote("SPY260918C00650001", 220, 223),
       }),
@@ -222,8 +222,8 @@ describe("deriveTradeIntentV2", () => {
   })
 
   it.each([
-    ["unsupported root", "DIA260918C00650000", "DIA260918C00655000"],
     ["impossible expiration", "SPY260431C00650000", "SPY260431C00655000"],
+    ["malformed symbol", "not-an-option", "also-not-an-option"],
   ])(
     "maps an %s to the existing derivation-input failure",
     (_case, longContractSymbol, shortContractSymbol) => {
@@ -240,10 +240,10 @@ describe("deriveTradeIntentV2", () => {
             contractSymbol: shortContractSymbol,
           },
         },
-      } as ProposedTradeDecisionV2
+      } as TradeProposalV3
 
       expect(
-        deriveTradeIntentV2(decision, {
+        deriveTradeIntentV3(decision, {
           ...context,
           longQuote: quote(longContractSymbol, 220, 223),
           shortQuote: quote(shortContractSymbol, 120, 121),
@@ -257,7 +257,7 @@ describe("deriveTradeIntentV2", () => {
 
   it("rejects an extreme debit at the spread-width boundary before conversion", () => {
     expect(
-      deriveTradeIntentV2(bullishDecision, {
+      deriveTradeIntentV3(bullishDecision, {
         ...context,
         longQuote: quote(
           "SPY260918C00650000",
@@ -274,7 +274,7 @@ describe("deriveTradeIntentV2", () => {
 
   it("rejects invalid quote inputs before arithmetic", () => {
     expect(
-      deriveTradeIntentV2(bullishDecision, {
+      deriveTradeIntentV3(bullishDecision, {
         ...context,
         longQuote: {
           ...context.longQuote,
@@ -289,7 +289,7 @@ describe("deriveTradeIntentV2", () => {
 
   it("returns a bounded failure when quote time is invalid at evaluation", () => {
     expect(
-      deriveTradeIntentV2(bullishDecision, {
+      deriveTradeIntentV3(bullishDecision, {
         ...context,
         longQuote: {
           ...context.longQuote,
@@ -303,7 +303,7 @@ describe("deriveTradeIntentV2", () => {
   })
 
   it("independently rejects inconsistent serialized intent fields", () => {
-    const result = deriveTradeIntentV2(bullishDecision, context)
+    const result = deriveTradeIntentV3(bullishDecision, context)
     expect(result.success).toBe(true)
     if (!result.success) throw new Error("Expected derivation to succeed")
 
@@ -344,7 +344,7 @@ describe("deriveTradeIntentV2", () => {
 
     for (const mutation of mutations) {
       expect(
-        tradeIntentV2Schema.safeParse({
+        tradeIntentV3Schema.safeParse({
           ...result.intent,
           ...mutation,
         }).success,
@@ -353,7 +353,7 @@ describe("deriveTradeIntentV2", () => {
   })
 
   it("does not admit executable or approval fields", () => {
-    const result = deriveTradeIntentV2(bullishDecision, context)
+    const result = deriveTradeIntentV3(bullishDecision, context)
     expect(result.success).toBe(true)
     if (!result.success) throw new Error("Expected derivation to succeed")
 
@@ -363,7 +363,7 @@ describe("deriveTradeIntentV2", () => {
     expect(result.intent).not.toHaveProperty("approved")
 
     expect(
-      tradeIntentV2Schema.safeParse({
+      tradeIntentV3Schema.safeParse({
         ...result.intent,
         quantity: 1,
       }).success,

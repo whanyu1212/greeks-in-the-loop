@@ -2,66 +2,65 @@ import { readFileSync } from "node:fs"
 
 import { describe, expect, it } from "vitest"
 
-import { NO_ACTION_REASON_CODES } from "../src/contracts/research-decision-v2.js"
+import { NO_ACTION_REASON_CODES } from "../src/contracts/research-decision-v3.js"
 import { RESEARCH_MAX_AGENT_STEPS } from "../src/research/research-agent.js"
 
 type PermissionAction = "allow" | "ask" | "deny"
-type Permission = PermissionAction | Record<string, PermissionAction>
 
 type PackageManifest = {
   scripts?: Record<string, string>
 }
 
 type OpenCodeConfig = {
-  agent: Record<
-    string,
-    {
-      mode?: string
-      permission?: Record<string, Permission>
-      prompt?: string
-      steps?: number
-    }
-  >
+  agent?: unknown
   default_agent?: string
   mcp: Record<string, { command: string[]; enabled?: boolean }>
-  permission?: Record<string, Permission>
+  permission?: Record<string, PermissionAction>
   share?: string
 }
+
+const readAgentDefinition = (path: string) => {
+  const source = readFileSync(path, "utf8")
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/u.exec(source)
+  if (!match) throw new Error(`Invalid OpenCode agent definition: ${path}`)
+  return { frontmatter: match[1]!, prompt: match[2]! }
+}
+
+const hasFrontmatterLine = (frontmatter: string, line: string) =>
+  frontmatter.split(/\r?\n/u).includes(line)
 
 const manifest = JSON.parse(
   readFileSync("package.json", "utf8"),
 ) as PackageManifest
 const config = JSON.parse(readFileSync("opencode.json", "utf8")) as OpenCodeConfig
-const systemPrompt = readFileSync(
-  "src/research/research-agent-system.md",
-  "utf8",
-)
+const research = readAgentDefinition(".opencode/agents/research.md")
+const trader = readAgentDefinition(".opencode/agents/trader.md")
+const systemPrompt = research.prompt
 const mcpLauncher = readFileSync("scripts/run-research-mcp.mjs", "utf8")
 const evalMcp = readFileSync("scripts/research-eval-mcp.ts", "utf8")
 const evalCli = readFileSync(
   "src/evaluation/research-behavior-evaluate-cli.ts",
   "utf8",
 )
-const research = config.agent.research
-if (!research) throw new Error("research agent is required")
-const permission = research.permission ?? {}
-
 describe("research agent policy", () => {
   it("selects the dedicated primary agent and disables session sharing", () => {
     expect(config.default_agent).toBe("research")
     expect(config.share).toBe("disabled")
-    expect(research.mode).toBe("primary")
-    expect(research.prompt).toBe("{file:./src/research/research-agent-system.md}")
-    expect(research.steps).toBe(RESEARCH_MAX_AGENT_STEPS)
+    expect(config.agent).toBeUndefined()
+    expect(hasFrontmatterLine(research.frontmatter, "mode: primary")).toBe(true)
+    expect(hasFrontmatterLine(research.frontmatter, `steps: ${RESEARCH_MAX_AGENT_STEPS}`)).toBe(true)
+    expect(hasFrontmatterLine(research.frontmatter, "model: openai/gpt-5.6-sol")).toBe(true)
   })
 
   it("denies unknown capabilities and permits only reviewed research MCP patterns", () => {
-    expect(permission["*"]).toBe("deny")
-    expect(permission["alpaca_get_*"]).toBe("allow")
-    expect(permission["fmp_*"]).toBe("allow")
-    expect(permission["exa_*"]).toBe("allow")
-    expect(permission.trusted_time).toBe("allow")
-    expect(config.permission?.["alpaca_*"]).toBe("deny")
+    for (const line of [
+      '  "*": deny',
+      '  "alpaca_get_*": allow',
+      '  "fmp_*": allow',
+      '  "exa_*": allow',
+      "  trusted_time: allow",
+    ]) expect(hasFrontmatterLine(research.frontmatter, line)).toBe(true)
+    expect(config.permission?.["*"]).toBe("deny")
   })
 
   it("denies authority-expanding tools", () => {
@@ -73,32 +72,51 @@ describe("research agent policy", () => {
       "webfetch",
       "websearch",
     ]) {
-      expect(permission[name]).toBe("deny")
+      expect(hasFrontmatterLine(research.frontmatter, `  ${name}: deny`)).toBe(true)
     }
-    expect(permission.skill).toBe("deny")
+    expect(hasFrontmatterLine(research.frontmatter, "  skill: deny")).toBe(true)
+  })
+
+  it("separates paper option submission into a minimal trader agent", () => {
+    expect(hasFrontmatterLine(trader.frontmatter, "mode: primary")).toBe(true)
+    expect(hasFrontmatterLine(trader.frontmatter, '  "alpaca_get_*": allow')).toBe(true)
+    expect(hasFrontmatterLine(trader.frontmatter, "  alpaca_place_option_order: allow")).toBe(true)
+    expect(trader.frontmatter).not.toContain("alpaca_place_stock_order")
+    expect(trader.frontmatter).not.toContain("alpaca_place_crypto_order")
+    expect(trader.frontmatter).not.toContain("alpaca_cancel_")
+    expect(trader.frontmatter).not.toContain('"fmp_*"')
+    expect(trader.frontmatter).not.toContain('"exa_*"')
+    expect(trader.prompt).toContain("Alpaca paper-trading system")
+    expect(trader.prompt).toContain("Submit at most once")
+    expect(trader.prompt).toContain("no authority to place stock or crypto orders")
   })
 
   it("keeps strategy selection inside the generic research prompt", () => {
-    expect(systemPrompt).toContain("Compare SPY, QQQ, and IWM")
-    expect(systemPrompt).toContain("select at most one underlying")
+    expect(systemPrompt).toContain("dynamic shortlist containing zero through eight symbols")
+    expect(systemPrompt).toContain("Promote no more than three symbols")
     expect(systemPrompt).not.toContain("spy-debit-spread-research")
   })
 
   it("limits file reads and edits to reviewed project paths", () => {
-    expect(permission.read).toEqual({
-      "*": "deny",
-      "docs/**": "allow",
-      "docs/.vitepress/**": "deny",
-      "workspace/**": "allow",
-    })
-    expect(permission.edit).toEqual({
-      "*": "deny",
-      "workspace/**": "allow",
-    })
+    expect(research.frontmatter).toContain([
+      "  read:",
+      '    "*": deny',
+      '    "docs/**": allow',
+      '    "docs/.vitepress/**": deny',
+      '    "workspace/**": allow',
+    ].join("\n"))
+    expect(research.frontmatter).toContain([
+      "  edit:",
+      '    "*": deny',
+      '    "workspace/**": allow',
+    ].join("\n"))
+    expect(hasFrontmatterLine(trader.frontmatter, "  read: deny")).toBe(true)
+    expect(hasFrontmatterLine(trader.frontmatter, "  edit: deny")).toBe(true)
   })
 
   it("contains no approval prompts in the unattended agent policy", () => {
-    expect(JSON.stringify(permission)).not.toContain('"ask"')
+    expect(research.frontmatter).not.toMatch(/:\s+ask$/mu)
+    expect(trader.frontmatter).not.toMatch(/:\s+ask$/mu)
   })
 
   it("provides every canonical no-action code without exposing source files", () => {
@@ -108,13 +126,35 @@ describe("research agent policy", () => {
   })
 
   it("requires concrete provider-attributed no-action evidence", () => {
-    expect(systemPrompt).toContain("a non-empty `evidence` array")
-    expect(systemPrompt).toContain("`NO_ACTION` evidence never uses `snapshotRef`")
-    expect(systemPrompt).toContain("exact condition or measured value")
+    expect(systemPrompt).toContain("return non-empty `reasonCodes` and `evidence` arrays")
+    expect(systemPrompt).toContain("it never uses `snapshotRef`")
   })
 
   it("spells out the strict candidate-leg role enum", () => {
-    expect(systemPrompt).toContain("role (`LONG` or `SHORT`)")
+    expect(systemPrompt).toContain("exactly one `LONG` and one `SHORT` leg")
+  })
+
+  it("defines spread-Greek arithmetic and comparison criteria", () => {
+    expect(systemPrompt).toContain("long leg minus short leg")
+    expect(systemPrompt).toContain("Bullish net delta must be 0.10 through 0.40")
+    expect(systemPrompt).toContain("bearish net delta -0.40 through -0.10")
+    expect(systemPrompt).toContain("theta cost")
+    expect(systemPrompt).toContain("absolute vega exposure per directional delta")
+    expect(systemPrompt).toContain("deterministic code independently recomputes")
+  })
+
+  it("uses orthogonal option-surface, event, and underlying evidence", () => {
+    for (const field of [
+      "atrPercent20",
+      "ewmaRealizedVolatility20",
+      "ivRvVarianceSpread",
+      "termStructureSlope",
+      "putCallSkew25Delta",
+      "impliedMovePercent",
+      "eventBeforeExpiration",
+    ]) expect(systemPrompt).toContain(field)
+    expect(systemPrompt).toContain("Do not infer `CLEAR` from silence")
+    expect(systemPrompt).toContain("RSI, MACD, stochastic")
   })
 
   it("runs policy, MCP, and behavior diagnostics through reviewed entrypoints", () => {
@@ -175,7 +215,16 @@ describe("research agent policy", () => {
     expect(evalMcp).toContain('start: z.string().datetime({ offset: true })')
     expect(evalMcp).toContain('end: z.string().datetime({ offset: true })')
     expect(evalMcp).toContain("Stock-bar start must precede end")
-    expect(evalMcp).toContain("allowedAlpacaOptionSymbolV1Schema")
+    expect(evalMcp).toContain("alpacaOptionSymbolSchema")
+    expect(evalMcp).toContain('"alpaca_get_account_info"')
+    expect(evalMcp).toContain('"alpaca_get_account_config"')
+    expect(evalMcp).toContain('"alpaca_get_option_snapshot"')
+    expect(evalMcp).toContain('"fmp_economics"')
+    expect(evalMcp).toContain('"fmp_calendar"')
+    expect(evalMcp).toContain('"exa_web_search_exa"')
+    expect(evalMcp).not.toContain('"alpaca_get_account_configurations"')
+    expect(evalMcp).not.toContain('"fmp_get_economic_calendar"')
+    expect(evalMcp).not.toContain('"exa_search"')
     expect(evalMcp).not.toContain('.startsWith("SPY")')
     expect(evalMcp).not.toContain("/^SPY\\d{6}")
     expect(evalMcp).toContain("withinRequestedWindow")
@@ -183,6 +232,8 @@ describe("research agent policy", () => {
   })
 
   it("enables only the four approved research MCP servers through the launcher", () => {
+    expect(mcpLauncher).toContain('"alpaca-mcp-server==2.2.1"')
+    expect(mcpLauncher).toContain('"fastmcp==3.4.7"')
     expect(Object.keys(config.mcp).sort()).toEqual([
       "alpaca",
       "exa",

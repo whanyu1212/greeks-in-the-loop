@@ -1,16 +1,19 @@
 import { z } from "zod"
 
 import {
-  ALLOWED_OPTION_UNDERLYINGS_V1,
+  alpacaOptionSymbolSchema,
+  optionUnderlyingV1Schema,
   parseAlpacaOptionSymbol,
-  allowedAlpacaOptionSymbolV1Schema,
-  validateOptionUniverseV1,
 } from "../shared/alpaca-option-identity.js"
 import {
   safeSchemaDiagnostics,
   type SchemaViolationCategory,
 } from "../shared/schema-diagnostics.js"
-export const RESEARCH_DECISION_CONTRACT_VERSION = "2.0.0" as const
+export const RESEARCH_DECISION_CONTRACT_VERSION = "3.0.0" as const
+export const TRADE_PROPOSAL_LIMIT = 3
+
+export const proposalQuoteSnapshotRef = (underlying: string) =>
+  `alpaca-proposal-quotes-v2-${underlying}`
 
 export const NO_ACTION_REASON_CODES = [
   "MARKET_WINDOW_INELIGIBLE",
@@ -33,7 +36,7 @@ const boundedIdentifier = z
   .min(1)
   .max(128)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u)
-const contractSymbol = allowedAlpacaOptionSymbolV1Schema
+const contractSymbol = alpacaOptionSymbolSchema
 // OCC symbols encode a two-digit year. This contract only accepts 2000–2099
 // so a full ISO date maps to exactly one symbol expiration.
 const expirationDate = z.iso.date().refine((value) => {
@@ -139,9 +142,9 @@ const optionLegSchema = z
   })
   .strict()
 
-export const researchCandidateV2Schema = z
+export const researchCandidateV3Schema = z
   .object({
-    underlying: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1),
+    underlying: optionUnderlyingV1Schema,
     structure: z.enum(["BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"]),
     expiration: expirationDate,
     longLeg: optionLegSchema,
@@ -179,7 +182,6 @@ export const researchCandidateV2Schema = z
       const parsedSymbol = parseAlpacaOptionSymbol(leg.contractSymbol)
       if (
         !parsedSymbol.success ||
-        !validateOptionUniverseV1(parsedSymbol.identity).success ||
         parsedSymbol.identity.root !== candidate.underlying ||
         parsedSymbol.identity.expiration !== candidate.expiration ||
         parsedSymbol.identity.optionType !== expectedOptionType ||
@@ -195,7 +197,7 @@ export const researchCandidateV2Schema = z
   })
 
 // Keep the safe branch stripped so irrelevant prose cannot block NO_ACTION.
-export const noActionDecisionV2Schema = z
+export const noActionDecisionV3Schema = z
   .object({
     contractVersion: z.literal(RESEARCH_DECISION_CONTRACT_VERSION),
     outcome: z.literal("NO_ACTION"),
@@ -208,13 +210,12 @@ export const noActionDecisionV2Schema = z
   .strip()
 
 // Proposals are strict because retained unknown fields could be mistaken for trusted data.
-export const proposedTradeDecisionV2Schema = z
+export const tradeProposalV3Schema = z
   .object({
-    contractVersion: z.literal(RESEARCH_DECISION_CONTRACT_VERSION),
-    outcome: z.literal("PROPOSE_TRADE"),
+    priority: z.number().int().min(1).max(TRADE_PROPOSAL_LIMIT),
     direction: z.enum(["BULLISH", "BEARISH"]),
     thesis: boundedText,
-    candidate: researchCandidateV2Schema,
+    candidate: researchCandidateV3Schema,
     invalidation: z.array(boundedText).min(1).max(16),
     evidence: z.array(evidenceClaimSchema).min(1).max(64),
   })
@@ -237,17 +238,64 @@ export const proposedTradeDecisionV2Schema = z
         message: "A trade proposal requires at least one sourced fact",
       })
     }
+    const expectedSnapshotRef = proposalQuoteSnapshotRef(
+      decision.candidate.underlying,
+    )
+    decision.evidence.forEach((claim, index) => {
+      if (
+        claim.kind === "SOURCED_FACT" &&
+        claim.snapshotRef !== expectedSnapshotRef
+      ) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["evidence", index, "snapshotRef"],
+          message: "Proposal facts must use the candidate-specific quote snapshot",
+        })
+      }
+    })
   })
 
-export const researchDecisionV2Schema = z.discriminatedUnion("outcome", [
-  noActionDecisionV2Schema,
-  proposedTradeDecisionV2Schema,
+export const proposedPortfolioDecisionV3Schema = z
+  .object({
+    contractVersion: z.literal(RESEARCH_DECISION_CONTRACT_VERSION),
+    outcome: z.literal("PROPOSE_TRADES"),
+    proposals: z.array(tradeProposalV3Schema).min(1).max(TRADE_PROPOSAL_LIMIT),
+  })
+  .strict()
+  .superRefine((decision, refinement) => {
+    const underlyings = new Set(
+      decision.proposals.map(({ candidate }) => candidate.underlying),
+    )
+    if (underlyings.size !== decision.proposals.length) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["proposals"],
+        message: "Portfolio proposals must use distinct underlyings",
+      })
+    }
+    decision.proposals.forEach((proposal, index) => {
+      if (proposal.priority !== index + 1) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["proposals", index, "priority"],
+          message: "Portfolio proposals must be ordered by contiguous priority",
+        })
+      }
+    })
+  })
+
+export const researchDecisionV3Schema = z.discriminatedUnion("outcome", [
+  noActionDecisionV3Schema,
+  proposedPortfolioDecisionV3Schema,
 ])
 
-export type ResearchDecisionV2 = z.infer<typeof researchDecisionV2Schema>
-export type NoActionDecisionV2 = z.infer<typeof noActionDecisionV2Schema>
-export type ProposedTradeDecisionV2 = z.infer<typeof proposedTradeDecisionV2Schema>
-export type ResearchCandidateV2 = z.infer<typeof researchCandidateV2Schema>
+export type ResearchDecisionV3 = z.infer<typeof researchDecisionV3Schema>
+export type NoActionDecisionV3 = z.infer<typeof noActionDecisionV3Schema>
+export type TradeProposalV3 = z.infer<typeof tradeProposalV3Schema>
+export type ProposedPortfolioDecisionV3 = z.infer<
+  typeof proposedPortfolioDecisionV3Schema
+>
+export type ResearchCandidateV3 = z.infer<typeof researchCandidateV3Schema>
 
 const evidenceSnapshotMetadataSchema = z
   .object({
@@ -295,7 +343,7 @@ export type ResearchDecisionValidationIssue = {
 export type ResearchDecisionValidationResult =
   | {
       success: true
-      data: ResearchDecisionV2
+      data: ResearchDecisionV3
     }
   | {
       success: false
@@ -319,7 +367,7 @@ const schemaIssuePath = (path: readonly PropertyKey[]) =>
   path.map((part) => (typeof part === "symbol" ? String(part) : part))
 
 /**
- * Validates untrusted agent output against the v2 contract and trusted evidence
+ * Validates untrusted agent output against the v3 contract and trusted evidence
  * metadata.
  *
  * Context is validated first because model claims must never establish their
@@ -330,7 +378,7 @@ const schemaIssuePath = (path: readonly PropertyKey[]) =>
  * @param context - Application-owned evaluation time and snapshot metadata.
  * @returns The normalized decision on success, or bounded validation issues.
  */
-export function validateResearchDecisionV2(
+export function validateResearchDecisionV3(
   input: unknown,
   context: ResearchDecisionValidationContext,
 ): ResearchDecisionValidationResult {
@@ -346,7 +394,7 @@ export function validateResearchDecisionV2(
     }
   }
 
-  const parsedDecision = researchDecisionV2Schema.safeParse(input)
+  const parsedDecision = researchDecisionV3Schema.safeParse(input)
   if (!parsedDecision.success) {
     return {
       success: false,
@@ -361,71 +409,70 @@ export function validateResearchDecisionV2(
   }
 
   const issues: ResearchDecisionValidationIssue[] = []
-  const claims = new Map<string, "SOURCED_FACT" | "INFERENCE">()
-
-  // First index claim kinds and reject ambiguous identifiers.
-  parsedDecision.data.evidence.forEach((evidence, index) => {
-    if (claims.has(evidence.claimId)) {
-      issues.push({
-        code: "DUPLICATE_CLAIM_ID",
-        path: ["evidence", index, "claimId"],
-      })
-      return
-    }
-    claims.set(evidence.claimId, evidence.kind)
-  })
-
   const evaluatedAt = Date.parse(parsedContext.data.evaluatedAt)
+  parsedDecision.data.proposals.forEach((proposal, proposalIndex) => {
+    const claims = new Map<string, "SOURCED_FACT" | "INFERENCE">()
+    const evidencePath = ["proposals", proposalIndex, "evidence"] as const
 
-  // Then resolve inference edges and evaluate sourced facts against trusted time.
-  parsedDecision.data.evidence.forEach((evidence, index) => {
-    if (evidence.kind === "INFERENCE") {
-      evidence.basedOn.forEach((claimId, referenceIndex) => {
-        const referencedKind = claims.get(claimId)
-        if (referencedKind === undefined) {
-          issues.push({
-            code: "UNKNOWN_INFERENCE_REFERENCE",
-            path: ["evidence", index, "basedOn", referenceIndex],
-          })
-        } else if (referencedKind !== "SOURCED_FACT") {
-          issues.push({
-            code: "INFERENCE_REFERENCE_NOT_FACT",
-            path: ["evidence", index, "basedOn", referenceIndex],
-          })
-        }
-      })
-      return
-    }
+    proposal.evidence.forEach((evidence, index) => {
+      if (claims.has(evidence.claimId)) {
+        issues.push({
+          code: "DUPLICATE_CLAIM_ID",
+          path: [...evidencePath, index, "claimId"],
+        })
+        return
+      }
+      claims.set(evidence.claimId, evidence.kind)
+    })
 
-    // Only own snapshot keys are trusted. Inherited names such as
-    // "constructor" would otherwise resolve to Object.prototype and skip
-    // freshness checks because Date.parse(undefined) is NaN.
-    const snapshot = Object.hasOwn(
-      parsedContext.data.snapshots,
-      evidence.snapshotRef,
-    )
-      ? parsedContext.data.snapshots[evidence.snapshotRef]
-      : undefined
-    if (snapshot === undefined) {
-      issues.push({
-        code: "UNKNOWN_SNAPSHOT",
-        path: ["evidence", index, "snapshotRef"],
-      })
-      return
-    }
+    proposal.evidence.forEach((evidence, index) => {
+      if (evidence.kind === "INFERENCE") {
+        evidence.basedOn.forEach((claimId, referenceIndex) => {
+          const referencedKind = claims.get(claimId)
+          if (referencedKind === undefined) {
+            issues.push({
+              code: "UNKNOWN_INFERENCE_REFERENCE",
+              path: [...evidencePath, index, "basedOn", referenceIndex],
+            })
+          } else if (referencedKind !== "SOURCED_FACT") {
+            issues.push({
+              code: "INFERENCE_REFERENCE_NOT_FACT",
+              path: [...evidencePath, index, "basedOn", referenceIndex],
+            })
+          }
+        })
+        return
+      }
 
-    if (Date.parse(snapshot.retrievedAt) > evaluatedAt) {
-      issues.push({
-        code: "SNAPSHOT_FROM_FUTURE",
-        path: ["evidence", index, "snapshotRef"],
-      })
-    }
-    if (Date.parse(snapshot.freshUntil) < evaluatedAt) {
-      issues.push({
-        code: "STALE_SNAPSHOT",
-        path: ["evidence", index, "snapshotRef"],
-      })
-    }
+      // Only own snapshot keys are trusted. Inherited names such as
+      // "constructor" would otherwise resolve to Object.prototype.
+      const snapshot = Object.hasOwn(
+        parsedContext.data.snapshots,
+        evidence.snapshotRef,
+      )
+        ? parsedContext.data.snapshots[evidence.snapshotRef]
+        : undefined
+      if (snapshot === undefined) {
+        issues.push({
+          code: "UNKNOWN_SNAPSHOT",
+          path: [...evidencePath, index, "snapshotRef"],
+        })
+        return
+      }
+
+      if (Date.parse(snapshot.retrievedAt) > evaluatedAt) {
+        issues.push({
+          code: "SNAPSHOT_FROM_FUTURE",
+          path: [...evidencePath, index, "snapshotRef"],
+        })
+      }
+      if (Date.parse(snapshot.freshUntil) < evaluatedAt) {
+        issues.push({
+          code: "STALE_SNAPSHOT",
+          path: [...evidencePath, index, "snapshotRef"],
+        })
+      }
+    })
   })
 
   return issues.length === 0

@@ -2,13 +2,12 @@ import { isDeepStrictEqual } from "node:util"
 
 import { z } from "zod"
 
-import { preliminaryResearchV2Schema } from "../contracts/preliminary-research-v2.js"
 import {
-  researchDecisionV2Schema,
-  validateResearchDecisionV2,
-} from "../contracts/research-decision-v2.js"
-import { researchReportV3Schema } from "../contracts/research-report-v3.js"
-import { tradeIntentV2Schema } from "../contracts/trade-intent-v2.js"
+  researchDecisionV3Schema,
+  proposalQuoteSnapshotRef,
+} from "../contracts/research-decision-v3.js"
+import { researchReportV6Schema } from "../contracts/research-report-v6.js"
+import { tradeIntentV3Schema } from "../contracts/trade-intent-v3.js"
 import {
   SUPPORTED_RESEARCH_RUN_VERSIONS,
   type ResearchRunV1,
@@ -18,15 +17,6 @@ import {
   ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS,
   ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE,
 } from "../market-data/alpaca-option-quotes.js"
-import {
-  proposalAccountChecksAreFresh,
-  PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
-  isProposedTradeReport,
-  proposalHistoryIssuePath,
-  proposalMarketRegimeIsFresh,
-  PROPOSAL_QUOTE_SNAPSHOT_REF,
-} from "../research/research-proposal-path.js"
-import { MAX_TERMINAL_REJECTION_DETAILS } from "../research/research-cycle-terminal.js"
 import {
   DRY_RUN_MODE,
   TRADE_INTENT_START_GRACE_MS,
@@ -39,10 +29,9 @@ import {
   parseRfc3339Nanoseconds,
 } from "../shared/value-normalization.js"
 
-// 1.1.0 narrowed the graded checks to failures the model can cause; checks only
-// application code could fail were removed. Bump when grader semantics change,
-// so two results are only comparable when they share this version.
-export const RESEARCH_RUN_EVALUATION_VERSION = "1.1.0" as const
+// Bump when grader semantics change, so two results are only comparable when
+// they share this version.
+export const RESEARCH_RUN_EVALUATION_VERSION = "2.0.0" as const
 
 export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "RUN_METADATA_INVALID",
@@ -56,9 +45,6 @@ export const RESEARCH_EVALUATION_ISSUE_CODES = [
   "ACCOUNT_CHECKS_STALE_AT_INTENT",
   "MARKET_REGIME_STALE_AT_INTENT",
   "INTRADAY_BAR_COUNT_MISMATCH",
-  "PRELIMINARY_SESSION_CONTEXT_MISSING",
-  "PRELIMINARY_TARGET_SESSION_MISMATCH",
-  "PRELIMINARY_OBSERVATION_AFTER_CYCLE",
   "DUPLICATE_CLAIM_ID",
   "NO_ACTION_SOURCED_EVIDENCE",
   "UNGROUNDED_INFERENCE",
@@ -93,11 +79,9 @@ export const researchRunEvaluationV1Schema = z
     cycleId: z.string().min(1).max(128),
     terminalEventId: z.string().min(1).max(128),
     outcomeStatus: z.enum([
-      "PRELIMINARY_RESEARCH_RETAINED",
       "VALIDATED_NO_ACTION",
       "DECISION_REJECTED",
-      "INTENT_DERIVATION_REJECTED",
-      "INTENT_DERIVED",
+      "PORTFOLIO_EVALUATED",
     ]),
     versions: z
       .object({
@@ -151,6 +135,7 @@ const timestampWithin = (value: string, start: number, end: number) => {
 }
 
 type CandidateIdentity = Readonly<{
+  underlying: string
   direction: "BULLISH" | "BEARISH"
   structure: "BULL_CALL_SPREAD" | "BEAR_PUT_SPREAD"
   expiration: string
@@ -264,6 +249,7 @@ const retainedTradeWindowContextIsValid = (
 
 const candidateKey = (candidate: CandidateIdentity) =>
   [
+    candidate.underlying,
     candidate.direction,
     candidate.structure,
     candidate.expiration,
@@ -271,28 +257,11 @@ const candidateKey = (candidate: CandidateIdentity) =>
     candidate.shortContractSymbol,
   ].join("|")
 
-const QUOTE_CONFIRMATION_REJECTION_REASONS = new Set([
-  "QUOTE_REQUEST_FAILED",
-  "QUOTE_RESPONSE_INVALID",
-  "QUOTE_SYMBOL_MISSING",
-  "QUOTE_PRICE_INVALID",
-  "QUOTE_TIMESTAMP_INVALID",
-  "QUOTE_FROM_FUTURE",
-  "QUOTE_STALE",
-  "EVALUATION_TIME_INVALID",
-])
-
-const INTENT_DERIVATION_REJECTION_REASONS = new Set([
-  "STRIKE_PRECISION_UNSUPPORTED",
-  "NON_POSITIVE_NET_DEBIT",
-  "ENTRY_LIMIT_NOT_BELOW_WIDTH",
-  "ARITHMETIC_OVERFLOW",
-])
-
 const hasCanonicalProposalQuoteProvenance = (
   snapshot: ResearchRunV1["evidenceSnapshots"][number],
+  expectedSnapshotRef: string,
 ) =>
-  snapshot.snapshotRef === PROPOSAL_QUOTE_SNAPSHOT_REF &&
+  snapshot.snapshotRef === expectedSnapshotRef &&
   snapshot.provider === "ALPACA" &&
   snapshot.source === ALPACA_OPTION_QUOTE_SNAPSHOT_SOURCE &&
   snapshot.temporalClass === "LIVE"
@@ -312,8 +281,9 @@ const hasAlpacaQuoteFreshnessBound = (
 
 const isCanonicalProposalQuoteSnapshot = (
   snapshot: ResearchRunV1["evidenceSnapshots"][number],
+  expectedSnapshotRef: string,
 ) =>
-  hasCanonicalProposalQuoteProvenance(snapshot) &&
+  hasCanonicalProposalQuoteProvenance(snapshot, expectedSnapshotRef) &&
   hasAlpacaQuoteFreshnessBound(snapshot)
 
 /**
@@ -338,38 +308,29 @@ export function evaluateResearchRunV1(
   const invocation = parsedInvocation?.success === true
     ? parsedInvocation.data
     : undefined
+  if (run.researchInvocation !== undefined && invocation === undefined) {
+    contractIssues.push("RUN_METADATA_INVALID")
+  }
 
-  const isAnytimeDryRun = run.initialEligibility?.researchMode === DRY_RUN_MODE
+  const parsedReport = run.researchReport === undefined
+    ? undefined
+    : researchReportV6Schema.safeParse(run.researchReport)
+  const validReport = parsedReport?.success === true ? parsedReport.data : undefined
+  const reportResult = validReport?.result
+  const parsedValidatedDecision = run.validatedDecision === undefined
+    ? undefined
+    : researchDecisionV3Schema.safeParse(run.validatedDecision)
+  const validRetainedResult = parsedValidatedDecision?.success === true
+    ? parsedValidatedDecision.data
+    : undefined
+  const versionedResult = reportResult ?? validRetainedResult
 
-  const parsedReport =
-    run.researchReport === undefined
-      ? undefined
-      : researchReportV3Schema.safeParse(run.researchReport)
   if (
     run.researchReport === undefined &&
-    [
-      "PRELIMINARY_RESEARCH_RETAINED",
-      "VALIDATED_NO_ACTION",
-      "INTENT_DERIVATION_REJECTED",
-      "INTENT_DERIVED",
-    ].includes(run.outcome.status)
+    run.outcome.status !== "DECISION_REJECTED"
   ) {
     contractIssues.push("RESEARCH_REPORT_MISSING")
   }
-  const parsedPreliminaryResearch =
-    run.preliminaryResearch === undefined
-      ? undefined
-      : preliminaryResearchV2Schema.safeParse(run.preliminaryResearch)
-  const parsedValidatedDecision =
-    run.validatedDecision === undefined
-      ? undefined
-      : researchDecisionV2Schema.safeParse(run.validatedDecision)
-
-  const validReport =
-    parsedReport?.success === true ? parsedReport.data : undefined
-  const reportResult = validReport?.result
-  // Model-caused: the report's own declared versions must match what the
-  // invocation authorized.
   if (
     invocation !== undefined &&
     reportResult !== undefined &&
@@ -378,644 +339,64 @@ export function evaluateResearchRunV1(
   ) {
     contractIssues.push("RUN_METADATA_INVALID")
   }
-  const expectedCommonReportRejectionIssues = (() => {
-    if (validReport === undefined) return undefined
-    const cycleStart = Date.parse(run.cycle.startedAt)
-    const cycleEnd = Date.parse(run.cycle.completedAt)
-    const reportAsOf = Date.parse(validReport.analysis.asOf)
-    if (
-      !Number.isFinite(cycleStart) ||
-      !Number.isFinite(cycleEnd) ||
-      cycleStart > cycleEnd ||
-      reportAsOf > cycleEnd
-    ) {
-      return [
-        { code: "CONTEXT_INVALID" as const, path: ["analysis", "asOf"] },
-      ]
-    }
-    const exaSources = validReport.analysis.externalContext.filter(
-      ({ provider }) => provider === "EXA",
-    )
-    return exaSources.length > 0 &&
-      !exaSources.some(({ retrievedAt }) =>
-        timestampWithin(retrievedAt, cycleStart, cycleEnd),
-      )
-      ? [
-          {
-            code: "CONTEXT_INVALID" as const,
-            path: ["analysis", "externalContext"],
-          },
-        ]
-      : undefined
-  })()
-  const plausibleCommonReportRejectionIssues = (() => {
-    if (
-      validReport === undefined ||
-      expectedCommonReportRejectionIssues !== undefined
-    ) {
-      return []
-    }
-    const cycleStart = Date.parse(run.cycle.startedAt)
-    const cycleEnd = Date.parse(run.cycle.completedAt)
-    const reportAsOf = Date.parse(validReport.analysis.asOf)
-    if (
-      !Number.isFinite(cycleStart) ||
-      !Number.isFinite(cycleEnd) ||
-      !Number.isFinite(reportAsOf)
-    ) {
-      return []
-    }
-    const plausible: Array<
-      ReadonlyArray<
-        Readonly<{ code: string; path: readonly (string | number)[] }>
-      >
-    > = []
-    if (reportAsOf > cycleStart && reportAsOf <= cycleEnd) {
-      plausible.push([
-        { code: "CONTEXT_INVALID", path: ["analysis", "asOf"] },
-      ])
-    }
-    const exaSources = validReport.analysis.externalContext.filter(
-      ({ provider }) => provider === "EXA",
-    )
-    if (
-      exaSources.length > 0 &&
-      !exaSources.some(
-        ({ retrievedAt }) =>
-          Date.parse(retrievedAt) >= cycleStart &&
-          Date.parse(retrievedAt) <= Math.max(cycleStart, reportAsOf),
-      )
-    ) {
-      plausible.push([
-        { code: "CONTEXT_INVALID", path: ["analysis", "externalContext"] },
-      ])
-    }
-    return plausible
-  })()
-  const rejectedOutcomeIssues =
-    run.outcome.status === "DECISION_REJECTED"
-      ? run.outcome.issues
-      : undefined
-  const retainedCommonReportRejectionMatches =
-    rejectedOutcomeIssues !== undefined &&
-    (expectedCommonReportRejectionIssues !== undefined
-      ? isDeepStrictEqual(
-          rejectedOutcomeIssues,
-          expectedCommonReportRejectionIssues,
-        )
-      : plausibleCommonReportRejectionIssues.some((issues) =>
-          isDeepStrictEqual(rejectedOutcomeIssues, issues),
-        ))
-  const retainedProposalEvaluationLowerBound = (() => {
-    if (validReport === undefined || run.initialEligibility === undefined) {
-      return undefined
-    }
-    const eligibilityEvaluatedAt = Date.parse(
-      run.initialEligibility.evaluatedAt,
-    )
-    const reportAsOf = Date.parse(validReport.analysis.asOf)
-    const cycleStart = Date.parse(run.cycle.startedAt)
-    const cycleEnd = Date.parse(run.cycle.completedAt)
-    const earliestInCycleExaRetrieval = Math.min(
-      ...validReport.analysis.externalContext
-        .filter(({ provider }) => provider === "EXA")
-        .map(({ retrievedAt }) => Date.parse(retrievedAt))
-        .filter(
-          (retrievedAt) =>
-            Number.isFinite(retrievedAt) &&
-            retrievedAt >= cycleStart &&
-            retrievedAt <= cycleEnd,
-        ),
-    )
-    return Number.isFinite(eligibilityEvaluatedAt) && Number.isFinite(reportAsOf)
-      ? new Date(
-          Math.max(
-            eligibilityEvaluatedAt,
-            reportAsOf,
-            Number.isFinite(earliestInCycleExaRetrieval)
-              ? earliestInCycleExaRetrieval
-              : Number.NEGATIVE_INFINITY,
-          ),
-        ).toISOString()
-      : undefined
-  })()
-  const retainedResult = run.preliminaryResearch ?? run.validatedDecision
-  const validRetainedResult =
-    parsedPreliminaryResearch?.success === true
-      ? parsedPreliminaryResearch.data
-      : parsedValidatedDecision?.success === true
-        ? parsedValidatedDecision.data
-        : undefined
-  const versionedResult = reportResult ?? validRetainedResult
-  const hasRetainedEligibleTradeWindow =
-    run.initialEligibility !== undefined &&
-    retainedTradeWindowContextIsValid(
-      run.initialEligibility,
-      run.cycle,
-    )
-  const quoteConfirmationRejection =
-    run.outcome.status === "INTENT_DERIVATION_REJECTED" &&
-    run.outcome.reasons.length === 1 &&
-    run.outcome.reasons.every((reason) =>
-      QUOTE_CONFIRMATION_REJECTION_REASONS.has(reason),
-    )
-  const proposalPreflightValidation =
-    run.outcome.status === "DECISION_REJECTED" &&
-    !retainedCommonReportRejectionMatches &&
-    reportResult?.outcome === "PROPOSE_TRADE"
-      ? validateResearchDecisionV2(
-          reportResult,
-          PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
-        )
-      : undefined
-  const expectedPreQuoteDecisionRejectionIssues = (() => {
-    if (
-      proposalPreflightValidation?.success !== true ||
-      !hasRetainedEligibleTradeWindow ||
-      validReport === undefined ||
-      !isProposedTradeReport(validReport) ||
-      run.initialEligibility === undefined ||
-      retainedProposalEvaluationLowerBound === undefined
-    ) {
-      return undefined
-    }
-    if (
-      !proposalMarketRegimeIsFresh(
-        validReport,
-        retainedProposalEvaluationLowerBound,
-      )
-    ) {
-      return [
-        {
-          code: "CONTEXT_INVALID" as const,
-          path: ["analysis", "marketRegime", "observedAt"],
-        },
-      ]
-    }
-    if (
-      !proposalAccountChecksAreFresh(
-        validReport,
-        retainedProposalEvaluationLowerBound,
-      )
-    ) {
-      return [
-        {
-          code: "CONTEXT_INVALID" as const,
-          path: ["analysis", "accountChecks", "observedAt"],
-        },
-      ]
-    }
-    const historyIssuePath = proposalHistoryIssuePath(
-      validReport,
-      run.initialEligibility,
-    )
-    return historyIssuePath === undefined
-      ? undefined
-      : [{ code: "CONTEXT_INVALID" as const, path: historyIssuePath }]
-  })()
-  const canonicalRetainedQuoteSnapshot =
-    run.evidenceSnapshots.length === 1 &&
-    run.evidenceSnapshots[0] !== undefined &&
-    isCanonicalProposalQuoteSnapshot(run.evidenceSnapshots[0])
-      ? run.evidenceSnapshots[0]
-      : undefined
-  const expectedSnapshotDecisionRejectionIssues = (() => {
-    if (
-      run.outcome.status !== "DECISION_REJECTED" ||
-      canonicalRetainedQuoteSnapshot === undefined ||
-      validReport === undefined ||
-      reportResult?.outcome !== "PROPOSE_TRADE"
-    ) {
-      return undefined
-    }
-    const evaluatedAt = Date.parse(canonicalRetainedQuoteSnapshot.retrievedAt)
-    const accountAge =
-      evaluatedAt - Date.parse(validReport.analysis.accountChecks.observedAt)
-    const marketAge =
-      evaluatedAt - Date.parse(validReport.analysis.marketRegime.observedAt)
-    if (marketAge < 0 || marketAge > 60_000) {
-      return [
-        {
-          code: "CONTEXT_INVALID" as const,
-          path: ["analysis", "marketRegime", "observedAt"],
-        },
-      ]
-    }
-    if (accountAge < 0 || accountAge > 5 * 60 * 1_000) {
-      return [
-        {
-          code: "CONTEXT_INVALID" as const,
-          path: ["analysis", "accountChecks", "observedAt"],
-        },
-      ]
-    }
-    const validation = validateResearchDecisionV2(reportResult, {
-      evaluatedAt: canonicalRetainedQuoteSnapshot.retrievedAt,
-      snapshots: {
-        [PROPOSAL_QUOTE_SNAPSHOT_REF]: {
-          provider: canonicalRetainedQuoteSnapshot.provider,
-          source: canonicalRetainedQuoteSnapshot.source,
-          retrievedAt: canonicalRetainedQuoteSnapshot.retrievedAt,
-          freshUntil: canonicalRetainedQuoteSnapshot.freshUntil,
-        },
-      },
-    })
-    return validation.success ? undefined : validation.issues
-  })()
   if (
     reportResult !== undefined &&
-    retainedResult !== undefined &&
-    !isDeepStrictEqual(reportResult, retainedResult)
+    run.validatedDecision !== undefined &&
+    !isDeepStrictEqual(reportResult, run.validatedDecision)
   ) {
     contractIssues.push("REPORT_RESULT_MISMATCH")
   }
 
   switch (run.outcome.status) {
-    case "PRELIMINARY_RESEARCH_RETAINED":
-      if (
-        run.preliminaryResearch === undefined ||
-        !isDeepStrictEqual(run.outcome.research, run.preliminaryResearch) ||
-        run.validatedDecision !== undefined
-      ) {
-        contractIssues.push("OUTCOME_RECORD_MISMATCH")
-      }
-      break
     case "VALIDATED_NO_ACTION":
       if (
-        run.validatedDecision === undefined ||
-        !isDeepStrictEqual(run.outcome.decision, run.validatedDecision) ||
-        run.preliminaryResearch !== undefined
-      ) {
-        contractIssues.push("OUTCOME_RECORD_MISMATCH")
-      }
-      break
-    case "INTENT_DERIVED":
-      if (
-        run.validatedDecision === undefined ||
-        !isDeepStrictEqual(run.outcome.decision, run.validatedDecision) ||
-        run.preliminaryResearch !== undefined
+        validRetainedResult?.outcome !== "NO_ACTION" ||
+        !isDeepStrictEqual(run.outcome.decision, validRetainedResult)
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
       }
       break
     case "DECISION_REJECTED":
-      const rejectedIssues = run.outcome.issues
-      const rejectionIssuesMatch = (
-        expected: readonly Readonly<{
-          code: string
-          path: readonly (string | number)[]
-        }>[],
-      ) =>
-        isDeepStrictEqual(
-          rejectedIssues,
-          expected.slice(0, MAX_TERMINAL_REJECTION_DETAILS),
-        )
-      const parsedRejectedReport =
-        parsedReport?.success === true ? parsedReport.data : undefined
-      const parsedRejectedResult = parsedRejectedReport?.result
-      const rejectedPreliminaryTargetSessionDate =
-        parsedRejectedResult?.outcome === "PRELIMINARY_RESEARCH"
-          ? parsedRejectedResult.targetSessionDate
-          : undefined
-      const preliminaryTargetSessionDateRejectionIssues = [
-        { code: "CONTEXT_INVALID" as const, path: ["targetSessionDate"] },
-      ]
-      const preliminaryCouldBeRetained =
-        !retainedCommonReportRejectionMatches &&
-        parsedRejectedReport !== undefined &&
-        parsedRejectedResult?.outcome === "PRELIMINARY_RESEARCH" &&
-        run.initialEligibility?.researchEligible === true &&
-        run.initialEligibility.sessionDate ===
-          parsedRejectedResult.targetSessionDate &&
-        run.cycle.sessionDate === parsedRejectedResult.targetSessionDate &&
-        Date.parse(parsedRejectedReport.analysis.asOf) <=
-          Date.parse(run.cycle.completedAt) &&
-        parsedRejectedResult.evidence.every(
-          (claim) =>
-            claim.kind !== "SOURCED_FACT" ||
-            Date.parse(claim.observedAt) <= Date.parse(run.cycle.completedAt),
-        )
-      const preliminaryFutureObservationIndex =
-        parsedRejectedResult?.outcome === "PRELIMINARY_RESEARCH"
-          ? parsedRejectedResult.evidence.findIndex(
-              (claim) =>
-                claim.kind === "SOURCED_FACT" &&
-                Date.parse(claim.observedAt) >
-                  Date.parse(run.cycle.completedAt),
-            )
-          : -1
-      const expectedPreliminaryDecisionRejectionIssues =
-        retainedCommonReportRejectionMatches ||
-        parsedRejectedResult?.outcome !== "PRELIMINARY_RESEARCH"
-          ? undefined
-          : preliminaryFutureObservationIndex >= 0
-            ? [
-                {
-                  code: "CONTEXT_INVALID" as const,
-                  path: [
-                    "evidence",
-                    preliminaryFutureObservationIndex,
-                    "observedAt",
-                  ],
-                },
-              ]
-            : run.cycle.sessionDate !== parsedRejectedResult.targetSessionDate
-              ? [
-                  {
-                    code: "CONTEXT_INVALID" as const,
-                    path: ["targetSessionDate"],
-                  },
-                ]
-              : undefined
-      const plausiblePreliminaryObservationRejectionIssues = (() => {
-        if (
-          retainedCommonReportRejectionMatches ||
-          preliminaryFutureObservationIndex >= 0 ||
-          parsedRejectedReport === undefined ||
-          parsedRejectedResult?.outcome !== "PRELIMINARY_RESEARCH"
-        ) {
-          return []
-        }
-        const cycleStartedAt = Date.parse(run.cycle.startedAt)
-        const completedAt = Date.parse(run.cycle.completedAt)
-        const earliestInCycleExaRetrieval = Math.min(
-          ...parsedRejectedReport.analysis.externalContext
-            .filter(({ provider }) => provider === "EXA")
-            .map(({ retrievedAt }) => Date.parse(retrievedAt))
-            .filter(
-              (retrievedAt) =>
-                Number.isFinite(retrievedAt) &&
-                retrievedAt >= cycleStartedAt &&
-                retrievedAt <= completedAt,
-            ),
-        )
-        const processingLowerBound = Math.max(
-          cycleStartedAt,
-          Date.parse(run.initialEligibility?.evaluatedAt ?? ""),
-          Date.parse(parsedRejectedReport.analysis.asOf),
-          Number.isFinite(earliestInCycleExaRetrieval)
-            ? earliestInCycleExaRetrieval
-            : Number.NEGATIVE_INFINITY,
-        )
-        if (
-          !Number.isFinite(processingLowerBound) ||
-          !Number.isFinite(completedAt)
-        ) {
-          return []
-        }
-        let priorObservation = processingLowerBound
-        return parsedRejectedResult.evidence.flatMap((claim, index) => {
-          if (claim.kind !== "SOURCED_FACT") return []
-          const observedAt = Date.parse(claim.observedAt)
-          const couldBeFirstFutureObservation =
-            Number.isFinite(observedAt) &&
-            observedAt > priorObservation &&
-            observedAt <= completedAt
-          priorObservation = Math.max(priorObservation, observedAt)
-          return couldBeFirstFutureObservation
-            ? [
-                [
-                  {
-                    code: "CONTEXT_INVALID" as const,
-                    path: ["evidence", index, "observedAt"],
-                  },
-                ],
-              ]
-            : []
-        })
-      })()
-      const plausiblePreliminaryObservationRejectionMatches =
-        plausiblePreliminaryObservationRejectionIssues.some((issues) =>
-          rejectionIssuesMatch(issues),
-        )
-      const noActionValidation =
-        !retainedCommonReportRejectionMatches &&
-        parsedRejectedResult?.outcome === "NO_ACTION"
-          ? validateResearchDecisionV2(parsedRejectedResult, {
-              evaluatedAt: run.cycle.completedAt,
-              snapshots: {},
-            })
-          : undefined
-      const noActionCouldBeRetained = noActionValidation?.success === true
-      const reportFreeRejectionIssuesMatch =
-        parsedRejectedReport !== undefined ||
-        isDeepStrictEqual(rejectedIssues, [
-          { code: "MALFORMED_JSON", path: [] },
-        ]) ||
-        isDeepStrictEqual(rejectedIssues, [
-          { code: "RESPONSE_TOO_LARGE", path: [] },
-        ]) ||
-        (rejectedIssues.length > 0 &&
-          rejectedIssues.length <= MAX_TERMINAL_REJECTION_DETAILS &&
-          rejectedIssues.every(({ code }) => code === "SCHEMA_INVALID"))
-      const plausibleLaterPreliminaryEligibilityRejection =
-        rejectedPreliminaryTargetSessionDate !== undefined &&
-        expectedPreliminaryDecisionRejectionIssues === undefined &&
-        rejectionIssuesMatch(preliminaryTargetSessionDateRejectionIssues) &&
-        (() => {
-          const completedAt = Date.parse(run.cycle.completedAt)
-          if (isAnytimeDryRun) {
-            return (
-              Number.isFinite(completedAt) &&
-              run.cycle.sessionDate === rejectedPreliminaryTargetSessionDate &&
-              newYorkDate(new Date(completedAt)) >
-                rejectedPreliminaryTargetSessionDate
-            )
-          }
-
-          const sessionClose = Date.parse(
-            run.initialEligibility?.sessionClose ?? "",
-          )
-          return (
-            !Number.isFinite(sessionClose) ||
-            !Number.isFinite(completedAt) ||
-            completedAt >= sessionClose
-          )
-        })()
-      const plausibleLaterProposalRejectionIssues = (() => {
-        if (
-          proposalPreflightValidation?.success !== true ||
-          !hasRetainedEligibleTradeWindow ||
-          validReport === undefined
-        ) {
-          return []
-        }
-        const completedAt = Date.parse(run.cycle.completedAt)
-        const deadline = Date.parse(
-          run.initialEligibility?.tradeIntentWindow?.deadline ?? "",
-        )
-        const marketObservedAt = Date.parse(
-          validReport.analysis.marketRegime.observedAt,
-        )
-        const accountObservedAt = Date.parse(
-          validReport.analysis.accountChecks.observedAt,
-        )
-        if (
-          !Number.isFinite(completedAt) ||
-          !Number.isFinite(deadline) ||
-          !Number.isFinite(marketObservedAt) ||
-          !Number.isFinite(accountObservedAt)
-        ) {
-          return []
-        }
-        const latestHiddenEvaluation = Math.min(completedAt, deadline - 1)
-        const plausible: Array<
-          ReadonlyArray<
-            Readonly<{ code: string; path: readonly (string | number)[] }>
-          >
-        > = []
-        if (latestHiddenEvaluation > marketObservedAt + 60_000) {
-          plausible.push([
-            {
-              code: "CONTEXT_INVALID",
-              path: ["analysis", "marketRegime", "observedAt"],
-            },
-          ])
-        }
-        if (
-          Math.min(latestHiddenEvaluation, marketObservedAt + 60_000) >
-          accountObservedAt + 5 * 60_000
-        ) {
-          plausible.push([
-            {
-              code: "CONTEXT_INVALID",
-              path: ["analysis", "accountChecks", "observedAt"],
-            },
-          ])
-        }
-        return plausible
-      })()
-      const proposalRejectionIssuesMatch =
-        proposalPreflightValidation?.success !== true ||
-        (hasRetainedEligibleTradeWindow &&
-          (() => {
-            const expectedPriority =
-              expectedPreQuoteDecisionRejectionIssues === undefined
-                ? 2
-                : isDeepStrictEqual(
-                      expectedPreQuoteDecisionRejectionIssues[0]?.path,
-                      ["analysis", "marketRegime", "observedAt"],
-                    )
-                  ? 0
-                  : isDeepStrictEqual(
-                        expectedPreQuoteDecisionRejectionIssues[0]?.path,
-                        ["analysis", "accountChecks", "observedAt"],
-                      )
-                    ? 1
-                    : 2
-            const possibleIssues = [
-              ...(expectedPreQuoteDecisionRejectionIssues === undefined
-                ? []
-                : [expectedPreQuoteDecisionRejectionIssues]),
-              ...plausibleLaterProposalRejectionIssues.filter((issues) => {
-                const priority = isDeepStrictEqual(issues[0]?.path, [
-                  "analysis",
-                  "marketRegime",
-                  "observedAt",
-                ])
-                  ? 0
-                  : 1
-                return priority <= expectedPriority
-              }),
-            ]
-            return possibleIssues.some((issues) =>
-              rejectionIssuesMatch(issues),
-            )
-          })())
       if (
-        run.preliminaryResearch !== undefined ||
         run.validatedDecision !== undefined ||
-        ((run.evidenceSnapshots.length === 0 &&
-            ((preliminaryCouldBeRetained &&
-              !plausibleLaterPreliminaryEligibilityRejection &&
-              !plausiblePreliminaryObservationRejectionMatches) ||
-              noActionCouldBeRetained)) ||
-            !reportFreeRejectionIssuesMatch ||
-            (expectedCommonReportRejectionIssues !== undefined &&
-              !rejectionIssuesMatch(expectedCommonReportRejectionIssues)) ||
-            (retainedCommonReportRejectionMatches &&
-              run.evidenceSnapshots.length > 0) ||
-            (expectedPreliminaryDecisionRejectionIssues !== undefined &&
-              !plausiblePreliminaryObservationRejectionMatches &&
-              !rejectionIssuesMatch(expectedPreliminaryDecisionRejectionIssues)) ||
-            (run.evidenceSnapshots.length === 0 &&
-              noActionValidation?.success === false &&
-              !rejectionIssuesMatch(noActionValidation.issues)) ||
-            (proposalPreflightValidation?.success === false &&
-              (run.evidenceSnapshots.length > 0 ||
-                !rejectionIssuesMatch(proposalPreflightValidation.issues))) ||
-            !proposalRejectionIssuesMatch ||
-            (run.evidenceSnapshots.length > 0 &&
-              (parsedReport?.success !== true ||
-                parsedReport.data.result.outcome !== "PROPOSE_TRADE")) ||
-            (canonicalRetainedQuoteSnapshot !== undefined &&
-              (!hasRetainedEligibleTradeWindow ||
-                expectedSnapshotDecisionRejectionIssues === undefined ||
-                !rejectionIssuesMatch(expectedSnapshotDecisionRejectionIssues))))
+        run.outcome.issues.length === 0 ||
+        run.outcome.issues.length > 10
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
       }
       break
-    case "INTENT_DERIVATION_REJECTED":
-      const reasons = run.outcome.reasons
-      const candidateUsesSubCentStrike =
-        reportResult?.outcome === "PROPOSE_TRADE" &&
-        [
-          reportResult.candidate.longLeg.contractSymbol,
-          reportResult.candidate.shortLeg.contractSymbol,
-        ].some((symbol) => Number(symbol.slice(-8)) % 10 !== 0)
-      const derivationRejected =
-        reasons.length === 1 &&
-        reasons.every((reason) =>
-          INTENT_DERIVATION_REJECTION_REASONS.has(reason),
-        ) &&
-        (reasons[0] !== "STRIKE_PRECISION_UNSUPPORTED" ||
-          candidateUsesSubCentStrike)
-      const marketWindowRejected =
-        reasons.length === 1 &&
-        reasons.every((reason) => reason === "MARKET_WINDOW_INELIGIBLE")
-      const hasCanonicalQuoteSnapshot =
-        run.evidenceSnapshots.length === 1 &&
-        run.evidenceSnapshots[0] !== undefined &&
-        isCanonicalProposalQuoteSnapshot(run.evidenceSnapshots[0])
-      const hasValidatedProposal =
-        parsedValidatedDecision?.success === true &&
-        parsedValidatedDecision.data.outcome === "PROPOSE_TRADE"
-      const retainedWindowDeadline = Date.parse(
-        run.initialEligibility?.tradeIntentWindow?.deadline ?? "",
+    case "PORTFOLIO_EVALUATED": {
+      const decision = validRetainedResult?.outcome === "PROPOSE_TRADES"
+        ? validRetainedResult
+        : undefined
+      const proposalByUnderlying = new Map(
+        decision?.proposals.map((proposal) => [
+          proposal.candidate.underlying,
+          proposal,
+        ]) ?? [],
       )
-      const cycleCompletedAt = Date.parse(run.cycle.completedAt)
-      const retainedTradeWindowCanExpireByCompletion =
-        hasRetainedEligibleTradeWindow &&
-        (!Number.isFinite(retainedWindowDeadline) ||
-          !Number.isFinite(cycleCompletedAt) ||
-          cycleCompletedAt >= retainedWindowDeadline)
-      const postQuoteMarketWindowRejectionPlausible =
-        hasCanonicalQuoteSnapshot && retainedTradeWindowCanExpireByCompletion
-      const rejectionRecordsMatch =
-        (quoteConfirmationRejection &&
-          hasRetainedEligibleTradeWindow &&
-          run.validatedDecision === undefined &&
-          run.evidenceSnapshots.length === 0) ||
-        (derivationRejected &&
-          hasRetainedEligibleTradeWindow &&
-          hasValidatedProposal &&
-          hasCanonicalQuoteSnapshot) ||
-        (marketWindowRejected &&
-          run.validatedDecision === undefined &&
-          ((run.evidenceSnapshots.length === 0 &&
-            (!hasRetainedEligibleTradeWindow ||
-              retainedTradeWindowCanExpireByCompletion)) ||
-            postQuoteMarketWindowRejectionPlausible))
+      const retainedIntentUnderlyings = new Set(
+        run.outcome.intents.map(({ underlying }) => underlying),
+      )
       if (
-        (parsedReport?.success === true &&
-          parsedReport.data.result.outcome !== "PROPOSE_TRADE") ||
-        run.preliminaryResearch !== undefined ||
-        !rejectionRecordsMatch
+        decision === undefined ||
+        !isDeepStrictEqual(run.outcome.decision, decision) ||
+        run.outcome.intents.some(
+          (intent) =>
+            !tradeIntentV3Schema.safeParse(intent).success ||
+            !proposalByUnderlying.has(intent.underlying),
+        ) ||
+        new Set(run.outcome.intents.map(({ underlying }) => underlying)).size !==
+          run.outcome.intents.length ||
+        run.outcome.selectedUnderlyings.length > 1 ||
+        run.outcome.selectedUnderlyings.some(
+          (underlying) => !retainedIntentUnderlyings.has(underlying),
+        )
       ) {
         contractIssues.push("OUTCOME_RECORD_MISMATCH")
       }
       break
+    }
   }
 
   const cycleStart = Date.parse(run.cycle.startedAt)
@@ -1042,117 +423,62 @@ export function evaluateResearchRunV1(
       temporalIssues.push("SOURCE_RETRIEVAL_OUTSIDE_CYCLE")
     }
   }
-  const postQuoteRejectionEvaluatedAt =
-    run.outcome.status === "INTENT_DERIVATION_REJECTED" &&
-    run.evidenceSnapshots.length === 1 &&
-    run.evidenceSnapshots[0] !== undefined &&
-    isCanonicalProposalQuoteSnapshot(run.evidenceSnapshots[0]) &&
-    run.outcome.reasons.length > 0 &&
-    (run.outcome.reasons.every((reason) =>
-      INTENT_DERIVATION_REJECTION_REASONS.has(reason),
-    ) ||
-      run.outcome.reasons.every(
-        (reason) => reason === "MARKET_WINDOW_INELIGIBLE",
-      ))
-      ? run.evidenceSnapshots[0].retrievedAt
-      : undefined
-  const quoteConfirmationEvaluationLowerBound = (() => {
-    return quoteConfirmationRejection
-      ? retainedProposalEvaluationLowerBound
-      : undefined
-  })()
-  const decisionRejectionEvaluatedAt =
-    run.outcome.status === "DECISION_REJECTED"
-      ? canonicalRetainedQuoteSnapshot?.retrievedAt
-      : undefined
-  const proposalEvaluatedAt =
-    run.outcome.status === "INTENT_DERIVED"
-      ? run.outcome.intent.evaluatedAt
-      : postQuoteRejectionEvaluatedAt ??
-        quoteConfirmationEvaluationLowerBound ??
-        decisionRejectionEvaluatedAt
-  if (proposalEvaluatedAt !== undefined && parsedReport?.success === true) {
-    const evaluatedAt = Date.parse(proposalEvaluatedAt)
-    const reportAsOf = Date.parse(parsedReport.data.analysis.asOf)
+  const intents = run.outcome.status === "PORTFOLIO_EVALUATED"
+    ? run.outcome.intents
+    : []
+  if (validReport !== undefined) {
+    const reportAsOf = Date.parse(validReport.analysis.asOf)
     const accountObservedAt = Date.parse(
-      parsedReport.data.analysis.accountChecks.observedAt,
+      validReport.analysis.accountChecks.observedAt,
     )
-    const marketObservedAt = Date.parse(
-      parsedReport.data.analysis.marketRegime.observedAt,
-    )
-    if (reportAsOf > evaluatedAt) {
-      temporalIssues.push("REPORT_AS_OF_AFTER_INTENT")
-    }
-    const accountAge = evaluatedAt - accountObservedAt
-    if (accountAge < 0 || accountAge > 5 * 60 * 1_000) {
-      temporalIssues.push("ACCOUNT_CHECKS_STALE_AT_INTENT")
-    }
-    const marketAge = evaluatedAt - marketObservedAt
-    if (marketAge < 0 || marketAge > 60_000) {
-      temporalIssues.push("MARKET_REGIME_STALE_AT_INTENT")
-    }
-  }
-  if (
-    parsedReport?.success === true &&
-    (proposalEvaluatedAt !== undefined || quoteConfirmationRejection)
-  ) {
-    const marketObservedAt = Date.parse(
-      parsedReport.data.analysis.marketRegime.observedAt,
-    )
-    const sessionDate = run.initialEligibility?.sessionDate
-    const expectedIntradayBars =
-      sessionDate === undefined
+    for (const intent of intents) {
+      const evaluatedAt = Date.parse(intent.evaluatedAt)
+      const market = validReport.analysis.marketRegimes.find(
+        ({ underlying }) => underlying === intent.underlying,
+      )
+      if (reportAsOf > evaluatedAt) {
+        temporalIssues.push("REPORT_AS_OF_AFTER_INTENT")
+      }
+      const accountAge = evaluatedAt - accountObservedAt
+      if (accountAge < 0 || accountAge > 5 * 60_000) {
+        temporalIssues.push("ACCOUNT_CHECKS_STALE_AT_INTENT")
+      }
+      if (market === undefined) {
+        temporalIssues.push("MARKET_REGIME_STALE_AT_INTENT")
+        continue
+      }
+      const marketObservedAt = Date.parse(market.observedAt)
+      const marketAge = evaluatedAt - marketObservedAt
+      if (marketAge < 0 || marketAge > 60_000) {
+        temporalIssues.push("MARKET_REGIME_STALE_AT_INTENT")
+      }
+      const sessionDate = run.initialEligibility?.sessionDate
+      const expectedIntradayBars = sessionDate === undefined
         ? Number.NaN
         : Math.floor(
             (marketObservedAt -
               newYorkLocalTime(sessionDate, "09:30").getTime()) /
               60_000,
           )
-    if (
-      !Number.isFinite(marketObservedAt) ||
-      expectedIntradayBars <= 0 ||
-      parsedReport.data.analysis.marketRegime.intradayBarCount !==
-        expectedIntradayBars
-    ) {
-      temporalIssues.push("INTRADAY_BAR_COUNT_MISMATCH")
-    }
-  }
-  if (run.outcome.status === "PRELIMINARY_RESEARCH_RETAINED") {
-    const eligibilitySessionDate = run.initialEligibility?.sessionDate
-    if (eligibilitySessionDate === undefined) {
-      temporalIssues.push("PRELIMINARY_SESSION_CONTEXT_MISSING")
-    } else if (
-      run.outcome.research.targetSessionDate !== eligibilitySessionDate ||
-      run.outcome.research.targetSessionDate !== run.cycle.sessionDate
-    ) {
-      temporalIssues.push("PRELIMINARY_TARGET_SESSION_MISMATCH")
-    }
-    const preliminaryResult =
-      reportResult?.outcome === "PRELIMINARY_RESEARCH"
-        ? reportResult
-        : parsedPreliminaryResearch?.success === true
-          ? parsedPreliminaryResearch.data
-          : undefined
-    if (
-      validCycleRange &&
-      preliminaryResult?.evidence.some(
-        (claim) =>
-          claim.kind === "SOURCED_FACT" &&
-          Date.parse(claim.observedAt) > cycleEnd,
-      )
-    ) {
-      temporalIssues.push("PRELIMINARY_OBSERVATION_AFTER_CYCLE")
+      if (
+        !Number.isFinite(marketObservedAt) ||
+        expectedIntradayBars <= 0 ||
+        market.intradayBarCount !== expectedIntradayBars
+      ) {
+        temporalIssues.push("INTRADAY_BAR_COUNT_MISMATCH")
+      }
     }
   }
 
-  const retainedEvidence =
-    typeof retainedResult === "object" &&
-    retainedResult !== null &&
-    "evidence" in retainedResult &&
-    Array.isArray(retainedResult.evidence)
-      ? retainedResult.evidence.filter(isEvaluableEvidenceClaim)
-      : []
-  const evidence = reportResult?.evidence ?? retainedEvidence
+  const evidenceFor = (decision: typeof versionedResult) => {
+    if (decision === undefined) return []
+    return decision.outcome === "NO_ACTION"
+      ? decision.evidence.filter(isEvaluableEvidenceClaim)
+      : decision.proposals.flatMap(({ evidence }) =>
+          evidence.filter(isEvaluableEvidenceClaim),
+        )
+  }
+  const evidence = evidenceFor(reportResult ?? validRetainedResult)
   const sourcedFacts = evidence.flatMap((claim) =>
     claim.kind === "SOURCED_FACT" ? [claim] : [],
   )
@@ -1160,12 +486,7 @@ export function evaluateResearchRunV1(
     claim.kind === "INFERENCE" ? [claim] : [],
   )
   const sourcedFactIds = new Set(sourcedFacts.map(({ claimId }) => claimId))
-  if (
-    ["INTENT_DERIVED", "INTENT_DERIVATION_REJECTED"].includes(
-      run.outcome.status,
-    ) &&
-    new Set(evidence.map(({ claimId }) => claimId)).size !== evidence.length
-  ) {
+  if (new Set(evidence.map(({ claimId }) => claimId)).size !== evidence.length) {
     groundingIssues.push("DUPLICATE_CLAIM_ID")
   }
   if (
@@ -1185,33 +506,16 @@ export function evaluateResearchRunV1(
     ...sourcedFacts.flatMap((claim) =>
       "snapshotRef" in claim ? [claim.snapshotRef] : [],
     ),
-    ...(run.outcome.status === "INTENT_DERIVED"
-      ? [run.outcome.intent.quoteSnapshotRef]
-      : []),
+    ...intents.map(({ quoteSnapshotRef }) => quoteSnapshotRef),
   ]
   const knownSnapshots = new Set(
     run.evidenceSnapshots.map(({ snapshotRef }) => snapshotRef),
   )
-  if (
-    run.outcome.status === "INTENT_DERIVED" &&
-    knownSnapshots.size !== run.evidenceSnapshots.length
-  ) {
+  if (knownSnapshots.size !== run.evidenceSnapshots.length) {
     groundingIssues.push("DUPLICATE_SNAPSHOT_REFERENCE")
   }
   if (
-    run.outcome.status === "INTENT_DERIVED" &&
-    ((knownSnapshots.size === run.evidenceSnapshots.length &&
-      run.evidenceSnapshots.length > 1) ||
-      run.evidenceSnapshots.some(
-        ({ snapshotRef }) => snapshotRef !== PROPOSAL_QUOTE_SNAPSHOT_REF,
-      ))
-  ) {
-    groundingIssues.push("UNEXPECTED_SNAPSHOT_REFERENCE")
-  }
-  if (
-    ["PRELIMINARY_RESEARCH_RETAINED", "VALIDATED_NO_ACTION"].includes(
-      run.outcome.status,
-    ) &&
+    run.outcome.status === "VALIDATED_NO_ACTION" &&
     run.evidenceSnapshots.length > 0
   ) {
     groundingIssues.push("UNEXPECTED_SNAPSHOT_REFERENCE")
@@ -1219,48 +523,37 @@ export function evaluateResearchRunV1(
   if (snapshotReferences.some((snapshotRef) => !knownSnapshots.has(snapshotRef))) {
     groundingIssues.push("UNKNOWN_SNAPSHOT_REFERENCE")
   }
+  const proposals = versionedResult?.outcome === "PROPOSE_TRADES"
+    ? versionedResult.proposals
+    : []
+  const expectedSnapshotRefs = new Set(
+    proposals.map(({ candidate }) =>
+      proposalQuoteSnapshotRef(candidate.underlying),
+    ),
+  )
   if (
-    run.outcome.status === "INTENT_DERIVATION_REJECTED" &&
     run.evidenceSnapshots.some(
-      (snapshot) => !hasCanonicalProposalQuoteProvenance(snapshot),
+      ({ snapshotRef }) => !expectedSnapshotRefs.has(snapshotRef),
     )
   ) {
-    groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
+    groundingIssues.push("UNEXPECTED_SNAPSHOT_REFERENCE")
   }
-  if (
-    run.outcome.status === "INTENT_DERIVATION_REJECTED" &&
-    run.evidenceSnapshots.some(
-      (snapshot) =>
-        hasCanonicalProposalQuoteProvenance(snapshot) &&
-        !hasAlpacaQuoteFreshnessBound(snapshot),
-    )
-  ) {
-    groundingIssues.push("QUOTE_SNAPSHOT_METADATA_MISMATCH")
-  }
-  if (run.outcome.status === "DECISION_REJECTED") {
-    if (run.evidenceSnapshots.length > 1) {
-      groundingIssues.push("UNEXPECTED_SNAPSHOT_REFERENCE")
-    }
+  for (const snapshot of run.evidenceSnapshots) {
     if (
-      run.evidenceSnapshots.some(
-        (snapshot) => !hasCanonicalProposalQuoteProvenance(snapshot),
-      )
+      !expectedSnapshotRefs.has(snapshot.snapshotRef) ||
+      !hasCanonicalProposalQuoteProvenance(snapshot, snapshot.snapshotRef)
     ) {
       groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
-    }
-    if (
-      run.evidenceSnapshots.some(
-        (snapshot) =>
-          hasCanonicalProposalQuoteProvenance(snapshot) &&
-          !hasAlpacaQuoteFreshnessBound(snapshot),
-      )
-    ) {
+    } else if (!hasAlpacaQuoteFreshnessBound(snapshot)) {
       groundingIssues.push("QUOTE_SNAPSHOT_METADATA_MISMATCH")
     }
   }
-  if (run.outcome.status === "INTENT_DERIVED") {
-    const intentEvaluatedAt = Date.parse(run.outcome.intent.evaluatedAt)
-    const parsedIntent = tradeIntentV2Schema.safeParse(run.outcome.intent)
+  const snapshotsByReference = new Map(
+    run.evidenceSnapshots.map((snapshot) => [snapshot.snapshotRef, snapshot]),
+  )
+  for (const intent of intents) {
+    const intentEvaluatedAt = Date.parse(intent.evaluatedAt)
+    const parsedIntent = tradeIntentV3Schema.safeParse(intent)
     const longQuoteTimestamp = parsedIntent.success
       ? parseRfc3339Nanoseconds(
           parsedIntent.data.longQuote.providerTimestamp,
@@ -1280,128 +573,94 @@ export function evaluateResearchRunV1(
               : shortQuoteTimestamp) +
               ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS,
           )
-    const snapshotsByReference = new Map(
-      run.evidenceSnapshots.map((snapshot) => [snapshot.snapshotRef, snapshot]),
-    )
-    for (const snapshotReference of snapshotReferences) {
-      const snapshot = snapshotsByReference.get(snapshotReference)
-      if (snapshot === undefined) continue
-      if (
-        !hasCanonicalProposalQuoteProvenance(snapshot)
-      ) {
-        groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
-      }
-      if (Date.parse(snapshot.retrievedAt) > intentEvaluatedAt) {
-        groundingIssues.push("SNAPSHOT_FROM_FUTURE")
-      }
-      if (Date.parse(snapshot.freshUntil) < intentEvaluatedAt) {
-        groundingIssues.push("STALE_SNAPSHOT")
-      }
-      if (
-        Date.parse(snapshot.retrievedAt) <= intentEvaluatedAt &&
-        Date.parse(snapshot.freshUntil) >= intentEvaluatedAt &&
-        parsedIntent.success &&
-        (snapshot.retrievedAt !== parsedIntent.data.evaluatedAt ||
-          expectedFreshUntil === undefined ||
-          snapshot.freshUntil !== expectedFreshUntil)
-      ) {
-        groundingIssues.push("QUOTE_SNAPSHOT_METADATA_MISMATCH")
-      }
+    const expectedSnapshotRef = proposalQuoteSnapshotRef(intent.underlying)
+    const snapshot = snapshotsByReference.get(intent.quoteSnapshotRef)
+    if (intent.quoteSnapshotRef !== expectedSnapshotRef) {
+      groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
+    }
+    if (snapshot === undefined) continue
+    if (!isCanonicalProposalQuoteSnapshot(snapshot, expectedSnapshotRef)) {
+      groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
+    }
+    if (Date.parse(snapshot.retrievedAt) > intentEvaluatedAt) {
+      groundingIssues.push("SNAPSHOT_FROM_FUTURE")
+    }
+    if (Date.parse(snapshot.freshUntil) < intentEvaluatedAt) {
+      groundingIssues.push("STALE_SNAPSHOT")
     }
     if (
-      snapshotReferences.some(
-        (snapshotReference) =>
-          snapshotReference !== PROPOSAL_QUOTE_SNAPSHOT_REF,
-      )
+      Date.parse(snapshot.retrievedAt) <= intentEvaluatedAt &&
+      Date.parse(snapshot.freshUntil) >= intentEvaluatedAt &&
+      parsedIntent.success &&
+      (snapshot.retrievedAt !== parsedIntent.data.evaluatedAt ||
+        expectedFreshUntil === undefined ||
+        snapshot.freshUntil !== expectedFreshUntil)
     ) {
-      groundingIssues.push("QUOTE_SNAPSHOT_PROVENANCE_INVALID")
+      groundingIssues.push("QUOTE_SNAPSHOT_METADATA_MISMATCH")
     }
   }
 
-  const candidateIdentities: CandidateIdentity[] = []
-  const addCandidate = (
-    result:
-      | typeof reportResult
-      | typeof validRetainedResult,
-  ) => {
-    if (result === undefined || !("candidate" in result) || result.candidate === undefined) {
-      return
-    }
-    if (!("direction" in result) || result.direction === "UNDETERMINED") return
-    candidateIdentities.push({
-      direction: result.direction,
-      structure: result.candidate.structure,
-      expiration: result.candidate.expiration,
-      longContractSymbol: result.candidate.longLeg.contractSymbol,
-      shortContractSymbol: result.candidate.shortLeg.contractSymbol,
-    })
-  }
-  addCandidate(reportResult)
-  addCandidate(
-    parsedPreliminaryResearch?.success === true
-      ? parsedPreliminaryResearch.data
-      : undefined,
-  )
-  addCandidate(
-    parsedValidatedDecision?.success === true
-      ? parsedValidatedDecision.data
-      : undefined,
-  )
-  if (run.outcome.status === "INTENT_DERIVED") {
-    candidateIdentities.push({
-      direction: run.outcome.intent.direction,
-      structure: run.outcome.intent.structure,
-      expiration: run.outcome.intent.expiration,
-      longContractSymbol: run.outcome.intent.longContractSymbol,
-      shortContractSymbol: run.outcome.intent.shortContractSymbol,
-    })
-  }
+  const proposalIdentity = (
+    proposal: (typeof proposals)[number],
+  ): CandidateIdentity => ({
+    underlying: proposal.candidate.underlying,
+    direction: proposal.direction,
+    structure: proposal.candidate.structure,
+    expiration: proposal.candidate.expiration,
+    longContractSymbol: proposal.candidate.longLeg.contractSymbol,
+    shortContractSymbol: proposal.candidate.shortLeg.contractSymbol,
+  })
+  const candidateIdentities = proposals.map(proposalIdentity)
   const candidateApplicable = candidateIdentities.length > 0
-  if (new Set(candidateIdentities.map(candidateKey)).size > 1) {
-    candidateIssues.push("CANDIDATE_IDENTITY_MISMATCH")
-  }
-  const diagnostics = parsedReport?.success === true
-    ? parsedReport.data.analysis.candidateEvaluation
-    : undefined
-  const canonicalCandidate = candidateIdentities[0]
-  if (diagnostics !== undefined && canonicalCandidate !== undefined) {
-    const diagnosticSymbols = new Map(
-      diagnostics.legs.map(({ role, contractSymbol }) => [role, contractSymbol]),
-    )
+  const proposalByUnderlying = new Map(
+    proposals.map((proposal) => [proposal.candidate.underlying, proposal]),
+  )
+  for (const intent of intents) {
+    const proposal = proposalByUnderlying.get(intent.underlying)
     if (
-      diagnosticSymbols.get("LONG") !== canonicalCandidate.longContractSymbol ||
-      diagnosticSymbols.get("SHORT") !== canonicalCandidate.shortContractSymbol
+      proposal === undefined ||
+      candidateKey(proposalIdentity(proposal)) !== candidateKey({
+        underlying: intent.underlying,
+        direction: intent.direction,
+        structure: intent.structure,
+        expiration: intent.expiration,
+        longContractSymbol: intent.longContractSymbol,
+        shortContractSymbol: intent.shortContractSymbol,
+      })
     ) {
       candidateIssues.push("CANDIDATE_IDENTITY_MISMATCH")
     }
   }
-  if (
-    diagnostics !== undefined &&
-    canonicalCandidate !== undefined &&
-    run.initialEligibility?.sessionDate !== undefined
-  ) {
-    const sessionDay = Date.parse(
-      `${run.initialEligibility.sessionDate}T00:00:00.000Z`,
+  const diagnostics = validReport?.analysis.candidateEvaluations ?? []
+  for (const candidate of candidateIdentities) {
+    const diagnostic = diagnostics.find(
+      ({ underlying }) => underlying === candidate.underlying,
     )
-    const expirationDay = Date.parse(
-      `${canonicalCandidate.expiration}T00:00:00.000Z`,
-    )
-    const expectedDte = (expirationDay - sessionDay) / 86_400_000
-    if (!Number.isInteger(expectedDte) || diagnostics.dte !== expectedDte) {
-      candidateIssues.push("CANDIDATE_DTE_MISMATCH")
+    if (diagnostic === undefined) {
+      candidateIssues.push("OPEN_INTEREST_HISTORY_INVALID")
+      continue
     }
-  }
-  const proposalHistoryRequired =
-    run.outcome.status === "INTENT_DERIVED" ||
-    postQuoteRejectionEvaluatedAt !== undefined ||
-    quoteConfirmationRejection ||
-    decisionRejectionEvaluatedAt !== undefined
-  if (proposalHistoryRequired && diagnostics === undefined) {
-    candidateIssues.push("OPEN_INTEREST_HISTORY_INVALID")
-  }
-  if (proposalHistoryRequired && diagnostics !== undefined) {
+    const diagnosticSymbols = new Map(
+      diagnostic.legs.map(({ role, contractSymbol }) => [role, contractSymbol]),
+    )
+    if (
+      diagnostic.expiration !== candidate.expiration ||
+      diagnosticSymbols.get("LONG") !== candidate.longContractSymbol ||
+      diagnosticSymbols.get("SHORT") !== candidate.shortContractSymbol
+    ) {
+      candidateIssues.push("CANDIDATE_IDENTITY_MISMATCH")
+    }
     const sessionDate = run.initialEligibility?.sessionDate
     const previousSessionDates = run.initialEligibility?.previousSessionDates
+    if (sessionDate !== undefined) {
+      const expectedDte =
+        (Date.parse(`${candidate.expiration}T00:00:00.000Z`) -
+          Date.parse(`${sessionDate}T00:00:00.000Z`)) /
+        86_400_000
+      if (!Number.isInteger(expectedDte) || diagnostic.dte !== expectedDte) {
+        candidateIssues.push("CANDIDATE_DTE_MISMATCH")
+      }
+    }
     const priorSessionHistoryIsValid =
       previousSessionDates !== undefined &&
       previousSessionDates.length >= 2 &&
@@ -1423,7 +682,7 @@ export function evaluateResearchRunV1(
         ...previousSessionDates.slice(-2),
       ])
       if (
-        diagnostics.legs.some(
+        diagnostic.legs.some(
           ({ openInterestDate }) =>
             !eligibleOpenInterestDates.has(openInterestDate),
         )
@@ -1433,7 +692,7 @@ export function evaluateResearchRunV1(
     }
   }
 
-  if (run.outcome.status === "INTENT_DERIVED") {
+  if (intents.length > 0) {
     const eligibility = run.initialEligibility
     const tradeIntentWindow = eligibility?.tradeIntentWindow
     // Absent context cannot establish eligibility, so it fails closed rather
@@ -1446,23 +705,32 @@ export function evaluateResearchRunV1(
     } else if (tradeIntentWindow === undefined) {
       failClosedIssues.push("INTENT_ELIGIBILITY_CONTEXT_MISSING")
     }
+    if (
+      eligibility !== undefined &&
+      tradeIntentWindow !== undefined &&
+      !retainedTradeWindowContextIsValid(eligibility, run.cycle)
+    ) {
+      failClosedIssues.push("INTENT_OUTSIDE_RETAINED_TRADE_WINDOW")
+    }
     if (eligibility !== undefined && tradeIntentWindow !== undefined) {
       const eligibilityEvaluatedAt = Date.parse(eligibility.evaluatedAt)
-      const intentEvaluatedAt = Date.parse(run.outcome.intent.evaluatedAt)
       const slotStartedAt = Date.parse(tradeIntentWindow.slotStartedAt)
       const deadline = Date.parse(tradeIntentWindow.deadline)
-      if (
-        !Number.isFinite(intentEvaluatedAt) ||
-        !Number.isFinite(slotStartedAt) ||
-        !Number.isFinite(deadline) ||
-        intentEvaluatedAt < slotStartedAt ||
-        intentEvaluatedAt < eligibilityEvaluatedAt ||
-        intentEvaluatedAt >= deadline
-      ) {
-        failClosedIssues.push("INTENT_OUTSIDE_RETAINED_TRADE_WINDOW")
+      for (const intent of intents) {
+        const intentEvaluatedAt = Date.parse(intent.evaluatedAt)
+        if (
+          !Number.isFinite(intentEvaluatedAt) ||
+          !Number.isFinite(slotStartedAt) ||
+          !Number.isFinite(deadline) ||
+          intentEvaluatedAt < slotStartedAt ||
+          intentEvaluatedAt < eligibilityEvaluatedAt ||
+          intentEvaluatedAt >= deadline
+        ) {
+          failClosedIssues.push("INTENT_OUTSIDE_RETAINED_TRADE_WINDOW")
+        }
       }
     }
-    if (run.validatedDecision?.outcome !== "PROPOSE_TRADE") {
+    if (validRetainedResult?.outcome !== "PROPOSE_TRADES") {
       failClosedIssues.push("INTENT_WITHOUT_VALIDATED_PROPOSAL")
     }
   }

@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { tradeIntentV2Schema } from "../contracts/trade-intent-v2.js"
+import { tradeIntentV3Schema } from "../contracts/trade-intent-v3.js"
 import { RISK_STATE_CAPTURE_FAILURE_CODES } from "./alpaca-risk-state-provider.js"
 import {
   RISK_EVALUATION_VERSION,
@@ -76,7 +76,7 @@ export const shadowRiskDecisionV1Schema = z.discriminatedUnion("stage", [
       ...commonDecisionFields,
       stage: z.literal("EVALUATED"),
       outcome: z.enum(["APPROVED", "REJECTED"]),
-      evaluatedIntent: tradeIntentV2Schema,
+      evaluatedIntent: tradeIntentV3Schema,
       stateProvenance: shadowRiskStateProvenanceV1Schema,
       evaluation: riskEvaluationV1Schema,
     })
