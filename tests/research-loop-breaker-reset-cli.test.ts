@@ -6,8 +6,8 @@ import { dirname, join, resolve } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 
 import { createResearchLifecycleRecorder } from "../src/event-ledger/research-lifecycle-recorder.js"
-import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
-import { acquireWorkerInstanceLock } from "../src/worker-instance-lock.js"
+import { createSqliteLedgerStore } from "../src/event-ledger/deprecated/sqlite-ledger-store.js"
+import { acquireWorkerInstanceLock } from "../src/event-ledger/deprecated/worker-instance-lock.js"
 
 const temporaryDirectories: string[] = []
 const workerEntrypoint = resolve("src/index.ts")

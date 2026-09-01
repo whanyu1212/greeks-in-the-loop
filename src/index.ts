@@ -22,14 +22,17 @@ import {
   runAgentLoop,
 } from "./agent-loop.js"
 import { parseAgentOptions } from "./agent-options.js"
-import { acquireWorkerInstanceLock } from "./worker-instance-lock.js"
 import { runWithCycleDeadline } from "./cycle-deadline.js"
 import {
   createResearchLifecycleRecorder,
   LedgerPersistenceError,
 } from "./event-ledger/research-lifecycle-recorder.js"
-import { createSqliteLedgerStore } from "./event-ledger/sqlite-ledger-store.js"
 import { LEDGER_EVENT_VERSION } from "./event-ledger/ledger-event-v1.js"
+import {
+  createConfiguredLedgerStore,
+  resolveLedgerBackendConfiguration,
+} from "./event-ledger/ledger-backend.js"
+import type { LedgerStore } from "./event-ledger/ledger-store.js"
 import { resolveExecutionAuthorizationV1 } from "./execution/authorization-v1.js"
 import { invokePaperTrader } from "./execution/paper-trader.js"
 import { createAlpacaOptionQuoteProvider } from "./market-data/alpaca-option-quotes.js"
@@ -79,6 +82,7 @@ import {
   evaluateResearchEligibility,
   newYorkDate,
 } from "./scheduling/research-eligibility.js"
+import { acquirePostgresWorkerInstanceLock } from "./event-ledger/postgres-worker-instance-lock.js"
 
 /** Settings parsed from the project environment file without exporting secrets. */
 const fileEnv = (() => {
@@ -192,8 +196,21 @@ const agentOptions = parseAgentOptions(
   readSetting("RESEARCH_LEDGER_PATH"),
 )
 const { once, dryRun, ledgerPath } = agentOptions
+const deploymentRole = readSetting("DEPLOYMENT_ROLE")?.trim() || "FULL"
+if (deploymentRole !== "FULL" && deploymentRole !== "RESEARCH_ONLY") {
+  throw new Error("DEPLOYMENT_ROLE must be FULL or RESEARCH_ONLY")
+}
+if (deploymentRole === "RESEARCH_ONLY" && !dryRun) {
+  throw new Error("RESEARCH_ONLY deployment requires --dry-run")
+}
+const ledgerConfiguration = resolveLedgerBackendConfiguration(
+  { ...fileEnv, ...process.env },
+  ledgerPath,
+)
 const breakerResetInstruction =
-  `run pnpm agent:reset-breaker -- --ledger <ledger-path> for ${JSON.stringify(ledgerPath)}`
+  ledgerConfiguration.backend === "postgres"
+    ? "run pnpm agent:reset-breaker with the same PostgreSQL ledger environment"
+    : `run pnpm agent:reset-breaker -- --ledger <ledger-path> for ${JSON.stringify(ledgerPath)}`
 const researchMode = dryRun ? DRY_RUN_MODE : undefined
 const intervalMs = readPositiveInteger("AGENT_INTERVAL_MS", 5 * 60 * 1000)
 const maxBackoffMs = readPositiveInteger(
@@ -242,6 +259,7 @@ const knownCredentialValues = [
   alpacaSecretKey,
   readSetting("FMP_API_KEY")?.trim(),
   readSetting("EXA_API_KEY")?.trim(),
+  readSetting("PGPASSWORD")?.trim(),
 ].filter((value): value is string => value !== undefined && value.length > 0)
 const quoteProvider = createAlpacaOptionQuoteProvider({
   apiKey: alpacaApiKey,
@@ -291,13 +309,26 @@ const traceVersions = {
   decisionContractVersion: researchCompatibility.decisionContractVersion,
   reportVersion: researchCompatibility.reportVersion,
 } as const
-mkdirSync(dirname(ledgerPath), { recursive: true })
-const workerInstanceLock = acquireWorkerInstanceLock({ ledgerPath })
-let ledgerStore: ReturnType<typeof createSqliteLedgerStore> | undefined
+let workerInstanceLock: Readonly<{ release(): Promise<void> }>
+if (ledgerConfiguration.backend === "postgres") {
+  workerInstanceLock = await acquirePostgresWorkerInstanceLock(
+    ledgerConfiguration.poolConfig,
+  )
+} else {
+  mkdirSync(dirname(ledgerPath), { recursive: true })
+  const { acquireWorkerInstanceLock } = await import(
+    "./event-ledger/deprecated/worker-instance-lock.js"
+  )
+  const sqliteLock = acquireWorkerInstanceLock({ ledgerPath })
+  workerInstanceLock = {
+    release: async () => sqliteLock.release(),
+  }
+}
+let ledgerStore: LedgerStore | undefined
 let telemetry: ReturnType<typeof startResearchTelemetry> | undefined
 try {
-  const activeLedgerStore = createSqliteLedgerStore({
-    path: ledgerPath,
+  const activeLedgerStore = await createConfiguredLedgerStore({
+    configuration: ledgerConfiguration,
     knownCredentialValues,
   })
   ledgerStore = activeLedgerStore
@@ -334,6 +365,8 @@ try {
     environment: {
       ...process.env,
       EXECUTION_LEDGER_PATH: ledgerPath,
+      EXECUTION_LEDGER_BACKEND: ledgerConfiguration.backend,
+      DEPLOYMENT_ROLE: deploymentRole,
     },
   })
 
@@ -906,7 +939,7 @@ try {
     try {
       await telemetry?.shutdown()
     } finally {
-      workerInstanceLock.release()
+      await workerInstanceLock.release()
     }
   }
 }

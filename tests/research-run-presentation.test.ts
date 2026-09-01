@@ -326,7 +326,7 @@ describe("research run presentation", () => {
     expect(first.markdown.split("\n").slice(0, 18)).toEqual([
       "# Research Cycle 3 - 2026-08-27",
       "",
-      "> Derived operator view. SQLite is authoritative and the canonical JSON is the portable machine record. No order was submitted.",
+      "> Derived operator view. The event ledger is authoritative and the canonical JSON is the portable machine record. No order was submitted.",
       "",
       "## At a Glance",
       "",

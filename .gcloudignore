@@ -1,0 +1,17 @@
+.gcloudignore
+.git
+.claude
+.codegraph
+.env
+.state
+assets
+dev_notes
+dist
+docs
+node_modules
+tests
+workspace
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal

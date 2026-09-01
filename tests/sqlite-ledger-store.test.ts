@@ -13,7 +13,7 @@ import { loadResearchContextV1 } from "../src/research/context.js"
 import {
   createSqliteLedgerStore as createConfiguredSqliteLedgerStore,
   type CreateSqliteLedgerStoreOptions,
-} from "../src/event-ledger/sqlite-ledger-store.js"
+} from "../src/event-ledger/deprecated/sqlite-ledger-store.js"
 
 const temporaryDirectories: string[] = []
 

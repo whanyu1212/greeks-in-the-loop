@@ -10,13 +10,13 @@ import {
   type LedgerEventV4,
   type StoredLedgerEvent,
   type StoredLedgerEventV4,
-} from "./ledger-event-v1.js"
+} from "../ledger-event-v1.js"
 import type {
   LedgerEventQuery,
   LedgerStore,
-} from "./ledger-store.js"
+} from "../ledger-store.js"
 import { applyLedgerMigrations } from "./migrations.js"
-import { assertPersistenceSafe } from "./persistence-safety.js"
+import { assertPersistenceSafe } from "../persistence-safety.js"
 
 const identifier = z
   .string()

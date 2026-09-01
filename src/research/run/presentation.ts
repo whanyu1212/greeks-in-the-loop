@@ -156,7 +156,7 @@ export function buildResearchRunPresentation(
   const lines: string[] = [
     `# Research Cycle ${run.cycle.cycleNumber} - ${run.cycle.sessionDate}`,
     "",
-    "> Derived operator view. SQLite is authoritative and the canonical JSON is the portable machine record. No order was submitted.",
+    "> Derived operator view. The event ledger is authoritative and the canonical JSON is the portable machine record. No order was submitted.",
     "",
     "## At a Glance",
     "",

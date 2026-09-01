@@ -4,12 +4,15 @@ import { parse as parseEnv } from "dotenv"
 import { z } from "zod"
 
 import type { StoredLedgerEvent } from "../event-ledger/ledger-event-v1.js"
-import { createSqliteLedgerStore } from "../event-ledger/sqlite-ledger-store.js"
+import {
+  createConfiguredLedgerStore,
+  resolveLedgerBackendConfiguration,
+} from "../event-ledger/ledger-backend.js"
 import { buildRiskReportV1 } from "./risk-report-v1.js"
 
 const usage = `Usage: pnpm risk:report [options]
 
-Read shadow risk decisions from the authoritative SQLite ledger.
+Read shadow risk decisions from the configured authoritative ledger.
 
 Options:
   --ledger <path>  Ledger path (default: RESEARCH_LEDGER_PATH or .state/research-ledger.sqlite)
@@ -48,10 +51,18 @@ for (let index = 0; index < args.length; index += 1) {
   throw new Error(`Unknown option: ${argument ?? ""}`)
 }
 
-if (!existsSync(ledgerPath)) throw new Error(`Research ledger does not exist: ${ledgerPath}`)
-const store = createSqliteLedgerStore({
-  path: ledgerPath,
-  knownCredentialValues: [],
+const configuration = resolveLedgerBackendConfiguration(
+  { ...fileEnv, ...process.env },
+  ledgerPath,
+)
+if (configuration.backend === "sqlite" && !existsSync(ledgerPath)) {
+  throw new Error(`Research ledger does not exist: ${ledgerPath}`)
+}
+const store = await createConfiguredLedgerStore({
+  configuration,
+  knownCredentialValues: [process.env.PGPASSWORD?.trim()].filter(
+    (value): value is string => value !== undefined && value.length > 0,
+  ),
   readonly: true,
 })
 try {

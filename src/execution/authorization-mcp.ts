@@ -2,11 +2,24 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 
-import { createSqliteLedgerStore } from "../event-ledger/sqlite-ledger-store.js"
+import {
+  createConfiguredLedgerStore,
+  resolveLedgerBackendConfiguration,
+} from "../event-ledger/ledger-backend.js"
 import { resolveExecutionAuthorizationV1 } from "./authorization-v1.js"
 
 const ledgerPath = process.env.EXECUTION_LEDGER_PATH?.trim()
-if (!ledgerPath) throw new Error("EXECUTION_LEDGER_PATH is required")
+const backendSetting = process.env.EXECUTION_LEDGER_BACKEND?.trim() ||
+  process.env.RESEARCH_LEDGER_BACKEND?.trim() ||
+  "sqlite"
+if (!ledgerPath && backendSetting === "sqlite") {
+  throw new Error("EXECUTION_LEDGER_PATH is required")
+}
+const ledgerConfiguration = resolveLedgerBackendConfiguration(
+  { ...process.env, EXECUTION_LEDGER_BACKEND: backendSetting },
+  ledgerPath ?? ".state/research-ledger.sqlite",
+  "EXECUTION_LEDGER_BACKEND",
+)
 
 const server = new McpServer({
   name: "greeks-execution-authorization",
@@ -23,9 +36,11 @@ server.registerTool(
       .strict(),
   },
   async ({ authorizationId }) => {
-    const store = createSqliteLedgerStore({
-      path: ledgerPath,
-      knownCredentialValues: [],
+    const store = await createConfiguredLedgerStore({
+      configuration: ledgerConfiguration,
+      knownCredentialValues: [process.env.PGPASSWORD?.trim()].filter(
+        (value): value is string => value !== undefined && value.length > 0,
+      ),
       readonly: true,
       fileMustExist: true,
     })

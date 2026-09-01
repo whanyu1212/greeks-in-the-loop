@@ -11,7 +11,7 @@ import type {
 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { createResearchLifecycleRecorder } from "../src/event-ledger/research-lifecycle-recorder.js"
-import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
+import { createSqliteLedgerStore } from "../src/event-ledger/deprecated/sqlite-ledger-store.js"
 import type { ResearchCycleTerminalRecordV4 } from "../src/research/cycle/outcome.js"
 import type { ShadowRiskDecisionV1 } from "../src/risk/shadow-risk-v1.js"
 

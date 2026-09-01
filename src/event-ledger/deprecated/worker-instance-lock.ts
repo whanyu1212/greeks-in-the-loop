@@ -1,7 +1,12 @@
 import Database from "better-sqlite3"
 import { chmodSync, lstatSync, statSync } from "node:fs"
 
-import { canonicalLedgerTargetPath } from "./agent-options.js"
+import { canonicalLedgerTargetPath } from "../../agent-options.js"
+import {
+  WorkerInstanceLockInitializationError,
+  WorkerInstanceLockReleaseError,
+  WorkerInstanceLockUnavailableError,
+} from "../worker-instance-lock-errors.js"
 
 const WORKER_LOCK_SUFFIX = ".worker-lock.sqlite" as const
 
@@ -12,32 +17,6 @@ export type WorkerInstanceLock = Readonly<{
 export type WorkerInstanceLockOptions = Readonly<{
   ledgerPath: string
 }>
-
-/** Indicates that another process currently owns the selected worker ledger. */
-export class WorkerInstanceLockUnavailableError extends Error {
-  constructor() {
-    super(
-      "Another worker already owns the selected ledger. Stop it and wait for shutdown to complete before starting another worker.",
-    )
-    this.name = "WorkerInstanceLockUnavailableError"
-  }
-}
-
-/** Indicates that exclusive worker ownership could not be established safely. */
-export class WorkerInstanceLockInitializationError extends Error {
-  constructor() {
-    super("The worker ownership lock could not be initialized safely.")
-    this.name = "WorkerInstanceLockInitializationError"
-  }
-}
-
-/** Indicates that a held worker lock could not be released cleanly. */
-export class WorkerInstanceLockReleaseError extends Error {
-  constructor() {
-    super("The worker ownership lock could not be released cleanly.")
-    this.name = "WorkerInstanceLockReleaseError"
-  }
-}
 
 const isMissingPathError = (error: unknown) => {
   const code = (error as NodeJS.ErrnoException).code

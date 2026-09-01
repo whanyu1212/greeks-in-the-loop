@@ -9,7 +9,7 @@ import {
   type StoredLedgerEventV4,
 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
-import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
+import { createSqliteLedgerStore } from "../src/event-ledger/deprecated/sqlite-ledger-store.js"
 import {
   MAX_RESEARCH_CONTEXT_EVENTS,
   MAX_RESEARCH_CONTEXT_SERIALIZED_BYTES,

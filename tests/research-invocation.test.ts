@@ -32,6 +32,7 @@ describe("ResearchInvocationV1", () => {
       "6.2.0",
       "7.0.0",
       "7.1.0",
+      "7.2.0",
     ])
     expect(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[RESEARCH_INVOCATION_VERSION]).toEqual({
       agentName: "research",
@@ -39,7 +40,7 @@ describe("ResearchInvocationV1", () => {
       decisionContractVersion: "4.0.0",
       reportVersion: "7.0.0",
       providerId: "openai",
-      modelId: "gpt-5.6-sol",
+      modelId: "gpt-5.6-terra",
     })
   })
 
@@ -47,7 +48,7 @@ describe("ResearchInvocationV1", () => {
     expect(
       assertResearchModelIdentityV1({
         providerId: "openai",
-        modelId: "gpt-5.6-sol",
+        modelId: "gpt-5.6-terra",
       }),
     ).toEqual({ ok: true })
     expect(
@@ -63,7 +64,7 @@ describe("ResearchInvocationV1", () => {
       versions,
       {
         providerId: "openai",
-        modelId: "gpt-5.6-sol",
+        modelId: "gpt-5.6-terra",
         inputTokenCount: 100,
         outputTokenCount: 20,
         responseError: false,

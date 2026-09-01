@@ -5,7 +5,7 @@ import {
   applyLedgerMigrations,
   LEDGER_MIGRATIONS,
   type LedgerMigration,
-} from "../src/event-ledger/migrations.js"
+} from "../src/event-ledger/deprecated/migrations.js"
 
 type DirectEvent = Readonly<{
   eventId: string

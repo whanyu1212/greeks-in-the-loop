@@ -1,10 +1,10 @@
 ---
 description: Compares the application-bounded option universe and returns ranked, non-executing option-strategy proposals.
 mode: primary
-model: openai/gpt-5.6-sol
+model: openai/gpt-5.6-terra
 steps: 32
 options:
-  reasoningEffort: medium
+  reasoningEffort: xhigh
 permission:
   "*": deny
   "alpaca_get_*": allow

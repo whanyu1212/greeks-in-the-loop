@@ -49,7 +49,8 @@ describe("research agent policy", () => {
     expect(config.agent).toBeUndefined()
     expect(hasFrontmatterLine(research.frontmatter, "mode: primary")).toBe(true)
     expect(hasFrontmatterLine(research.frontmatter, `steps: ${RESEARCH_MAX_AGENT_STEPS}`)).toBe(true)
-    expect(hasFrontmatterLine(research.frontmatter, "model: openai/gpt-5.6-sol")).toBe(true)
+    expect(hasFrontmatterLine(research.frontmatter, "model: openai/gpt-5.6-terra")).toBe(true)
+    expect(hasFrontmatterLine(research.frontmatter, "  reasoningEffort: xhigh")).toBe(true)
   })
 
   it("denies unknown capabilities and permits only reviewed research MCP patterns", () => {

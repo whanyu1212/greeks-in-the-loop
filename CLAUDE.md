@@ -54,7 +54,7 @@ OptionUniverseSnapshotV2
 - `src/market-data/`: read-only Alpaca normalization and freshness.
 - `src/risk/`: state capture, reconciliation, pure risk gate, shadow result.
 - `src/scheduling/`: standard and dry-run eligibility.
-- `src/event-ledger/`: append-only SQLite lifecycle.
+- `src/event-ledger/`: append-only lifecycle with PostgreSQL deployment and deprecated SQLite local/test adapters isolated under `deprecated/`.
 - `src/backtest/`: self-contained deterministic replay.
 
 `opencode.json` is globally deny-by-default. The checked-in `research` agent has read-only market authority and no arbitrary skill-loading, shell, subagent, web, or broker-mutation authority. The separate `trader` agent may resolve one opaque ledger authorization, read Alpaca state, and submit option orders only through the paper-pinned Alpaca MCP; it has no stock, crypto, cancellation, replacement, filesystem, or external-research authority. The application invokes it in a separate session only for selected, risk-approved, positive-debit multi-leg authorizations. Credit, single-leg, expired, dry-run, and non-paper paths remain non-executing.

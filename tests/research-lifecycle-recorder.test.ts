@@ -13,7 +13,7 @@ import type {
 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { createResearchLifecycleRecorder } from "../src/event-ledger/research-lifecycle-recorder.js"
-import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
+import { createSqliteLedgerStore } from "../src/event-ledger/deprecated/sqlite-ledger-store.js"
 import type { ResearchCycleTerminalRecordV3 } from "../src/research/cycle/outcome.js"
 import type { ResearchInvocationV1 } from "../src/research/invocation.js"
 import type { SymbolScreenResultV2 } from "../src/research/symbol-screen.js"
@@ -475,8 +475,8 @@ describe("createResearchLifecycleRecorder", () => {
 
     await cycle.recordInvocationIdentityRejected({
       reason: "MODEL_DRIFT",
-      expected: "gpt-5.6-sol",
-      observed: "gpt-5.6-sol-fast",
+      expected: "gpt-5.6-terra",
+      observed: "gpt-5.6-terra-fast",
     })
 
     expect(state.events).toEqual([
@@ -490,10 +490,10 @@ describe("createResearchLifecycleRecorder", () => {
         cycleId: "id-1",
         sessionId: "session-1",
         payload: {
-          invocationVersion: "7.1.0",
+          invocationVersion: "7.2.0",
           reason: "MODEL_DRIFT",
-          expected: "gpt-5.6-sol",
-          observed: "gpt-5.6-sol-fast",
+          expected: "gpt-5.6-terra",
+          observed: "gpt-5.6-terra-fast",
         },
       },
     ])
