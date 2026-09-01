@@ -60,14 +60,40 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v3
+      # Submit async: the deploy service account is not a project Viewer, so
+      # gcloud's synchronous log streaming exits 1 even when the build succeeds.
       - name: Build immutable image
+        id: build
         run: >-
           gcloud builds submit
           --project="${{ vars.GCP_PROJECT_ID }}"
           --region="${{ vars.GCP_REGION }}"
           --tag="$IMAGE"
+          --async
+          --format="value(id)"
           --quiet
-          .
+          . | tee "$RUNNER_TEMP/build_id"
+      - name: Wait for build
+        run: |
+          set -euo pipefail
+          id="$(cat "$RUNNER_TEMP/build_id")"
+          describe() {
+            gcloud builds describe "$id" \
+              --project="${{ vars.GCP_PROJECT_ID }}" \
+              --region="${{ vars.GCP_REGION }}" \
+              --format='value(status)'
+          }
+          # Poll until a terminal status. Anything else (PENDING, QUEUED,
+          # WORKING, STATUS_UNKNOWN) means the build is still in flight.
+          while true; do
+            status="$(describe)"
+            case "$status" in
+              SUCCESS|FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED) break ;;
+            esac
+            sleep 10
+          done
+          echo "build $id finished: $status"
+          test "$status" = "SUCCESS"
       - name: Update Cloud Run job image
         run: >-
           gcloud run jobs update "${{ vars.CLOUD_RUN_JOB }}"
