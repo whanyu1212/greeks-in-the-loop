@@ -514,6 +514,58 @@ describe("processResearchCycle", () => {
     expect(records[0]?.evidenceSnapshots).toHaveLength(3)
   })
 
+  it("rejects V7 proposals that omit required deep-research gates", () => {
+    const report = proposalReport(1)
+    const expectRejectedAt = (
+      input: unknown,
+      path: readonly (string | number)[],
+    ) => {
+      const parsed = researchReportV7Schema.safeParse(input)
+      expect(parsed.success).toBe(false)
+      if (parsed.success) throw new Error("Expected V7 proposal rejection")
+      expect(parsed.error.issues).toContainEqual(expect.objectContaining({ path }))
+    }
+
+    expectRejectedAt({
+      ...report,
+      analysis: { ...report.analysis, externalContext: [] },
+    }, ["analysis", "externalContext"])
+    expectRejectedAt({
+      ...report,
+      analysis: { ...report.analysis, optionSurfaces: [] },
+    }, ["analysis", "optionSurfaces"])
+
+    const {
+      ewmaRealizedVolatility20: _ewmaRealizedVolatility20,
+      ...incompleteIndicator
+    } = report.analysis.symbolIndicators[0]!
+    expectRejectedAt({
+      ...report,
+      analysis: {
+        ...report.analysis,
+        symbolIndicators: [
+          incompleteIndicator,
+          ...report.analysis.symbolIndicators.slice(1),
+        ],
+      },
+    }, ["analysis", "symbolIndicators", 0, "ewmaRealizedVolatility20"])
+
+    expectRejectedAt({
+      ...report,
+      analysis: {
+        ...report.analysis,
+        optionSurfaces: [{
+          ...report.analysis.optionSurfaces[0]!,
+          eventRisk: {
+            verification: "AGENT_REPORTED",
+            status: "UNKNOWN",
+            macroEvents: [],
+          },
+        }],
+      },
+    }, ["analysis", "optionSurfaces", 0, "eventRisk"])
+  })
+
   it("rejects a proposal not marked actionable by the application screen", async () => {
     const screen = screenOptionUniverseV2(optionUniverse)
     const blockedScreen: SymbolScreenResultV2 = {
