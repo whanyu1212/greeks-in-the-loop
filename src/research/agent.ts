@@ -16,7 +16,7 @@ import type { SymbolScreenResultV2 } from "./symbol-screen.js"
 /** Checked-in OpenCode primary agent used by every unattended cycle. */
 export const RESEARCH_AGENT_NAME = "research" as const
 /** Increment when the system prompt or cycle-request behavior changes. */
-export const RESEARCH_PROMPT_VERSION = "7.0.0" as const
+export const RESEARCH_PROMPT_VERSION = "7.1.0" as const
 
 /** Hard OpenCode turn bound mirrored by the checked-in agent configuration. */
 export const RESEARCH_MAX_AGENT_STEPS = 32
@@ -59,7 +59,7 @@ export function buildResearchReportRepairPrompt(
   }>[],
 ) {
   return [
-    "Your prior response failed deterministic ResearchReportV6 validation.",
+    "Your prior response failed deterministic ResearchReportV7 validation.",
     "Do not call tools or add new research. Correct the complete existing report using only facts already gathered, then return exactly one bare JSON object with no Markdown or commentary.",
     "Every invalidation field is an array of strings. Every date-time uses UTC ISO 8601 with exactly three fractional digits, for example 2026-08-31T07:43:13.082Z.",
     "Case-sensitive enums: evidence kind is SOURCED_FACT or INFERENCE; temporalClass is LIVE, DELAYED, or PRIOR_CLOSE; symbol direction is BULLISH, BEARISH, or NEUTRAL; symbol disposition is REJECT, WATCH, or PROPOSE.",
@@ -101,7 +101,7 @@ export function buildResearchCyclePrompt(
     JSON.stringify(optionUniverse),
     underlyings.length === 0
       ? "The dynamic shortlist is empty. Return NO_ACTION with INSUFFICIENT_UNDERLYING_DATA and do not substitute a symbol."
-      : `Lightly evaluate every shortlisted underlying (${underlyings.join(", ")}), promote at most three to deep option research, and return either NO_ACTION or one to three ranked BULL_CALL_SPREAD or BEAR_PUT_SPREAD proposals.`,
+      : `Lightly evaluate every shortlisted underlying (${underlyings.join(", ")}), promote at most three to deep option research, and return either NO_ACTION or one to three ranked proposals using only exact ACTIONABLE symbol-strategy pairs from the application screen.`,
     symbolScreen
       ? [
           "The application-authoritative symbol-strategy screen follows. Return a proposal only for an exact underlying and strategy pair marked ACTIONABLE. WATCH, REJECTED, and UNAVAILABLE pairs are not proposal candidates; catalog presence, Alpaca capability, or account approval does not override this screen.",

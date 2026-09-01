@@ -32,7 +32,7 @@ const optionUniverse = {
 describe("research agent request construction", () => {
   it("uses the fixed checked-in agent identity", () => {
     expect(RESEARCH_AGENT_NAME).toBe("research")
-    expect(RESEARCH_PROMPT_VERSION).toBe("7.0.0")
+    expect(RESEARCH_PROMPT_VERSION).toBe("7.1.0")
   })
 
   it("publishes bounded research budgets", () => {
@@ -75,7 +75,7 @@ describe("research agent request construction", () => {
         "Run structured research cycle 3 at 2026-08-25T13:30:00.000Z.",
         "The application-authoritative option universe follows. Copy it exactly into analysis.optionUniverse; do not add or substitute symbols.",
         JSON.stringify(optionUniverse),
-        "Lightly evaluate every shortlisted underlying (TSLA, NVDA, AMD), promote at most three to deep option research, and return either NO_ACTION or one to three ranked BULL_CALL_SPREAD or BEAR_PUT_SPREAD proposals.",
+        "Lightly evaluate every shortlisted underlying (TSLA, NVDA, AMD), promote at most three to deep option research, and return either NO_ACTION or one to three ranked proposals using only exact ACTIONABLE symbol-strategy pairs from the application screen.",
         "Current operator objective: Compare downside catalysts.",
       ].join("\n"),
     )
@@ -132,6 +132,7 @@ describe("research agent request construction", () => {
     expect(prompt).toContain("temporalClass is LIVE, DELAYED, or PRIOR_CLOSE")
     expect(prompt).toContain("Use benchmark, not underlying")
     expect(prompt).toContain("EXA externalContext is exactly")
+    expect(prompt).toContain("ResearchReportV7")
   })
 
   it("labels ledger context as historical and requires current facts to be refreshed", () => {
