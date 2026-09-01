@@ -18,6 +18,10 @@ import {
   type ResearchEligibilityV1,
 } from "../../scheduling/research-eligibility.js"
 import {
+  strategyActionabilityIssuePathV2,
+  type SymbolScreenResultV2,
+} from "../symbol-screen.js"
+import {
   RESEARCH_CYCLE_OUTCOME_VERSION,
   type ResearchCycleEvidenceSnapshotReferenceV1,
   type ResearchProposalDispositionV1,
@@ -208,6 +212,7 @@ export type ProposalIntentDeriver = (
 
 export type ProcessResearchProposalPathOptions = Readonly<{
   report: ProposedPortfolioReportV3
+  symbolScreen: SymbolScreenResultV2
   signal: AbortSignal
   quoteProvider: OptionQuoteProvider
   shadowRiskEvaluator: ShadowRiskEvaluator
@@ -244,6 +249,7 @@ async function processOneProposal(
 }>> {
   const {
     report,
+    symbolScreen,
     signal,
     quoteProvider,
     shadowRiskEvaluator,
@@ -254,6 +260,21 @@ async function processOneProposal(
     stageReporter,
   } = options
   const identity = identityFor(proposal)
+  const actionabilityIssue = strategyActionabilityIssuePathV2(
+    symbolScreen,
+    proposal.candidate.underlying,
+    proposal.candidate.structure,
+  )
+  if (actionabilityIssue !== undefined) {
+    return {
+      disposition: {
+        ...identity,
+        status: "DECISION_REJECTED",
+        issues: [{ code: "CONTEXT_INVALID", path: actionabilityIssue }],
+      },
+      evidenceSnapshots: [],
+    }
+  }
   const proposalEligibility = getEligibility()
   if (!proposalEligibility.tradeIntentEligible) {
     return {

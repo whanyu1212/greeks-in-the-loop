@@ -234,6 +234,34 @@ export function indexSymbolStrategyScreenV2(
   ]))
 }
 
+/** Locates the application-owned screen reason a proposal is not actionable. */
+export function strategyActionabilityIssuePathV2(
+  screen: SymbolScreenResultV2,
+  underlying: string,
+  strategy: OptionStrategy,
+): readonly (string | number)[] | undefined {
+  const symbolIndex = screen.symbols.findIndex(
+    (entry) => entry.underlying === underlying,
+  )
+  if (symbolIndex < 0) return ["symbolScreen", "symbols"]
+  const strategyIndex = screen.symbols[symbolIndex]!.strategies.findIndex(
+    (assessment) => assessment.strategy === strategy,
+  )
+  const assessment = screen.symbols[symbolIndex]!.strategies[strategyIndex]
+  return assessment?.actionability === "ACTIONABLE"
+    ? undefined
+    : strategyIndex < 0
+      ? ["symbolScreen", "symbols", symbolIndex, "strategies"]
+      : [
+          "symbolScreen",
+          "symbols",
+          symbolIndex,
+          "strategies",
+          strategyIndex,
+          "actionability",
+        ]
+}
+
 const CURRENT_SCREEN_STRATEGIES = new Set<OptionStrategy>([
   "BULL_CALL_SPREAD",
   "BEAR_PUT_SPREAD",

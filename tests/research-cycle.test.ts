@@ -4,6 +4,7 @@ import { proposalQuoteSnapshotRef } from "../src/contracts/research-decision-v3.
 import type { OptionUniverseSnapshotV2 } from "../src/contracts/option-universe-v2.js"
 import { researchReportV6Schema } from "../src/contracts/research-report-v6.js"
 import type { OptionQuoteProvider } from "../src/market-data/alpaca-option-quotes.js"
+import { OPTION_STRATEGIES } from "../src/options/strategy.js"
 import type { ShadowRiskEvaluator } from "../src/risk/shadow-risk-service.js"
 import type { ResearchEligibilityV1 } from "../src/scheduling/research-eligibility.js"
 import type {
@@ -12,7 +13,10 @@ import type {
 } from "../src/research/cycle/outcome.js"
 import { processResearchCycle } from "../src/research/cycle.js"
 import type { ResearchInvocationV1 } from "../src/research/invocation.js"
-import { screenOptionUniverseV2 } from "../src/research/symbol-screen.js"
+import {
+  screenOptionUniverseV2,
+  type SymbolScreenResultV2,
+} from "../src/research/symbol-screen.js"
 
 const underlyings = ["SPY", "QQQ", "NVDA"] as const
 const observedAt = "2026-08-26T14:30:00.000Z"
@@ -380,6 +384,7 @@ const run = async (
   report: unknown,
   options: Readonly<{
     universe?: OptionUniverseSnapshotV2
+    screen?: SymbolScreenResultV2
     quotes?: OptionQuoteProvider
     risk?: ShadowRiskEvaluator
   }> = {},
@@ -395,7 +400,7 @@ const run = async (
     rawResponse: typeof report === "string" ? report : JSON.stringify(report),
     cycleStartedAt: "2026-08-26T14:28:00.000Z",
     optionUniverse: selectedUniverse,
-    symbolScreen: screenOptionUniverseV2(selectedUniverse),
+    symbolScreen: options.screen ?? screenOptionUniverseV2(selectedUniverse),
     signal: new AbortController().signal,
     quoteProvider: options.quotes ?? quoteProvider,
     shadowRiskEvaluator: options.risk ?? approvedRisk,
@@ -495,6 +500,54 @@ describe("processResearchCycle", () => {
     )).toEqual([true, false, false])
     expect(risk.evaluate).toHaveBeenCalledTimes(3)
     expect(records[0]?.evidenceSnapshots).toHaveLength(3)
+  })
+
+  it("rejects a proposal not marked actionable by the application screen", async () => {
+    const screen = screenOptionUniverseV2(optionUniverse)
+    const blockedScreen: SymbolScreenResultV2 = {
+      ...screen,
+      symbols: screen.symbols.map((entry, symbolIndex) => symbolIndex === 0
+        ? {
+            ...entry,
+            strategies: entry.strategies.map((assessment) =>
+              assessment.strategy === "BULL_CALL_SPREAD"
+                ? {
+                    ...assessment,
+                    actionability: "WATCH" as const,
+                    reasonCodes: ["SESSION_MOVE_BELOW_THRESHOLD" as const],
+                  }
+                : assessment
+            ),
+          }
+        : entry),
+    }
+    const quotes = { confirmQuotes: vi.fn() }
+    const risk = { evaluate: vi.fn() }
+    const { processed } = await run(proposalReport(1), {
+      screen: blockedScreen,
+      quotes: quotes as unknown as OptionQuoteProvider,
+      risk: risk as unknown as ShadowRiskEvaluator,
+    })
+
+    expect(processed.outcome.status).toBe("PORTFOLIO_EVALUATED")
+    if (processed.outcome.status !== "PORTFOLIO_EVALUATED") return
+    expect(processed.outcome.proposals[0]).toMatchObject({
+      underlying: "SPY",
+      status: "DECISION_REJECTED",
+      issues: [{
+        code: "CONTEXT_INVALID",
+        path: [
+          "symbolScreen",
+          "symbols",
+          0,
+          "strategies",
+          OPTION_STRATEGIES.indexOf("BULL_CALL_SPREAD"),
+          "actionability",
+        ],
+      }],
+    })
+    expect(quotes.confirmQuotes).not.toHaveBeenCalled()
+    expect(risk.evaluate).not.toHaveBeenCalled()
   })
 
   it("selects the best refreshed execution quality instead of agent priority", async () => {
