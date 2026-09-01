@@ -67,6 +67,35 @@ const fmpPreloadPath = fileURLToPath(
 )
 const tsxCliPath = require.resolve("tsx/cli")
 
+const authorizationEnvironment = () => {
+  const backend = (
+    readSetting("EXECUTION_LEDGER_BACKEND") ||
+    readSetting("RESEARCH_LEDGER_BACKEND") ||
+    "sqlite"
+  ).toLowerCase()
+  const environment = {
+    EXECUTION_LEDGER_BACKEND: backend,
+    EXECUTION_LEDGER_PATH:
+      readSetting("EXECUTION_LEDGER_PATH") ||
+      readSetting("RESEARCH_LEDGER_PATH") ||
+      ".state/research-ledger.sqlite",
+  }
+  if (backend !== "postgres") return environment
+
+  const connectionString = readSetting("DATABASE_URL")
+  if (connectionString) return { ...environment, DATABASE_URL: connectionString }
+
+  const port = readSetting("PGPORT")
+  return {
+    ...environment,
+    PGHOST: readRequiredSetting("PGHOST"),
+    ...(port ? { PGPORT: port } : {}),
+    PGDATABASE: readRequiredSetting("PGDATABASE"),
+    PGUSER: readRequiredSetting("PGUSER"),
+    PGPASSWORD: readRequiredSetting("PGPASSWORD"),
+  }
+}
+
 const createServers = {
   alpaca: () => ({
     command: "uvx",
@@ -115,12 +144,7 @@ const createServers = {
         new URL("../src/execution/authorization-mcp.ts", import.meta.url),
       ),
     ],
-    environment: {
-      EXECUTION_LEDGER_PATH:
-        readSetting("EXECUTION_LEDGER_PATH") ||
-        readSetting("RESEARCH_LEDGER_PATH") ||
-        ".state/research-ledger.sqlite",
-    },
+    environment: authorizationEnvironment(),
   }),
 }
 

@@ -220,6 +220,24 @@ describe("research agent policy", () => {
     )
   })
 
+  it("gives the authorization MCP the selected ledger connection only", () => {
+    for (const setting of [
+      "EXECUTION_LEDGER_BACKEND",
+      "RESEARCH_LEDGER_BACKEND",
+      "DATABASE_URL",
+      "PGHOST",
+      "PGPORT",
+      "PGDATABASE",
+      "PGUSER",
+      "PGPASSWORD",
+    ]) expect(mcpLauncher).toContain(`"${setting}"`)
+    expect(mcpLauncher).toContain('if (backend !== "postgres") return environment')
+    expect(mcpLauncher).toContain(
+      "if (connectionString) return { ...environment, DATABASE_URL: connectionString }",
+    )
+    expect(mcpLauncher).toContain("environment: authorizationEnvironment()")
+  })
+
   it("keeps live behavior evaluation isolated from production credentials", () => {
     for (const setting of [
       "ALPACA_API_KEY",
