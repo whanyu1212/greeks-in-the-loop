@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
-import type { TradeProposalV3 } from "../src/contracts/research-decision-v3.js"
-import { deriveTradeIntentV3 } from "../src/contracts/trade-intent-v3.js"
+import type { TradeProposalV4 } from "../src/contracts/research-decision-v4.js"
+import { deriveTradeIntentV4 } from "../src/contracts/trade-intent-v4.js"
 import type { RiskStateProvider } from "../src/risk/alpaca-risk-state-provider.js"
 import type { StoredLedgerEventV4 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
@@ -20,16 +20,25 @@ const evaluatedAt = "2026-08-27T14:30:30.000Z"
 const longSymbol = "SPY260918C00600000"
 const shortSymbol = "SPY260918C00605000"
 
-const decision: TradeProposalV3 = {
+const decision: TradeProposalV4 = {
   priority: 1,
   direction: "BULLISH",
   thesis: "Daily and intraday direction agree.",
   candidate: {
     underlying: "SPY",
-    structure: "BULL_CALL_SPREAD",
-    expiration: "2026-09-18",
-    longLeg: { contractSymbol: longSymbol, strike: 600 },
-    shortLeg: { contractSymbol: shortSymbol, strike: 605 },
+    strategy: "BULL_CALL_SPREAD",
+    legs: [
+      {
+        contractSymbol: longSymbol,
+        positionIntent: "BUY_TO_OPEN",
+        ratioQuantity: 1,
+      },
+      {
+        contractSymbol: shortSymbol,
+        positionIntent: "SELL_TO_OPEN",
+        ratioQuantity: 1,
+      },
+    ],
   },
   invalidation: ["Reject if refreshed evidence changes the candidate."],
   evidence: [{
@@ -58,10 +67,10 @@ const quotes = (timestamp: string) => ({
 })
 
 const sourceIntent = (() => {
-  const result = deriveTradeIntentV3(decision, {
+  const result = deriveTradeIntentV4(decision, {
     quoteSnapshotRef: "alpaca-proposal-quotes-v2-SPY",
     evaluatedAt: "2026-08-27T14:30:10.000Z",
-    ...quotes("2026-08-27T14:30:00.000000000Z"),
+    quotes: Object.values(quotes("2026-08-27T14:30:00.000000000Z")),
   })
   if (!result.success) throw new Error("Test intent could not be derived")
   return result.intent

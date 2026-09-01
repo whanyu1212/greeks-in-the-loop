@@ -423,18 +423,22 @@ describe("research run presentation", () => {
         snapshotRef: "alpaca-proposal-quotes-v1-qqq",
       }],
     }
+    const firstIntent = source.outcome.intents[0]!
+    if (firstIntent.contractVersion !== "3.0.0") {
+      throw new Error("Expected a legacy debit-spread intent")
+    }
     const secondIntent = {
-      ...source.outcome.intents[0]!,
+      ...firstIntent,
       underlying: "QQQ",
       longContractSymbol: "QQQ260918C00650000",
       shortContractSymbol: "QQQ260918C00655000",
       quoteSnapshotRef: "alpaca-proposal-quotes-v1-qqq",
       longQuote: {
-        ...source.outcome.intents[0]!.longQuote,
+        ...firstIntent.longQuote,
         contractSymbol: "QQQ260918C00650000",
       },
       shortQuote: {
-        ...source.outcome.intents[0]!.shortQuote,
+        ...firstIntent.shortQuote,
         contractSymbol: "QQQ260918C00655000",
       },
     }

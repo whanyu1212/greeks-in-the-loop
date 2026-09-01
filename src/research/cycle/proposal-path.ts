@@ -1,6 +1,5 @@
 import {
   proposalQuoteSnapshotRef,
-  type TradeProposalV3,
 } from "../../contracts/research-decision-v3.js"
 import {
   RESEARCH_DECISION_V4_CONTRACT_VERSION,
@@ -9,14 +8,13 @@ import {
 } from "../../contracts/research-decision-v4.js"
 import type { ResearchReportV7 } from "../../contracts/research-report-v7.js"
 import type {
-  TradeIntentDerivationContextV3,
-  TradeIntentDerivationResultV3,
-} from "../../contracts/trade-intent-v3.js"
+  TradeIntentDerivationContextV4,
+  TradeIntentDerivationResultV4,
+} from "../../contracts/trade-intent-v4.js"
 import type { OptionQuoteProvider } from "../../market-data/alpaca-option-quotes.js"
 import type { ResearchCycleTrace } from "../../observability/research-telemetry.js"
 import type { TerminalStageReporter } from "../../observability/terminal-stage-reporter.js"
 import type { ShadowRiskEvaluator } from "../../risk/shadow-risk-service.js"
-import { parseAlpacaOptionSymbol } from "../../shared/alpaca-option-identity.js"
 import {
   newYorkLocalTime,
   type ResearchEligibilityV1,
@@ -82,54 +80,6 @@ export const isProposedPortfolioReport = (
   report: ResearchReportV7,
 ): report is ProposedPortfolioReportV4 =>
   report.result.outcome === "PROPOSE_TRADES"
-
-const adaptDebitVerticalProposal = (
-  proposal: TradeProposalV4,
-): TradeProposalV3 | undefined => {
-  if (
-    proposal.candidate.strategy !== "BULL_CALL_SPREAD" &&
-    proposal.candidate.strategy !== "BEAR_PUT_SPREAD"
-  ) return undefined
-  const [longLeg, shortLeg] = proposal.candidate.legs
-  if (
-    longLeg === undefined ||
-    shortLeg === undefined ||
-    proposal.candidate.legs.length !== 2 ||
-    longLeg.positionIntent !== "BUY_TO_OPEN" ||
-    shortLeg.positionIntent !== "SELL_TO_OPEN" ||
-    longLeg.ratioQuantity !== 1 ||
-    shortLeg.ratioQuantity !== 1
-  ) return undefined
-  const longIdentity = parseAlpacaOptionSymbol(longLeg.contractSymbol)
-  const shortIdentity = parseAlpacaOptionSymbol(shortLeg.contractSymbol)
-  if (
-    !longIdentity.success ||
-    !shortIdentity.success ||
-    longIdentity.identity.expiration !== shortIdentity.identity.expiration
-  ) return undefined
-  return {
-    priority: proposal.priority,
-    direction: proposal.candidate.strategy === "BULL_CALL_SPREAD"
-      ? "BULLISH"
-      : "BEARISH",
-    thesis: proposal.thesis,
-    candidate: {
-      underlying: proposal.candidate.underlying,
-      structure: proposal.candidate.strategy,
-      expiration: longIdentity.identity.expiration,
-      longLeg: {
-        contractSymbol: longLeg.contractSymbol,
-        strike: longIdentity.identity.strikeThousandthsPerShare / 1_000,
-      },
-      shortLeg: {
-        contractSymbol: shortLeg.contractSymbol,
-        strike: shortIdentity.identity.strikeThousandthsPerShare / 1_000,
-      },
-    },
-    invalidation: proposal.invalidation,
-    evidence: proposal.evidence,
-  }
-}
 
 const marketRegimeFor = (
   report: ResearchReportV7,
@@ -250,9 +200,9 @@ export const proposalHistoryIssuePath = (
 }
 
 export type ProposalIntentDeriver = (
-  proposal: TradeProposalV3,
-  context: TradeIntentDerivationContextV3,
-) => TradeIntentDerivationResultV3
+  proposal: TradeProposalV4,
+  context: TradeIntentDerivationContextV4,
+) => TradeIntentDerivationResultV4
 
 export type ProcessResearchProposalPathOptions = Readonly<{
   report: ProposedPortfolioReportV4
@@ -431,29 +381,11 @@ async function processOneProposal(
     }
   }
 
-  const legacyProposal = adaptDebitVerticalProposal(proposal)
-  if (legacyProposal === undefined) {
-    return {
-      disposition: {
-        ...identity,
-        status: "DECISION_REJECTED",
-        issues: [{ code: "CONTEXT_INVALID", path: ["candidate", "strategy"] }],
-      },
-      evidenceSnapshots,
-    }
-  }
   const derivation = await trace.run("research.intent.derive", () =>
-    deriveIntent(legacyProposal, {
+    deriveIntent(proposal, {
       quoteSnapshotRef: snapshotRef,
       evaluatedAt: quoteConfirmation.snapshot.evaluatedAt,
-      longQuote: quoteConfirmation.snapshot.quotes.find(
-        ({ contractSymbol }) =>
-          contractSymbol === legacyProposal.candidate.longLeg.contractSymbol,
-      )!,
-      shortQuote: quoteConfirmation.snapshot.quotes.find(
-        ({ contractSymbol }) =>
-          contractSymbol === legacyProposal.candidate.shortLeg.contractSymbol,
-      )!,
+      quotes: quoteConfirmation.snapshot.quotes,
     }),
   )
   if (!derivation.success) {
@@ -484,7 +416,7 @@ async function processOneProposal(
   }
   const shadowRisk = await trace.run("risk.shadow.evaluate", () =>
     shadowRiskEvaluator.evaluate({
-      decision: legacyProposal,
+      decision: proposal,
       sourceIntent: derivation.intent,
       captureEligibility: {
         ...proposalEligibility,
@@ -528,14 +460,15 @@ const executionQualityFor = (disposition: ResearchProposalDispositionV2) => {
     disposition.shadowRisk.decision.outcome !== "APPROVED"
   ) return undefined
 
-  const intent = disposition.shadowRisk.decision.evaluatedIntent
+  const intent = disposition.intent
   return {
     disposition,
-    combinedQuoteWidthCents:
-      intent.longQuote.askCentsPerShare - intent.longQuote.bidCentsPerShare +
-      intent.shortQuote.askCentsPerShare - intent.shortQuote.bidCentsPerShare,
-    entryLimitCents: intent.entryLimitCentsPerShare,
-    spreadWidthCents: intent.widthCentsPerShare,
+    combinedQuoteWidthCents: intent.legs.reduce(
+      (total, leg) => total + leg.ratioQuantity *
+        (leg.quote.askCentsPerShare - leg.quote.bidCentsPerShare),
+      0,
+    ),
+    entryLimitCents: intent.entryLimitCentsPerStrategyUnit,
   }
 }
 
@@ -550,14 +483,6 @@ const compareExecutionQuality = (
     right.entryLimitCents,
   )
   if (quoteWidthComparison !== 0) return quoteWidthComparison
-
-  const debitComparison = compareFractions(
-    left.entryLimitCents,
-    left.spreadWidthCents,
-    right.entryLimitCents,
-    right.spreadWidthCents,
-  )
-  if (debitComparison !== 0) return debitComparison
 
   return left.disposition.priority - right.disposition.priority ||
     left.disposition.underlying.localeCompare(right.disposition.underlying)

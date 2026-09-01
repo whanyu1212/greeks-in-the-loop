@@ -19,6 +19,10 @@ import type {
   TradeIntentV3,
 } from "../../contracts/trade-intent-v3.js"
 import type {
+  TradeIntentDerivationReasonV4,
+  TradeIntentV4,
+} from "../../contracts/trade-intent-v4.js"
+import type {
   OptionQuoteConfirmationFailureCode,
 } from "../../market-data/alpaca-option-quotes.js"
 import type { ShadowRiskResultV1 } from "../../risk/shadow-risk-v1.js"
@@ -37,6 +41,7 @@ export type DecisionRejectionIssue =
 export type IntentDerivationRejectionReason =
   | OptionQuoteConfirmationFailureCode
   | TradeIntentDerivationReason
+  | TradeIntentDerivationReasonV4
   | "MARKET_WINDOW_INELIGIBLE"
 
 type ProposalIdentity = Readonly<{
@@ -76,7 +81,7 @@ export type ResearchProposalDispositionV2 = ProposalIdentity &
     | Readonly<{
         status: "RISK_EVALUATED"
         proposal: TradeProposalV4
-        intent: TradeIntentV3
+        intent: TradeIntentV4
         shadowRisk: ShadowRiskResultV1
         selected: boolean
       }>

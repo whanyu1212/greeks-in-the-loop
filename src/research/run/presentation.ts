@@ -403,19 +403,35 @@ export function buildResearchRunPresentation(
         : undefined
     const intent = evaluatedRisk?.evaluatedIntent ?? primaryIntent
     lines.push("## Derived Intent", "")
-    table(lines, [
-      ["Basis", evaluatedRisk === undefined ? "INITIAL_DERIVATION" : "SHADOW_RISK_REFRESH"],
-      ["Quote snapshot", intent.quoteSnapshotRef],
-      ["Evaluated", intent.evaluatedAt],
-      ["Long quote", `${dollarsFromCents(intent.longQuote.bidCentsPerShare)} bid / ${dollarsFromCents(intent.longQuote.askCentsPerShare)} ask`],
-      ["Short quote", `${dollarsFromCents(intent.shortQuote.bidCentsPerShare)} bid / ${dollarsFromCents(intent.shortQuote.askCentsPerShare)} ask`],
-      ["Entry limit", `${dollarsFromCents(intent.entryLimitCentsPerShare)} per share`],
-      ["Spread width", `${dollarsFromCents(intent.widthCentsPerShare)} per share`],
-      ["Maximum loss", `${dollarsFromCents(intent.maxLossCentsPerContract)} per contract`],
-      ["Maximum profit", `${dollarsFromCents(intent.maxProfitCentsPerContract)} per contract`],
-      ["Stop-loss mark", `${dollarsFromHalfCents(intent.stopLossMarkHalfCentsPerShare)} per share`],
-      ["Profit-target mark", `${dollarsFromHalfCents(intent.profitTargetMarkHalfCentsPerShare)} per share`],
-    ])
+    const basis = evaluatedRisk === undefined
+      ? "INITIAL_DERIVATION"
+      : "SHADOW_RISK_REFRESH"
+    table(lines, "strategy" in intent
+      ? [
+          ["Basis", basis],
+          ["Quote snapshot", intent.quoteSnapshotRef],
+          ["Evaluated", intent.evaluatedAt],
+          ["Strategy", intent.strategy],
+          ["Premium effect", intent.premiumEffect],
+          ["Entry limit", `${dollarsFromCents(intent.entryLimitCentsPerStrategyUnit)} per strategy unit`],
+          ...intent.legs.flatMap((leg, index) => [
+            [`Leg ${index + 1}`, `${leg.positionIntent} ${leg.ratioQuantity} ${leg.contractSymbol}`] as const,
+            [`Leg ${index + 1} quote`, `${dollarsFromCents(leg.quote.bidCentsPerShare)} bid / ${dollarsFromCents(leg.quote.askCentsPerShare)} ask`] as const,
+          ]),
+        ]
+      : [
+          ["Basis", basis],
+          ["Quote snapshot", intent.quoteSnapshotRef],
+          ["Evaluated", intent.evaluatedAt],
+          ["Long quote", `${dollarsFromCents(intent.longQuote.bidCentsPerShare)} bid / ${dollarsFromCents(intent.longQuote.askCentsPerShare)} ask`],
+          ["Short quote", `${dollarsFromCents(intent.shortQuote.bidCentsPerShare)} bid / ${dollarsFromCents(intent.shortQuote.askCentsPerShare)} ask`],
+          ["Entry limit", `${dollarsFromCents(intent.entryLimitCentsPerShare)} per share`],
+          ["Spread width", `${dollarsFromCents(intent.widthCentsPerShare)} per share`],
+          ["Maximum loss", `${dollarsFromCents(intent.maxLossCentsPerContract)} per contract`],
+          ["Maximum profit", `${dollarsFromCents(intent.maxProfitCentsPerContract)} per contract`],
+          ["Stop-loss mark", `${dollarsFromHalfCents(intent.stopLossMarkHalfCentsPerShare)} per share`],
+          ["Profit-target mark", `${dollarsFromHalfCents(intent.profitTargetMarkHalfCentsPerShare)} per share`],
+        ])
   }
 
   if (report !== undefined) {

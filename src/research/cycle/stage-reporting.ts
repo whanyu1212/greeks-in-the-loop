@@ -7,6 +7,10 @@ import type {
   TradeIntentV3,
 } from "../../contracts/trade-intent-v3.js"
 import type {
+  TradeIntentDerivationReasonV4,
+  TradeIntentV4,
+} from "../../contracts/trade-intent-v4.js"
+import type {
   ConfirmedOptionQuoteSnapshotV2,
   OptionQuoteConfirmationFailureCode,
 } from "../../market-data/alpaca-option-quotes.js"
@@ -29,8 +33,10 @@ export type ResearchCycleStageReports = Readonly<{
     reasons: readonly OptionQuoteConfirmationFailureCode[],
   ): void
   quotesConfirmed(snapshot: ConfirmedOptionQuoteSnapshotV2): void
-  intentRejected(reasons: readonly TradeIntentDerivationReason[]): void
-  intentDerived(intent: TradeIntentV3): void
+  intentRejected(reasons: readonly (
+    TradeIntentDerivationReason | TradeIntentDerivationReasonV4
+  )[]): void
+  intentDerived(intent: TradeIntentV3 | TradeIntentV4): void
   riskEvaluated(result: ShadowRiskResultV1): void
   ledgerCommitted(record: ResearchCycleTerminalRecordV4): void
   cycleOutcomeRecorded(record: ResearchCycleTerminalRecordV4): void
@@ -98,14 +104,22 @@ export function createResearchCycleStageReports(
       reporter.report("intent.derive", "REJECTED", { reasonCodes: reasons })
     },
     intentDerived(intent) {
-      reporter.report("intent.derive", "COMPLETED", {
-        direction: intent.direction,
-        structure: intent.structure,
-        expiration: intent.expiration,
-        entryLimitCentsPerShare: intent.entryLimitCentsPerShare,
-        maxLossCentsPerContract: intent.maxLossCentsPerContract,
-        maxProfitCentsPerContract: intent.maxProfitCentsPerContract,
-      })
+      reporter.report("intent.derive", "COMPLETED", intent.contractVersion === "4.0.0"
+        ? {
+            direction: intent.direction,
+            structure: intent.strategy,
+            legCount: intent.legs.length,
+            premiumEffect: intent.premiumEffect,
+            entryLimitCentsPerShare: intent.entryLimitCentsPerStrategyUnit,
+          }
+        : {
+            direction: intent.direction,
+            structure: intent.structure,
+            expiration: intent.expiration,
+            entryLimitCentsPerShare: intent.entryLimitCentsPerShare,
+            maxLossCentsPerContract: intent.maxLossCentsPerContract,
+            maxProfitCentsPerContract: intent.maxProfitCentsPerContract,
+          })
     },
     riskEvaluated(result) {
       const riskDecision = result.decision

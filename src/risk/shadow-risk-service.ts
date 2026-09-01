@@ -1,11 +1,17 @@
 import type { TradeProposalV3 } from "../contracts/research-decision-v3.js"
+import type { TradeProposalV4 } from "../contracts/research-decision-v4.js"
 import {
   deriveTradeIntentV3,
   type TradeIntentV3,
 } from "../contracts/trade-intent-v3.js"
+import {
+  deriveTradeIntentV4,
+  type TradeIntentV4,
+} from "../contracts/trade-intent-v4.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import { LedgerPersistenceError } from "../event-ledger/research-lifecycle-recorder.js"
 import { ALPACA_OPTION_ORDER_CAPABILITY_VERSION } from "../options/alpaca-capabilities.js"
+import { parseAlpacaOptionSymbol } from "../shared/alpaca-option-identity.js"
 import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
 import {
   NOOP_TERMINAL_STAGE_REPORTER,
@@ -38,8 +44,8 @@ export type DurableRiskControlStateLoader = Readonly<{
 
 export type ShadowRiskEvaluator = Readonly<{
   evaluate(input: Readonly<{
-    decision: TradeProposalV3
-    sourceIntent: TradeIntentV3
+    decision: TradeProposalV4
+    sourceIntent: TradeIntentV4
     captureEligibility: ResearchEligibilityV1 & Readonly<{
       sessionDate: string
       tradeIntentWindow: NonNullable<ResearchEligibilityV1["tradeIntentWindow"]>
@@ -159,13 +165,60 @@ const breakerTransitionsFor = (
   return transitions
 }
 
+const legacyDebitVerticalProposal = (
+  proposal: TradeProposalV4,
+): TradeProposalV3 | undefined => {
+  if (
+    proposal.candidate.strategy !== "BULL_CALL_SPREAD" &&
+    proposal.candidate.strategy !== "BEAR_PUT_SPREAD"
+  ) return undefined
+  const [longLeg, shortLeg] = proposal.candidate.legs
+  if (
+    longLeg === undefined || shortLeg === undefined ||
+    proposal.candidate.legs.length !== 2 ||
+    longLeg.positionIntent !== "BUY_TO_OPEN" ||
+    shortLeg.positionIntent !== "SELL_TO_OPEN" ||
+    longLeg.ratioQuantity !== 1 || shortLeg.ratioQuantity !== 1
+  ) return undefined
+  const longIdentity = parseAlpacaOptionSymbol(longLeg.contractSymbol)
+  const shortIdentity = parseAlpacaOptionSymbol(shortLeg.contractSymbol)
+  if (
+    !longIdentity.success || !shortIdentity.success ||
+    longIdentity.identity.expiration !== shortIdentity.identity.expiration
+  ) return undefined
+  return {
+    priority: proposal.priority,
+    direction: proposal.candidate.strategy === "BULL_CALL_SPREAD"
+      ? "BULLISH"
+      : "BEARISH",
+    thesis: proposal.thesis,
+    candidate: {
+      underlying: proposal.candidate.underlying,
+      structure: proposal.candidate.strategy,
+      expiration: longIdentity.identity.expiration,
+      longLeg: {
+        contractSymbol: longLeg.contractSymbol,
+        strike: longIdentity.identity.strikeThousandthsPerShare / 1_000,
+      },
+      shortLeg: {
+        contractSymbol: shortLeg.contractSymbol,
+        strike: shortIdentity.identity.strikeThousandthsPerShare / 1_000,
+      },
+    },
+    invalidation: proposal.invalidation,
+    evidence: proposal.evidence,
+  }
+}
+
 export function createShadowRiskEvaluator(options: Readonly<{
   provider: RiskStateProvider
   durableControl: DurableRiskControlStateLoader
-  deriveIntent?: typeof deriveTradeIntentV3
+  deriveIntent?: typeof deriveTradeIntentV4
+  deriveLegacyIntent?: typeof deriveTradeIntentV3
   evaluateRisk?: typeof evaluateTradeIntentRiskV1
 }>): ShadowRiskEvaluator {
-  const deriveIntent = options.deriveIntent ?? deriveTradeIntentV3
+  const deriveIntent = options.deriveIntent ?? deriveTradeIntentV4
+  const deriveLegacyIntent = options.deriveLegacyIntent ?? deriveTradeIntentV3
   const evaluateRisk = options.evaluateRisk ?? evaluateTradeIntentRiskV1
   return {
     async evaluate(input) {
@@ -188,20 +241,15 @@ export function createShadowRiskEvaluator(options: Readonly<{
         slotStartedAt: tradeIntentWindow.slotStartedAt,
         entryPlan: {
           capabilityVersion: ALPACA_OPTION_ORDER_CAPABILITY_VERSION,
-          strategy: input.sourceIntent.structure,
+          strategy: input.sourceIntent.strategy,
           underlying: input.sourceIntent.underlying,
-          legs: [
-            {
-              contractSymbol: input.sourceIntent.longContractSymbol,
-              positionIntent: "BUY_TO_OPEN",
-              ratioQuantity: 1,
-            },
-            {
-              contractSymbol: input.sourceIntent.shortContractSymbol,
-              positionIntent: "SELL_TO_OPEN",
-              ratioQuantity: 1,
-            },
-          ],
+          legs: input.sourceIntent.legs.map(
+            ({ contractSymbol, positionIntent, ratioQuantity }) => ({
+              contractSymbol,
+              positionIntent,
+              ratioQuantity,
+            }),
+          ),
         },
         durableControl,
         signal: input.signal,
@@ -245,9 +293,13 @@ export function createShadowRiskEvaluator(options: Readonly<{
           quote,
         ]),
       )
-      const longQuote = quoteBySymbol.get(input.sourceIntent.longContractSymbol)
-      const shortQuote = quoteBySymbol.get(input.sourceIntent.shortContractSymbol)
-      if (longQuote === undefined || shortQuote === undefined) {
+      const refreshedQuotes = input.sourceIntent.legs.flatMap(
+        ({ contractSymbol }) => {
+          const quote = quoteBySymbol.get(contractSymbol)
+          return quote === undefined ? [] : [quote]
+        },
+      )
+      if (refreshedQuotes.length !== input.sourceIntent.legs.length) {
         return {
           decision: shadowRiskDecisionV1Schema.parse({
             decisionVersion: SHADOW_RISK_DECISION_VERSION,
@@ -265,8 +317,7 @@ export function createShadowRiskEvaluator(options: Readonly<{
       const refreshed = deriveIntent(input.decision, {
         quoteSnapshotRef: SHADOW_RISK_QUOTE_SNAPSHOT_REF,
         evaluatedAt: capture.snapshot.evaluatedAt,
-        longQuote,
-        shortQuote,
+        quotes: refreshedQuotes,
       })
       input.signal.throwIfAborted()
       if (!refreshed.success) {
@@ -289,10 +340,43 @@ export function createShadowRiskEvaluator(options: Readonly<{
         }
       }
 
+      const legacyProposal = legacyDebitVerticalProposal(input.decision)
+      const longLeg = refreshed.intent.legs.find(
+        ({ positionIntent }) => positionIntent === "BUY_TO_OPEN",
+      )
+      const shortLeg = refreshed.intent.legs.find(
+        ({ positionIntent }) => positionIntent === "SELL_TO_OPEN",
+      )
+      const legacyRefreshed = legacyProposal === undefined ||
+          longLeg === undefined || shortLeg === undefined
+        ? { success: false as const, reasons: ["DERIVATION_INPUT_INVALID" as const] }
+        : deriveLegacyIntent(legacyProposal, {
+            quoteSnapshotRef: SHADOW_RISK_QUOTE_SNAPSHOT_REF,
+            evaluatedAt: capture.snapshot.evaluatedAt,
+            longQuote: longLeg.quote,
+            shortQuote: shortLeg.quote,
+          })
+      if (!legacyRefreshed.success) {
+        return {
+          decision: shadowRiskDecisionV1Schema.parse({
+            decisionVersion: SHADOW_RISK_DECISION_VERSION,
+            mode: "SHADOW",
+            evaluationVersion: RISK_EVALUATION_VERSION,
+            ruleVersion: RISK_RULE_VERSION,
+            stage: "INTENT_REFRESH_FAILED",
+            outcome: "REJECTED",
+            evaluatedAt: capture.snapshot.evaluatedAt,
+            derivationReasonCodes: legacyRefreshed.reasons,
+            stateProvenance,
+          }),
+          breakerTransitions,
+        }
+      }
+
       stageReporter.report("risk.intent_refresh", "COMPLETED", {
-        evaluatedAt: refreshed.intent.evaluatedAt,
-        entryLimitCentsPerShare: refreshed.intent.entryLimitCentsPerShare,
-        maxLossCentsPerContract: refreshed.intent.maxLossCentsPerContract,
+        evaluatedAt: legacyRefreshed.intent.evaluatedAt,
+        entryLimitCentsPerShare: legacyRefreshed.intent.entryLimitCentsPerShare,
+        maxLossCentsPerContract: legacyRefreshed.intent.maxLossCentsPerContract,
       })
 
       const contracts = {
@@ -315,7 +399,7 @@ export function createShadowRiskEvaluator(options: Readonly<{
         ...account
       } = capture.snapshot.account
       const evaluation = evaluateRisk({
-        intent: refreshed.intent,
+        intent: legacyRefreshed.intent,
         context: {
           provenance: "APPLICATION_VERIFIED",
           eligibility: input.getEvaluationEligibility(),
@@ -332,7 +416,7 @@ export function createShadowRiskEvaluator(options: Readonly<{
           ruleVersion: evaluation.ruleVersion,
           stage: "EVALUATED",
           outcome: evaluation.outcome,
-          evaluatedIntent: refreshed.intent,
+          evaluatedIntent: legacyRefreshed.intent,
           stateProvenance,
           evaluation,
         }),

@@ -7,6 +7,7 @@ import {
 } from "../contracts/research-decision-v3.js"
 import { researchDecisionV4Schema } from "../contracts/research-decision-v4.js"
 import { tradeIntentV3Schema } from "../contracts/trade-intent-v3.js"
+import { tradeIntentV4Schema } from "../contracts/trade-intent-v4.js"
 import { researchReportV6Schema } from "../contracts/research-report-v6.js"
 import { researchReportV7Schema } from "../contracts/research-report-v7.js"
 import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
@@ -163,7 +164,7 @@ const payloadSchemas = {
     .strict(),
   TRADE_INTENT_DERIVED: z
     .object({
-      intent: tradeIntentV3Schema,
+      intent: z.union([tradeIntentV3Schema, tradeIntentV4Schema]),
     })
     .strict(),
   TRADE_INTENT_DERIVATION_REJECTED: z

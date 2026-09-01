@@ -1,4 +1,4 @@
-import { deriveTradeIntentV3 } from "../contracts/trade-intent-v3.js"
+import { deriveTradeIntentV4 } from "../contracts/trade-intent-v4.js"
 import type { OptionUniverseSnapshotV2 } from "../contracts/option-universe-v2.js"
 import {
   validateResearchDecisionV4,
@@ -163,7 +163,7 @@ export async function processResearchCycle({
   getEligibility,
   researchInvocation,
   now = () => new Date(),
-  deriveIntent = deriveTradeIntentV3,
+  deriveIntent = deriveTradeIntentV4,
   trace = NOOP_RESEARCH_CYCLE_TRACE,
   stageReporter = NOOP_TERMINAL_STAGE_REPORTER,
 }: ProcessResearchCycleOptions): Promise<ProcessedResearchCycle> {

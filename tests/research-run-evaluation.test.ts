@@ -499,6 +499,9 @@ describe("evaluateResearchRunV1", () => {
       throw new Error("Expected an evaluated portfolio")
     }
     const intent = source.outcome.intents[0]!
+    if (intent.contractVersion !== "3.0.0") {
+      throw new Error("Expected a legacy debit-spread intent")
+    }
     const run = {
       ...source,
       outcome: {

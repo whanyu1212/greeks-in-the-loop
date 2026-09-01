@@ -8,6 +8,7 @@ import type { ResearchDecisionV4 } from "../../contracts/research-decision-v4.js
 import type { ResearchReportV6 } from "../../contracts/research-report-v6.js"
 import type { ResearchReportV7 } from "../../contracts/research-report-v7.js"
 import type { TradeIntentV3 } from "../../contracts/trade-intent-v3.js"
+import type { TradeIntentV4 } from "../../contracts/trade-intent-v4.js"
 import {
   LEDGER_EVENT_VERSION,
   type StoredLedgerEvent,
@@ -58,7 +59,7 @@ export type ResearchRunOutcomeV1 =
       decision:
         | Extract<ResearchDecisionV3, { outcome: "PROPOSE_TRADES" }>
         | Extract<ResearchDecisionV4, { outcome: "PROPOSE_TRADES" }>
-      intents: readonly TradeIntentV3[]
+      intents: readonly (TradeIntentV3 | TradeIntentV4)[]
       selectedUnderlyings: readonly string[]
     }>
 

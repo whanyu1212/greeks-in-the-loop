@@ -6,8 +6,11 @@ import {
   researchDecisionV3Schema,
   proposalQuoteSnapshotRef,
 } from "../contracts/research-decision-v3.js"
+import { researchDecisionV4Schema } from "../contracts/research-decision-v4.js"
 import { researchReportV6Schema } from "../contracts/research-report-v6.js"
+import { researchReportV7Schema } from "../contracts/research-report-v7.js"
 import { tradeIntentV3Schema } from "../contracts/trade-intent-v3.js"
+import { tradeIntentV4Schema } from "../contracts/trade-intent-v4.js"
 import {
   SUPPORTED_RESEARCH_RUN_VERSIONS,
   type ResearchRunV1,
@@ -136,11 +139,10 @@ const timestampWithin = (value: string, start: number, end: number) => {
 
 type CandidateIdentity = Readonly<{
   underlying: string
-  direction: "BULLISH" | "BEARISH"
-  structure: "BULL_CALL_SPREAD" | "BEAR_PUT_SPREAD"
-  expiration: string
-  longContractSymbol: string
-  shortContractSymbol: string
+  direction: string
+  strategy: string
+  legs: readonly string[]
+  expiration?: string
 }>
 
 type EvaluableEvidenceClaim =
@@ -251,10 +253,8 @@ const candidateKey = (candidate: CandidateIdentity) =>
   [
     candidate.underlying,
     candidate.direction,
-    candidate.structure,
-    candidate.expiration,
-    candidate.longContractSymbol,
-    candidate.shortContractSymbol,
+    candidate.strategy,
+    ...candidate.legs,
   ].join("|")
 
 const hasCanonicalProposalQuoteProvenance = (
@@ -312,17 +312,29 @@ export function evaluateResearchRunV1(
     contractIssues.push("RUN_METADATA_INVALID")
   }
 
-  const parsedReport = run.researchReport === undefined
+  const parsedReportV6 = run.researchReport === undefined
     ? undefined
     : researchReportV6Schema.safeParse(run.researchReport)
-  const validReport = parsedReport?.success === true ? parsedReport.data : undefined
+  const parsedReportV7 = run.researchReport === undefined
+    ? undefined
+    : researchReportV7Schema.safeParse(run.researchReport)
+  const validReport = parsedReportV7?.success === true
+    ? parsedReportV7.data
+    : parsedReportV6?.success === true
+      ? parsedReportV6.data
+      : undefined
   const reportResult = validReport?.result
-  const parsedValidatedDecision = run.validatedDecision === undefined
+  const parsedValidatedDecisionV3 = run.validatedDecision === undefined
     ? undefined
     : researchDecisionV3Schema.safeParse(run.validatedDecision)
-  const validRetainedResult = parsedValidatedDecision?.success === true
-    ? parsedValidatedDecision.data
-    : undefined
+  const parsedValidatedDecisionV4 = run.validatedDecision === undefined
+    ? undefined
+    : researchDecisionV4Schema.safeParse(run.validatedDecision)
+  const validRetainedResult = parsedValidatedDecisionV4?.success === true
+    ? parsedValidatedDecisionV4.data
+    : parsedValidatedDecisionV3?.success === true
+      ? parsedValidatedDecisionV3.data
+      : undefined
   const versionedResult = reportResult ?? validRetainedResult
 
   if (
@@ -383,7 +395,8 @@ export function evaluateResearchRunV1(
         !isDeepStrictEqual(run.outcome.decision, decision) ||
         run.outcome.intents.some(
           (intent) =>
-            !tradeIntentV3Schema.safeParse(intent).success ||
+            (!tradeIntentV3Schema.safeParse(intent).success &&
+              !tradeIntentV4Schema.safeParse(intent).success) ||
             !proposalByUnderlying.has(intent.underlying),
         ) ||
         new Set(run.outcome.intents.map(({ underlying }) => underlying)).size !==
@@ -409,14 +422,14 @@ export function evaluateResearchRunV1(
     temporalIssues.push("CYCLE_TIME_RANGE_INVALID")
   } else {
     if (
-      parsedReport?.success === true &&
-      !timestampWithin(parsedReport.data.analysis.asOf, cycleStart, cycleEnd)
+      validReport !== undefined &&
+      !timestampWithin(validReport.analysis.asOf, cycleStart, cycleEnd)
     ) {
       temporalIssues.push("REPORT_AS_OF_OUTSIDE_CYCLE")
     }
     if (
-      parsedReport?.success === true &&
-      parsedReport.data.analysis.externalContext.some(
+      validReport !== undefined &&
+      validReport.analysis.externalContext.some(
         ({ retrievedAt }) => !timestampWithin(retrievedAt, cycleStart, cycleEnd),
       )
     ) {
@@ -553,26 +566,27 @@ export function evaluateResearchRunV1(
   )
   for (const intent of intents) {
     const intentEvaluatedAt = Date.parse(intent.evaluatedAt)
-    const parsedIntent = tradeIntentV3Schema.safeParse(intent)
-    const longQuoteTimestamp = parsedIntent.success
-      ? parseRfc3339Nanoseconds(
-          parsedIntent.data.longQuote.providerTimestamp,
+    const parsedIntentV3 = tradeIntentV3Schema.safeParse(intent)
+    const parsedIntentV4 = tradeIntentV4Schema.safeParse(intent)
+    const quoteTimestamps = parsedIntentV4.success
+      ? parsedIntentV4.data.legs.flatMap(({ quote }) => {
+          const timestamp = parseRfc3339Nanoseconds(quote.providerTimestamp)
+          return timestamp === undefined ? [] : [timestamp]
+        })
+      : parsedIntentV3.success
+        ? [
+            parseRfc3339Nanoseconds(parsedIntentV3.data.longQuote.providerTimestamp),
+            parseRfc3339Nanoseconds(parsedIntentV3.data.shortQuote.providerTimestamp),
+          ].flatMap((timestamp) => timestamp === undefined ? [] : [timestamp])
+        : []
+    const expectedFreshUntil = quoteTimestamps.length ===
+        (parsedIntentV4.success ? parsedIntentV4.data.legs.length : 2)
+      ? floorNanosecondsToIsoMilliseconds(
+          quoteTimestamps.reduce((earliest, timestamp) =>
+            timestamp < earliest ? timestamp : earliest
+          ) + ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS,
         )
       : undefined
-    const shortQuoteTimestamp = parsedIntent.success
-      ? parseRfc3339Nanoseconds(
-          parsedIntent.data.shortQuote.providerTimestamp,
-        )
-      : undefined
-    const expectedFreshUntil =
-      longQuoteTimestamp === undefined || shortQuoteTimestamp === undefined
-        ? undefined
-        : floorNanosecondsToIsoMilliseconds(
-            (longQuoteTimestamp < shortQuoteTimestamp
-              ? longQuoteTimestamp
-              : shortQuoteTimestamp) +
-              ALPACA_OPTION_QUOTE_FRESHNESS_NANOSECONDS,
-          )
     const expectedSnapshotRef = proposalQuoteSnapshotRef(intent.underlying)
     const snapshot = snapshotsByReference.get(intent.quoteSnapshotRef)
     if (intent.quoteSnapshotRef !== expectedSnapshotRef) {
@@ -591,8 +605,8 @@ export function evaluateResearchRunV1(
     if (
       Date.parse(snapshot.retrievedAt) <= intentEvaluatedAt &&
       Date.parse(snapshot.freshUntil) >= intentEvaluatedAt &&
-      parsedIntent.success &&
-      (snapshot.retrievedAt !== parsedIntent.data.evaluatedAt ||
+      (parsedIntentV3.success || parsedIntentV4.success) &&
+      (snapshot.retrievedAt !== intent.evaluatedAt ||
         expectedFreshUntil === undefined ||
         snapshot.freshUntil !== expectedFreshUntil)
     ) {
@@ -602,14 +616,25 @@ export function evaluateResearchRunV1(
 
   const proposalIdentity = (
     proposal: (typeof proposals)[number],
-  ): CandidateIdentity => ({
-    underlying: proposal.candidate.underlying,
-    direction: proposal.direction,
-    structure: proposal.candidate.structure,
-    expiration: proposal.candidate.expiration,
-    longContractSymbol: proposal.candidate.longLeg.contractSymbol,
-    shortContractSymbol: proposal.candidate.shortLeg.contractSymbol,
-  })
+  ): CandidateIdentity => "strategy" in proposal.candidate
+    ? {
+        underlying: proposal.candidate.underlying,
+        direction: proposal.direction,
+        strategy: proposal.candidate.strategy,
+        legs: proposal.candidate.legs.map((leg) =>
+          `${leg.positionIntent}:${leg.ratioQuantity}:${leg.contractSymbol}`
+        ),
+      }
+    : {
+        underlying: proposal.candidate.underlying,
+        direction: proposal.direction,
+        strategy: proposal.candidate.structure,
+        expiration: proposal.candidate.expiration,
+        legs: [
+          `BUY_TO_OPEN:1:${proposal.candidate.longLeg.contractSymbol}`,
+          `SELL_TO_OPEN:1:${proposal.candidate.shortLeg.contractSymbol}`,
+        ],
+      }
   const candidateIdentities = proposals.map(proposalIdentity)
   const candidateApplicable = candidateIdentities.length > 0
   const proposalByUnderlying = new Map(
@@ -619,14 +644,27 @@ export function evaluateResearchRunV1(
     const proposal = proposalByUnderlying.get(intent.underlying)
     if (
       proposal === undefined ||
-      candidateKey(proposalIdentity(proposal)) !== candidateKey({
-        underlying: intent.underlying,
-        direction: intent.direction,
-        structure: intent.structure,
-        expiration: intent.expiration,
-        longContractSymbol: intent.longContractSymbol,
-        shortContractSymbol: intent.shortContractSymbol,
-      })
+      candidateKey(proposalIdentity(proposal)) !== candidateKey(
+        "strategy" in intent
+          ? {
+              underlying: intent.underlying,
+              direction: intent.direction,
+              strategy: intent.strategy,
+              legs: intent.legs.map((leg) =>
+                `${leg.positionIntent}:${leg.ratioQuantity}:${leg.contractSymbol}`
+              ),
+            }
+          : {
+              underlying: intent.underlying,
+              direction: intent.direction,
+              strategy: intent.structure,
+              expiration: intent.expiration,
+              legs: [
+                `BUY_TO_OPEN:1:${intent.longContractSymbol}`,
+                `SELL_TO_OPEN:1:${intent.shortContractSymbol}`,
+              ],
+            },
+      )
     ) {
       candidateIssues.push("CANDIDATE_IDENTITY_MISMATCH")
     }
@@ -640,19 +678,19 @@ export function evaluateResearchRunV1(
       candidateIssues.push("OPEN_INTEREST_HISTORY_INVALID")
       continue
     }
-    const diagnosticSymbols = new Map(
-      diagnostic.legs.map(({ role, contractSymbol }) => [role, contractSymbol]),
-    )
-    if (
-      diagnostic.expiration !== candidate.expiration ||
-      diagnosticSymbols.get("LONG") !== candidate.longContractSymbol ||
-      diagnosticSymbols.get("SHORT") !== candidate.shortContractSymbol
-    ) {
+    const diagnosticLegs = "dte" in diagnostic
+      ? diagnostic.legs.map((leg) =>
+          `${leg.role === "LONG" ? "BUY_TO_OPEN" : "SELL_TO_OPEN"}:1:${leg.contractSymbol}`
+        )
+      : diagnostic.legs.map((leg) =>
+          `${leg.positionIntent}:${leg.ratioQuantity}:${leg.contractSymbol}`
+        )
+    if (candidateKey({ ...candidate, legs: diagnosticLegs }) !== candidateKey(candidate)) {
       candidateIssues.push("CANDIDATE_IDENTITY_MISMATCH")
     }
     const sessionDate = run.initialEligibility?.sessionDate
     const previousSessionDates = run.initialEligibility?.previousSessionDates
-    if (sessionDate !== undefined) {
+    if (sessionDate !== undefined && candidate.expiration !== undefined && "dte" in diagnostic) {
       const expectedDte =
         (Date.parse(`${candidate.expiration}T00:00:00.000Z`) -
           Date.parse(`${sessionDate}T00:00:00.000Z`)) /
@@ -742,9 +780,9 @@ export function evaluateResearchRunV1(
     outcomeStatus: run.outcome.status,
     versions: {
       runVersion: run.runVersion,
-      ...(parsedReport?.success !== true
+      ...(validReport === undefined
         ? {}
-        : { reportVersion: parsedReport.data.reportVersion }),
+        : { reportVersion: validReport.reportVersion }),
       ...(versionedResult === undefined
         ? {}
         : {
@@ -764,14 +802,14 @@ export function evaluateResearchRunV1(
       groundedInferenceCount,
       snapshotReferenceCount: snapshotReferences.length,
       exaSourceCount:
-        parsedReport?.success === true
-          ? parsedReport.data.analysis.externalContext.filter(
+        validReport !== undefined
+          ? validReport.analysis.externalContext.filter(
               ({ provider }) => provider === "EXA",
             ).length
           : 0,
       fmpSourceCount:
-        parsedReport?.success === true
-          ? parsedReport.data.analysis.externalContext.filter(
+        validReport !== undefined
+          ? validReport.analysis.externalContext.filter(
               ({ provider }) => provider === "FMP",
             ).length
           : 0,

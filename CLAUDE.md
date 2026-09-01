@@ -37,8 +37,9 @@ OptionUniverseSnapshotV2
   -> ResearchReportV7
   -> validateResearchDecisionV4
   -> confirm exact-leg quotes
-  -> deriveTradeIntentV3
+  -> deriveTradeIntentV4
   -> capture application-owned risk state
+  -> refresh TradeIntentV4 and adapt supported debit verticals to TradeIntentV3
   -> evaluateTradeIntentRiskV1
   -> append ledger events
 ```
@@ -59,7 +60,7 @@ OptionUniverseSnapshotV2
 
 ## Contract rules
 
-Current breaking contracts are `OptionUniverseSnapshotV2`, `ResearchDecisionV4`, `ResearchReportV7`, and `TradeIntentV3`. Persisted V3/V6 decisions and reports remain readable. Schemas are strict on proposal paths; safe `NO_ACTION` strips irrelevant prose. Do not add other compatibility parsers without an explicit requirement.
+Current breaking contracts are `OptionUniverseSnapshotV2`, `ResearchDecisionV4`, `ResearchReportV7`, and `TradeIntentV4`. Persisted V3/V6 decisions, reports, and trade intents remain readable. Schemas are strict on proposal paths; safe `NO_ACTION` strips irrelevant prose. Do not add other compatibility parsers without an explicit requirement.
 
 Failures expose bounded reason codes, never raw model or provider input.
 
