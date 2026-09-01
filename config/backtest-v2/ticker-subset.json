@@ -1,0 +1,33 @@
+{
+  "backtestVersion": "2.0.0",
+  "experimentId": "ticker-subset-aapl-amd-nvda",
+  "capability": "SELECTION_PREFLIGHT",
+  "datasetManifestRef": "fixtures/backtest-v2/golden-selection-v1/manifest.json",
+  "universeId": "golden-tech-options-v1",
+  "replaySelection": {
+    "startDate": "2025-01-02",
+    "endDate": "2025-01-03",
+    "timezone": "America/New_York",
+    "symbols": ["AAPL", "AMD", "NVDA"],
+    "session": "REGULAR",
+    "decisionTimes": ["10:00", "13:00", "15:00"]
+  },
+  "strategy": {
+    "strategyVersion": "directional-debit-spread-v1",
+    "structures": ["BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"]
+  },
+  "execution": {
+    "priceMode": "BID_ASK",
+    "multiLegFill": "ATOMIC",
+    "missingQuote": "INCOMPLETE_RUN",
+    "latencyMilliseconds": 1000,
+    "slippageHalfCentsPerLeg": 1,
+    "commissionCentsPerContract": 65
+  },
+  "portfolio": {
+    "initialCapitalCents": 1000000,
+    "quantity": 1,
+    "maxConcurrentPositions": 1,
+    "endOfTest": "LIQUIDATE_AT_END"
+  }
+}
