@@ -1,7 +1,6 @@
 import type { OpencodeClient, Part } from "@opencode-ai/sdk"
 import { z } from "zod"
 
-import { assertResearchModelIdentityV1 } from "../research/invocation.js"
 import type { ExecutionAuthorizationV1 } from "./authorization-v1.js"
 import {
   PAPER_TRADER_RESULT_VERSION,
@@ -14,6 +13,17 @@ const identifier = z
   .min(1)
   .max(128)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u)
+export const PAPER_TRADER_MODEL_IDENTITY = Object.freeze({
+  providerId: "openai",
+  modelId: "gpt-5.6-sol",
+})
+
+export const hasPaperTraderModelIdentityV1 = (
+  observed: Readonly<{ providerId: string; modelId: string }>,
+) =>
+  observed.providerId === PAPER_TRADER_MODEL_IDENTITY.providerId &&
+  observed.modelId === PAPER_TRADER_MODEL_IDENTITY.modelId
+
 export const buildPaperTraderPrompt = (authorizationId: string) =>
   `Process execution authorization ID ${JSON.stringify(identifier.parse(authorizationId))}. Resolve it through the execution authorization tool, follow the checked-in trader policy exactly, and return only the required bare JSON result.`
 
@@ -91,11 +101,11 @@ export async function invokePaperTrader({
       )
     }
 
-    const identity = assertResearchModelIdentityV1({
+    const identityMatches = hasPaperTraderModelIdentityV1({
       providerId: response.data.info.providerID,
       modelId: response.data.info.modelID,
     })
-    if (!identity.ok) {
+    if (!identityMatches) {
       return syntheticResult(
         authorization,
         "SUBMISSION_UNKNOWN",

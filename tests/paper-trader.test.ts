@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 
 import {
   buildPaperTraderPrompt,
+  hasPaperTraderModelIdentityV1,
+  PAPER_TRADER_MODEL_IDENTITY,
 } from "../src/execution/paper-trader.js"
 import { paperTraderResultV1Schema } from "../src/execution/paper-trader-result-v1.js"
 
@@ -13,6 +15,18 @@ describe("paper trader boundary", () => {
     expect(prompt).not.toContain("SPY")
     expect(prompt).not.toContain("limit_price")
     expect(prompt).not.toContain("client_order_id")
+  })
+
+  it("pins responses to the trader model rather than the research model", () => {
+    expect(PAPER_TRADER_MODEL_IDENTITY).toEqual({
+      providerId: "openai",
+      modelId: "gpt-5.6-sol",
+    })
+    expect(hasPaperTraderModelIdentityV1(PAPER_TRADER_MODEL_IDENTITY)).toBe(true)
+    expect(hasPaperTraderModelIdentityV1({
+      providerId: "openai",
+      modelId: "gpt-5.6-terra",
+    })).toBe(false)
   })
 
   it("accepts bounded submission results and rejects incomplete success", () => {

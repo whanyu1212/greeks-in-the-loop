@@ -221,6 +221,15 @@ export const POSTGRES_LEDGER_MIGRATIONS: readonly PostgresLedgerMigration[] = [
       FOR EACH ROW EXECUTE FUNCTION ledger_events_reject_mutation();
     `,
   },
+  {
+    id: "002_portfolio_shadow_risk",
+    sql: `
+      DROP INDEX ledger_events_one_shadow_risk_decision;
+      CREATE UNIQUE INDEX ledger_events_one_shadow_risk_decision_per_intent
+        ON ledger_events(causation_event_id)
+        WHERE event_type = 'RISK_SHADOW_DECISION_RECORDED';
+    `,
+  },
 ]
 
 const checksum = (sql: string) =>
