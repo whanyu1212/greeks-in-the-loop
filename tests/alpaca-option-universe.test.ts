@@ -68,8 +68,8 @@ describe("Alpaca option universe provider", () => {
             contract("NVDA", 180),
             contract("AMD", 220, "put", 900),
             contract("AMD", 215, "put", 800),
-            contract("AAPL", 250, "call", 2_000),
-            contract("AAPL", 255, "call", 1_900),
+            contract("AAPL", 250, "call", 600),
+            contract("AAPL", 255, "call", 600),
           ],
         })
       }
@@ -104,7 +104,7 @@ describe("Alpaca option universe provider", () => {
         liquidSeriesCount: 1,
         contractCount: 2,
         liquidContractCount: 2,
-        totalOpenInterest: 3_900,
+        totalOpenInterest: 1_200,
         openInterestCoverage: 1,
       },
     })
@@ -129,7 +129,7 @@ describe("Alpaca option universe provider", () => {
       ({ url }) => url.pathname === "/v2/options/contracts",
     )!.url
     expect(contractsUrl.searchParams.get("underlying_symbols")).toBe(
-      "TSLA,NVDA,AMD,AAPL",
+      "AAPL,TSLA,NVDA,AMD",
     )
     expect(contractsUrl.searchParams.get("expiration_date_gte")).toBe(
       "2026-09-08",
@@ -191,5 +191,76 @@ describe("Alpaca option universe provider", () => {
 
     expect(snapshot.candidates.map(({ underlying }) => underlying))
       .toEqual(["AAPL", "TSLA", "AMD"])
+  })
+
+  it("reserves discovery capacity for active names, gainers, and losers", async () => {
+    const actives = Array.from({ length: 100 }, (_, index) =>
+      `A${String(index).padStart(2, "0")}`
+    )
+    const gainers = Array.from({ length: 50 }, (_, index) =>
+      `G${String(index).padStart(2, "0")}`
+    )
+    const losers = Array.from({ length: 50 }, (_, index) =>
+      `L${String(index).padStart(2, "0")}`
+    )
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input))
+      if (url.pathname === "/v2/assets") {
+        return response([...actives, ...gainers, ...losers].map((symbol) => ({
+          symbol,
+          status: "active",
+          tradable: true,
+          attributes: ["has_options"],
+        })))
+      }
+      if (url.pathname === "/v1beta1/screener/stocks/most-actives") {
+        return response({ most_actives: actives.map((symbol) => ({ symbol })) })
+      }
+      if (url.pathname === "/v1beta1/screener/stocks/movers") {
+        return response({
+          gainers: gainers.map((symbol, index) => ({
+            symbol,
+            percent_change: 50 - index,
+          })),
+          losers: losers.map((symbol, index) => ({
+            symbol,
+            percent_change: index - 50,
+          })),
+        })
+      }
+      if (url.pathname === "/v2/options/contracts") {
+        return response({
+          option_contracts: [
+            contract("A00", 100),
+            contract("A00", 105),
+            contract("G00", 100),
+            contract("G00", 105),
+            contract("L00", 100),
+            contract("L00", 105),
+          ],
+        })
+      }
+      throw new Error(`Unexpected test URL: ${url.pathname}`)
+    })
+    const provider = createAlpacaOptionUniverseProvider({
+      apiKey: "test-key",
+      secretKey: "test-secret",
+      dataBaseUrl: "https://data.test.invalid",
+      tradingBaseUrl: "https://trading.test.invalid",
+      fetch: fetchMock,
+      now: () => new Date("2026-08-25T12:00:00.000Z"),
+    })
+
+    await provider.discover("2026-08-25", new AbortController().signal)
+
+    const contractsCall = fetchMock.mock.calls.find(([input]) =>
+      new URL(String(input)).pathname === "/v2/options/contracts"
+    )
+    const screened = new URL(String(contractsCall?.[0])).searchParams
+      .get("underlying_symbols")?.split(",") ?? []
+    expect(screened).toHaveLength(100)
+    expect(screened.filter((symbol) => symbol.startsWith("A"))).toHaveLength(50)
+    expect(screened.filter((symbol) => symbol.startsWith("G"))).toHaveLength(25)
+    expect(screened.filter((symbol) => symbol.startsWith("L"))).toHaveLength(25)
   })
 })

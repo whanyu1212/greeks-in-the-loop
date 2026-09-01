@@ -20,7 +20,7 @@ const expiration = "2026-09-18"
 
 const optionUniverse: OptionUniverseSnapshotV2 = {
   snapshotVersion: "2.0.0",
-  policyVersion: "4.0.0",
+  policyVersion: "5.0.0",
   snapshotId: `option-universe-v2-${"a".repeat(64)}`,
   generatedAt: "2026-08-26T14:20:00.000Z",
   sessionDate: "2026-08-26",
@@ -360,10 +360,11 @@ const quoteProvider: OptionQuoteProvider = {
 }
 
 const approvedRisk = {
-  evaluate: vi.fn(async () => ({
+  evaluate: vi.fn(async ({ sourceIntent }) => ({
     decision: {
       stage: "EVALUATED",
       outcome: "APPROVED",
+      evaluatedIntent: sourceIntent,
       evaluation: { outcome: "APPROVED" },
     },
     breakerTransitions: [],
@@ -414,14 +415,50 @@ describe("processResearchCycle", () => {
     expect(records).toHaveLength(1)
   })
 
-  it("evaluates up to three proposals and selects only the first approval", async () => {
+  it("rejects overall no-action when a symbol is marked actionable", async () => {
+    const report = noActionReport()
+    const inconsistentReport = {
+      ...report,
+      analysis: {
+        ...report.analysis,
+        symbolEvaluations: report.analysis.symbolEvaluations.map(
+          (evaluation, index) => index === 1
+            ? {
+                ...evaluation,
+                disposition: "PROPOSE" as const,
+                direction: "BULLISH" as const,
+              }
+            : evaluation,
+        ),
+      },
+    }
+    const quotes = { confirmQuotes: vi.fn() }
+    const risk = { evaluate: vi.fn() }
+    const { processed } = await run(inconsistentReport, {
+      quotes: quotes as unknown as OptionQuoteProvider,
+      risk: risk as unknown as ShadowRiskEvaluator,
+    })
+
+    expect(processed.outcome).toMatchObject({
+      status: "DECISION_REJECTED",
+      issues: [{
+        code: "CONTEXT_INVALID",
+        path: ["analysis", "symbolEvaluations", 1, "disposition"],
+      }],
+    })
+    expect(quotes.confirmQuotes).not.toHaveBeenCalled()
+    expect(risk.evaluate).not.toHaveBeenCalled()
+  })
+
+  it("evaluates up to three proposals and uses priority to break equal quality", async () => {
     const parsedReport = researchReportV6Schema.safeParse(proposalReport(3))
     if (!parsedReport.success) throw new Error(JSON.stringify(parsedReport.error.issues))
     const risk = {
-      evaluate: vi.fn(async () => ({
+      evaluate: vi.fn(async ({ sourceIntent }) => ({
         decision: {
           stage: "EVALUATED",
           outcome: "APPROVED",
+          evaluatedIntent: sourceIntent,
           evaluation: { outcome: "APPROVED" },
         },
         breakerTransitions: [],
@@ -437,6 +474,75 @@ describe("processResearchCycle", () => {
     )).toEqual([true, false, false])
     expect(risk.evaluate).toHaveBeenCalledTimes(3)
     expect(records[0]?.evidenceSnapshots).toHaveLength(3)
+  })
+
+  it("selects the best refreshed execution quality instead of agent priority", async () => {
+    const quotes: OptionQuoteProvider = {
+      async confirmQuotes(input) {
+        const underlying = input.longContractSymbol.slice(0, -15)
+        const quoteWidth = underlying === "QQQ" ? 5 : underlying === "NVDA" ? 10 : 20
+        return {
+          success: true,
+          snapshot: {
+            evaluatedAt: "2026-08-26T14:30:40.000Z",
+            snapshotMetadata: {
+              provider: "ALPACA",
+              source: "options-snapshots-indicative",
+              retrievedAt: "2026-08-26T14:30:40.000Z",
+              freshUntil: "2026-08-26T14:31:40.000Z",
+            },
+            longQuote: {
+              contractSymbol: input.longContractSymbol,
+              feed: "INDICATIVE",
+              bidCentsPerShare: 300,
+              askCentsPerShare: 300 + quoteWidth,
+              providerTimestamp: "2026-08-26T14:30:35.000000000Z",
+            },
+            shortQuote: {
+              contractSymbol: input.shortContractSymbol,
+              feed: "INDICATIVE",
+              bidCentsPerShare: 100,
+              askCentsPerShare: 100 + quoteWidth,
+              providerTimestamp: "2026-08-26T14:30:35.000000000Z",
+            },
+          },
+        }
+      },
+    }
+    const { processed } = await run(proposalReport(3), { quotes })
+
+    expect(processed.outcome.status).toBe("PORTFOLIO_EVALUATED")
+    if (processed.outcome.status !== "PORTFOLIO_EVALUATED") return
+    expect(processed.outcome.proposals.map((item) =>
+      item.status === "RISK_EVALUATED" ? item.selected : false
+    )).toEqual([false, true, false])
+  })
+
+  it("rejects a proposal whose symbol-level direction does not match", async () => {
+    const report = proposalReport(3)
+    const mismatchedReport = {
+      ...report,
+      analysis: {
+        ...report.analysis,
+        symbolEvaluations: report.analysis.symbolEvaluations.map(
+          (evaluation, index) => index === 1
+            ? { ...evaluation, direction: "BEARISH" as const }
+            : evaluation,
+        ),
+      },
+    }
+    const { processed } = await run(mismatchedReport)
+
+    expect(processed.outcome.status).toBe("PORTFOLIO_EVALUATED")
+    if (processed.outcome.status !== "PORTFOLIO_EVALUATED") return
+    expect(processed.outcome.proposals[1]).toMatchObject({
+      underlying: "QQQ",
+      status: "DECISION_REJECTED",
+      issues: [{
+        code: "CONTEXT_INVALID",
+        path: ["analysis", "symbolEvaluations", 1, "direction"],
+      }],
+    })
   })
 
   it("keeps a failed quote as a per-symbol disposition and continues", async () => {

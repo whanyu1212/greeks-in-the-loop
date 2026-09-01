@@ -258,6 +258,25 @@ export async function processResearchCycle({
   }
 
   if (result.outcome === "NO_ACTION") {
+    const actionableSymbolIndex = researchReport.analysis.symbolEvaluations
+      .findIndex(({ disposition }) => disposition === "PROPOSE")
+    if (actionableSymbolIndex >= 0) {
+      return recordReportResolution({
+        outcome: {
+          outcomeVersion: RESEARCH_CYCLE_OUTCOME_VERSION,
+          status: "DECISION_REJECTED",
+          issues: [{
+            code: "CONTEXT_INVALID",
+            path: [
+              "analysis",
+              "symbolEvaluations",
+              actionableSymbolIndex,
+              "disposition",
+            ],
+          }],
+        },
+      })
+    }
     const validation = await trace.run("research.decision.validate", () =>
       validateResearchDecisionV3(result, {
         evaluatedAt: processingEvaluatedAt.toISOString(),

@@ -150,7 +150,7 @@ const proposalOptionUniverse: NonNullable<
   ResearchReportV6["analysis"]["optionUniverse"]
 > = {
   snapshotVersion: "2.0.0",
-  policyVersion: "4.0.0",
+  policyVersion: "5.0.0",
   snapshotId: `option-universe-v2-${"d".repeat(64)}`,
   generatedAt: "2026-08-26T14:00:30.000Z",
   sessionDate: "2026-08-26",

@@ -89,6 +89,24 @@ const candidateEvaluationFor = (
   ({ underlying }) => underlying === proposal.candidate.underlying,
 )
 
+const proposalSymbolEvaluationIssuePath = (
+  report: ProposedPortfolioReportV3,
+  proposal: TradeProposalV3,
+): readonly (string | number)[] | undefined => {
+  const evaluationIndex = report.analysis.symbolEvaluations.findIndex(
+    ({ underlying }) => underlying === proposal.candidate.underlying,
+  )
+  const evaluation = report.analysis.symbolEvaluations[evaluationIndex]
+  if (evaluation?.disposition !== "PROPOSE") {
+    return evaluationIndex < 0
+      ? ["analysis", "symbolEvaluations"]
+      : ["analysis", "symbolEvaluations", evaluationIndex]
+  }
+  return evaluation.direction === proposal.direction
+    ? undefined
+    : ["analysis", "symbolEvaluations", evaluationIndex, "direction"]
+}
+
 export const proposalMarketRegimeIsFresh = (
   report: ResearchReportV6,
   proposal: TradeProposalV3,
@@ -248,15 +266,16 @@ async function processOneProposal(
     }
   }
 
-  const contextIssue = !proposalMarketRegimeIsFresh(
-    report,
-    proposal,
-    proposalEligibility.evaluatedAt,
-  )
-    ? ["analysis", "marketRegimes"] as const
-    : !proposalAccountChecksAreFresh(report, proposalEligibility.evaluatedAt)
-      ? ["analysis", "accountChecks", "observedAt"] as const
-      : proposalHistoryIssuePath(report, proposal, proposalEligibility)
+  const contextIssue = proposalSymbolEvaluationIssuePath(report, proposal) ??
+    (!proposalMarketRegimeIsFresh(
+        report,
+        proposal,
+        proposalEligibility.evaluatedAt,
+      )
+      ? ["analysis", "marketRegimes"] as const
+      : !proposalAccountChecksAreFresh(report, proposalEligibility.evaluatedAt)
+        ? ["analysis", "accountChecks", "observedAt"] as const
+        : proposalHistoryIssuePath(report, proposal, proposalEligibility))
   if (contextIssue !== undefined) {
     return {
       disposition: {
@@ -408,6 +427,59 @@ async function processOneProposal(
   }
 }
 
+const compareFractions = (
+  leftNumerator: number,
+  leftDenominator: number,
+  rightNumerator: number,
+  rightDenominator: number,
+) => {
+  const left = BigInt(leftNumerator) * BigInt(rightDenominator)
+  const right = BigInt(rightNumerator) * BigInt(leftDenominator)
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+const executionQualityFor = (disposition: ResearchProposalDispositionV1) => {
+  if (
+    disposition.status !== "RISK_EVALUATED" ||
+    disposition.shadowRisk.decision.stage !== "EVALUATED" ||
+    disposition.shadowRisk.decision.outcome !== "APPROVED"
+  ) return undefined
+
+  const intent = disposition.shadowRisk.decision.evaluatedIntent
+  return {
+    disposition,
+    combinedQuoteWidthCents:
+      intent.longQuote.askCentsPerShare - intent.longQuote.bidCentsPerShare +
+      intent.shortQuote.askCentsPerShare - intent.shortQuote.bidCentsPerShare,
+    entryLimitCents: intent.entryLimitCentsPerShare,
+    spreadWidthCents: intent.widthCentsPerShare,
+  }
+}
+
+const compareExecutionQuality = (
+  left: NonNullable<ReturnType<typeof executionQualityFor>>,
+  right: NonNullable<ReturnType<typeof executionQualityFor>>,
+) => {
+  const quoteWidthComparison = compareFractions(
+    left.combinedQuoteWidthCents,
+    left.entryLimitCents,
+    right.combinedQuoteWidthCents,
+    right.entryLimitCents,
+  )
+  if (quoteWidthComparison !== 0) return quoteWidthComparison
+
+  const debitComparison = compareFractions(
+    left.entryLimitCents,
+    left.spreadWidthCents,
+    right.entryLimitCents,
+    right.spreadWidthCents,
+  )
+  if (debitComparison !== 0) return debitComparison
+
+  return left.disposition.priority - right.disposition.priority ||
+    left.disposition.underlying.localeCompare(right.disposition.underlying)
+}
+
 /** Processes all ranked proposals, then deterministically selects within capacity. */
 export async function processResearchProposalPath(
   options: ProcessResearchProposalPathOptions,
@@ -434,14 +506,21 @@ export async function processResearchProposalPath(
     processed.push(await processOneProposal(options, proposal))
   }
 
-  let selected = 0
+  const selectedDispositions = new Set(
+    processed
+      .flatMap(({ disposition }) => {
+        const quality = executionQualityFor(disposition)
+        return quality === undefined ? [] : [quality]
+      })
+      .sort(compareExecutionQuality)
+      .slice(0, MAX_SELECTED_SHADOW_PROPOSALS)
+      .map(({ disposition }) => disposition),
+  )
   const dispositions = processed.map(({ disposition }) => {
     if (
       disposition.status !== "RISK_EVALUATED" ||
-      disposition.shadowRisk.decision.outcome !== "APPROVED" ||
-      selected >= MAX_SELECTED_SHADOW_PROPOSALS
+      !selectedDispositions.has(disposition)
     ) return disposition
-    selected += 1
     return { ...disposition, selected: true }
   })
 

@@ -2,7 +2,7 @@ import { z } from "zod"
 
 import { optionUnderlyingV1Schema } from "../shared/alpaca-option-identity.js"
 
-export const OPTION_UNIVERSE_POLICY_VERSION = "4.0.0" as const
+export const OPTION_UNIVERSE_POLICY_VERSION = "5.0.0" as const
 export const OPTION_UNIVERSE_SNAPSHOT_VERSION = "2.0.0" as const
 export const DISCOVERY_POOL_LIMIT = 100
 export const RESEARCH_SHORTLIST_LIMIT = 8

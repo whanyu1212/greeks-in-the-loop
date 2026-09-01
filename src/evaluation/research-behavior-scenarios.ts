@@ -16,7 +16,7 @@ export type ResearchEvaluationOptionUnderlying =
 /** Captured dynamic-discovery output used only by deterministic evaluations. */
 export const RESEARCH_EVALUATION_OPTION_UNIVERSE = {
   snapshotVersion: "2.0.0",
-  policyVersion: "4.0.0",
+  policyVersion: "5.0.0",
   snapshotId: `option-universe-v2-${"0".repeat(64)}`,
   generatedAt: "2026-08-26T14:19:00.000Z",
   sessionDate: "2026-08-26",

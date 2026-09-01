@@ -14,6 +14,9 @@ import { optionUnderlyingV1Schema } from "../shared/alpaca-option-identity.js"
 
 const MAX_CONTRACT_PAGES = 5
 const LIQUID_OPEN_INTEREST = 500
+const ACTIVE_DISCOVERY_LIMIT = 50
+const GAINER_DISCOVERY_LIMIT = 25
+const LOSER_DISCOVERY_LIMIT = 25
 const providerSymbol = z.string().trim().min(1).max(32)
 
 export type OptionUniverseProvider = Readonly<{
@@ -232,11 +235,12 @@ export function createAlpacaOptionUniverseProvider(
         const change = providerNumber(mover.percent_change)
         if (change !== undefined) changes.set(mover.symbol, change)
       }
-      const discovered = new Map<string, {
+      type DiscoveredCandidate = {
         underlying: string
         activityRank?: number
         sessionPercentChange?: number
-      }>()
+      }
+      const discovered = new Map<string, DiscoveredCandidate>()
       actives.data.most_actives.forEach(({ symbol }, index) => {
         if (!optionable.has(symbol)) return
         const sessionPercentChange = changes.get(symbol)
@@ -262,17 +266,32 @@ export function createAlpacaOptionUniverseProvider(
             : { sessionPercentChange }),
         })
       }
-      const screened = [...discovered.values()]
-        .sort((left, right) =>
-          Number(right.sessionPercentChange !== undefined) -
-            Number(left.sessionPercentChange !== undefined) ||
-          Math.abs(right.sessionPercentChange ?? 0) -
-            Math.abs(left.sessionPercentChange ?? 0) ||
-          (left.activityRank ?? DISCOVERY_POOL_LIMIT + 1) -
-            (right.activityRank ?? DISCOVERY_POOL_LIMIT + 1) ||
-          left.underlying.localeCompare(right.underlying),
-        )
-        .slice(0, DISCOVERY_POOL_LIMIT)
+      const screenedByUnderlying = new Map<string, DiscoveredCandidate>()
+      const retain = (symbols: readonly string[], limit: number) => {
+        for (const symbol of symbols.slice(0, limit)) {
+          const candidate = discovered.get(symbol)
+          if (candidate !== undefined) {
+            screenedByUnderlying.set(symbol, candidate)
+          }
+        }
+      }
+      retain(
+        actives.data.most_actives.map(({ symbol }) => symbol),
+        ACTIVE_DISCOVERY_LIMIT,
+      )
+      retain(
+        movers.data.gainers.map(({ symbol }) => symbol),
+        GAINER_DISCOVERY_LIMIT,
+      )
+      retain(
+        movers.data.losers.map(({ symbol }) => symbol),
+        LOSER_DISCOVERY_LIMIT,
+      )
+      for (const [underlying, candidate] of discovered) {
+        if (screenedByUnderlying.size >= DISCOVERY_POOL_LIMIT) break
+        screenedByUnderlying.set(underlying, candidate)
+      }
+      const screened = [...screenedByUnderlying.values()]
 
       if (screened.length === 0) {
         return snapshot(sessionDate, now().toISOString(), [])
@@ -387,12 +406,14 @@ export function createAlpacaOptionUniverseProvider(
             left.optionLiquidity.liquidSeriesCount ||
           right.optionLiquidity.liquidContractCount -
             left.optionLiquidity.liquidContractCount ||
-          right.optionLiquidity.totalOpenInterest -
-            left.optionLiquidity.totalOpenInterest ||
-          Math.abs(right.sessionPercentChange ?? 0) -
-            Math.abs(left.sessionPercentChange ?? 0) ||
+          right.optionLiquidity.openInterestCoverage -
+            left.optionLiquidity.openInterestCoverage ||
           (left.activityRank ?? DISCOVERY_POOL_LIMIT + 1) -
             (right.activityRank ?? DISCOVERY_POOL_LIMIT + 1) ||
+          Math.abs(right.sessionPercentChange ?? 0) -
+            Math.abs(left.sessionPercentChange ?? 0) ||
+          right.optionLiquidity.totalOpenInterest -
+            left.optionLiquidity.totalOpenInterest ||
           left.underlying.localeCompare(right.underlying),
         )
         .slice(0, RESEARCH_SHORTLIST_LIMIT)
