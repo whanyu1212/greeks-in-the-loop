@@ -47,6 +47,23 @@ gcloud builds submit \
 
 The image contains Node 22, pnpm, OpenCode, the checked-in agent policies, MCP launchers, and `uvx` for the pinned Alpaca MCP server. Deprecated SQLite source and `better-sqlite3` are omitted from the runtime stage.
 
+## Automated Delivery
+
+`.github/workflows/ci-cd.yml` runs typechecking, tests, application and documentation builds, and a production container build on pull requests to `develop`. On a push to `develop`, the same verification gates an immutable `${GITHUB_SHA}` image build in Cloud Build and an image-only update of the existing Cloud Run Job.
+
+The deploy job uses GitHub OpenID Connect and Workload Identity Federation. It does not use a downloaded service-account key. Configure these GitHub Actions repository variables:
+
+- `GCP_PROJECT_ID`
+- `GCP_REGION`
+- `GCP_ARTIFACT_REPOSITORY`
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`
+- `GCP_DEPLOY_SERVICE_ACCOUNT`
+- `CLOUD_RUN_JOB`
+
+Restrict the Workload Identity principal to this repository and the `develop` branch. Grant its deploy service account only permission to submit Cloud Builds, use enabled services, update the existing Cloud Run Job, and act as the job runtime service account. The Cloud Build runtime identity, not the GitHub identity, writes images to Artifact Registry.
+
+The `research-production` GitHub environment provides the deployment boundary. Environment protection rules can require operator approval without changing the workflow. The deploy step changes only the image, preserving the job command, secret bindings, Cloud SQL attachment, task limits, runtime service account, and `RESEARCH_ONLY` configuration.
+
 ## Deploy The Job
 
 Cloud Run mounts the Cloud SQL Unix socket at `/cloudsql/INSTANCE_CONNECTION_NAME`. Replace the uppercase placeholders:

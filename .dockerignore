@@ -10,6 +10,7 @@ docs
 node_modules
 tests
 workspace
+gha-creds-*.json
 *.sqlite
 *.sqlite-journal
 *.sqlite-shm

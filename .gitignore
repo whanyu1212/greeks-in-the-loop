@@ -10,3 +10,4 @@ node_modules/
 workspace/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+gha-creds-*.json
