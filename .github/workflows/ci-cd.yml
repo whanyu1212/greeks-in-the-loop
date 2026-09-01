@@ -83,10 +83,14 @@ jobs:
               --region="${{ vars.GCP_REGION }}" \
               --format='value(status)'
           }
-          status="$(describe)"
-          while [ "$status" = "QUEUED" ] || [ "$status" = "WORKING" ]; do
-            sleep 10
+          # Poll until a terminal status. Anything else (PENDING, QUEUED,
+          # WORKING, STATUS_UNKNOWN) means the build is still in flight.
+          while true; do
             status="$(describe)"
+            case "$status" in
+              SUCCESS|FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED) break ;;
+            esac
+            sleep 10
           done
           echo "build $id finished: $status"
           test "$status" = "SUCCESS"
