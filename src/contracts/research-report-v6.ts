@@ -355,7 +355,7 @@ const externalContextSchema = z.discriminatedUnion("provider", [
   fmpContextSchema,
 ])
 
-const analysisSchema = z
+export const researchAnalysisV6Schema = z
   .object({
     provenance: z.literal("AGENT_REPORTED"),
     asOf: timestamp,
@@ -390,7 +390,7 @@ export const researchReportV6Schema = z
   .object({
     reportVersion: z.literal(RESEARCH_REPORT_VERSION),
     result: researchDecisionV3Schema,
-    analysis: analysisSchema,
+    analysis: researchAnalysisV6Schema,
   })
   .strict()
   .superRefine((report, refinement) => {

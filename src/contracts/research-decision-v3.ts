@@ -130,7 +130,7 @@ const inferenceSchema = z
   })
   .strict()
 
-const evidenceClaimSchema = z.discriminatedUnion("kind", [
+export const proposalEvidenceClaimV3Schema = z.discriminatedUnion("kind", [
   sourcedFactSchema,
   inferenceSchema,
 ])
@@ -217,7 +217,7 @@ export const tradeProposalV3Schema = z
     thesis: boundedText,
     candidate: researchCandidateV3Schema,
     invalidation: z.array(boundedText).min(1).max(16),
-    evidence: z.array(evidenceClaimSchema).min(1).max(64),
+    evidence: z.array(proposalEvidenceClaimV3Schema).min(1).max(64),
   })
   .strict()
   .superRefine((decision, refinement) => {
