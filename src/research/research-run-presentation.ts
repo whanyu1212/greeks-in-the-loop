@@ -239,8 +239,13 @@ export function buildResearchRunPresentation(
     }
   }
 
+  const selectedUnderlying = run.outcome.status === "PORTFOLIO_EVALUATED"
+    ? run.outcome.selectedUnderlyings[0]
+    : undefined
   const primaryProposal = result?.outcome === "PROPOSE_TRADES"
-    ? result.proposals[0]
+    ? result.proposals.find(
+        ({ candidate }) => candidate.underlying === selectedUnderlying,
+      ) ?? result.proposals[0]
     : undefined
   const candidate = primaryProposal?.candidate
   if (candidate !== undefined) {
@@ -301,10 +306,16 @@ export function buildResearchRunPresentation(
   }
 
   if (run.outcome.status === "PORTFOLIO_EVALUATED" && run.outcome.intents[0]) {
-    const evaluatedRisk = run.shadowRisk?.decision.stage === "EVALUATED"
-      ? run.shadowRisk.decision
-      : undefined
-    const intent = evaluatedRisk?.evaluatedIntent ?? run.outcome.intents[0]
+    const primaryIntent = run.outcome.intents.find(
+      ({ underlying }) => underlying === selectedUnderlying,
+    ) ?? run.outcome.intents[0]
+    const evaluatedRisk =
+      run.shadowRisk?.decision.stage === "EVALUATED" &&
+      run.shadowRisk.decision.evaluatedIntent.underlying ===
+        primaryIntent.underlying
+        ? run.shadowRisk.decision
+        : undefined
+    const intent = evaluatedRisk?.evaluatedIntent ?? primaryIntent
     lines.push("## Derived Intent", "")
     table(lines, [
       ["Basis", evaluatedRisk === undefined ? "INITIAL_DERIVATION" : "SHADOW_RISK_REFRESH"],

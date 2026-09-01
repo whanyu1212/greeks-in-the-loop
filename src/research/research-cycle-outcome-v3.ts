@@ -96,15 +96,3 @@ export type ResearchCycleOutcomeSink = Readonly<{
     signal: AbortSignal,
   ): Promise<void>
 }>
-
-/** Creates an optional JSON-lines adapter for local diagnostics and tests. */
-export function createConsoleResearchCycleOutcomeSink(
-  write: (line: string) => void = console.log,
-): ResearchCycleOutcomeSink {
-  return {
-    async record(record, signal) {
-      signal.throwIfAborted()
-      write(JSON.stringify(record.outcome))
-    },
-  }
-}

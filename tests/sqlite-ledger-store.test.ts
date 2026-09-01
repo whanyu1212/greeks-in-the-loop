@@ -5,7 +5,10 @@ import { join } from "node:path"
 import Database from "better-sqlite3"
 import { afterEach, describe, expect, it } from "vitest"
 
-import type { LedgerEventV4 } from "../src/event-ledger/ledger-event-v1.js"
+import {
+  MAX_LEDGER_EVENT_PAYLOAD_BYTES,
+  type LedgerEventV4,
+} from "../src/event-ledger/ledger-event-v1.js"
 import { loadResearchContextV1 } from "../src/research/research-context-v1.js"
 import {
   createSqliteLedgerStore as createConfiguredSqliteLedgerStore,
@@ -280,7 +283,7 @@ describe("createSqliteLedgerStore", () => {
     await store.close()
   })
 
-  it("rejects schema-valid payloads larger than 64 KiB", async () => {
+  it("rejects schema-valid payloads larger than the configured cap", async () => {
     const store = createSqliteLedgerStore({ path: ":memory:" })
     await store.migrate()
     const oversizedEvent = {
@@ -303,7 +306,7 @@ describe("createSqliteLedgerStore", () => {
     } as LedgerEventV4
 
     await expect(store.append(oversizedEvent)).rejects.toThrow(
-      "Ledger event payload cannot exceed 65536 bytes",
+      `Ledger event payload cannot exceed ${MAX_LEDGER_EVENT_PAYLOAD_BYTES} bytes`,
     )
     await expect(store.list({ limit: 10 })).resolves.toEqual([])
 

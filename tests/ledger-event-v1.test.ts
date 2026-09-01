@@ -62,9 +62,9 @@ describe("LedgerEventV4", () => {
     expect(ledgerEventV4Schema.parse(baseEvent)).toEqual(baseEvent)
   })
 
-  it("preserves the canonical V3 ledger-event bytes", () => {
+  it("preserves the canonical V4 ledger-event bytes", () => {
     expect(canonicalJsonSha256(ledgerEventV4Schema.parse(baseEvent))).toBe(
-      "828ec7881630476e4ef5b6b9e58bb58f39c875fcd50250c07cd88946fc24f8ac",
+      "40979b06dfaa5388f4d997b6b82abfb3b98a64778dd3b073466abf3fde514825",
     )
   })
 
@@ -85,6 +85,7 @@ describe("LedgerEventV4", () => {
       "RESEARCH_LOOP_BREAKER_RESET",
       "RISK_SHADOW_DECISION_RECORDED",
       "RISK_BREAKER_LATCHED",
+      "PORTFOLIO_SHADOW_PLAN_RECORDED",
     ])
   })
 

@@ -18,7 +18,7 @@ import {
   writeResearchRunArtifact,
 } from "../src/research/research-artifact.js"
 import type { StoredLedgerEventV4 } from "../src/event-ledger/ledger-event-v1.js"
-import type { ResearchCycleOutcomeV1 } from "../src/research/research-cycle-outcome-v1.js"
+import type { ResearchCycleOutcomeV3 } from "../src/research/research-cycle-outcome-v3.js"
 
 const researchInvocation = {
   invocationVersion: "3.0.0" as const,
@@ -49,7 +49,7 @@ afterEach(() => {
 })
 
 describe("research cycle artifact", () => {
-  it("integrates a bounded shadow-risk decision and breaker transitions", () => {
+  it("selects shadow risk by causal intent identity and retains its breaker transitions", () => {
     const base = {
       eventVersion: "4.0.0",
       occurredAt: "2026-08-27T14:30:00.000Z",
@@ -72,7 +72,13 @@ describe("research cycle artifact", () => {
         eventId: "risk-decision-source",
         causationEventId: "risk-start",
         eventType: "RESEARCH_DECISION_VALIDATED",
-        payload: { decision: { outcome: "PROPOSE_TRADE" } },
+        payload: {
+          decision: {
+            contractVersion: "3.0.0",
+            outcome: "PROPOSE_TRADES",
+            proposals: [],
+          },
+        },
       },
       {
         ...base,
@@ -80,7 +86,7 @@ describe("research cycle artifact", () => {
         eventId: "risk-intent",
         causationEventId: "risk-decision-source",
         eventType: "TRADE_INTENT_DERIVED",
-        payload: { intent: { contractVersion: "3.0.0" } },
+        payload: { intent: { underlying: "SPY" } },
       },
       {
         ...base,
@@ -104,8 +110,35 @@ describe("research cycle artifact", () => {
       {
         ...base,
         sequence: 5,
-        eventId: "risk-breaker",
+        eventId: "risk-intent-selected",
         causationEventId: "risk-result",
+        eventType: "TRADE_INTENT_DERIVED",
+        payload: { intent: { underlying: "QQQ" } },
+      },
+      {
+        ...base,
+        sequence: 6,
+        eventId: "risk-result-selected",
+        causationEventId: "risk-intent-selected",
+        eventType: "RISK_SHADOW_DECISION_RECORDED",
+        payload: {
+          decision: {
+            decisionVersion: "1.0.0",
+            mode: "SHADOW",
+            evaluationVersion: "1.0.0",
+            ruleVersion: "1.0.0",
+            stage: "STATE_CAPTURE_FAILED",
+            outcome: "REJECTED",
+            evaluatedAt: null,
+            captureReasonCodes: ["CAPTURE_INTERNAL_INVALID"],
+          },
+        },
+      },
+      {
+        ...base,
+        sequence: 7,
+        eventId: "risk-breaker",
+        causationEventId: "risk-result-selected",
         eventType: "RISK_BREAKER_LATCHED",
         payload: {
           stateVersion: "1.0.0",
@@ -116,23 +149,35 @@ describe("research cycle artifact", () => {
       },
       {
         ...base,
-        sequence: 6,
-        eventId: "risk-completed",
+        sequence: 8,
+        eventId: "risk-plan",
         causationEventId: "risk-breaker",
+        eventType: "PORTFOLIO_SHADOW_PLAN_RECORDED",
+        payload: { proposalCount: 2, selectedUnderlyings: ["QQQ"] },
+      },
+      {
+        ...base,
+        sequence: 9,
+        eventId: "risk-completed",
+        causationEventId: "risk-plan",
         eventType: "RESEARCH_CYCLE_COMPLETED",
-        payload: { status: "INTENT_DERIVED" },
+        payload: { status: "PORTFOLIO_EVALUATED" },
       },
     ] as unknown as StoredLedgerEventV4[]
 
     expect(projectResearchRunV1(events)).toMatchObject({
-      runVersion: "5.0.0",
+      runVersion: "6.0.0",
       shadowRisk: {
         decision: {
           stage: "STATE_CAPTURE_FAILED",
           outcome: "REJECTED",
-          captureReasonCodes: ["ACCOUNT_REQUEST_FAILED"],
+          captureReasonCodes: ["CAPTURE_INTERNAL_INVALID"],
         },
         breakerTransitions: [{ breaker: "DAILY" }],
+      },
+      outcome: {
+        status: "PORTFOLIO_EVALUATED",
+        selectedUnderlyings: ["QQQ"],
       },
     })
   })
@@ -197,7 +242,7 @@ describe("research cycle artifact", () => {
     ]
 
     expect(projectResearchRunV1(events)).toMatchObject({
-      runVersion: "5.0.0",
+      runVersion: "6.0.0",
       cycle: {
         cycleId: "cycle-1",
         cycleNumber: 1,
@@ -241,7 +286,7 @@ describe("research cycle artifact", () => {
     ) as StoredLedgerEventV4[]
     const currentRun = projectResearchRunV1(currentEvents)
     expect(currentRun).toMatchObject({
-      runVersion: "5.0.0",
+      runVersion: "6.0.0",
       researchInvocation,
     })
     const latestInvocation = {
@@ -258,7 +303,7 @@ describe("research cycle artifact", () => {
         : event,
     ) as StoredLedgerEventV4[]
     expect(projectResearchRunV1(latestEvents)).toMatchObject({
-      runVersion: "5.0.0",
+      runVersion: "6.0.0",
       researchInvocation: latestInvocation,
     })
   })
@@ -266,7 +311,7 @@ describe("research cycle artifact", () => {
   it("writes the full validated outcome to a unique inspection-only JSON file", async () => {
     const root = mkdtempSync(join(tmpdir(), "research-artifact-test-"))
     temporaryDirectories.push(root)
-    const outcome: ResearchCycleOutcomeV1 = {
+    const outcome: ResearchCycleOutcomeV3 = {
       outcomeVersion: "3.0.0",
       status: "VALIDATED_NO_ACTION",
       decision: {
@@ -298,14 +343,18 @@ describe("research cycle artifact", () => {
           optionsTradingApproved: true,
           conflictingStrategyExposure: false,
         },
-        marketRegime: {
+        marketRegimes: [{
           verification: "AGENT_REPORTED",
           temporalClass: "PRIOR_CLOSE",
           observedAt: "2026-08-25T20:00:00.000Z",
           signal: "UNAVAILABLE",
+          underlying: "SPY",
           dailySessionCount: 50,
           intradayBarCount: 0,
-        },
+        }],
+        symbolEvaluations: [],
+        optionSurfaces: [],
+        candidateEvaluations: [],
         externalContext: [
           {
             sourceId: "exa-1",
@@ -326,7 +375,7 @@ describe("research cycle artifact", () => {
     }
 
     const run: ResearchRunV1 = {
-      runVersion: "5.0.0",
+      runVersion: "6.0.0",
       cycle: {
         cycleId: "cycle-1",
         cycleNumber: 1,
@@ -357,7 +406,7 @@ describe("research cycle artifact", () => {
     })
     expect(
       createHash("sha256").update(readFileSync(path)).digest("hex"),
-    ).toBe("865b43e00984f7dd082a94f762fb874a312b1540672e7b11ea2690761017e9ce")
+    ).toBe("f478d5d6cc6e42059bcc7d0bd01c47ad6b9221d6a07d71a891b8b1be8608cf57")
     expect(statSync(path).mode & 0o777).toBe(0o600)
 
     chmodSync(path, 0o644)
@@ -368,7 +417,7 @@ describe("research cycle artifact", () => {
   it("does not overwrite an existing cycle artifact", async () => {
     const root = mkdtempSync(join(tmpdir(), "research-artifact-test-"))
     temporaryDirectories.push(root)
-    const outcome: ResearchCycleOutcomeV1 = {
+    const outcome: ResearchCycleOutcomeV3 = {
       outcomeVersion: "3.0.0",
       status: "VALIDATED_NO_ACTION",
       decision: {
@@ -386,7 +435,7 @@ describe("research cycle artifact", () => {
       },
     }
     const run: ResearchRunV1 = {
-      runVersion: "5.0.0",
+      runVersion: "6.0.0",
       cycle: {
         cycleId: "cycle-1",
         cycleNumber: 1,

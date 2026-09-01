@@ -115,7 +115,7 @@ export function projectResearchRunV1(
       event.eventVersion === LEDGER_EVENT_VERSION,
   )
   if (currentEvents.length !== inputEvents.length) {
-    throw new Error("Legacy ledger cycles cannot be exported as research run V5")
+    throw new Error("Legacy ledger cycles cannot be exported as research run V6")
   }
   const events = [...currentEvents].sort(
     (left, right) => left.sequence - right.sequence,
@@ -222,21 +222,33 @@ export function projectResearchRunV1(
     throw new Error("Shadow risk requires an evaluated portfolio")
   }
 
-  const shadowRiskResults = riskEvents.map((riskEvent) => ({
-    decision: riskEvent.payload.decision,
-    breakerTransitions: [] as readonly RiskBreakerTransitionV1[],
-  }))
+  const projectedRiskResults = riskEvents.map((riskEvent) => {
+    const intentEvent = intentEvents.find(
+      (event) => event.eventId === riskEvent.causationEventId,
+    )
+    const breakerTransitions: RiskBreakerTransitionV1[] = []
+    let causationEventId = riskEvent.eventId
+    for (const event of events) {
+      if (event.causationEventId !== causationEventId) continue
+      if (event.eventType !== "RISK_BREAKER_LATCHED") break
+      breakerTransitions.push(event.payload)
+      causationEventId = event.eventId
+    }
+    return {
+      underlying: intentEvent?.payload.intent.underlying,
+      result: {
+        decision: riskEvent.payload.decision,
+        breakerTransitions,
+      },
+    }
+  })
+  const shadowRiskResults = projectedRiskResults.map(({ result }) => result)
   const selectedUnderlying = outcome.status === "PORTFOLIO_EVALUATED"
     ? outcome.selectedUnderlyings[0]
     : undefined
-  const selectedIntentIndex = selectedUnderlying === undefined
-    ? -1
-    : intentEvents.findIndex(({ payload }) =>
-        payload.intent.longContractSymbol.startsWith(selectedUnderlying)
-      )
-  const primaryShadowRisk = selectedIntentIndex >= 0
-    ? shadowRiskResults[selectedIntentIndex]
-    : shadowRiskResults[0]
+  const primaryShadowRisk = projectedRiskResults.find(
+    ({ underlying }) => underlying === selectedUnderlying,
+  )?.result ?? shadowRiskResults[0]
 
   const cycleId = start.cycleId
   const sessionId = start.sessionId
