@@ -25,6 +25,8 @@ import {
   riskBreakerTransitionV1Schema,
   shadowRiskDecisionV1Schema,
 } from "../risk/shadow-risk-v1.js"
+import { executionAuthorizationV1Schema } from "../execution/authorization-v1.js"
+import { paperTraderResultV1Schema } from "../execution/paper-trader-result-v1.js"
 
 export const LEGACY_LEDGER_EVENT_VERSION = "1.0.0" as const
 export const LEDGER_EVENT_VERSION = "4.0.0" as const
@@ -49,6 +51,8 @@ export const LEDGER_EVENT_TYPES = [
   "RISK_SHADOW_DECISION_RECORDED",
   "RISK_BREAKER_LATCHED",
   "PORTFOLIO_SHADOW_PLAN_RECORDED",
+  "EXECUTION_AUTHORIZATION_RECORDED",
+  "PAPER_TRADER_RESULT_RECORDED",
 ] as const
 
 export const STORED_LEDGER_EVENT_TYPES = [
@@ -241,6 +245,12 @@ const payloadSchemas = {
       proposalCount: z.number().int().min(1).max(3),
       selectedUnderlyings: z.array(identifier).max(1),
     })
+    .strict(),
+  EXECUTION_AUTHORIZATION_RECORDED: z
+    .object({ instruction: executionAuthorizationV1Schema })
+    .strict(),
+  PAPER_TRADER_RESULT_RECORDED: z
+    .object({ result: paperTraderResultV1Schema })
     .strict(),
 } as const
 
@@ -512,6 +522,24 @@ const createEventSchemas = (
           })
         }
         return
+      }
+
+      if (
+        eventType === "EXECUTION_AUTHORIZATION_RECORDED" ||
+        eventType === "PAPER_TRADER_RESULT_RECORDED"
+      ) {
+        const payloadId = eventType === "EXECUTION_AUTHORIZATION_RECORDED"
+          ? (event.payload as { instruction?: { authorizationId?: unknown } })
+              .instruction?.authorizationId
+          : (event.payload as { result?: { authorizationId?: unknown } })
+              .result?.authorizationId
+        if (event.cycleId === undefined || payloadId !== event.cycleId) {
+          refinement.addIssue({
+            code: "custom",
+            path: ["cycleId"],
+            message: "Execution identity must match its research cycle",
+          })
+        }
       }
 
       if (event.cycleId === undefined) {

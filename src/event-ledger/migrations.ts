@@ -323,6 +323,80 @@ export const LEDGER_MIGRATIONS: readonly LedgerMigration[] = [
       END;
     `,
   },
+  {
+    id: "006_paper_execution_authorization",
+    sql: `
+      DROP TRIGGER ledger_events_no_post_terminal;
+
+      CREATE UNIQUE INDEX ledger_events_one_execution_authorization
+        ON ledger_events(cycle_id)
+        WHERE event_type = 'EXECUTION_AUTHORIZATION_RECORDED';
+
+      CREATE UNIQUE INDEX ledger_events_execution_authorization_id
+        ON ledger_events(json_extract(payload_json, '$.instruction.authorizationId'))
+        WHERE event_type = 'EXECUTION_AUTHORIZATION_RECORDED';
+
+      CREATE UNIQUE INDEX ledger_events_one_paper_trader_result
+        ON ledger_events(cycle_id)
+        WHERE event_type = 'PAPER_TRADER_RESULT_RECORDED';
+
+      CREATE TRIGGER ledger_events_authorization_follows_approval
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.event_type = 'EXECUTION_AUTHORIZATION_RECORDED'
+      BEGIN
+        SELECT CASE
+          WHEN NEW.cycle_id IS NULL OR NOT EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE event_id = NEW.causation_event_id
+              AND cycle_id = NEW.cycle_id
+              AND event_type = 'RISK_SHADOW_DECISION_RECORDED'
+              AND json_extract(payload_json, '$.decision.stage') = 'EVALUATED'
+              AND json_extract(payload_json, '$.decision.outcome') = 'APPROVED'
+          )
+          THEN RAISE(ABORT, 'execution authorization must follow approved risk')
+        END;
+      END;
+
+      CREATE TRIGGER ledger_events_paper_result_follows_authorization
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.event_type = 'PAPER_TRADER_RESULT_RECORDED'
+      BEGIN
+        SELECT CASE
+          WHEN NEW.cycle_id IS NULL OR NOT EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE event_id = NEW.causation_event_id
+              AND cycle_id = NEW.cycle_id
+              AND event_type = 'EXECUTION_AUTHORIZATION_RECORDED'
+          ) OR NOT EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE cycle_id = NEW.cycle_id
+              AND event_type = 'RESEARCH_CYCLE_COMPLETED'
+          )
+          THEN RAISE(ABORT, 'paper trader result must follow completed authorization')
+        END;
+      END;
+
+      CREATE TRIGGER ledger_events_no_post_terminal
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.cycle_id IS NOT NULL
+        AND NEW.event_type <> 'PAPER_TRADER_RESULT_RECORDED'
+        AND EXISTS (
+          SELECT 1
+          FROM ledger_events
+          WHERE cycle_id = NEW.cycle_id
+            AND event_type IN (
+              'RESEARCH_CYCLE_COMPLETED',
+              'RESEARCH_CYCLE_INTERRUPTED'
+            )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'cannot append after a cycle terminal event');
+      END;
+    `,
+  },
 ]
 
 const checksum = (sql: string) =>

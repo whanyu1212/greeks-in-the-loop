@@ -1,13 +1,14 @@
 /**
- * Entry point for the structured, non-executing trading research worker.
+ * Entry point for the structured Alpaca paper-trading worker.
  *
  * The worker starts a managed local OpenCode server, creates an isolated session
  * for each sequential research cycle, and runs until a process signal or cycle
  * limit stops it. Every cycle selects the checked-in, deny-by-default research
- * agent, while `startOpencode` owns cleanup of the server and its MCP
- * descendants.
+ * agent and may hand one immutable authorization to a separate trader session,
+ * while `startOpencode` owns cleanup of the server and its MCP descendants.
  */
 
+import { randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync } from "node:fs"
 import { dirname } from "node:path"
 
@@ -28,6 +29,9 @@ import {
   LedgerPersistenceError,
 } from "./event-ledger/research-lifecycle-recorder.js"
 import { createSqliteLedgerStore } from "./event-ledger/sqlite-ledger-store.js"
+import { LEDGER_EVENT_VERSION } from "./event-ledger/ledger-event-v1.js"
+import { resolveExecutionAuthorizationV1 } from "./execution/authorization-v1.js"
+import { invokePaperTrader } from "./execution/paper-trader.js"
 import { createAlpacaOptionQuoteProvider } from "./market-data/alpaca-option-quotes.js"
 import { createAlpacaOptionUniverseProvider } from "./market-data/alpaca-option-universe.js"
 import { createAlpacaCalendarClient } from "./market-data/alpaca-calendar-client.js"
@@ -221,6 +225,18 @@ const serverTimeout = readPositiveInteger("OPENCODE_SERVER_TIMEOUT_MS", 60_000)
 const task = readSetting("AGENT_TASK")?.trim()
 const alpacaApiKey = readRequiredSetting("ALPACA_API_KEY")
 const alpacaSecretKey = readRequiredSetting("ALPACA_SECRET_KEY")
+const alpacaTradingBaseUrl =
+  readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
+  "https://paper-api.alpaca.markets"
+let alpacaTradingOrigin: string
+try {
+  alpacaTradingOrigin = new URL(alpacaTradingBaseUrl).origin
+} catch {
+  throw new Error("ALPACA_TRADING_BASE_URL must be a valid URL")
+}
+if (alpacaTradingOrigin !== "https://paper-api.alpaca.markets") {
+  throw new Error("ALPACA_TRADING_BASE_URL must remain pinned to Alpaca paper trading")
+}
 const knownCredentialValues = [
   alpacaApiKey,
   alpacaSecretKey,
@@ -241,8 +257,7 @@ const optionUniverseProvider = createAlpacaOptionUniverseProvider({
     readSetting("ALPACA_MARKET_DATA_BASE_URL")?.trim() ||
     "https://data.alpaca.markets",
   tradingBaseUrl:
-    readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
-    "https://paper-api.alpaca.markets",
+    alpacaTradingBaseUrl,
 })
 const riskStateProvider = createAlpacaRiskStateProvider({
   apiKey: alpacaApiKey,
@@ -251,15 +266,13 @@ const riskStateProvider = createAlpacaRiskStateProvider({
     readSetting("ALPACA_MARKET_DATA_BASE_URL")?.trim() ||
     "https://data.alpaca.markets",
   tradingBaseUrl:
-    readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
-    "https://paper-api.alpaca.markets",
+    alpacaTradingBaseUrl,
 })
 const calendar = createAlpacaCalendarClient({
   apiKey: alpacaApiKey,
   secretKey: alpacaSecretKey,
   baseUrl:
-    readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
-    "https://paper-api.alpaca.markets",
+    alpacaTradingBaseUrl,
 })
 const premarketStartEt =
   readSetting("AGENT_PREMARKET_START_ET")?.trim() ||
@@ -318,6 +331,10 @@ try {
     port,
     signal: abortController.signal,
     timeoutMs: serverTimeout,
+    environment: {
+      ...process.env,
+      EXECUTION_LEDGER_PATH: ledgerPath,
+    },
   })
 
   try {
@@ -718,6 +735,59 @@ try {
             },
           })
           cycleTrace.setOutcome(processed.outcome.status)
+          let paperTraderStatus: string | undefined
+          if (!dryRun) {
+            let authorization
+            try {
+              authorization = await resolveExecutionAuthorizationV1(
+                activeLedgerStore,
+                cycle.cycleId,
+              )
+            } catch (error) {
+              throw new LedgerPersistenceError(
+                "execution-authorization query",
+                error,
+              )
+            }
+            if (authorization.status === "AUTHORIZED") {
+              stageReporter.report("paper-trader.handoff", "STARTED", {
+                authorizationId: authorization.authorization.authorizationId,
+              })
+              const result = await invokePaperTrader({
+                client: runtime.client,
+                authorization: authorization.authorization,
+                signal: abortController.signal,
+              })
+              try {
+                await activeLedgerStore.append(
+                  {
+                    eventId: randomUUID(),
+                    eventVersion: LEDGER_EVENT_VERSION,
+                    eventType: "PAPER_TRADER_RESULT_RECORDED",
+                    occurredAt: new Date().toISOString(),
+                    correlationId: cycle.correlationId,
+                    causationEventId: authorization.eventId,
+                    cycleId: cycle.cycleId,
+                    sessionId: cycle.sessionId,
+                    payload: { result },
+                  },
+                  abortController.signal,
+                )
+              } catch (error) {
+                throw new LedgerPersistenceError("paper-trader result append", error)
+              }
+              paperTraderStatus = result.status
+              stageReporter.report(
+                "paper-trader.handoff",
+                result.status === "SUBMITTED" ? "COMPLETED" : "REJECTED",
+                {
+                  authorizationId: result.authorizationId,
+                  status: result.status,
+                  reasonCodes: result.reasonCodes,
+                },
+              )
+            }
+          }
           try {
             const artifacts = await cycleTrace.run(
               "research.artifact.project",
@@ -755,6 +825,9 @@ try {
               `Audit: ${artifacts.presentation.audit.passCount} PASS / ${artifacts.presentation.audit.failCount} FAIL / ${artifacts.presentation.audit.notApplicableCount} N/A`,
               `Research brief: ${artifacts.markdownPath}`,
               `Canonical JSON: ${artifacts.jsonPath}`,
+              ...(paperTraderStatus === undefined
+                ? []
+                : [`Paper trader: ${paperTraderStatus}`]),
             ].join("\n")
           } catch {
             stageReporter.report("artifact.write", "REJECTED", {
@@ -763,7 +836,11 @@ try {
             console.error(
               `[cycle ${cycleNumber}] validated outcome recorded, but research artifact could not be written`,
             )
-            return `${processed.report}\nResearch artifacts: unavailable`
+            return `${processed.report}\nResearch artifacts: unavailable${
+              paperTraderStatus === undefined
+                ? ""
+                : `\nPaper trader: ${paperTraderStatus}`
+            }`
           }
         } catch (error) {
           if (error instanceof LedgerPersistenceError) {

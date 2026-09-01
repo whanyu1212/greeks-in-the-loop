@@ -1,5 +1,5 @@
 /**
- * Starts one approved research MCP with only the credentials it requires.
+ * Starts one approved isolated MCP with only the credentials it requires.
  *
  * OpenCode receives this launcher path rather than secret-bearing command
  * arguments. The launcher reads the project environment privately, constructs
@@ -23,8 +23,10 @@ const fileEnv = (() => {
   }
 })()
 
+const readSetting = (name) => (process.env[name] ?? fileEnv[name])?.trim()
+
 const readRequiredSetting = (name) => {
-  const value = (process.env[name] ?? fileEnv[name])?.trim()
+  const value = readSetting(name)
   if (!value) throw new Error(`${name} is required`)
   return value
 }
@@ -63,6 +65,7 @@ const fmpProxyPath = join(dirname(fmpPackagePath), "dist", "proxy.js")
 const fmpPreloadPath = fileURLToPath(
   new URL("./expand-fmp-key.cjs", import.meta.url),
 )
+const tsxCliPath = require.resolve("tsx/cli")
 
 const createServers = {
   alpaca: () => ({
@@ -103,6 +106,21 @@ const createServers = {
     command: process.execPath,
     args: [fileURLToPath(new URL("./trusted-time-mcp.mjs", import.meta.url))],
     environment: {},
+  }),
+  authorization: () => ({
+    command: process.execPath,
+    args: [
+      tsxCliPath,
+      fileURLToPath(
+        new URL("../src/execution/authorization-mcp.ts", import.meta.url),
+      ),
+    ],
+    environment: {
+      EXECUTION_LEDGER_PATH:
+        readSetting("EXECUTION_LEDGER_PATH") ||
+        readSetting("RESEARCH_LEDGER_PATH") ||
+        ".state/research-ledger.sqlite",
+    },
   }),
 }
 

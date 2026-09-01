@@ -26,6 +26,12 @@
       "command": ["node", "scripts/run-research-mcp.mjs", "trusted"],
       "enabled": true,
       "timeout": 60000
+    },
+    "execution": {
+      "type": "local",
+      "command": ["node", "scripts/run-research-mcp.mjs", "authorization"],
+      "enabled": true,
+      "timeout": 60000
     }
   },
   "permission": {

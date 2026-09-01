@@ -87,6 +87,8 @@ describe("LedgerEventV4", () => {
       "RISK_SHADOW_DECISION_RECORDED",
       "RISK_BREAKER_LATCHED",
       "PORTFOLIO_SHADOW_PLAN_RECORDED",
+      "EXECUTION_AUTHORIZATION_RECORDED",
+      "PAPER_TRADER_RESULT_RECORDED",
     ])
   })
 
@@ -344,7 +346,36 @@ describe("LedgerEventV4", () => {
     ).toBe(false)
   })
 
-  it("rejects speculative broker event types", () => {
+  it("requires execution payload identity to match its cycle", () => {
+    const resultEvent = {
+      ...baseEvent,
+      eventType: "PAPER_TRADER_RESULT_RECORDED",
+      causationEventId: "authorization-event-1",
+      payload: {
+        result: {
+          resultVersion: "1.0.0",
+          status: "NOT_SUBMITTED",
+          authorizationId: "cycle-1",
+          clientOrderId: "gitl-1234",
+          observedAt: "2026-08-25T14:30:00.000Z",
+          reasonCodes: ["MARKET_CLOSED"],
+        },
+      },
+    } as const
+
+    expect(ledgerEventV4Schema.safeParse(resultEvent).success).toBe(true)
+    expect(ledgerEventV4Schema.safeParse({
+      ...resultEvent,
+      payload: {
+        result: {
+          ...resultEvent.payload.result,
+          authorizationId: "cycle-2",
+        },
+      },
+    }).success).toBe(false)
+  })
+
+  it("rejects unsupported broker event types", () => {
     expect(
       ledgerEventV4Schema.safeParse({
         ...baseEvent,

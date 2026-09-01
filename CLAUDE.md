@@ -27,7 +27,7 @@ The agent proposes; deterministic code disposes.
 - Only candidate identity crosses from research into risk. Application code refreshes quotes, contracts, account state, portfolio state, and clock data.
 - Application code calculates position-weighted Greeks from refreshed ordered legs; signed directional net delta is the hard Greek limit for bullish and bearish strategies.
 - Money is integer cents; exit marks are half-cents per share.
-- No order-submission code exists. Runtime ends with a shadow decision in the ledger.
+- Only the isolated `trader` agent may submit an order, and only from an immutable, unexpired, application-derived authorization through the paper-pinned Alpaca MCP. Research remains non-executing.
 
 ## Pipeline
 
@@ -41,7 +41,8 @@ OptionUniverseSnapshotV2
   -> capture application-owned risk state
   -> refresh TradeIntentV4
   -> evaluateTradeIntentRiskV1
-  -> append ledger events
+  -> append ledger events, including any eligible paper authorization
+  -> isolated trader resolves the opaque authorization ID
 ```
 
 `src/index.ts` is the composition root. `src/research/cycle.ts` orchestrates one cycle.
@@ -56,7 +57,7 @@ OptionUniverseSnapshotV2
 - `src/event-ledger/`: append-only SQLite lifecycle.
 - `src/backtest/`: self-contained deterministic replay.
 
-`opencode.json` is globally deny-by-default. The checked-in `research` agent has read-only market authority and no arbitrary skill-loading, shell, subagent, web, or broker-mutation authority. The separate `trader` agent may read Alpaca state and submit option orders only through the paper-pinned Alpaca MCP; it has no stock, crypto, cancellation, replacement, filesystem, or external-research authority. The application worker does not invoke the trader yet and still ends with a shadow decision.
+`opencode.json` is globally deny-by-default. The checked-in `research` agent has read-only market authority and no arbitrary skill-loading, shell, subagent, web, or broker-mutation authority. The separate `trader` agent may resolve one opaque ledger authorization, read Alpaca state, and submit option orders only through the paper-pinned Alpaca MCP; it has no stock, crypto, cancellation, replacement, filesystem, or external-research authority. The application invokes it in a separate session only for selected, risk-approved, positive-debit multi-leg authorizations. Credit, single-leg, expired, dry-run, and non-paper paths remain non-executing.
 
 ## Contract rules
 

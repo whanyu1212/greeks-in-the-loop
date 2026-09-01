@@ -81,6 +81,7 @@ describe("research agent policy", () => {
     expect(hasFrontmatterLine(trader.frontmatter, "mode: primary")).toBe(true)
     expect(hasFrontmatterLine(trader.frontmatter, '  "alpaca_get_*": allow')).toBe(true)
     expect(hasFrontmatterLine(trader.frontmatter, "  alpaca_place_option_order: allow")).toBe(true)
+    expect(hasFrontmatterLine(trader.frontmatter, "  execution_get_authorization: allow")).toBe(true)
     expect(trader.frontmatter).not.toContain("alpaca_place_stock_order")
     expect(trader.frontmatter).not.toContain("alpaca_place_crypto_order")
     expect(trader.frontmatter).not.toContain("alpaca_cancel_")
@@ -88,6 +89,8 @@ describe("research agent policy", () => {
     expect(trader.frontmatter).not.toContain('"exa_*"')
     expect(trader.prompt).toContain("Alpaca paper-trading system")
     expect(trader.prompt).toContain("Submit at most once")
+    expect(trader.prompt).toContain("opaque authorization ID")
+    expect(trader.prompt).toContain("ALPACA_PAPER")
     expect(trader.prompt).toContain("no authority to place stock or crypto orders")
   })
 
@@ -249,18 +252,23 @@ describe("research agent policy", () => {
     expect(evalMcp).toContain("instant >= requestedStart && instant < requestedEnd")
   })
 
-  it("enables only the four approved research MCP servers through the launcher", () => {
+  it("enables only the approved isolated MCP servers through the launcher", () => {
     expect(mcpLauncher).toContain('"alpaca-mcp-server==2.2.1"')
     expect(mcpLauncher).toContain('"fastmcp==3.4.7"')
     expect(Object.keys(config.mcp).sort()).toEqual([
       "alpaca",
       "exa",
+      "execution",
       "fmp",
       "trusted",
     ])
     for (const [name, server] of Object.entries(config.mcp)) {
       expect(server.enabled).toBe(true)
-      expect(server.command).toEqual(["node", "scripts/run-research-mcp.mjs", name])
+      expect(server.command).toEqual([
+        "node",
+        "scripts/run-research-mcp.mjs",
+        name === "execution" ? "authorization" : name,
+      ])
     }
   })
 })

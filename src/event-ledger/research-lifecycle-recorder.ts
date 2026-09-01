@@ -19,6 +19,7 @@ import {
   type LedgerEventV4,
 } from "./ledger-event-v1.js"
 import type { LedgerStore } from "./ledger-store.js"
+import { deriveExecutionAuthorizationV1 } from "../execution/authorization-v1.js"
 
 export const RESEARCH_CYCLE_INTERRUPTION_REASONS = [
   "TIMEOUT",
@@ -131,6 +132,7 @@ const completionEvents = (
   startEventId: string,
   occurredAt: string,
   idFactory: () => string,
+  executionWindowDeadline?: string,
 ): LedgerEventV4[] => {
   if (record.researchInvocation === undefined) {
     throw new Error("Completed research cycles require invocation metadata")
@@ -265,11 +267,30 @@ const completionEvents = (
           eventType: "TRADE_INTENT_DERIVED",
           payload: { intent: proposal.intent },
         })
-        append({
+        const riskEvent: LedgerEventV4 = {
           ...envelope(),
           eventType: "RISK_SHADOW_DECISION_RECORDED",
           payload: { decision: proposal.shadowRisk.decision },
-        })
+        }
+        append(riskEvent)
+        const authorization =
+          proposal.selected &&
+          record.researchInvocation.cycleMode === "STANDARD" &&
+          executionWindowDeadline !== undefined
+            ? deriveExecutionAuthorizationV1({
+                authorizationId: identity.cycleId,
+                issuedAt: occurredAt,
+                expiresAt: executionWindowDeadline,
+                riskDecision: proposal.shadowRisk.decision,
+              })
+            : undefined
+        if (authorization !== undefined) {
+          append({
+            ...envelope(),
+            eventType: "EXECUTION_AUTHORIZATION_RECORDED",
+            payload: { instruction: authorization },
+          })
+        }
         for (const transition of proposal.shadowRisk.breakerTransitions) {
           append({
             ...envelope(),
@@ -473,6 +494,7 @@ export function createResearchLifecycleRecorder({
                   startEventId,
                   now().toISOString(),
                   idFactory,
+                  initialEligibility?.tradeIntentWindow?.deadline,
                 ),
                 recordSignal,
               ),
