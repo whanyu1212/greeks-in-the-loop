@@ -22,7 +22,10 @@ import {
   type ResearchEligibilityV1,
 } from "../../scheduling/research-eligibility.js"
 import type { ResearchInvocationV1 } from "../invocation.js"
-import type { SymbolScreenResultV1 } from "../symbol-screen.js"
+import type {
+  SymbolScreenResultV1,
+  SymbolScreenResultV2,
+} from "../symbol-screen.js"
 
 export const RESEARCH_RUN_VERSION = "6.0.0" as const
 export const SUPPORTED_RESEARCH_RUN_VERSIONS = [RESEARCH_RUN_VERSION] as const
@@ -66,7 +69,7 @@ export type ResearchRunV1 = Readonly<{
   }>
   initialEligibility?: ResearchEligibilityV1
   researchInvocation?: ResearchInvocationV1
-  symbolScreen?: SymbolScreenResultV1
+  symbolScreen?: SymbolScreenResultV1 | SymbolScreenResultV2
   evidenceSnapshots: readonly Readonly<{
     snapshotRef: string
     provider: "ALPACA" | "FMP" | "EXA"

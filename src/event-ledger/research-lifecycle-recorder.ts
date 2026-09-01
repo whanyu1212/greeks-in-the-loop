@@ -157,7 +157,10 @@ const completionEvents = (
     payload: {
       screen: {
         ...record.symbolScreen,
-        results: [...record.symbolScreen.results],
+        symbols: record.symbolScreen.symbols.map((symbol) => ({
+          ...symbol,
+          strategies: [...symbol.strategies],
+        })),
       },
     },
   })

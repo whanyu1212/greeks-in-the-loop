@@ -9,7 +9,7 @@ import type {
 } from "./outcome.js"
 import type { ResearchCycleStageReports } from "./stage-reporting.js"
 import type { ResearchInvocationV1 } from "../invocation.js"
-import type { SymbolScreenResultV1 } from "../symbol-screen.js"
+import type { SymbolScreenResultV2 } from "../symbol-screen.js"
 
 export const MAX_TERMINAL_REJECTION_DETAILS = 64
 
@@ -27,7 +27,7 @@ export type RecordResearchCycleOutcomeContext = Readonly<{
   sink: ResearchCycleOutcomeSink
   signal: AbortSignal
   researchInvocation: ResearchInvocationV1
-  symbolScreen: SymbolScreenResultV1
+  symbolScreen: SymbolScreenResultV2
   researchReport?: ResearchReportV6
   trace: ResearchCycleTrace
   stages: ResearchCycleStageReports
@@ -36,7 +36,7 @@ export type RecordResearchCycleOutcomeContext = Readonly<{
 export type ProcessedResearchCycle = Readonly<{
   outcome: ResearchCycleOutcomeV3
   report: string
-  symbolScreen: SymbolScreenResultV1
+  symbolScreen: SymbolScreenResultV2
   researchReport?: ResearchReportV6
   shadowRisks?: readonly ShadowRiskResultV1[]
 }>

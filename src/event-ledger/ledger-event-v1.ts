@@ -13,7 +13,10 @@ import {
   researchInvocationV1Schema,
   SUPPORTED_RESEARCH_INVOCATION_VERSIONS,
 } from "../research/invocation.js"
-import { symbolScreenResultV1Schema } from "../research/symbol-screen.js"
+import {
+  symbolScreenResultV1Schema,
+  symbolScreenResultV2Schema,
+} from "../research/symbol-screen.js"
 import { SCHEMA_VIOLATION_CATEGORIES } from "../shared/schema-diagnostics.js"
 import {
   riskBreakerTransitionV1Schema,
@@ -102,7 +105,7 @@ const payloadSchemas = {
     }),
   RESEARCH_SYMBOL_SCREEN_RECORDED: z
     .object({
-      screen: symbolScreenResultV1Schema,
+      screen: z.union([symbolScreenResultV1Schema, symbolScreenResultV2Schema]),
     })
     .strict(),
   EVIDENCE_SNAPSHOT_REFERENCED: z

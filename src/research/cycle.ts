@@ -38,7 +38,7 @@ import {
   type ResearchCycleTerminalResolution,
 } from "./cycle/terminal.js"
 import type { ResearchInvocationV1 } from "./invocation.js"
-import type { SymbolScreenResultV1 } from "./symbol-screen.js"
+import type { SymbolScreenResultV2 } from "./symbol-screen.js"
 
 export {
   PROPOSAL_EVIDENCE_PREFLIGHT_CONTEXT,
@@ -115,7 +115,7 @@ export type ProcessResearchCycleOptions = Readonly<{
   rawResponse: string
   cycleStartedAt: string
   optionUniverse: OptionUniverseSnapshotV2
-  symbolScreen: SymbolScreenResultV1
+  symbolScreen: SymbolScreenResultV2
   signal: AbortSignal
   quoteProvider: OptionQuoteProvider
   shadowRiskEvaluator: ShadowRiskEvaluator

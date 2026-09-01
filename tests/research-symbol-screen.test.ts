@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest"
 
 import type { OptionUniverseSnapshotV2 } from "../src/contracts/option-universe-v2.js"
+import type { OptionStrategy } from "../src/options/strategy.js"
 import {
-  screenOptionUniverseV1,
+  indexSymbolStrategyScreenV2,
+  screenOptionUniverseV2,
   symbolScreenResultV1Schema,
+  symbolScreenResultV2Schema,
+  type SymbolScreenResultV2,
 } from "../src/research/symbol-screen.js"
 
 const liquidity = {
@@ -28,9 +32,17 @@ const universe = (
   candidates,
 })
 
-describe("screenOptionUniverseV1", () => {
+const assessment = (
+  screen: SymbolScreenResultV2,
+  underlying: string,
+  strategy: OptionStrategy,
+) => screen.symbols
+  .find((symbol) => symbol.underlying === underlying)!
+  .strategies.find((candidate) => candidate.strategy === strategy)!
+
+describe("screenOptionUniverseV2", () => {
   it("maps qualified movers to supported directional debit spreads", () => {
-    const screen = screenOptionUniverseV1(universe([
+    const screen = screenOptionUniverseV2(universe([
       {
         rank: 1,
         underlying: "SPY",
@@ -48,32 +60,37 @@ describe("screenOptionUniverseV1", () => {
     ]))
 
     expect(screen).toMatchObject({
-      screenVersion: "1.0.0",
-      policyVersion: "1.0.0",
+      screenVersion: "2.0.0",
+      policyVersion: "2.0.0",
       mode: "SHADOW",
       evaluatedAt: "2026-08-26T14:30:00.000Z",
-      results: [
-        {
-          underlying: "SPY",
-          actionability: "ACTIONABLE",
-          direction: "BULLISH",
-          structure: "BULL_CALL_SPREAD",
-          reasonCodes: [],
-        },
-        {
-          underlying: "QQQ",
-          actionability: "ACTIONABLE",
-          direction: "BEARISH",
-          structure: "BEAR_PUT_SPREAD",
-          reasonCodes: [],
-        },
-      ],
+      symbols: [{ underlying: "SPY" }, { underlying: "QQQ" }],
     })
-    expect(symbolScreenResultV1Schema.parse(screen)).toEqual(screen)
+    expect(assessment(screen, "SPY", "BULL_CALL_SPREAD")).toEqual({
+      strategy: "BULL_CALL_SPREAD",
+      actionability: "ACTIONABLE",
+      reasonCodes: [],
+    })
+    expect(assessment(screen, "SPY", "BEAR_PUT_SPREAD")).toMatchObject({
+      actionability: "REJECTED",
+      reasonCodes: ["DIRECTION_MISMATCH"],
+    })
+    expect(assessment(screen, "QQQ", "BEAR_PUT_SPREAD")).toMatchObject({
+      actionability: "ACTIONABLE",
+      reasonCodes: [],
+    })
+    expect(assessment(screen, "QQQ", "LONG_PUT")).toMatchObject({
+      actionability: "UNAVAILABLE",
+      reasonCodes: ["APPLICATION_SUPPORT_PENDING"],
+    })
+    expect(
+      indexSymbolStrategyScreenV2(screen).get("SPY")?.get("BULL_CALL_SPREAD"),
+    ).toEqual(assessment(screen, "SPY", "BULL_CALL_SPREAD"))
+    expect(symbolScreenResultV2Schema.parse(screen)).toEqual(screen)
   })
 
   it("watches symbols without a sufficient directional move", () => {
-    const screen = screenOptionUniverseV1(universe([
+    const screen = screenOptionUniverseV2(universe([
       {
         rank: 1,
         underlying: "SPY",
@@ -87,22 +104,18 @@ describe("screenOptionUniverseV1", () => {
       },
     ]))
 
-    expect(screen.results).toMatchObject([
-      {
-        actionability: "WATCH",
-        direction: "NEUTRAL",
-        reasonCodes: ["SESSION_MOVE_UNAVAILABLE"],
-      },
-      {
-        actionability: "WATCH",
-        direction: "NEUTRAL",
-        reasonCodes: ["SESSION_MOVE_BELOW_THRESHOLD"],
-      },
-    ])
+    expect(assessment(screen, "SPY", "BULL_CALL_SPREAD")).toMatchObject({
+      actionability: "WATCH",
+      reasonCodes: ["SESSION_MOVE_UNAVAILABLE"],
+    })
+    expect(assessment(screen, "QQQ", "BEAR_PUT_SPREAD")).toMatchObject({
+      actionability: "WATCH",
+      reasonCodes: ["SESSION_MOVE_BELOW_THRESHOLD"],
+    })
   })
 
   it("rejects symbols whose application-owned liquidity evidence is unsafe", () => {
-    const screen = screenOptionUniverseV1(universe([
+    const screen = screenOptionUniverseV2(universe([
       {
         rank: 1,
         underlying: "SPY",
@@ -121,24 +134,28 @@ describe("screenOptionUniverseV1", () => {
       },
     ]))
 
-    expect(screen.results).toMatchObject([
-      {
-        actionability: "REJECTED",
-        direction: "NEUTRAL",
-        reasonCodes: ["OPTION_LIQUIDITY_UNAVAILABLE"],
-      },
-      {
-        actionability: "REJECTED",
-        direction: "NEUTRAL",
-        reasonCodes: [
-          "LIQUID_CONTRACT_COUNT_LOW",
-          "OPEN_INTEREST_LOW",
-          "OPEN_INTEREST_COVERAGE_LOW",
-        ],
-      },
-    ])
-    expect(screen.results.every(({ structure }) => structure === undefined)).toBe(
-      true,
-    )
+    expect(assessment(screen, "SPY", "BULL_CALL_SPREAD")).toMatchObject({
+      actionability: "REJECTED",
+      reasonCodes: ["OPTION_LIQUIDITY_UNAVAILABLE"],
+    })
+    expect(assessment(screen, "QQQ", "BEAR_PUT_SPREAD")).toMatchObject({
+      actionability: "REJECTED",
+      reasonCodes: [
+        "LIQUID_CONTRACT_COUNT_LOW",
+        "OPEN_INTEREST_LOW",
+        "OPEN_INTEREST_COVERAGE_LOW",
+      ],
+    })
+  })
+
+  it("retains V1 parsing only for persisted ledger screens", () => {
+    expect(symbolScreenResultV1Schema.safeParse({
+      screenVersion: "1.0.0",
+      policyVersion: "1.0.0",
+      mode: "SHADOW",
+      evaluatedAt: "2026-08-26T14:30:00.000Z",
+      universeSnapshotId: `option-universe-v2-${"a".repeat(64)}`,
+      results: [],
+    }).success).toBe(true)
   })
 })

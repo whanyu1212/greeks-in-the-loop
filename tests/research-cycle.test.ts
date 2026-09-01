@@ -12,7 +12,7 @@ import type {
 } from "../src/research/cycle/outcome.js"
 import { processResearchCycle } from "../src/research/cycle.js"
 import type { ResearchInvocationV1 } from "../src/research/invocation.js"
-import { screenOptionUniverseV1 } from "../src/research/symbol-screen.js"
+import { screenOptionUniverseV2 } from "../src/research/symbol-screen.js"
 
 const underlyings = ["SPY", "QQQ", "NVDA"] as const
 const observedAt = "2026-08-26T14:30:00.000Z"
@@ -391,7 +391,7 @@ const run = async (
     rawResponse: typeof report === "string" ? report : JSON.stringify(report),
     cycleStartedAt: "2026-08-26T14:28:00.000Z",
     optionUniverse: selectedUniverse,
-    symbolScreen: screenOptionUniverseV1(selectedUniverse),
+    symbolScreen: screenOptionUniverseV2(selectedUniverse),
     signal: new AbortController().signal,
     quoteProvider: options.quotes ?? quoteProvider,
     shadowRiskEvaluator: options.risk ?? approvedRisk,
@@ -417,15 +417,17 @@ describe("processResearchCycle", () => {
     expect(risk.evaluate).not.toHaveBeenCalled()
     expect(records).toHaveLength(1)
     expect(records[0]!.symbolScreen).toMatchObject({
-      screenVersion: "1.0.0",
-      policyVersion: "1.0.0",
+      screenVersion: "2.0.0",
+      policyVersion: "2.0.0",
       mode: "SHADOW",
       universeSnapshotId: optionUniverse.snapshotId,
-      results: underlyings.map((underlying) => ({
+      symbols: underlyings.map((underlying) => ({
         underlying,
-        actionability: "ACTIONABLE",
-        direction: "BULLISH",
-        structure: "BULL_CALL_SPREAD",
+        strategies: expect.arrayContaining([{
+          strategy: "BULL_CALL_SPREAD",
+          actionability: "ACTIONABLE",
+          reasonCodes: [],
+        }]),
       })),
     })
   })

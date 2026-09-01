@@ -63,7 +63,7 @@ import {
   processResearchCycle,
   repairResearchReportV6ResponseOnce,
 } from "./research/cycle.js"
-import { screenOptionUniverseV1 } from "./research/symbol-screen.js"
+import { screenOptionUniverseV2 } from "./research/symbol-screen.js"
 import { createAlpacaRiskStateProvider } from "./risk/alpaca-risk-state-provider.js"
 import {
   createLedgerDurableRiskControlStateLoader,
@@ -502,12 +502,14 @@ try {
                   ({ underlying }) => underlying,
                 ),
               })
-              const symbolScreen = screenOptionUniverseV1(optionUniverse)
+              const symbolScreen = screenOptionUniverseV2(optionUniverse)
               stageReporter.report("universe.screen", "COMPLETED", {
                 policyVersion: symbolScreen.policyVersion,
-                actionableUnderlyings: symbolScreen.results.flatMap((result) =>
-                  result.actionability === "ACTIONABLE"
-                    ? [result.underlying]
+                actionableUnderlyings: symbolScreen.symbols.flatMap((symbol) =>
+                  symbol.strategies.some(
+                      ({ actionability }) => actionability === "ACTIONABLE",
+                    )
+                    ? [symbol.underlying]
                     : [],
                 ),
               })

@@ -241,34 +241,58 @@ export function buildResearchRunPresentation(
 
   if (run.symbolScreen !== undefined) {
     lines.push("## Deterministic Symbol Screen", "")
+    const screenRows: readonly (readonly [string, string])[] =
+      run.symbolScreen.screenVersion === "1.0.0"
+        ? run.symbolScreen.results.flatMap((result) => {
+            const agentEvaluation = report?.analysis.symbolEvaluations.find(
+              ({ underlying }) => underlying === result.underlying,
+            )
+            return [
+              [`${result.underlying} actionability`, result.actionability],
+              [`${result.underlying} direction`, result.direction],
+              [`${result.underlying} structure`, result.structure ?? "NONE"],
+              [
+                `${result.underlying} reasons`,
+                result.reasonCodes.length === 0
+                  ? "NONE"
+                  : result.reasonCodes.join(", "),
+              ],
+              [
+                `${result.underlying} agent disposition`,
+                agentEvaluation?.disposition ?? "UNAVAILABLE",
+              ],
+              [
+                `${result.underlying} agent direction`,
+                agentEvaluation?.direction ?? "UNAVAILABLE",
+              ],
+            ] as const
+          })
+        : run.symbolScreen.symbols.flatMap((symbol) => {
+            const agentEvaluation = report?.analysis.symbolEvaluations.find(
+              ({ underlying }) => underlying === symbol.underlying,
+            )
+            return [
+              ...symbol.strategies.map((assessment) => [
+                `${symbol.underlying} ${assessment.strategy}`,
+                assessment.reasonCodes.length === 0
+                  ? assessment.actionability
+                  : `${assessment.actionability}: ${assessment.reasonCodes.join(", ")}`,
+              ] as const),
+              [
+                `${symbol.underlying} agent disposition`,
+                agentEvaluation?.disposition ?? "UNAVAILABLE",
+              ] as const,
+              [
+                `${symbol.underlying} agent direction`,
+                agentEvaluation?.direction ?? "UNAVAILABLE",
+              ] as const,
+            ]
+          })
     table(lines, [
       ["Mode", run.symbolScreen.mode],
       ["Policy version", run.symbolScreen.policyVersion],
       ["Evaluated", run.symbolScreen.evaluatedAt],
-      ...run.symbolScreen.results.flatMap((result) => {
-        const agentEvaluation = report?.analysis.symbolEvaluations.find(
-          ({ underlying }) => underlying === result.underlying,
-        )
-        return [
-          [`${result.underlying} actionability`, result.actionability] as const,
-          [`${result.underlying} direction`, result.direction] as const,
-          [`${result.underlying} structure`, result.structure ?? "NONE"] as const,
-          [
-            `${result.underlying} reasons`,
-            result.reasonCodes.length === 0
-              ? "NONE"
-              : result.reasonCodes.join(", "),
-          ] as const,
-          [
-            `${result.underlying} agent disposition`,
-            agentEvaluation?.disposition ?? "UNAVAILABLE",
-          ] as const,
-          [
-            `${result.underlying} agent direction`,
-            agentEvaluation?.direction ?? "UNAVAILABLE",
-          ] as const,
-        ]
-      }),
+      ...screenRows,
     ])
   }
 

@@ -16,19 +16,19 @@ import { createResearchLifecycleRecorder } from "../src/event-ledger/research-li
 import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
 import type { ResearchCycleTerminalRecordV3 } from "../src/research/cycle/outcome.js"
 import type { ResearchInvocationV1 } from "../src/research/invocation.js"
-import type { SymbolScreenResultV1 } from "../src/research/symbol-screen.js"
+import type { SymbolScreenResultV2 } from "../src/research/symbol-screen.js"
 
 const TIMESTAMP = "2026-08-26T10:00:00.000Z"
 const SNAPSHOT_REF = proposalQuoteSnapshotRef("SPY")
 const signal = new AbortController().signal
 
-const symbolScreen: SymbolScreenResultV1 = {
-  screenVersion: "1.0.0",
-  policyVersion: "1.0.0",
+const symbolScreen: SymbolScreenResultV2 = {
+  screenVersion: "2.0.0",
+  policyVersion: "2.0.0",
   mode: "SHADOW",
   evaluatedAt: TIMESTAMP,
   universeSnapshotId: `option-universe-v2-${"a".repeat(64)}`,
-  results: [],
+  symbols: [],
 }
 
 const researchInvocation: ResearchInvocationV1 = {
