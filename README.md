@@ -1,5 +1,7 @@
 # greeks-in-the-loop
 
+![Greeks in the Loop banner](assets/greeks-in-the-loop-banner-v3.png)
+
 A non-executing options research worker. One agent selects the best current opportunity from an application-generated option universe, researches it, and proposes at most one directional debit spread. Deterministic application code validates the proposal, refreshes financial inputs, and runs the risk gate.
 
 No order-submission code exists in this repository.
