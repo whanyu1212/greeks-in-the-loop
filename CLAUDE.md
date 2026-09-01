@@ -64,6 +64,10 @@ Current breaking contracts are `OptionUniverseSnapshotV2`, `ResearchDecisionV4`,
 
 Failures expose bounded reason codes, never raw model or provider input.
 
+## Backtest
+
+Replay `7.0.0` is the frozen historical V3 debit-spread model. Replay `8.0.0` evaluates V4 risk inputs and requires explicit natural close-premium marks, per-leg entry and exit slippage, commissions, stop/profit thresholds, minimum DTE, and maximum holding sessions. These assumptions are retained in output; missing exit prices make the aggregate incomplete rather than fabricating a fill.
+
 ## Dry run
 
 `--dry-run` requires `--once` and uses an isolated ledger. Current-session dry runs may reach shadow risk; historical sessions are research-only. Dry runs have no elapsed-time cycle deadline by default; set `AGENT_CYCLE_TIMEOUT_MS` to opt into one. Shutdown still cancels unbounded runs. Dry run never weakens validation, freshness, risk, or permissions.
