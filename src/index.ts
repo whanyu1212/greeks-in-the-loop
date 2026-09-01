@@ -206,7 +206,9 @@ if (maxBackoffMs / 2 < intervalMs) {
 if (maxBackoffMs > MAX_AGENT_LOOP_DELAY_MS) {
   throw new Error(`AGENT_MAX_BACKOFF_MS must not exceed ${MAX_AGENT_LOOP_DELAY_MS}`)
 }
-const cycleTimeoutMs = readPositiveInteger("AGENT_CYCLE_TIMEOUT_MS", 10 * 60 * 1000)
+const cycleTimeoutMs = dryRun && readSetting("AGENT_CYCLE_TIMEOUT_MS") === undefined
+  ? undefined
+  : readPositiveInteger("AGENT_CYCLE_TIMEOUT_MS", 10 * 60 * 1000)
 const cycleAbortTimeoutMs = readPositiveInteger("AGENT_CYCLE_ABORT_TIMEOUT_MS", 5_000)
 const maxCycles = once
   ? 1
@@ -334,10 +336,12 @@ try {
           "research.eligibility",
           async () => {
             const eligibilityEvaluatedAt = new Date()
-            const calendarSignal = AbortSignal.any([
-              abortController.signal,
-              AbortSignal.timeout(cycleTimeoutMs),
-            ])
+            const calendarSignal = cycleTimeoutMs === undefined
+              ? abortController.signal
+              : AbortSignal.any([
+                  abortController.signal,
+                  AbortSignal.timeout(cycleTimeoutMs),
+                ])
             const requestedSessionDate =
               agentOptions.sessionDate ?? newYorkDate(eligibilityEvaluatedAt)
             const session = await calendar.getSession(
@@ -488,7 +492,7 @@ try {
 
         try {
           const processed = await runWithCycleDeadline({
-            timeoutMs: cycleTimeoutMs,
+            ...(cycleTimeoutMs === undefined ? {} : { timeoutMs: cycleTimeoutMs }),
             shutdownSignal: abortController.signal,
             run: async (signal) => {
               stageReporter.report("universe.discover", "STARTED")

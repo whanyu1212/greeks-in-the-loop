@@ -65,7 +65,7 @@ Failures expose bounded reason codes, never raw model or provider input.
 
 ## Dry run
 
-`--dry-run` requires `--once` and uses an isolated ledger. Current-session dry runs may reach shadow risk; historical sessions are research-only. Dry run never weakens validation, freshness, risk, or permissions.
+`--dry-run` requires `--once` and uses an isolated ledger. Current-session dry runs may reach shadow risk; historical sessions are research-only. Dry runs have no elapsed-time cycle deadline by default; set `AGENT_CYCLE_TIMEOUT_MS` to opt into one. Shutdown still cancels unbounded runs. Dry run never weakens validation, freshness, risk, or permissions.
 
 ## Before changing rules
 
