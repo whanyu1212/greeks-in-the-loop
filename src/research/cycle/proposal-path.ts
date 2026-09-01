@@ -290,8 +290,10 @@ async function processOneProposal(
   signal.throwIfAborted()
   const quoteConfirmation = await trace.run("market.option_quotes.confirm", () =>
     quoteProvider.confirmQuotes({
-      longContractSymbol: proposal.candidate.longLeg.contractSymbol,
-      shortContractSymbol: proposal.candidate.shortLeg.contractSymbol,
+      contractSymbols: [
+        proposal.candidate.longLeg.contractSymbol,
+        proposal.candidate.shortLeg.contractSymbol,
+      ],
       signal,
     }),
   )
@@ -369,8 +371,14 @@ async function processOneProposal(
     deriveIntent(proposal, {
       quoteSnapshotRef: snapshotRef,
       evaluatedAt: quoteConfirmation.snapshot.evaluatedAt,
-      longQuote: quoteConfirmation.snapshot.longQuote,
-      shortQuote: quoteConfirmation.snapshot.shortQuote,
+      longQuote: quoteConfirmation.snapshot.quotes.find(
+        ({ contractSymbol }) =>
+          contractSymbol === proposal.candidate.longLeg.contractSymbol,
+      )!,
+      shortQuote: quoteConfirmation.snapshot.quotes.find(
+        ({ contractSymbol }) =>
+          contractSymbol === proposal.candidate.shortLeg.contractSymbol,
+      )!,
     }),
   )
   if (!derivation.success) {

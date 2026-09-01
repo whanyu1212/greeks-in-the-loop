@@ -26,6 +26,7 @@ const account = {
   options_approved_level: 3,
   options_trading_level: 3,
   buying_power: "100000.00",
+  cash: "75000.00",
   equity: "100000.00",
   last_equity: "100000.00",
 }
@@ -93,8 +94,23 @@ const closingOrder = (overrides: Record<string, unknown> = {}) =>
 const input = {
   sessionDate,
   slotStartedAt: "2026-08-27T14:30:00.000Z",
-  longContractSymbol: longSymbol,
-  shortContractSymbol: shortSymbol,
+  entryPlan: {
+    capabilityVersion: "2.0.0",
+    strategy: "BULL_CALL_SPREAD",
+    underlying: "SPY",
+    legs: [
+      {
+        contractSymbol: longSymbol,
+        positionIntent: "BUY_TO_OPEN",
+        ratioQuantity: 1,
+      },
+      {
+        contractSymbol: shortSymbol,
+        positionIntent: "SELL_TO_OPEN",
+        ratioQuantity: 1,
+      },
+    ],
+  },
   durableControl: {
     stateVersion: DURABLE_RISK_CONTROL_STATE_VERSION,
     tradingDate: sessionDate,
@@ -111,9 +127,11 @@ const router = (overrides: Readonly<{
   openOrders?: (call: number, url: URL) => unknown
   history?: unknown | ((call: number, url: URL) => unknown)
   snapshots?: unknown
+  contractSymbols?: readonly string[]
   clock?: unknown
   clockStatus?: number
 }> = {}) => {
+  const expectedContractSymbols = overrides.contractSymbols ?? [longSymbol, shortSymbol]
   let positionsCall = 0
   let openOrdersCall = 0
   let historyCall = 0
@@ -138,14 +156,15 @@ const router = (overrides: Readonly<{
           : overrides.history ?? [],
       )
     }
-    if (url.pathname === `/v2/options/contracts/${longSymbol}`) {
-      return response(contract(longSymbol))
-    }
-    if (url.pathname === `/v2/options/contracts/${shortSymbol}`) {
-      return response(contract(shortSymbol))
+    const contractPrefix = "/v2/options/contracts/"
+    if (url.pathname.startsWith(contractPrefix)) {
+      const symbol = decodeURIComponent(url.pathname.slice(contractPrefix.length))
+      return expectedContractSymbols.includes(symbol)
+        ? response(contract(symbol))
+        : response({}, 404)
     }
     if (url.pathname === "/v1beta1/options/snapshots") {
-      expect(url.searchParams.get("symbols")).toBe(`${longSymbol},${shortSymbol}`)
+      expect(url.searchParams.get("symbols")).toBe(expectedContractSymbols.join(","))
       expect(url.searchParams.get("feed")).toBe("indicative")
       return response(overrides.snapshots ?? snapshots)
     }
@@ -200,7 +219,10 @@ describe("Alpaca risk-state provider", () => {
         status: "ACTIVE",
         tradingRestricted: false,
         multilegOptionsApproved: true,
+        optionsApprovedLevel: 3,
+        optionsTradingLevel: 3,
         buyingPowerCents: 10_000_000,
+        cashCents: 7_500_000,
       },
       portfolio: {
         observedAt: evaluatedAt.toISOString(),
@@ -210,9 +232,29 @@ describe("Alpaca risk-state provider", () => {
         slotStartedAt: input.slotStartedAt,
         observedAt: evaluatedAt.toISOString(),
         legs: [
-          { role: "LONG", volume: 250, volumeDate: sessionDate },
-          { role: "SHORT", volume: 250, volumeDate: sessionDate },
+          {
+            positionIntent: "BUY_TO_OPEN",
+            ratioQuantity: 1,
+            volume: 250,
+            volumeDate: sessionDate,
+          },
+          {
+            positionIntent: "SELL_TO_OPEN",
+            ratioQuantity: 1,
+            volume: 250,
+            volumeDate: sessionDate,
+          },
         ],
+      },
+      positions: [],
+      candidateCollateral: {
+        underlying: "SPY",
+        longUnderlyingShares: 0,
+        cashAvailableCents: 7_500_000,
+        requiredLongSharesPerUnit: 0,
+        requiredCashCentsPerUnit: 0,
+        maxUnitsFromShares: null,
+        maxUnitsFromCash: null,
       },
       reconciliationReasonCodes: [],
     })
@@ -225,6 +267,114 @@ describe("Alpaca risk-state provider", () => {
         "APCA-API-SECRET-KEY": "test-secret",
       })
     }
+  })
+
+  it("captures ordered metrics for a four-leg entry plan", async () => {
+    const contractSymbols = [
+      "SPY260918P00590000",
+      "SPY260918P00595000",
+      "SPY260918C00605000",
+      "SPY260918C00610000",
+    ] as const
+    const result = await provider(router({
+      contractSymbols,
+      snapshots: {
+        snapshots: Object.fromEntries(contractSymbols.map((symbol, index) => [
+          symbol,
+          optionSnapshot(index / 10),
+        ])),
+      },
+    })).capture({
+      ...input,
+      entryPlan: {
+        capabilityVersion: "2.0.0",
+        strategy: "IRON_CONDOR",
+        underlying: "SPY",
+        legs: [
+          { contractSymbol: contractSymbols[0], positionIntent: "BUY_TO_OPEN", ratioQuantity: 1 },
+          { contractSymbol: contractSymbols[1], positionIntent: "SELL_TO_OPEN", ratioQuantity: 1 },
+          { contractSymbol: contractSymbols[2], positionIntent: "SELL_TO_OPEN", ratioQuantity: 1 },
+          { contractSymbol: contractSymbols[3], positionIntent: "BUY_TO_OPEN", ratioQuantity: 1 },
+        ],
+      },
+    })
+
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.snapshot.quoteSnapshot.quotes.map(({ contractSymbol }) => contractSymbol))
+      .toEqual(contractSymbols)
+    expect(result.snapshot.contracts.legs.map(({ contractSymbol }) => contractSymbol))
+      .toEqual(contractSymbols)
+  })
+
+  it("derives covered-call capacity from normalized underlying shares", async () => {
+    const result = await provider(router({
+      contractSymbols: [shortSymbol],
+      snapshots: { snapshots: { [shortSymbol]: optionSnapshot(0.3) } },
+      positions: () => [{
+        asset_class: "us_equity",
+        symbol: "SPY",
+        qty: "250",
+        side: "long",
+      }],
+    })).capture({
+      ...input,
+      entryPlan: {
+        capabilityVersion: "2.0.0",
+        strategy: "COVERED_CALL",
+        underlying: "SPY",
+        legs: [{
+          contractSymbol: shortSymbol,
+          positionIntent: "SELL_TO_OPEN",
+          ratioQuantity: 1,
+        }],
+      },
+    })
+
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.snapshot.positions).toEqual([{
+      assetClass: "us_equity",
+      symbol: "SPY",
+      signedQuantity: 250,
+    }])
+    expect(result.snapshot.candidateCollateral).toMatchObject({
+      longUnderlyingShares: 250,
+      requiredLongSharesPerUnit: 100,
+      maxUnitsFromShares: 2,
+      requiredCashCentsPerUnit: 0,
+      maxUnitsFromCash: null,
+    })
+  })
+
+  it("derives cash-secured-put capacity from exact cash and strike", async () => {
+    const putSymbol = "SPY260918P00600000"
+    const result = await provider(router({
+      contractSymbols: [putSymbol],
+      snapshots: { snapshots: { [putSymbol]: optionSnapshot(-0.3) } },
+    })).capture({
+      ...input,
+      entryPlan: {
+        capabilityVersion: "2.0.0",
+        strategy: "CASH_SECURED_PUT",
+        underlying: "SPY",
+        legs: [{
+          contractSymbol: putSymbol,
+          positionIntent: "SELL_TO_OPEN",
+          ratioQuantity: 1,
+        }],
+      },
+    })
+
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.snapshot.candidateCollateral).toMatchObject({
+      cashAvailableCents: 7_500_000,
+      requiredLongSharesPerUnit: 0,
+      maxUnitsFromShares: null,
+      requiredCashCentsPerUnit: 6_000_000,
+      maxUnitsFromCash: 1,
+    })
   })
 
   it("verifies a fresh open Alpaca clock after all other broker reads", async () => {
@@ -690,7 +840,13 @@ describe("Alpaca risk-state provider", () => {
     const fetchImplementation = router()
     const result = await provider(fetchImplementation).capture({
       ...input,
-      shortContractSymbol: longSymbol,
+      entryPlan: {
+        ...input.entryPlan,
+        legs: [input.entryPlan.legs[0], {
+          ...input.entryPlan.legs[1],
+          contractSymbol: longSymbol,
+        }],
+      },
     })
     expect(result).toEqual({
       success: false,
@@ -710,7 +866,13 @@ describe("Alpaca risk-state provider", () => {
       const fetchImplementation = router()
       const result = await provider(fetchImplementation).capture({
         ...input,
-        longContractSymbol,
+        entryPlan: {
+          ...input.entryPlan,
+          legs: [{
+            ...input.entryPlan.legs[0],
+            contractSymbol: longContractSymbol,
+          }, input.entryPlan.legs[1]],
+        },
       })
 
       expect(result).toEqual({

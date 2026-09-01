@@ -97,6 +97,27 @@ export const riskContractLegV1Schema = z
   })
   .strict()
 
+export const riskContractLegV2Schema = z
+  .object({
+    contractSymbol,
+    positionIntent: z.enum(["BUY_TO_OPEN", "SELL_TO_OPEN"]),
+    ratioQuantity: positiveSafeInteger,
+    active: z.boolean(),
+    tradable: z.boolean(),
+    exerciseStyle: z.enum(["AMERICAN", "EUROPEAN", "UNKNOWN"]),
+    multiplier: positiveSafeInteger,
+    delta: z.number().finite(),
+    impliedVolatility: z.number().finite(),
+    gamma: z.number().finite(),
+    theta: z.number().finite(),
+    vega: z.number().finite(),
+    volume: count,
+    volumeDate: z.iso.date(),
+    openInterest: count,
+    openInterestDate: z.iso.date(),
+  })
+  .strict()
+
 export const applicationVerifiedAccountV1Schema = z
   .object({
     observedAt: timestamp,
@@ -140,8 +161,32 @@ export const contractSnapshotV1Schema = z
     }
   })
 
+export const contractSnapshotV2Schema = z
+  .object({
+    snapshotVersion: z.literal("2.0.0"),
+    slotStartedAt: timestamp,
+    observedAt: timestamp,
+    legs: z.array(riskContractLegV2Schema).min(1).max(4),
+  })
+  .strict()
+  .superRefine((snapshot, refinement) => {
+    if (
+      new Set(snapshot.legs.map(({ contractSymbol }) => contractSymbol)).size !==
+        snapshot.legs.length
+    ) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["legs"],
+        message: "Contract snapshot legs must be unique",
+      })
+    }
+  })
+
 export type RiskContractLegV1 = Readonly<
   z.infer<typeof riskContractLegV1Schema>
+>
+export type RiskContractLegV2 = Readonly<
+  z.infer<typeof riskContractLegV2Schema>
 >
 export type ApplicationVerifiedAccountV1 = Readonly<
   z.infer<typeof applicationVerifiedAccountV1Schema>
@@ -151,6 +196,11 @@ export type ReconciledPortfolioV1 = Readonly<
 >
 export type ContractSnapshotV1 = Readonly<
   z.infer<typeof contractSnapshotV1Schema>
+>
+export type ContractSnapshotV2 = Readonly<
+  Omit<z.infer<typeof contractSnapshotV2Schema>, "legs"> & {
+    legs: readonly RiskContractLegV2[]
+  }
 >
 
 export const riskEvaluationInputV1Schema = z

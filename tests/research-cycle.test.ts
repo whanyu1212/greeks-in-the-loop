@@ -330,10 +330,12 @@ const noActionReport = () => ({
 })
 
 const quoteProvider: OptionQuoteProvider = {
-  async confirmQuotes({ longContractSymbol, shortContractSymbol }) {
+  async confirmQuotes({ contractSymbols }) {
+    const [longContractSymbol, shortContractSymbol] = contractSymbols
     return {
       success: true,
       snapshot: {
+        snapshotVersion: "2.0.0",
         evaluatedAt: "2026-08-26T14:30:40.000Z",
         snapshotMetadata: {
           provider: "ALPACA",
@@ -341,20 +343,22 @@ const quoteProvider: OptionQuoteProvider = {
           retrievedAt: "2026-08-26T14:30:40.000Z",
           freshUntil: "2026-08-26T14:31:40.000Z",
         },
-        longQuote: {
-          contractSymbol: longContractSymbol,
-          feed: "INDICATIVE",
-          bidCentsPerShare: 300,
-          askCentsPerShare: 310,
-          providerTimestamp: "2026-08-26T14:30:35.000000000Z",
-        },
-        shortQuote: {
-          contractSymbol: shortContractSymbol,
-          feed: "INDICATIVE",
-          bidCentsPerShare: 100,
-          askCentsPerShare: 110,
-          providerTimestamp: "2026-08-26T14:30:35.000000000Z",
-        },
+        quotes: [
+          {
+            contractSymbol: longContractSymbol!,
+            feed: "INDICATIVE",
+            bidCentsPerShare: 300,
+            askCentsPerShare: 310,
+            providerTimestamp: "2026-08-26T14:30:35.000000000Z",
+          },
+          {
+            contractSymbol: shortContractSymbol!,
+            feed: "INDICATIVE",
+            bidCentsPerShare: 100,
+            askCentsPerShare: 110,
+            providerTimestamp: "2026-08-26T14:30:35.000000000Z",
+          },
+        ],
       },
     }
   },
@@ -496,11 +500,13 @@ describe("processResearchCycle", () => {
   it("selects the best refreshed execution quality instead of agent priority", async () => {
     const quotes: OptionQuoteProvider = {
       async confirmQuotes(input) {
-        const underlying = input.longContractSymbol.slice(0, -15)
+        const [longContractSymbol, shortContractSymbol] = input.contractSymbols
+        const underlying = longContractSymbol!.slice(0, -15)
         const quoteWidth = underlying === "QQQ" ? 5 : underlying === "NVDA" ? 10 : 20
         return {
           success: true,
           snapshot: {
+            snapshotVersion: "2.0.0",
             evaluatedAt: "2026-08-26T14:30:40.000Z",
             snapshotMetadata: {
               provider: "ALPACA",
@@ -508,20 +514,22 @@ describe("processResearchCycle", () => {
               retrievedAt: "2026-08-26T14:30:40.000Z",
               freshUntil: "2026-08-26T14:31:40.000Z",
             },
-            longQuote: {
-              contractSymbol: input.longContractSymbol,
-              feed: "INDICATIVE",
-              bidCentsPerShare: 300,
-              askCentsPerShare: 300 + quoteWidth,
-              providerTimestamp: "2026-08-26T14:30:35.000000000Z",
-            },
-            shortQuote: {
-              contractSymbol: input.shortContractSymbol,
-              feed: "INDICATIVE",
-              bidCentsPerShare: 100,
-              askCentsPerShare: 100 + quoteWidth,
-              providerTimestamp: "2026-08-26T14:30:35.000000000Z",
-            },
+            quotes: [
+              {
+                contractSymbol: longContractSymbol!,
+                feed: "INDICATIVE",
+                bidCentsPerShare: 300,
+                askCentsPerShare: 300 + quoteWidth,
+                providerTimestamp: "2026-08-26T14:30:35.000000000Z",
+              },
+              {
+                contractSymbol: shortContractSymbol!,
+                feed: "INDICATIVE",
+                bidCentsPerShare: 100,
+                askCentsPerShare: 100 + quoteWidth,
+                providerTimestamp: "2026-08-26T14:30:35.000000000Z",
+              },
+            ],
           },
         }
       },
@@ -565,7 +573,7 @@ describe("processResearchCycle", () => {
   it("keeps a failed quote as a per-symbol disposition and continues", async () => {
     const quotes: OptionQuoteProvider = {
       confirmQuotes: vi.fn(async (input) =>
-        input.longContractSymbol.startsWith("QQQ")
+        input.contractSymbols[0]?.startsWith("QQQ")
           ? { success: false as const, reasons: ["QUOTE_REQUEST_FAILED" as const] }
           : quoteProvider.confirmQuotes(input)
       ),

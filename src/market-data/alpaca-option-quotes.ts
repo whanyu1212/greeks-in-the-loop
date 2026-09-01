@@ -6,6 +6,7 @@ import type {
 import type {
   EvidenceSnapshotMetadata,
 } from "../contracts/research-decision-v3.js"
+import { ALPACA_MAX_OPTION_ORDER_LEGS } from "../options/alpaca-capabilities.js"
 import {
   parseAlpacaOptionSymbol,
 } from "../shared/alpaca-option-identity.js"
@@ -49,6 +50,14 @@ export type OptionQuoteConfirmationFailureCode =
   | "QUOTE_STALE"
   | "EVALUATION_TIME_INVALID"
 
+export type ConfirmedOptionQuoteSnapshotV2 = Readonly<{
+  snapshotVersion: "2.0.0"
+  evaluatedAt: string
+  snapshotMetadata: EvidenceSnapshotMetadata
+  quotes: readonly ConfirmedOptionQuoteV2[]
+}>
+
+/** Legacy two-leg snapshot retained for stored V1 state compatibility. */
 export type ConfirmedOptionQuoteSnapshotV1 = Readonly<{
   evaluatedAt: string
   snapshotMetadata: EvidenceSnapshotMetadata
@@ -56,26 +65,25 @@ export type ConfirmedOptionQuoteSnapshotV1 = Readonly<{
   shortQuote: ConfirmedOptionQuoteV2
 }>
 
-export type OptionQuoteConfirmationResult =
+export type OptionQuoteConfirmationResultV2 =
   | {
       success: true
-      snapshot: ConfirmedOptionQuoteSnapshotV1
+      snapshot: ConfirmedOptionQuoteSnapshotV2
     }
   | {
       success: false
       reasons: readonly OptionQuoteConfirmationFailureCode[]
     }
 
-export type ConfirmOptionQuotesInput = Readonly<{
-  longContractSymbol: string
-  shortContractSymbol: string
+export type ConfirmOptionQuotesInputV2 = Readonly<{
+  contractSymbols: readonly string[]
   signal: AbortSignal
 }>
 
 export type OptionQuoteProvider = Readonly<{
   confirmQuotes(
-    input: ConfirmOptionQuotesInput,
-  ): Promise<OptionQuoteConfirmationResult>
+    input: ConfirmOptionQuotesInputV2,
+  ): Promise<OptionQuoteConfirmationResultV2>
 }>
 
 export type AlpacaOptionQuoteProviderOptions = Readonly<{
@@ -88,7 +96,7 @@ export type AlpacaOptionQuoteProviderOptions = Readonly<{
 
 const failure = (
   reason: OptionQuoteConfirmationFailureCode,
-): OptionQuoteConfirmationResult => ({
+): OptionQuoteConfirmationResultV2 => ({
   success: false,
   reasons: [reason],
 })
@@ -187,7 +195,7 @@ export const normalizeAlpacaOptionQuote = (
 /**
  * Creates a read-only Alpaca indicative option-quote provider.
  *
- * The adapter performs one GET request for both exact proposed symbols. It has
+ * The adapter performs one GET request for the exact proposed symbols. It has
  * no broker-trading methods and never includes provider response bodies or
  * credentials in returned failures.
  *
@@ -206,16 +214,18 @@ export function createAlpacaOptionQuoteProvider(
 
   return {
     async confirmQuotes({
-      longContractSymbol,
-      shortContractSymbol,
+      contractSymbols,
       signal,
-    }): Promise<OptionQuoteConfirmationResult> {
-      const longIdentity = parseAlpacaOptionSymbol(longContractSymbol)
-      const shortIdentity = parseAlpacaOptionSymbol(shortContractSymbol)
+    }): Promise<OptionQuoteConfirmationResultV2> {
+      const identities = contractSymbols.map(parseAlpacaOptionSymbol)
       if (
-        !longIdentity.success ||
-        !shortIdentity.success ||
-        longIdentity.identity.root !== shortIdentity.identity.root
+        contractSymbols.length < 1 ||
+        contractSymbols.length > ALPACA_MAX_OPTION_ORDER_LEGS ||
+        new Set(contractSymbols).size !== contractSymbols.length ||
+        identities.some((identity) => !identity.success) ||
+        new Set(identities.flatMap((identity) =>
+          identity.success ? [identity.identity.root] : []
+        )).size !== 1
       ) {
         return failure("QUOTE_SYMBOL_MISSING")
       }
@@ -223,7 +233,7 @@ export function createAlpacaOptionQuoteProvider(
       const url = new URL("/v1beta1/options/snapshots", baseUrl)
       url.searchParams.set(
         "symbols",
-        `${longContractSymbol},${shortContractSymbol}`,
+        contractSymbols.join(","),
       )
       url.searchParams.set("feed", "indicative")
 
@@ -258,18 +268,9 @@ export function createAlpacaOptionQuoteProvider(
       const parsedResponse = snapshotsResponseSchema.safeParse(rawResponse)
       if (!parsedResponse.success) return failure("QUOTE_RESPONSE_INVALID")
 
-      if (
-        !Object.hasOwn(parsedResponse.data.snapshots, longContractSymbol) ||
-        !Object.hasOwn(parsedResponse.data.snapshots, shortContractSymbol)
-      ) {
-        return failure("QUOTE_SYMBOL_MISSING")
-      }
-
-      const longSnapshot =
-        parsedResponse.data.snapshots[longContractSymbol]
-      const shortSnapshot =
-        parsedResponse.data.snapshots[shortContractSymbol]
-      if (longSnapshot === undefined || shortSnapshot === undefined) {
+      if (contractSymbols.some((symbol) =>
+        !Object.hasOwn(parsedResponse.data.snapshots, symbol)
+      )) {
         return failure("QUOTE_SYMBOL_MISSING")
       }
 
@@ -282,28 +283,34 @@ export function createAlpacaOptionQuoteProvider(
       const evaluatedAt = evaluatedAtDate.toISOString()
       const evaluatedAtNanoseconds =
         BigInt(evaluatedAtMilliseconds) * 1_000_000n
-      const longQuote = normalizeAlpacaOptionQuote(
-        longContractSymbol,
-        longSnapshot.latestQuote,
-        evaluatedAtNanoseconds,
+      const normalized = contractSymbols.map((contractSymbol) => {
+        const snapshot = parsedResponse.data.snapshots[contractSymbol]
+        return snapshot === undefined
+          ? { success: false as const, reason: "QUOTE_SYMBOL_MISSING" as const }
+          : normalizeAlpacaOptionQuote(
+              contractSymbol,
+              snapshot.latestQuote,
+              evaluatedAtNanoseconds,
+            )
+      })
+      const rejected = normalized.find((quote) => !quote.success)
+      if (rejected !== undefined) return failure(rejected.reason)
+      const confirmed = normalized.filter(
+        (quote): quote is Extract<(typeof normalized)[number], { success: true }> =>
+          quote.success,
       )
-      if (!longQuote.success) return failure(longQuote.reason)
-
-      const shortQuote = normalizeAlpacaOptionQuote(
-        shortContractSymbol,
-        shortSnapshot.latestQuote,
-        evaluatedAtNanoseconds,
+      const freshUntilNanoseconds = confirmed.reduce(
+        (earliest, quote) =>
+          quote.freshUntilNanoseconds < earliest
+            ? quote.freshUntilNanoseconds
+            : earliest,
+        confirmed[0]!.freshUntilNanoseconds,
       )
-      if (!shortQuote.success) return failure(shortQuote.reason)
-
-      const freshUntilNanoseconds =
-        longQuote.freshUntilNanoseconds < shortQuote.freshUntilNanoseconds
-          ? longQuote.freshUntilNanoseconds
-          : shortQuote.freshUntilNanoseconds
 
       return {
         success: true,
         snapshot: {
+          snapshotVersion: "2.0.0",
           evaluatedAt,
           snapshotMetadata: {
             provider: "ALPACA",
@@ -312,8 +319,7 @@ export function createAlpacaOptionQuoteProvider(
             freshUntil:
               floorNanosecondsToIsoMilliseconds(freshUntilNanoseconds),
           },
-          longQuote: longQuote.quote,
-          shortQuote: shortQuote.quote,
+          quotes: confirmed.map(({ quote }) => quote),
         },
       }
     },

@@ -1,6 +1,9 @@
 import { z } from "zod"
 
-import type { ConfirmedOptionQuoteSnapshotV1 } from "../market-data/alpaca-option-quotes.js"
+import type {
+  ConfirmedOptionQuoteSnapshotV1,
+  ConfirmedOptionQuoteSnapshotV2,
+} from "../market-data/alpaca-option-quotes.js"
 import {
   alpacaOptionSymbolSchema,
   parseAlpacaOptionSymbol,
@@ -10,6 +13,7 @@ import {
   reconciledPortfolioV1Schema,
   type ApplicationVerifiedAccountV1,
   type ContractSnapshotV1,
+  type ContractSnapshotV2,
   type ReconciledPortfolioV1,
 } from "./risk-evaluation-v1.js"
 
@@ -30,6 +34,12 @@ const positiveProviderNumber = z
   .max(Number.MAX_SAFE_INTEGER)
 const brokerIdentifier = z.string().min(1).max(128)
 const optionSymbol = alpacaOptionSymbolSchema
+const safeCents = z
+  .number()
+  .int()
+  .min(Number.MIN_SAFE_INTEGER)
+  .max(Number.MAX_SAFE_INTEGER)
+const nonnegativeSafeCents = safeCents.nonnegative()
 
 export const durableRiskControlStateV1Schema = z
   .object({
@@ -50,6 +60,46 @@ export const normalizedBrokerPositionV1Schema = z
     assetClass: z.string().min(1).max(64),
     symbol: z.string().min(1).max(64),
     signedQuantity: finiteProviderNumber,
+  })
+  .strict()
+
+export const applicationVerifiedAccountV2Schema = z
+  .object({
+    snapshotVersion: z.literal("2.0.0"),
+    observedAt: timestamp,
+    status: z.enum(["ACTIVE", "INACTIVE", "UNKNOWN"]),
+    tradingRestricted: z.boolean(),
+    optionsApprovedLevel: boundedCount,
+    optionsTradingLevel: boundedCount,
+    multilegOptionsApproved: z.boolean(),
+    buyingPowerCents: nonnegativeSafeCents,
+    cashCents: safeCents,
+    equityCents: nonnegativeSafeCents,
+    lastEquityCents: nonnegativeSafeCents,
+  })
+  .strict()
+  .superRefine((account, refinement) => {
+    if (
+      account.multilegOptionsApproved !==
+        (account.optionsApprovedLevel >= 3 && account.optionsTradingLevel >= 3)
+    ) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["multilegOptionsApproved"],
+        message: "Multileg approval must match the captured Alpaca levels",
+      })
+    }
+  })
+
+export const candidateCollateralV1Schema = z
+  .object({
+    underlying: z.string().min(1).max(12),
+    longUnderlyingShares: z.number().finite().nonnegative(),
+    cashAvailableCents: nonnegativeSafeCents,
+    requiredLongSharesPerUnit: boundedCount,
+    requiredCashCentsPerUnit: nonnegativeSafeCents,
+    maxUnitsFromShares: boundedCount.nullable(),
+    maxUnitsFromCash: boundedCount.nullable(),
   })
   .strict()
 
@@ -91,6 +141,12 @@ export const normalizedBrokerOrderV1Schema = z
 
 export type NormalizedBrokerPositionV1 = Readonly<
   z.infer<typeof normalizedBrokerPositionV1Schema>
+>
+export type ApplicationVerifiedAccountV2 = Readonly<
+  z.infer<typeof applicationVerifiedAccountV2Schema>
+>
+export type CandidateCollateralV1 = Readonly<
+  z.infer<typeof candidateCollateralV1Schema>
 >
 export type NormalizedBrokerOrderV1 = Readonly<
   z.infer<typeof normalizedBrokerOrderV1Schema>
@@ -366,5 +422,17 @@ export type ApplicationRiskStateSnapshotV1 = Readonly<{
   account: ApplicationVerifiedAccountV1
   portfolio: ReconciledPortfolioV1
   contracts: ContractSnapshotV1
+  reconciliationReasonCodes: readonly RiskReconciliationReasonCode[]
+}>
+
+export type ApplicationRiskStateSnapshotV2 = Readonly<{
+  snapshotVersion: "2.0.0"
+  evaluatedAt: string
+  quoteSnapshot: ConfirmedOptionQuoteSnapshotV2
+  account: ApplicationVerifiedAccountV2
+  positions: readonly NormalizedBrokerPositionV1[]
+  candidateCollateral: CandidateCollateralV1
+  portfolio: ReconciledPortfolioV1
+  contracts: ContractSnapshotV2
   reconciliationReasonCodes: readonly RiskReconciliationReasonCode[]
 }>

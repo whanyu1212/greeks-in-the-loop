@@ -5,6 +5,7 @@ import {
 } from "../contracts/trade-intent-v3.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import { LedgerPersistenceError } from "../event-ledger/research-lifecycle-recorder.js"
+import { ALPACA_OPTION_ORDER_CAPABILITY_VERSION } from "../options/alpaca-capabilities.js"
 import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
 import {
   NOOP_TERMINAL_STAGE_REPORTER,
@@ -185,8 +186,23 @@ export function createShadowRiskEvaluator(options: Readonly<{
       const capture = await options.provider.capture({
         sessionDate,
         slotStartedAt: tradeIntentWindow.slotStartedAt,
-        longContractSymbol: input.sourceIntent.longContractSymbol,
-        shortContractSymbol: input.sourceIntent.shortContractSymbol,
+        entryPlan: {
+          capabilityVersion: ALPACA_OPTION_ORDER_CAPABILITY_VERSION,
+          strategy: input.sourceIntent.structure,
+          underlying: input.sourceIntent.underlying,
+          legs: [
+            {
+              contractSymbol: input.sourceIntent.longContractSymbol,
+              positionIntent: "BUY_TO_OPEN",
+              ratioQuantity: 1,
+            },
+            {
+              contractSymbol: input.sourceIntent.shortContractSymbol,
+              positionIntent: "SELL_TO_OPEN",
+              ratioQuantity: 1,
+            },
+          ],
+        },
         durableControl,
         signal: input.signal,
       })
@@ -223,11 +239,34 @@ export function createShadowRiskEvaluator(options: Readonly<{
         durableControl,
         capture.snapshot.portfolio,
       )
+      const quoteBySymbol = new Map(
+        capture.snapshot.quoteSnapshot.quotes.map((quote) => [
+          quote.contractSymbol,
+          quote,
+        ]),
+      )
+      const longQuote = quoteBySymbol.get(input.sourceIntent.longContractSymbol)
+      const shortQuote = quoteBySymbol.get(input.sourceIntent.shortContractSymbol)
+      if (longQuote === undefined || shortQuote === undefined) {
+        return {
+          decision: shadowRiskDecisionV1Schema.parse({
+            decisionVersion: SHADOW_RISK_DECISION_VERSION,
+            mode: "SHADOW",
+            evaluationVersion: RISK_EVALUATION_VERSION,
+            ruleVersion: RISK_RULE_VERSION,
+            stage: "STATE_CAPTURE_FAILED",
+            outcome: "REJECTED",
+            evaluatedAt: capture.snapshot.evaluatedAt,
+            captureReasonCodes: ["OPTION_SNAPSHOT_RESPONSE_INVALID"],
+          }),
+          breakerTransitions,
+        }
+      }
       const refreshed = deriveIntent(input.decision, {
         quoteSnapshotRef: SHADOW_RISK_QUOTE_SNAPSHOT_REF,
         evaluatedAt: capture.snapshot.evaluatedAt,
-        longQuote: capture.snapshot.quoteSnapshot.longQuote,
-        shortQuote: capture.snapshot.quoteSnapshot.shortQuote,
+        longQuote,
+        shortQuote,
       })
       input.signal.throwIfAborted()
       if (!refreshed.success) {
@@ -256,14 +295,33 @@ export function createShadowRiskEvaluator(options: Readonly<{
         maxLossCentsPerContract: refreshed.intent.maxLossCentsPerContract,
       })
 
+      const contracts = {
+        slotStartedAt: capture.snapshot.contracts.slotStartedAt,
+        observedAt: capture.snapshot.contracts.observedAt,
+        legs: capture.snapshot.contracts.legs.map(
+          ({ positionIntent, ratioQuantity: _ratioQuantity, ...leg }) => ({
+            ...leg,
+            role: positionIntent === "BUY_TO_OPEN"
+              ? "LONG" as const
+              : "SHORT" as const,
+          }),
+        ),
+      }
+      const {
+        snapshotVersion: _accountSnapshotVersion,
+        optionsApprovedLevel: _optionsApprovedLevel,
+        optionsTradingLevel: _optionsTradingLevel,
+        cashCents: _cashCents,
+        ...account
+      } = capture.snapshot.account
       const evaluation = evaluateRisk({
         intent: refreshed.intent,
         context: {
           provenance: "APPLICATION_VERIFIED",
           eligibility: input.getEvaluationEligibility(),
-          account: capture.snapshot.account,
+          account,
           portfolio: capture.snapshot.portfolio,
-          contracts: capture.snapshot.contracts,
+          contracts,
         },
       })
       return {

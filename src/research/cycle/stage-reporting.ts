@@ -7,7 +7,7 @@ import type {
   TradeIntentV3,
 } from "../../contracts/trade-intent-v3.js"
 import type {
-  ConfirmedOptionQuoteSnapshotV1,
+  ConfirmedOptionQuoteSnapshotV2,
   OptionQuoteConfirmationFailureCode,
 } from "../../market-data/alpaca-option-quotes.js"
 import {
@@ -28,7 +28,7 @@ export type ResearchCycleStageReports = Readonly<{
   quotesRejected(
     reasons: readonly OptionQuoteConfirmationFailureCode[],
   ): void
-  quotesConfirmed(snapshot: ConfirmedOptionQuoteSnapshotV1): void
+  quotesConfirmed(snapshot: ConfirmedOptionQuoteSnapshotV2): void
   intentRejected(reasons: readonly TradeIntentDerivationReason[]): void
   intentDerived(intent: TradeIntentV3): void
   riskEvaluated(result: ShadowRiskResultV1): void
@@ -86,8 +86,9 @@ export function createResearchCycleStageReports(
     },
     quotesConfirmed(snapshot) {
       reporter.report("quotes.confirm", "COMPLETED", {
-        longContractSymbol: snapshot.longQuote.contractSymbol,
-        shortContractSymbol: snapshot.shortQuote.contractSymbol,
+        contractSymbols: snapshot.quotes.map(({ contractSymbol }) =>
+          contractSymbol
+        ),
         source: snapshot.snapshotMetadata.source,
         retrievedAt: snapshot.snapshotMetadata.retrievedAt,
         freshUntil: snapshot.snapshotMetadata.freshUntil,

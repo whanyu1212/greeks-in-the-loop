@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   ALPACA_OPTION_ORDER_CAPABILITY_VERSION,
   alpacaMinimumLevelFor,
-  alpacaOptionOrderPlanV1Schema,
+  alpacaOptionEntryPlanV2Schema,
   evaluateAlpacaOpeningCoverageV1,
 } from "../src/options/alpaca-capabilities.js"
 import {
@@ -23,7 +23,7 @@ const plan = (
     ratioQuantity: number
     positionIntent: "BUY_TO_OPEN" | "SELL_TO_OPEN"
   }>[],
-) => alpacaOptionOrderPlanV1Schema.parse({
+) => alpacaOptionEntryPlanV2Schema.parse({
   capabilityVersion: ALPACA_OPTION_ORDER_CAPABILITY_VERSION,
   strategy,
   underlying: "SPY",
@@ -55,8 +55,25 @@ describe("Alpaca option order capabilities", () => {
     expect(evaluateAlpacaOpeningCoverageV1(butterfly)).toEqual({ covered: true })
   })
 
+  it("accepts a later-expiring long option as calendar coverage", () => {
+    const calendar = plan("CALENDAR_SPREAD", [
+      {
+        contractSymbol: "SPY261120C00500000",
+        ratioQuantity: 1,
+        positionIntent: "SELL_TO_OPEN",
+      },
+      {
+        contractSymbol: call(500),
+        ratioQuantity: 1,
+        positionIntent: "BUY_TO_OPEN",
+      },
+    ])
+
+    expect(evaluateAlpacaOpeningCoverageV1(calendar)).toEqual({ covered: true })
+  })
+
   it("rejects ratios that are not in simplest form", () => {
-    expect(alpacaOptionOrderPlanV1Schema.safeParse({
+    expect(alpacaOptionEntryPlanV2Schema.safeParse({
       capabilityVersion: ALPACA_OPTION_ORDER_CAPABILITY_VERSION,
       strategy: "BULL_CALL_SPREAD",
       underlying: "SPY",
@@ -68,15 +85,40 @@ describe("Alpaca option order capabilities", () => {
   })
 
   it("rejects structurally uncovered short option exposure", () => {
-    const uncovered = plan("DEFINED_RISK_MLEG", [
-      { contractSymbol: call(500), ratioQuantity: 1, positionIntent: "BUY_TO_OPEN" },
-      { contractSymbol: call(510), ratioQuantity: 2, positionIntent: "SELL_TO_OPEN" },
-    ])
+    expect(alpacaOptionEntryPlanV2Schema.safeParse({
+      capabilityVersion: ALPACA_OPTION_ORDER_CAPABILITY_VERSION,
+      strategy: "DEFINED_RISK_MLEG",
+      underlying: "SPY",
+      legs: [
+        { contractSymbol: call(500), ratioQuantity: 1, positionIntent: "BUY_TO_OPEN" },
+        { contractSymbol: call(510), ratioQuantity: 2, positionIntent: "SELL_TO_OPEN" },
+      ],
+    }).success).toBe(false)
+  })
 
-    expect(evaluateAlpacaOpeningCoverageV1(uncovered)).toEqual({
-      covered: false,
-      reason: "UNCOVERED_SHORT_LEG",
-    })
+  it("rejects legs that do not match the declared strategy", () => {
+    expect(alpacaOptionEntryPlanV2Schema.safeParse({
+      capabilityVersion: ALPACA_OPTION_ORDER_CAPABILITY_VERSION,
+      strategy: "BULL_CALL_SPREAD",
+      underlying: "SPY",
+      legs: [
+        { contractSymbol: call(500), ratioQuantity: 1, positionIntent: "SELL_TO_OPEN" },
+        { contractSymbol: call(510), ratioQuantity: 1, positionIntent: "BUY_TO_OPEN" },
+      ],
+    }).success).toBe(false)
+  })
+
+  it("rejects closing intents from entry plans", () => {
+    expect(alpacaOptionEntryPlanV2Schema.safeParse({
+      capabilityVersion: ALPACA_OPTION_ORDER_CAPABILITY_VERSION,
+      strategy: "LONG_CALL",
+      underlying: "SPY",
+      legs: [{
+        contractSymbol: call(500),
+        ratioQuantity: 1,
+        positionIntent: "BUY_TO_CLOSE",
+      }],
+    }).success).toBe(false)
   })
 
   it("recognizes cash and share collateral as requiring later risk proof", () => {

@@ -80,8 +80,10 @@ const eligibility = {
 } as const
 
 const snapshot = (dailyBreakerActive = false) => ({
+  snapshotVersion: "2.0.0" as const,
   evaluatedAt,
   quoteSnapshot: {
+    snapshotVersion: "2.0.0" as const,
     evaluatedAt,
     snapshotMetadata: {
       provider: "ALPACA" as const,
@@ -89,16 +91,30 @@ const snapshot = (dailyBreakerActive = false) => ({
       retrievedAt: evaluatedAt,
       freshUntil: "2026-08-27T14:31:00.000Z",
     },
-    ...quotes("2026-08-27T14:30:20.000000000Z"),
+    quotes: Object.values(quotes("2026-08-27T14:30:20.000000000Z")),
   },
   account: {
+    snapshotVersion: "2.0.0" as const,
     observedAt: evaluatedAt,
     status: "ACTIVE" as const,
     tradingRestricted: false,
+    optionsApprovedLevel: 3,
+    optionsTradingLevel: 3,
     multilegOptionsApproved: true,
     buyingPowerCents: 20_000_000,
+    cashCents: 5_000_000,
     equityCents: 10_000_000,
     lastEquityCents: 10_000_000,
+  },
+  positions: [],
+  candidateCollateral: {
+    underlying: "SPY",
+    longUnderlyingShares: 0,
+    cashAvailableCents: 5_000_000,
+    requiredLongSharesPerUnit: 0,
+    requiredCashCentsPerUnit: 0,
+    maxUnitsFromShares: null,
+    maxUnitsFromCash: null,
   },
   portfolio: {
     observedAt: evaluatedAt,
@@ -110,12 +126,14 @@ const snapshot = (dailyBreakerActive = false) => ({
     competitionBreakerActive: false,
   },
   contracts: {
+    snapshotVersion: "2.0.0" as const,
     slotStartedAt,
     observedAt: evaluatedAt,
     legs: [
       {
-        role: "LONG" as const,
         contractSymbol: longSymbol,
+        positionIntent: "BUY_TO_OPEN" as const,
+        ratioQuantity: 1,
         active: true,
         tradable: true,
         exerciseStyle: "AMERICAN" as const,
@@ -131,8 +149,9 @@ const snapshot = (dailyBreakerActive = false) => ({
         openInterestDate: "2026-08-26",
       },
       {
-        role: "SHORT" as const,
         contractSymbol: shortSymbol,
+        positionIntent: "SELL_TO_OPEN" as const,
+        ratioQuantity: 1,
         active: true,
         tradable: true,
         exerciseStyle: "AMERICAN" as const,
