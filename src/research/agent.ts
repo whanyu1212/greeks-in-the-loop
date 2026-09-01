@@ -15,7 +15,7 @@ import type { ResearchContextV1 } from "./context.js"
 /** Checked-in OpenCode primary agent used by every unattended cycle. */
 export const RESEARCH_AGENT_NAME = "research" as const
 /** Increment when the system prompt or cycle-request behavior changes. */
-export const RESEARCH_PROMPT_VERSION = "6.0.0" as const
+export const RESEARCH_PROMPT_VERSION = "6.1.1" as const
 
 /** Hard OpenCode turn bound mirrored by the checked-in agent configuration. */
 export const RESEARCH_MAX_AGENT_STEPS = 32
@@ -61,7 +61,10 @@ export function buildResearchReportRepairPrompt(
     "Your prior response failed deterministic ResearchReportV6 validation.",
     "Do not call tools or add new research. Correct the complete existing report using only facts already gathered, then return exactly one bare JSON object with no Markdown or commentary.",
     "Every invalidation field is an array of strings. Every date-time uses UTC ISO 8601 with exactly three fractional digits, for example 2026-08-31T07:43:13.082Z.",
-    "NO_ACTION evidence is a non-empty array of timestamped ALPACA, EXA, or FMP sourced facts and optional inferences grounded in those fact claim IDs.",
+    "Case-sensitive enums: evidence kind is SOURCED_FACT or INFERENCE; temporalClass is LIVE, DELAYED, or PRIOR_CLOSE; symbol direction is BULLISH, BEARISH, or NEUTRAL; symbol disposition is REJECT, WATCH, or PROPOSE.",
+    "NO_ACTION evidence is a non-empty array. Sourced facts are exactly {claimId,kind:\"SOURCED_FACT\",claim,provider,temporalClass,observedAt} plus optional locator. Inferences are exactly {claimId,kind:\"INFERENCE\",claim,basedOn} and basedOn references sourced-fact claim IDs.",
+    "When analysis.broadMarketContext is present it requires verification, temporalClass, observedAt, benchmark, and signal. Use benchmark, not underlying.",
+    "EXA externalContext is exactly {sourceId,provider:\"EXA\",verification:\"AGENT_REPORTED\",title,url,publishedAt,retrievedAt,summary,relevance}. FMP externalContext is exactly {sourceId,provider:\"FMP\",verification:\"AGENT_REPORTED\",dataset,observedAt,retrievedAt,summary,relevance}. Do not retain provider aliases or extra fields.",
     `Safe validation diagnostics: ${JSON.stringify(issues)}`,
   ].join("\n")
 }

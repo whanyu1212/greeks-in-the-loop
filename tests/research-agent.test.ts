@@ -31,7 +31,7 @@ const optionUniverse = {
 describe("research agent request construction", () => {
   it("uses the fixed checked-in agent identity", () => {
     expect(RESEARCH_AGENT_NAME).toBe("research")
-    expect(RESEARCH_PROMPT_VERSION).toBe("6.0.0")
+    expect(RESEARCH_PROMPT_VERSION).toBe("6.1.1")
   })
 
   it("publishes bounded research budgets", () => {
@@ -103,6 +103,10 @@ describe("research agent request construction", () => {
     expect(prompt).toContain('"path":["result","invalidation"]')
     expect(prompt).toContain("exactly three fractional digits")
     expect(prompt).toContain("NO_ACTION evidence is a non-empty array")
+    expect(prompt).toContain("evidence kind is SOURCED_FACT or INFERENCE")
+    expect(prompt).toContain("temporalClass is LIVE, DELAYED, or PRIOR_CLOSE")
+    expect(prompt).toContain("Use benchmark, not underlying")
+    expect(prompt).toContain("EXA externalContext is exactly")
   })
 
   it("labels ledger context as historical and requires current facts to be refreshed", () => {

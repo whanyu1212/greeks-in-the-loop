@@ -128,6 +128,18 @@ describe("research agent policy", () => {
   it("requires concrete provider-attributed no-action evidence", () => {
     expect(systemPrompt).toContain("return non-empty `reasonCodes` and `evidence` arrays")
     expect(systemPrompt).toContain("it never uses `snapshotRef`")
+    expect(systemPrompt).toContain('kind:"SOURCED_FACT"')
+    expect(systemPrompt).toContain('kind:"INFERENCE"')
+  })
+
+  it("pins strict report field names and case-sensitive enums", () => {
+    expect(systemPrompt).toContain("This section is the authoritative output contract")
+    expect(systemPrompt).toContain("`LIVE`, `DELAYED`, or `PRIOR_CLOSE`")
+    expect(systemPrompt).toContain("`BULLISH`, `BEARISH`, or `NEUTRAL`")
+    expect(systemPrompt).toContain("Use `benchmark`, not `underlying`")
+    expect(systemPrompt).toContain('provider:"EXA"')
+    expect(systemPrompt).toContain('provider:"FMP"')
+    expect(systemPrompt).toContain("Do not substitute provider payload field names")
   })
 
   it("spells out the strict candidate-leg role enum", () => {

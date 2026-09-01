@@ -12,7 +12,7 @@ import {
 const versions = {
   agentName: "research",
   cycleMode: "DRY_RUN" as const,
-  promptVersion: "6.0.0",
+  promptVersion: "6.1.1",
   decisionContractVersion: "3.0.0",
   reportVersion: "6.0.0",
 }
@@ -27,10 +27,12 @@ describe("ResearchInvocationV1", () => {
       "4.2.0",
       "5.0.0",
       "6.0.0",
+      "6.1.0",
+      "6.1.1",
     ])
     expect(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[RESEARCH_INVOCATION_VERSION]).toEqual({
       agentName: "research",
-      promptVersion: "6.0.0",
+      promptVersion: "6.1.1",
       decisionContractVersion: "3.0.0",
       reportVersion: "6.0.0",
       providerId: "openai",

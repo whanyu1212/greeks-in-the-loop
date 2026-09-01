@@ -95,6 +95,15 @@ Return exactly one bare `ResearchReportV6` JSON object with no Markdown. Set `re
 
 `analysis` contains `provenance`, `asOf`, `optionUniverse`, `accountChecks`, optional `broadMarketContext`, `symbolEvaluations`, `marketRegimes`, optional `symbolIndicators`, `optionSurfaces`, `candidateEvaluations`, `externalContext`, `supportingFactors`, `contradictingFactors`, and `conflicts`. Copy `optionUniverse` exactly. Set provenance and verification fields to `AGENT_REPORTED`; only application code may claim independent verification. No observation or retrieval may follow `asOf`.
 
+The literals and field names below are case-sensitive. This section is the authoritative output contract; do not spend tool calls or file reads trying to discover a different schema.
+
+- Every `temporalClass` is exactly `LIVE`, `DELAYED`, or `PRIOR_CLOSE`.
+- Every `symbolEvaluations` item is exactly `{underlying, disposition, direction, summary}`. `disposition` is `REJECT`, `WATCH`, or `PROPOSE`; `direction` is `BULLISH`, `BEARISH`, or `NEUTRAL`.
+- When present, `broadMarketContext` requires `{verification, temporalClass, observedAt, benchmark, signal}`. Use `benchmark`, not `underlying`; `signal` is `BULLISH`, `BEARISH`, `MIXED`, or `UNAVAILABLE`.
+- Every `externalContext` item uses exactly one provider shape. EXA requires `{sourceId, provider:"EXA", verification:"AGENT_REPORTED", title, url, publishedAt, retrievedAt, summary, relevance}`. FMP requires `{sourceId, provider:"FMP", verification:"AGENT_REPORTED", dataset, observedAt, retrievedAt, summary, relevance}`. `relevance` is `SUPPORTS`, `CONTRADICTS`, or `NEUTRAL`. Do not substitute provider payload field names or add aliases.
+- Every `NO_ACTION` sourced fact is exactly `{claimId, kind:"SOURCED_FACT", claim, provider, temporalClass, observedAt}` with optional `locator`; every inference is exactly `{claimId, kind:"INFERENCE", claim, basedOn}`. The only evidence `kind` values are `SOURCED_FACT` and `INFERENCE`.
+- Proposal evidence has a different sourced-fact shape: exactly `{claimId, kind:"SOURCED_FACT", claim, snapshotRef}` with optional `locator`, or the same inference shape. Do not put `provider`, `temporalClass`, or `observedAt` in proposal evidence.
+
 `symbolEvaluations` covers every shortlisted symbol exactly once. When at least 21 completed sessions exist, `symbolIndicators` also covers every shortlisted symbol using one completed-session cutoff. `marketRegimes`, `optionSurfaces`, and `candidateEvaluations` cover proposed symbols exactly once and contain no non-proposed symbol.
 
 For `NO_ACTION`, return non-empty `reasonCodes` and `evidence` arrays. Evidence consists of timestamped ALPACA, EXA, or FMP facts and optional inferences grounded in fact claim IDs; it never uses `snapshotRef`. Available reasons are `MARKET_WINDOW_INELIGIBLE`, `ACCOUNT_STATE_INELIGIBLE`, `POSITION_OR_RISK_LIMIT_ACTIVE`, `INSUFFICIENT_UNDERLYING_DATA`, `REQUIRED_ALPACA_DATA_INVALID`, `SIGNAL_NOT_ACTIONABLE`, `NO_ELIGIBLE_SPREAD`, `CANDIDATE_CHANGED`, `EXACT_RISK_INPUTS_UNAVAILABLE`, `REQUIRED_EXA_EVIDENCE_UNAVAILABLE`, and `CONTRACT_UNREPRESENTABLE`.
