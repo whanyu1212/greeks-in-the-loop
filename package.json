@@ -26,6 +26,7 @@
     "research:run": "tsx src/research/run/cli.ts",
     "risk:report": "tsx src/risk/risk-report-cli.ts",
     "backtest": "tsx src/backtest/backtest-cli.ts",
+    "backtest:bars": "tsx src/backtest/alpaca-bar-proxy-cli.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "test": "vitest run",

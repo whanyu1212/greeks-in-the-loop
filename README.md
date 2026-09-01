@@ -86,9 +86,12 @@ Use each command's `--help` output for ledger, cycle, and output options.
 ```bash
 pnpm backtest -- --scenarios workspace/scenarios.json
 pnpm backtest -- --scenarios workspace/scenarios.json --output workspace/report.json
+pnpm backtest:bars -- --manifest workspace/trades.json --output workspace/bar-proxy-report.json
 ```
 
 Replay accepts self-contained exact risk inputs and monitor cycles. It calls the same pure `evaluateTradeIntentRiskV1` used by runtime shadow risk. It does not download, persist, or version a market dataset.
+
+The optional [Alpaca bar-proxy adapter](docs/bar-proxy-backtest.md) downloads completed account-default option trade bars and converts them into retained synthetic quote assumptions before delegating to replay V8. It is a manual robustness evaluation, not historical NBBO or strategy-selection evidence.
 
 ## Safety boundary
 

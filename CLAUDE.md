@@ -69,6 +69,8 @@ Failures expose bounded reason codes, never raw model or provider input.
 
 Replay `7.0.0` is the frozen historical V3 debit-spread model. Replay `8.0.0` evaluates V4 risk inputs and requires explicit natural close-premium marks, per-leg entry and exit slippage, commissions, stop/profit thresholds, minimum DTE, and maximum holding sessions. These assumptions are retained in output; missing exit prices make the aggregate incomplete rather than fabricating a fill.
 
+`pnpm backtest:bars -- --manifest <json> --output <json>` is a manual, credentialed offline adapter for exact historical bull-call and bear-put manifests. It uses only completed Alpaca account-default option trade bars (expected indicative on the configured free tier), retains synthetic spread, liquidity, account, and European-model Greek assumptions, and delegates unchanged V8 inputs to `runBacktestReplay`. Never run its live Alpaca requests in ordinary PR CI or treat proxy approval as historical NBBO evidence.
+
 ## Dry run
 
 `--dry-run` requires `--once` and uses an isolated ledger. Current-session dry runs may reach shadow risk; historical sessions are research-only. Dry runs have no elapsed-time cycle deadline by default; set `AGENT_CYCLE_TIMEOUT_MS` to opt into one. Shutdown still cancels unbounded runs. Dry run never weakens validation, freshness, risk, or permissions.
