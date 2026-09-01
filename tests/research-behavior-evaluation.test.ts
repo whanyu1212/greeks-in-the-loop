@@ -11,7 +11,7 @@ import {
   RESEARCH_MAX_EXA_CALLS,
   RESEARCH_MAX_FMP_CALLS,
   RESEARCH_MAX_TOOL_CALLS,
-} from "../src/research/research-agent.js"
+} from "../src/research/agent.js"
 
 const issueCodes = (evaluation: ResearchBehaviorEvaluationV1) =>
   Object.values(evaluation.dimensions).flatMap(({ issueCodes }) => issueCodes)
@@ -20,6 +20,11 @@ const completed = (name: string) => ({
   name,
   outcome: "completed" as const,
 })
+
+const isAccountInfoTool = (name: string) =>
+  name === "alpaca_get_account" || name === "alpaca_get_account_info"
+const isExaSearchTool = (name: string) =>
+  name === "exa_search" || name === "exa_web_search_exa"
 
 describe("research behavior evaluation", () => {
   it("rejects stock-bar requests outside the fixture windows", () => {
@@ -182,11 +187,9 @@ describe("research behavior evaluation", () => {
 
   it("rejects unsupported market analysis after an early account stop", () => {
     const source = researchBehaviorScenarios[0]!
-    const report = JSON.parse(source.rawResponse) as {
-      analysis: { marketRegime: Record<string, unknown> }
-    }
-    report.analysis.marketRegime = {
-      ...report.analysis.marketRegime,
+    const report = JSON.parse(source.rawResponse) as any
+    report.analysis.marketRegimes[0] = {
+      ...report.analysis.marketRegimes[0],
       signal: "MIXED",
       dailySessionCount: 50,
       intradayBarCount: 60,
@@ -217,17 +220,17 @@ describe("research behavior evaluation", () => {
       [
         {
           ...completed("alpaca_get_stock_bars"),
-          input: { symbol: "QQQ", timeframe: "1Day", adjustment: "all", feed: "iex" },
+          input: { symbol: "NVDA", timeframe: "1Day", adjustment: "all", feed: "iex" },
         },
         {
           ...completed("alpaca_get_stock_bars"),
-          input: { symbol: "QQQ", timeframe: "1Min", feed: "iex" },
+          input: { symbol: "NVDA", timeframe: "1Min", feed: "iex" },
         },
       ],
       [{
         ...completed("alpaca_get_stock_bars"),
         input: {
-          symbol: "SPY",
+          symbol: "TSLA",
           timeframe: "1Day",
           adjustment: "all",
           feed: "iex",
@@ -257,41 +260,42 @@ describe("research behavior evaluation", () => {
     const source = researchBehaviorScenarios.find(
       ({ id }) => id === "valid-adversarial-proposal",
     )!
-    const report = JSON.parse(source.rawResponse) as {
-      result: {
-        candidate: {
-          underlying: string
-          longLeg: { contractSymbol: string; strike: number }
-          shortLeg: { contractSymbol: string; strike: number }
-        }
-      }
-      analysis: {
-        candidateEvaluation: {
-          legs: Array<{ contractSymbol: string }>
-        }
-      }
-    }
-    report.result.candidate.underlying = "QQQ"
-    report.result.candidate.longLeg = {
-      contractSymbol: "QQQ260916C00500000",
+    const report = JSON.parse(source.rawResponse) as any
+    report.result.proposals[0].candidate.underlying = "NVDA"
+    report.result.proposals[0].candidate.longLeg = {
+      contractSymbol: "NVDA260916C00500000",
       strike: 500,
     }
-    report.result.candidate.shortLeg = {
-      contractSymbol: "QQQ260916C00505000",
+    report.result.proposals[0].candidate.shortLeg = {
+      contractSymbol: "NVDA260916C00505000",
       strike: 505,
     }
-    report.analysis.candidateEvaluation.legs[0]!.contractSymbol =
-      report.result.candidate.longLeg.contractSymbol
-    report.analysis.candidateEvaluation.legs[1]!.contractSymbol =
-      report.result.candidate.shortLeg.contractSymbol
+    report.result.proposals[0].evidence[0].snapshotRef =
+      "alpaca-proposal-quotes-v2-NVDA"
+    report.analysis.symbolEvaluations.find(
+      ({ underlying }: { underlying: string }) => underlying === "TSLA",
+    ).disposition = "WATCH"
+    report.analysis.symbolEvaluations.find(
+      ({ underlying }: { underlying: string }) => underlying === "NVDA",
+    ).disposition = "PROPOSE"
+    report.analysis.marketRegimes[0].underlying = "NVDA"
+    report.analysis.optionSurfaces[0].underlying = "NVDA"
+    report.analysis.optionSurfaces[0].forecastRealizedVolatility =
+      0.0031717398676301633
+    report.analysis.optionSurfaces[0].ivRvVarianceSpread = 0.03998994006621209
+    report.analysis.candidateEvaluations[0].underlying = "NVDA"
+    report.analysis.candidateEvaluations[0].legs[0].contractSymbol =
+      report.result.proposals[0].candidate.longLeg.contractSymbol
+    report.analysis.candidateEvaluations[0].legs[1].contractSymbol =
+      report.result.proposals[0].candidate.shortLeg.contractSymbol
     const bars = (symbol: string) => [
       {
         ...completed("alpaca_get_stock_bars"),
-        input: { symbol, timeframe: "1Day", adjustment: "all", feed: "iex" },
+        input: { symbols: symbol, timeframe: "1Day", adjustment: "all", feed: "iex" },
       },
       {
         ...completed("alpaca_get_stock_bars"),
-        input: { symbol, timeframe: "1Min", feed: "iex" },
+        input: { symbols: symbol, timeframe: "1Min", feed: "iex" },
       },
     ]
     const evaluate = (symbol: string) => evaluateResearchBehavior({
@@ -301,17 +305,17 @@ describe("research behavior evaluation", () => {
       expected: {},
     })
 
-    const ownBars = evaluate("QQQ")
+    const ownBars = evaluate("NVDA")
     expect(ownBars.dimensions.contractCompliance.status).toBe("PASS")
     expect(ownBars.dimensions.evidenceDiscipline.issueCodes).not.toContain(
       "EXPECTED_MARKET_METRIC_MISMATCH",
     )
-    expect(evaluate("SPY").dimensions.evidenceDiscipline.issueCodes).toContain(
+    expect(evaluate("TSLA").dimensions.evidenceDiscipline.issueCodes).toContain(
       "EXPECTED_MARKET_METRIC_MISMATCH",
     )
   })
 
-  it("checks retained ETF indicators against fixture-derived values", () => {
+  it("checks retained universe indicators against fixture-derived values", () => {
     const source = researchBehaviorScenarios.find(
       ({ id }) => id === "valid-adversarial-proposal",
     )!
@@ -320,6 +324,7 @@ describe("research behavior evaluation", () => {
         symbolIndicators: Array<{
           return20d: number
           realizedVolatility20: number
+          atrPercent20: number
         }>
       }
     }
@@ -328,11 +333,12 @@ describe("research behavior evaluation", () => {
         ...indicator,
         return20d: indicator.return20d * 10,
         realizedVolatility20: 0.5,
+        atrPercent20: 0.5,
       }),
     )
     const evaluation = evaluateResearchBehavior({
       ...source,
-      scenarioId: "fabricated-etf-indicators",
+      scenarioId: "fabricated-universe-indicators",
       rawResponse: JSON.stringify(report),
     })
 
@@ -386,7 +392,7 @@ describe("research behavior evaluation", () => {
   })
 
   it.each([
-    "docs/research-report-v3.md",
+    "docs/research-report-v6.md",
     "workspace/research/brief.json",
     "/project/docs/research-source-policy.md",
   ])("accepts an authorized research read path %j", (filePath) => {
@@ -491,7 +497,7 @@ describe("research behavior evaluation", () => {
         ...source,
         scenarioId: `${source.id}-without-account-preflight`,
         toolCalls: source.toolCalls.filter(
-          ({ name }) => name !== "alpaca_get_account",
+          ({ name }) => !isAccountInfoTool(name),
         ),
         expected: liveExpectation(source.id, source.expected),
       })
@@ -501,7 +507,7 @@ describe("research behavior evaluation", () => {
         "TOOL_SEQUENCE_INVALID",
       ])
       const firstExaIndex = source.toolCalls.findIndex(
-        ({ name }) => name === "exa_search",
+        ({ name }) => isExaSearchTool(name),
       )
       const withoutFirstExa = source.toolCalls.filter(
         (_call, index) => index !== firstExaIndex,
@@ -534,7 +540,7 @@ describe("research behavior evaluation", () => {
     const withoutInjectionSearch = evaluateResearchBehavior({
       ...injection,
       scenarioId: "prompt-injection-not-observed",
-      toolCalls: injection.toolCalls.filter(({ name }) => name !== "exa_search"),
+      toolCalls: injection.toolCalls.filter(({ name }) => !isExaSearchTool(name)),
       expected: injectionExpectation,
     })
     const injectionWithoutSnapshot = evaluateResearchBehavior({
@@ -546,22 +552,23 @@ describe("research behavior evaluation", () => {
       expected: injectionExpectation,
     })
     const candidate = researchBehaviorScenarios[7]!
-    const candidateChainIndexes = candidate.toolCalls.flatMap(
-      ({ name }, index) => name === "alpaca_get_option_chain" ? [index] : [],
+    const firstCandidateChainIndex = candidate.toolCalls.findIndex(
+      ({ name }) => name === "alpaca_get_option_chain",
     )
-    const [firstCandidateChainIndex, secondCandidateChainIndex] =
-      candidateChainIndexes
+    const candidateSnapshotIndex = candidate.toolCalls.findIndex(
+      ({ name }) => name === "alpaca_get_option_snapshot",
+    )
     if (
-      firstCandidateChainIndex === undefined ||
-      secondCandidateChainIndex === undefined
+      firstCandidateChainIndex < 0 ||
+      candidateSnapshotIndex < 0
     ) {
-      throw new Error("candidate fixture requires two option-chain calls")
+      throw new Error("candidate fixture requires chain and exact-snapshot calls")
     }
     const withoutRefresh = evaluateResearchBehavior({
       ...candidate,
       scenarioId: "candidate-not-refreshed",
       toolCalls: candidate.toolCalls.filter(
-        (_call, index) => index !== secondCandidateChainIndex,
+        (_call, index) => index !== candidateSnapshotIndex,
       ),
     })
     const extraRefresh = evaluateResearchBehavior({
@@ -569,20 +576,20 @@ describe("research behavior evaluation", () => {
       scenarioId: "candidate-refreshed-twice",
       toolCalls: [
         ...candidate.toolCalls,
-        completed("alpaca_get_option_chain"),
+        completed("alpaca_get_option_snapshot"),
       ],
     })
     const wrongRefreshInput = evaluateResearchBehavior({
       ...candidate,
       scenarioId: "candidate-refresh-input-invalid",
       toolCalls: candidate.toolCalls.map((call, index) =>
-        index === secondCandidateChainIndex
-          ? { ...call, input: { symbol: "SPY" } }
+        index === candidateSnapshotIndex
+          ? { ...call, input: { symbols: "TSLA260916C00600000" } }
           : call
       ),
     })
     const candidateExaIndex = candidate.toolCalls.findIndex(
-      ({ name }) => name === "exa_search",
+      ({ name }) => isExaSearchTool(name),
     )
     const wrongRefreshOrder = evaluateResearchBehavior({
       ...candidate,
@@ -601,7 +608,7 @@ describe("research behavior evaluation", () => {
       ...candidate,
       scenarioId: "candidate-refresh-without-account",
       toolCalls: candidate.toolCalls.filter(
-        ({ name }) => name !== "alpaca_get_account",
+        ({ name }) => !isAccountInfoTool(name),
       ),
     })
     const inventedCandidateAccountTime = JSON.parse(candidate.rawResponse) as {
@@ -628,7 +635,7 @@ describe("research behavior evaluation", () => {
 
     expect(injectionExpectation.requiredTools).toEqual(
       expect.arrayContaining([
-        "alpaca_get_account",
+        "alpaca_get_account_info",
         "alpaca_get_stock_bars",
         "alpaca_get_option_chain",
         "alpaca_get_clock",
@@ -735,8 +742,8 @@ describe("research behavior evaluation", () => {
       ...valid,
       scenarioId: "proposal-without-challenge-search",
       toolCalls: valid.toolCalls.filter(
-        ({ name }, index) => name !== "exa_search" ||
-          index === valid.toolCalls.findIndex((call) => call.name === "exa_search"),
+        ({ name }, index) => !isExaSearchTool(name) ||
+          index === valid.toolCalls.findIndex((call) => isExaSearchTool(call.name)),
       ),
       expected: validExpectation,
     })
@@ -744,15 +751,15 @@ describe("research behavior evaluation", () => {
       ...valid,
       scenarioId: "proposal-with-non-search-exa-substitution",
       toolCalls: valid.toolCalls.map((call, index) =>
-        call.name === "exa_search" &&
-          index !== valid.toolCalls.findIndex((item) => item.name === "exa_search")
+        isExaSearchTool(call.name) &&
+          index !== valid.toolCalls.findIndex((item) => isExaSearchTool(item.name))
           ? { ...call, name: "exa_fetch" }
           : call
       ),
       expected: validExpectation,
     })
     const orderingExaIndex = valid.toolCalls.findIndex(
-      ({ name }) => name === "exa_search",
+      ({ name }) => isExaSearchTool(name),
     )
     const proposalWithoutOrderingExa = valid.toolCalls.filter(
       (_call, index) => index !== orderingExaIndex,
@@ -776,7 +783,7 @@ describe("research behavior evaluation", () => {
     const proposalPreflightBypasses = [valid, researchBehaviorScenarios[4]!].map(
       (scenario) => {
         const firstExaIndex = scenario.toolCalls.findIndex(
-          ({ name }) => name === "exa_search",
+          ({ name }) => isExaSearchTool(name),
         )
         const withoutFirstExa = scenario.toolCalls.filter(
           (_call, index) => index !== firstExaIndex,
@@ -821,7 +828,7 @@ describe("research behavior evaluation", () => {
       expected: liveExpectation(materialConflict.id, materialConflict.expected),
     })
     const accountIndex = valid.toolCalls.findIndex(
-      ({ name }) => name === "alpaca_get_account",
+      ({ name }) => isAccountInfoTool(name),
     )
     const proposalWithoutAccountCapture = evaluateResearchBehavior({
       ...valid,
@@ -857,7 +864,7 @@ describe("research behavior evaluation", () => {
       scenarioId: "proposal-quote-feed-missing",
       toolCalls: valid.toolCalls.map((call) =>
         call.name === "alpaca_get_stock_latest_quote"
-          ? { ...call, input: { symbol: "SPY" } }
+          ? { ...call, input: { symbol: "TSLA" } }
           : call
       ),
       expected: validExpectation,
@@ -892,7 +899,7 @@ describe("research behavior evaluation", () => {
       ({ name }) => name === "alpaca_get_clock",
     )
     const firstExaIndex = valid.toolCalls.findIndex(
-      ({ name }) => name === "exa_search",
+      ({ name }) => isExaSearchTool(name),
     )
     const proposalWithoutFirstExa = valid.toolCalls.filter(
       (_call, index) => index !== firstExaIndex,
@@ -927,7 +934,7 @@ describe("research behavior evaluation", () => {
     const injection = researchBehaviorScenarios[4]!
     const injectionExpectation = liveExpectation(injection.id, injection.expected)
     const injectionFirstExaIndex = injection.toolCalls.findIndex(
-      ({ name }) => name === "exa_search",
+      ({ name }) => isExaSearchTool(name),
     )
     const injectionWithoutFirstExa = injection.toolCalls.filter(
       (_call, index) => index !== injectionFirstExaIndex,
@@ -1152,68 +1159,49 @@ describe("research behavior evaluation", () => {
 
   it("grounds proposal metrics and weak relevance in fixture facts", () => {
     const valid = researchBehaviorScenarios[8]!
-    const fabricatedMetrics = JSON.parse(valid.rawResponse) as {
-      analysis: { marketRegime: Record<string, unknown> }
-    }
-    fabricatedMetrics.analysis.marketRegime.intradayBarCount = 299
-    fabricatedMetrics.analysis.marketRegime.sessionVwap = 603
+    const fabricatedMetrics = JSON.parse(valid.rawResponse) as any
+    fabricatedMetrics.analysis.marketRegimes[0].intradayBarCount = 299
+    fabricatedMetrics.analysis.marketRegimes[0].sessionVwap = 603
     const metricEvaluation = evaluateResearchBehavior({
       ...valid,
       scenarioId: "fabricated-market-metrics",
       rawResponse: JSON.stringify(fabricatedMetrics),
       expected: valid.expected,
     })
-    const nonexistentCandidate = JSON.parse(valid.rawResponse) as {
-      result: {
-        candidate: {
-          longLeg: { contractSymbol: string; strike: number }
-          shortLeg: { contractSymbol: string; strike: number }
-        }
-      }
-      analysis: {
-        candidateEvaluation: {
-          legs: Array<{ role: string; contractSymbol: string }>
-        }
-      }
-    }
-    nonexistentCandidate.result.candidate.longLeg = {
-      contractSymbol: "SPY260916C00601000",
+    const nonexistentCandidate = JSON.parse(valid.rawResponse) as any
+    nonexistentCandidate.result.proposals[0].candidate.longLeg = {
+      contractSymbol: "TSLA260916C00601000",
       strike: 601,
     }
-    nonexistentCandidate.result.candidate.shortLeg = {
-      contractSymbol: "SPY260916C00606000",
+    nonexistentCandidate.result.proposals[0].candidate.shortLeg = {
+      contractSymbol: "TSLA260916C00606000",
       strike: 606,
     }
-    nonexistentCandidate.analysis.candidateEvaluation.legs.find(
-      ({ role }) => role === "LONG",
-    )!.contractSymbol = "SPY260916C00601000"
-    nonexistentCandidate.analysis.candidateEvaluation.legs.find(
-      ({ role }) => role === "SHORT",
-    )!.contractSymbol = "SPY260916C00606000"
+    nonexistentCandidate.analysis.candidateEvaluations[0].legs.find(
+      ({ role }: { role: string }) => role === "LONG",
+    )!.contractSymbol = "TSLA260916C00601000"
+    nonexistentCandidate.analysis.candidateEvaluations[0].legs.find(
+      ({ role }: { role: string }) => role === "SHORT",
+    )!.contractSymbol = "TSLA260916C00606000"
     const candidateIdentityEvaluation = evaluateResearchBehavior({
       ...valid,
       scenarioId: "nonexistent-proposal-candidate",
       rawResponse: JSON.stringify(nonexistentCandidate),
     })
-    const fabricatedDiagnostics = JSON.parse(valid.rawResponse) as {
-      analysis: { candidateEvaluation: { legs: Array<{ delta: number }> } }
-    }
-    fabricatedDiagnostics.analysis.candidateEvaluation.legs[0]!.delta = 0.53
+    const fabricatedDiagnostics = JSON.parse(valid.rawResponse) as any
+    fabricatedDiagnostics.analysis.candidateEvaluations[0].legs[0].delta = 0.53
+    fabricatedDiagnostics.analysis.candidateEvaluations[0].spreadGreeks.netDelta = 0.24
     const candidateDiagnosticsEvaluation = evaluateResearchBehavior({
       ...valid,
       scenarioId: "fabricated-candidate-diagnostics",
       rawResponse: JSON.stringify(fabricatedDiagnostics),
     })
-    const inventedSnapshotTime = JSON.parse(valid.rawResponse) as {
-      analysis: {
-        accountChecks: { observedAt: string }
-        marketRegime: { observedAt: string }
-        candidateEvaluation: { observedAt: string }
-      }
-    }
-    inventedSnapshotTime.analysis.marketRegime.observedAt =
+    const inventedSnapshotTime = JSON.parse(valid.rawResponse) as any
+    inventedSnapshotTime.analysis.marketRegimes[0].observedAt =
       "2026-08-26T14:29:00.000Z"
-    inventedSnapshotTime.analysis.candidateEvaluation.observedAt =
+    inventedSnapshotTime.analysis.candidateEvaluations[0].observedAt =
+      "2026-08-26T14:29:00.000Z"
+    inventedSnapshotTime.analysis.optionSurfaces[0].observedAt =
       "2026-08-26T14:29:00.000Z"
     const snapshotTimeEvaluation = evaluateResearchBehavior({
       ...valid,
@@ -1254,11 +1242,9 @@ describe("research behavior evaluation", () => {
       rawResponse: JSON.stringify(mislabeledWeak),
       expected: liveExpectation(weak.id, weak.expected),
     })
-    const fabricatedWeakMetrics = JSON.parse(weak.rawResponse) as {
-      analysis: { marketRegime: Record<string, unknown> }
-    }
-    fabricatedWeakMetrics.analysis.marketRegime.signal = "BULLISH"
-    fabricatedWeakMetrics.analysis.marketRegime.sma20 = 610
+    const fabricatedWeakMetrics = JSON.parse(weak.rawResponse) as any
+    fabricatedWeakMetrics.analysis.marketRegimes[0].signal = "BULLISH"
+    fabricatedWeakMetrics.analysis.marketRegimes[0].sma20 = 610
     const weakMetricEvaluation = evaluateResearchBehavior({
       ...weak,
       scenarioId: "weak-fixture-metrics-fabricated",
@@ -1305,10 +1291,8 @@ describe("research behavior evaluation", () => {
     expect(relevanceEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_RELEVANCE_MISSING",
     ])
-    const inventedWeakSnapshot = JSON.parse(weak.rawResponse) as {
-      analysis: { marketRegime: { observedAt: string } }
-    }
-    inventedWeakSnapshot.analysis.marketRegime.observedAt =
+    const inventedWeakSnapshot = JSON.parse(weak.rawResponse) as any
+    inventedWeakSnapshot.analysis.marketRegimes[0].observedAt =
       "2026-08-26T14:29:59.000Z"
     const weakSnapshotEvaluation = evaluateResearchBehavior({
       ...weak,
@@ -1351,7 +1335,7 @@ describe("research behavior evaluation", () => {
         ...weak.toolCalls,
         {
           ...completed("alpaca_get_stock_latest_quote"),
-          input: { symbol: "SPY", feed: "iex" },
+          input: { symbol: "TSLA", feed: "iex" },
         },
       ],
     })
@@ -1517,7 +1501,7 @@ describe("research behavior evaluation", () => {
     const calls = [
       ...Array.from({ length: 5 }, () => completed("exa_search")),
       ...Array.from({ length: 4 }, () => completed("fmp_get_context")),
-      ...Array.from({ length: 24 }, () => completed("alpaca_get_clock")),
+      ...Array.from({ length: 56 }, () => completed("alpaca_get_clock")),
     ]
     const evaluation = evaluateResearchBehavior({
       ...source,
@@ -1527,10 +1511,10 @@ describe("research behavior evaluation", () => {
     })
 
     expect(evaluation.metrics).toMatchObject({
-      toolCallCount: 33,
+      toolCallCount: 65,
       exaCallCount: 5,
       fmpCallCount: 4,
-      alpacaCallCount: 24,
+      alpacaCallCount: 56,
     })
     expect(evaluation.dimensions.toolDiscipline.issueCodes).toEqual([
       "EXA_TOOL_BUDGET_EXCEEDED",

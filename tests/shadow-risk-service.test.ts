@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
 
-import type { ProposedTradeDecisionV2 } from "../src/contracts/research-decision-v2.js"
-import { deriveTradeIntentV2 } from "../src/contracts/trade-intent-v2.js"
+import type { TradeProposalV4 } from "../src/contracts/research-decision-v4.js"
+import { deriveTradeIntentV4 } from "../src/contracts/trade-intent-v4.js"
 import type { RiskStateProvider } from "../src/risk/alpaca-risk-state-provider.js"
-import type { StoredLedgerEventV2 } from "../src/event-ledger/ledger-event-v1.js"
+import type { StoredLedgerEventV4 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { LedgerPersistenceError } from "../src/event-ledger/research-lifecycle-recorder.js"
 import { buildRiskReportV1 } from "../src/risk/risk-report-v1.js"
@@ -20,24 +20,32 @@ const evaluatedAt = "2026-08-27T14:30:30.000Z"
 const longSymbol = "SPY260918C00600000"
 const shortSymbol = "SPY260918C00605000"
 
-const decision: ProposedTradeDecisionV2 = {
-  contractVersion: "2.0.0",
-  outcome: "PROPOSE_TRADE",
+const decision: TradeProposalV4 = {
+  priority: 1,
   direction: "BULLISH",
   thesis: "Daily and intraday direction agree.",
   candidate: {
     underlying: "SPY",
-    structure: "BULL_CALL_SPREAD",
-    expiration: "2026-09-18",
-    longLeg: { contractSymbol: longSymbol, strike: 600 },
-    shortLeg: { contractSymbol: shortSymbol, strike: 605 },
+    strategy: "BULL_CALL_SPREAD",
+    legs: [
+      {
+        contractSymbol: longSymbol,
+        positionIntent: "BUY_TO_OPEN",
+        ratioQuantity: 1,
+      },
+      {
+        contractSymbol: shortSymbol,
+        positionIntent: "SELL_TO_OPEN",
+        ratioQuantity: 1,
+      },
+    ],
   },
   invalidation: ["Reject if refreshed evidence changes the candidate."],
   evidence: [{
     claimId: "quote-fact",
     kind: "SOURCED_FACT",
     claim: "The exact proposed legs were confirmed.",
-    snapshotRef: "alpaca-proposal-quotes-v1",
+    snapshotRef: "alpaca-proposal-quotes-v2-SPY",
   }],
 }
 
@@ -59,10 +67,10 @@ const quotes = (timestamp: string) => ({
 })
 
 const sourceIntent = (() => {
-  const result = deriveTradeIntentV2(decision, {
-    quoteSnapshotRef: "alpaca-proposal-quotes-v1",
+  const result = deriveTradeIntentV4(decision, {
+    quoteSnapshotRef: "alpaca-proposal-quotes-v2-SPY",
     evaluatedAt: "2026-08-27T14:30:10.000Z",
-    ...quotes("2026-08-27T14:30:00.000000000Z"),
+    quotes: Object.values(quotes("2026-08-27T14:30:00.000000000Z")),
   })
   if (!result.success) throw new Error("Test intent could not be derived")
   return result.intent
@@ -81,8 +89,10 @@ const eligibility = {
 } as const
 
 const snapshot = (dailyBreakerActive = false) => ({
+  snapshotVersion: "2.0.0" as const,
   evaluatedAt,
   quoteSnapshot: {
+    snapshotVersion: "2.0.0" as const,
     evaluatedAt,
     snapshotMetadata: {
       provider: "ALPACA" as const,
@@ -90,16 +100,30 @@ const snapshot = (dailyBreakerActive = false) => ({
       retrievedAt: evaluatedAt,
       freshUntil: "2026-08-27T14:31:00.000Z",
     },
-    ...quotes("2026-08-27T14:30:20.000000000Z"),
+    quotes: Object.values(quotes("2026-08-27T14:30:20.000000000Z")),
   },
   account: {
+    snapshotVersion: "2.0.0" as const,
     observedAt: evaluatedAt,
     status: "ACTIVE" as const,
     tradingRestricted: false,
+    optionsApprovedLevel: 3,
+    optionsTradingLevel: 3,
     multilegOptionsApproved: true,
     buyingPowerCents: 20_000_000,
+    cashCents: 5_000_000,
     equityCents: 10_000_000,
     lastEquityCents: 10_000_000,
+  },
+  positions: [],
+  candidateCollateral: {
+    underlying: "SPY",
+    longUnderlyingShares: 0,
+    cashAvailableCents: 5_000_000,
+    requiredLongSharesPerUnit: 0,
+    requiredCashCentsPerUnit: 0,
+    maxUnitsFromShares: null,
+    maxUnitsFromCash: null,
   },
   portfolio: {
     observedAt: evaluatedAt,
@@ -111,12 +135,14 @@ const snapshot = (dailyBreakerActive = false) => ({
     competitionBreakerActive: false,
   },
   contracts: {
+    snapshotVersion: "2.0.0" as const,
     slotStartedAt,
     observedAt: evaluatedAt,
     legs: [
       {
-        role: "LONG" as const,
         contractSymbol: longSymbol,
+        positionIntent: "BUY_TO_OPEN" as const,
+        ratioQuantity: 1,
         active: true,
         tradable: true,
         exerciseStyle: "AMERICAN" as const,
@@ -132,8 +158,9 @@ const snapshot = (dailyBreakerActive = false) => ({
         openInterestDate: "2026-08-26",
       },
       {
-        role: "SHORT" as const,
         contractSymbol: shortSymbol,
+        positionIntent: "SELL_TO_OPEN" as const,
+        ratioQuantity: 1,
         active: true,
         tradable: true,
         exerciseStyle: "AMERICAN" as const,
@@ -202,12 +229,53 @@ describe("shadow risk evaluator", () => {
       mode: "SHADOW",
       stage: "EVALUATED",
       outcome: "APPROVED",
+      ruleVersion: "2.0.0",
       evaluatedIntent: {
         quoteSnapshotRef: SHADOW_RISK_QUOTE_SNAPSHOT_REF,
         evaluatedAt,
       },
+      evaluation: {
+        aggregateGreeks: {
+          calculation: "POSITION_WEIGHTED_SUM",
+          netDelta: 0.2,
+          netGamma: 0,
+          netTheta: 0,
+          netVega: 0,
+        },
+        strategyEconomics: {
+          strategy: "BULL_CALL_SPREAD",
+          maxLossCents: 21_000,
+          maxProfitCents: 29_000,
+        },
+      },
     })
     expect(result.breakerTransitions).toEqual([])
+  })
+
+  it("rejects when the captured Alpaca option level cannot open the strategy", async () => {
+    const captured = snapshot()
+    const result = await evaluate({
+      capture: vi.fn(async () => ({
+        success: true as const,
+        snapshot: {
+          ...captured,
+          account: {
+            ...captured.account,
+            optionsApprovedLevel: 2,
+            optionsTradingLevel: 2,
+            multilegOptionsApproved: false,
+          },
+        },
+      })),
+    })
+
+    expect(result.decision).toMatchObject({
+      stage: "EVALUATED",
+      outcome: "REJECTED",
+      evaluation: {
+        reasonCodes: expect.arrayContaining(["OPTIONS_APPROVAL_INSUFFICIENT"]),
+      },
+    })
   })
 
   it("fails closed on capture errors and records newly observed breaker latches", async () => {
@@ -241,7 +309,7 @@ describe("shadow risk evaluator", () => {
     const events = [
       {
         eventId: "cycle-start",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "RESEARCH_CYCLE_STARTED",
         occurredAt: evaluatedAt,
         recordedAt: evaluatedAt,
@@ -256,7 +324,7 @@ describe("shadow risk evaluator", () => {
       },
       {
         eventId: "risk-1",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "RISK_SHADOW_DECISION_RECORDED",
         occurredAt: evaluatedAt,
         recordedAt: evaluatedAt,
@@ -277,7 +345,7 @@ describe("shadow risk evaluator", () => {
           },
         },
       },
-    ] as StoredLedgerEventV2[]
+    ] as StoredLedgerEventV4[]
 
     expect(buildRiskReportV1(events, sessionDate)).toMatchObject({
       tradingDate: sessionDate,

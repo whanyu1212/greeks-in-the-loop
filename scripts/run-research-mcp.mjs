@@ -1,5 +1,5 @@
 /**
- * Starts one approved research MCP with only the credentials it requires.
+ * Starts one approved isolated MCP with only the credentials it requires.
  *
  * OpenCode receives this launcher path rather than secret-bearing command
  * arguments. The launcher reads the project environment privately, constructs
@@ -23,8 +23,10 @@ const fileEnv = (() => {
   }
 })()
 
+const readSetting = (name) => (process.env[name] ?? fileEnv[name])?.trim()
+
 const readRequiredSetting = (name) => {
-  const value = (process.env[name] ?? fileEnv[name])?.trim()
+  const value = readSetting(name)
   if (!value) throw new Error(`${name} is required`)
   return value
 }
@@ -63,11 +65,47 @@ const fmpProxyPath = join(dirname(fmpPackagePath), "dist", "proxy.js")
 const fmpPreloadPath = fileURLToPath(
   new URL("./expand-fmp-key.cjs", import.meta.url),
 )
+const tsxCliPath = require.resolve("tsx/cli")
+
+const authorizationEnvironment = () => {
+  const backend = (
+    readSetting("EXECUTION_LEDGER_BACKEND") ||
+    readSetting("RESEARCH_LEDGER_BACKEND") ||
+    "sqlite"
+  ).toLowerCase()
+  const environment = {
+    EXECUTION_LEDGER_BACKEND: backend,
+    EXECUTION_LEDGER_PATH:
+      readSetting("EXECUTION_LEDGER_PATH") ||
+      readSetting("RESEARCH_LEDGER_PATH") ||
+      ".state/research-ledger.sqlite",
+  }
+  if (backend !== "postgres") return environment
+
+  const connectionString = readSetting("DATABASE_URL")
+  if (connectionString) return { ...environment, DATABASE_URL: connectionString }
+
+  const port = readSetting("PGPORT")
+  return {
+    ...environment,
+    PGHOST: readRequiredSetting("PGHOST"),
+    ...(port ? { PGPORT: port } : {}),
+    PGDATABASE: readRequiredSetting("PGDATABASE"),
+    PGUSER: readRequiredSetting("PGUSER"),
+    PGPASSWORD: readRequiredSetting("PGPASSWORD"),
+  }
+}
 
 const createServers = {
   alpaca: () => ({
     command: "uvx",
-    args: ["--from", "alpaca-mcp-server==2.2.1", "alpaca-mcp-server"],
+    args: [
+      "--from",
+      "alpaca-mcp-server==2.2.1",
+      "--with",
+      "fastmcp==3.4.7",
+      "alpaca-mcp-server",
+    ],
     environment: {
       ALPACA_API_KEY: readRequiredSetting("ALPACA_API_KEY"),
       ALPACA_SECRET_KEY: readRequiredSetting("ALPACA_SECRET_KEY"),
@@ -97,6 +135,16 @@ const createServers = {
     command: process.execPath,
     args: [fileURLToPath(new URL("./trusted-time-mcp.mjs", import.meta.url))],
     environment: {},
+  }),
+  authorization: () => ({
+    command: process.execPath,
+    args: [
+      tsxCliPath,
+      fileURLToPath(
+        new URL("../src/execution/authorization-mcp.ts", import.meta.url),
+      ),
+    ],
+    environment: authorizationEnvironment(),
   }),
 }
 

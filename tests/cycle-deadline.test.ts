@@ -51,16 +51,21 @@ describe("runWithCycleDeadline", () => {
     expect(onTimeout).not.toHaveBeenCalled()
   })
 
-  it("interrupts work that ignores cancellation during worker shutdown", async () => {
+  it("keeps unbounded work alive until worker shutdown", async () => {
+    vi.useFakeTimers()
     const controller = new AbortController()
     const onTimeout = vi.fn()
 
     const cycle = runWithCycleDeadline({
-      timeoutMs: 60_000,
       shutdownSignal: controller.signal,
       run: () => new Promise<never>(() => undefined),
       onTimeout,
     })
+    const settled = vi.fn()
+    void cycle.then(settled, settled)
+
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000)
+    expect(settled).not.toHaveBeenCalled()
 
     controller.abort(new Error("shutdown"))
 

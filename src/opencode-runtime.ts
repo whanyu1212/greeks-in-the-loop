@@ -15,6 +15,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk"
+import { Agent } from "undici"
 
 /** A managed OpenCode server and its connected SDK client. */
 export type OpencodeRuntime = {
@@ -229,7 +230,14 @@ export async function startOpencode({
     if (signal.aborted) onAbort()
   })
 
-  const client = createOpencodeClient({ baseUrl: url, directory: cwd })
+  // Caller signals own request deadlines; Undici's five-minute default must not preempt them.
+  const dispatcher = new Agent({ bodyTimeout: 0, headersTimeout: 0 })
+  const client = createOpencodeClient({
+    baseUrl: url,
+    directory: cwd,
+    fetch: (request) =>
+      globalThis.fetch(request, { dispatcher } as RequestInit),
+  })
   let closing: Promise<void> | undefined
 
   /**
@@ -249,6 +257,7 @@ export async function startOpencode({
         client.instance.dispose().catch(() => undefined),
         new Promise((resolve) => setTimeout(resolve, 5_000)),
       ])
+      await dispatcher.destroy()
 
       killProcessTree(process, "SIGTERM")
       if (!(await waitForExit(process, 5_000))) {

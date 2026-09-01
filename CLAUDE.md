@@ -21,47 +21,57 @@ Run one test with `pnpm vitest run tests/<file>.test.ts`. Node 22 and pnpm 10 ar
 
 The agent proposes; deterministic code disposes.
 
-- One research agent selects among `SPY`, `QQQ`, and `IWM`, performs strategy-driven research, and returns at most one directional debit vertical.
+- Application code discovers a bounded active, optionable universe each cycle and records a deterministic symbol-strategy screen in shadow mode; one research agent compares the exact universe snapshot and may propose up to three screened option strategies.
+- Named Alpaca strategy families are actionable when their application screen passes; the generic `DEFINED_RISK_MLEG` catch-all remains `APPLICATION_SUPPORT_PENDING`.
 - `evaluateTradeIntentRiskV1` in `src/risk/risk-evaluation-v1.ts` is pure: no I/O, history, database access, or ambient state.
 - Only candidate identity crosses from research into risk. Application code refreshes quotes, contracts, account state, portfolio state, and clock data.
+- Application code calculates position-weighted Greeks from refreshed ordered legs; signed directional net delta is the hard Greek limit for bullish and bearish strategies.
 - Money is integer cents; exit marks are half-cents per share.
-- No order-submission code exists. Runtime ends with a shadow decision in the ledger.
+- Only the isolated `trader` agent may submit an order, and only from an immutable, unexpired, application-derived authorization through the paper-pinned Alpaca MCP. Research remains non-executing.
 
 ## Pipeline
 
 ```text
-ResearchReportV3
-  -> validateResearchDecisionV2
+OptionUniverseSnapshotV2
+  -> SymbolScreenResultV2 (application-owned actionability)
+  -> ResearchReportV7
+  -> validateResearchDecisionV4
   -> confirm exact-leg quotes
-  -> deriveTradeIntentV2
+  -> deriveTradeIntentV4
   -> capture application-owned risk state
+  -> refresh TradeIntentV4
   -> evaluateTradeIntentRiskV1
-  -> append ledger events
+  -> append ledger events, including any eligible paper authorization
+  -> isolated trader resolves the opaque authorization ID
 ```
 
-`src/index.ts` is the composition root. `src/research/research-cycle.ts` orchestrates one cycle.
+`src/index.ts` is the composition root. `src/research/cycle.ts` orchestrates one cycle.
 
 ## Boundaries
 
 - `src/contracts/`: strict Zod trust boundaries and pure derivation.
-- `src/research/`: generic agent prompt, orchestration, retained context.
+- `src/research/`: orchestration and retained context; OpenCode agent policies live in `.opencode/agents/`.
 - `src/market-data/`: read-only Alpaca normalization and freshness.
 - `src/risk/`: state capture, reconciliation, pure risk gate, shadow result.
 - `src/scheduling/`: standard and dry-run eligibility.
-- `src/event-ledger/`: append-only SQLite lifecycle.
+- `src/event-ledger/`: append-only lifecycle with PostgreSQL deployment and deprecated SQLite local/test adapters isolated under `deprecated/`.
 - `src/backtest/`: self-contained deterministic replay.
 
-`opencode.json` is deny-by-default. The research agent has no shell, subagent, skill, arbitrary web, or broker-mutation authority. It can write only under `workspace/`.
+`opencode.json` is globally deny-by-default. The checked-in `research` agent has read-only market authority and no arbitrary skill-loading, shell, subagent, web, or broker-mutation authority. The separate `trader` agent may resolve one opaque ledger authorization, read Alpaca state, and submit option orders only through the paper-pinned Alpaca MCP; it has no stock, crypto, cancellation, replacement, filesystem, or external-research authority. The application invokes it in a separate session only for selected, risk-approved, positive-debit multi-leg authorizations. Credit, single-leg, expired, dry-run, and non-paper paths remain non-executing.
 
 ## Contract rules
 
-Current breaking contracts are `ResearchDecisionV2`, `PreliminaryResearchV2`, `TradeIntentV2`, and `ResearchReportV3`. Schemas are strict on proposal paths; safe `NO_ACTION` strips irrelevant prose. Do not add compatibility parsers without an explicit requirement.
+Current breaking contracts are `OptionUniverseSnapshotV2`, `ResearchDecisionV4`, `ResearchReportV7`, and `TradeIntentV4`. Persisted V3/V6 decisions, reports, and trade intents remain readable. Schemas are strict on proposal paths; safe `NO_ACTION` strips irrelevant prose. Do not add other compatibility parsers without an explicit requirement.
 
 Failures expose bounded reason codes, never raw model or provider input.
 
+## Backtest
+
+Replay `7.0.0` is the frozen historical V3 debit-spread model. Replay `8.0.0` evaluates V4 risk inputs and requires explicit natural close-premium marks, per-leg entry and exit slippage, commissions, stop/profit thresholds, minimum DTE, and maximum holding sessions. These assumptions are retained in output; missing exit prices make the aggregate incomplete rather than fabricating a fill.
+
 ## Dry run
 
-`--dry-run` requires `--once` and uses an isolated ledger. Current-session dry runs may reach shadow risk; historical sessions are research-only. Dry run never weakens validation, freshness, risk, or permissions.
+`--dry-run` requires `--once` and uses an isolated ledger. Current-session dry runs may reach shadow risk; historical sessions are research-only. Dry runs have no elapsed-time cycle deadline by default; set `AGENT_CYCLE_TIMEOUT_MS` to opt into one. Shutdown still cancels unbounded runs. Dry run never weakens validation, freshness, risk, or permissions.
 
 ## Before changing rules
 

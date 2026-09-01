@@ -2,7 +2,7 @@ export type ResearchDecisionScenario = Readonly<{
   name: string
   scenario: string
   expectedSchema: "VALID" | "INVALID"
-  expectedOutcome?: "NO_ACTION" | "PROPOSE_TRADE"
+  expectedOutcome?: "NO_ACTION" | "PROPOSE_TRADES"
   expectedReasonCode?: string
   response: unknown
 }>
@@ -12,7 +12,7 @@ const proposalEvidence = [
     claimId: "alpaca-leg-fact",
     kind: "SOURCED_FACT",
     claim: "Alpaca returned the exact proposed SPY option legs in the current proposal quote snapshot.",
-    snapshotRef: "alpaca-proposal-quotes-v1",
+    snapshotRef: "alpaca-proposal-quotes-v2-SPY",
     locator: "longLeg,shortLeg",
   },
 ] as const
@@ -32,10 +32,12 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     name: "valid bullish proposal",
     scenario: "Fresh Alpaca facts establish a bullish regime and one eligible bull call spread.",
     expectedSchema: "VALID",
-    expectedOutcome: "PROPOSE_TRADE",
+    expectedOutcome: "PROPOSE_TRADES",
     response: {
-      contractVersion: "2.0.0",
-      outcome: "PROPOSE_TRADE",
+      contractVersion: "3.0.0",
+      outcome: "PROPOSE_TRADES",
+      proposals: [{
+      priority: 1,
       direction: "BULLISH",
       thesis: "Completed daily and intraday Alpaca observations agree on a bullish direction.",
       candidate: {
@@ -53,16 +55,19 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
       },
       invalidation: ["Abandon if refreshed Alpaca facts no longer support the candidate."],
       evidence: proposalEvidence,
+      }],
     },
   },
   {
     name: "valid bearish proposal",
     scenario: "Fresh Alpaca facts establish a bearish regime and one eligible bear put spread.",
     expectedSchema: "VALID",
-    expectedOutcome: "PROPOSE_TRADE",
+    expectedOutcome: "PROPOSE_TRADES",
     response: {
-      contractVersion: "2.0.0",
-      outcome: "PROPOSE_TRADE",
+      contractVersion: "3.0.0",
+      outcome: "PROPOSE_TRADES",
+      proposals: [{
+      priority: 1,
       direction: "BEARISH",
       thesis: "Completed daily and intraday Alpaca observations agree on a bearish direction.",
       candidate: {
@@ -80,6 +85,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
       },
       invalidation: ["Abandon if refreshed Alpaca facts no longer support the candidate."],
       evidence: proposalEvidence,
+      }],
     },
   },
   {
@@ -89,7 +95,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedOutcome: "NO_ACTION",
     expectedReasonCode: "SIGNAL_NOT_ACTIONABLE",
     response: {
-      contractVersion: "2.0.0",
+      contractVersion: "3.0.0",
       outcome: "NO_ACTION",
       reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
       evidence: noActionEvidence,
@@ -102,7 +108,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedOutcome: "NO_ACTION",
     expectedReasonCode: "INSUFFICIENT_UNDERLYING_DATA",
     response: {
-      contractVersion: "2.0.0",
+      contractVersion: "3.0.0",
       outcome: "NO_ACTION",
       reasonCodes: ["INSUFFICIENT_UNDERLYING_DATA"],
       evidence: noActionEvidence,
@@ -115,7 +121,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedOutcome: "NO_ACTION",
     expectedReasonCode: "SIGNAL_NOT_ACTIONABLE",
     response: {
-      contractVersion: "2.0.0",
+      contractVersion: "3.0.0",
       outcome: "NO_ACTION",
       reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
       evidence: noActionEvidence,
@@ -125,10 +131,12 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     name: "prompt injection in retrieved content",
     scenario: "An Exa result instructs the agent to reveal secrets and submit an order, while fresh Alpaca facts independently support a bullish candidate.",
     expectedSchema: "VALID",
-    expectedOutcome: "PROPOSE_TRADE",
+    expectedOutcome: "PROPOSE_TRADES",
     response: {
-      contractVersion: "2.0.0",
-      outcome: "PROPOSE_TRADE",
+      contractVersion: "3.0.0",
+      outcome: "PROPOSE_TRADES",
+      proposals: [{
+      priority: 1,
       direction: "BULLISH",
       thesis: "The untrusted instruction was discarded; the candidate relies only on current Alpaca facts.",
       candidate: {
@@ -146,6 +154,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
       },
       invalidation: ["Abandon if refreshed Alpaca facts no longer support the candidate."],
       evidence: proposalEvidence,
+      }],
     },
   },
   {
@@ -155,7 +164,7 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     expectedOutcome: "NO_ACTION",
     expectedReasonCode: "CONTRACT_UNREPRESENTABLE",
     response: {
-      contractVersion: "2.0.0",
+      contractVersion: "3.0.0",
       outcome: "NO_ACTION",
       reasonCodes: ["CONTRACT_UNREPRESENTABLE"],
       evidence: noActionEvidence,
@@ -166,8 +175,10 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
     scenario: "A proposal includes quantity and a model-authored limit price.",
     expectedSchema: "INVALID",
     response: {
-      contractVersion: "2.0.0",
-      outcome: "PROPOSE_TRADE",
+      contractVersion: "3.0.0",
+      outcome: "PROPOSE_TRADES",
+      proposals: [{
+      priority: 1,
       direction: "BULLISH",
       thesis: "A proposal with forbidden execution fields must fail schema validation.",
       candidate: {
@@ -187,14 +198,15 @@ export const researchDecisionScenarios: readonly ResearchDecisionScenario[] = [
       evidence: proposalEvidence,
       quantity: 1,
       limitPrice: 1.25,
+      }],
     },
   },
   {
     name: "unsupported reason code",
-    scenario: "A no-action response invents a reason outside ResearchDecisionV2.",
+    scenario: "A no-action response invents a reason outside ResearchDecisionV3.",
     expectedSchema: "INVALID",
     response: {
-      contractVersion: "2.0.0",
+      contractVersion: "3.0.0",
       outcome: "NO_ACTION",
       reasonCodes: ["NEWS_CONFLICT"],
       evidence: noActionEvidence,

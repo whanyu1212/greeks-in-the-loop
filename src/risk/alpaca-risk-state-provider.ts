@@ -5,9 +5,15 @@ import {
   alpacaLatestOptionQuoteSchema,
   normalizeAlpacaOptionQuote,
 } from "../market-data/alpaca-option-quotes.js"
+import {
+  alpacaOptionEntryPlanV2Schema,
+  type AlpacaOptionEntryLegV2,
+  type AlpacaOptionEntryPlanV2,
+} from "../options/alpaca-capabilities.js"
 import { newYorkLocalTime } from "../scheduling/research-eligibility.js"
 import {
-  allowedAlpacaOptionSymbolV1Schema,
+  alpacaOptionStrikeCents,
+  alpacaOptionSymbolSchema,
   parseAlpacaOptionSymbol,
 } from "../shared/alpaca-option-identity.js"
 import {
@@ -16,18 +22,20 @@ import {
   parseRfc3339Nanoseconds,
 } from "../shared/value-normalization.js"
 import {
-  applicationVerifiedAccountV1Schema,
-  contractSnapshotV1Schema,
-  type ApplicationVerifiedAccountV1,
-  type ContractSnapshotV1,
-  type RiskContractLegV1,
+  contractSnapshotV2Schema,
+  type ContractSnapshotV2,
+  type RiskContractLegV2,
 } from "./risk-evaluation-v1.js"
 import {
+  applicationVerifiedAccountV2Schema,
+  candidateCollateralV1Schema,
   durableRiskControlStateV1Schema,
   normalizedBrokerOrderV1Schema,
   normalizedBrokerPositionV1Schema,
   reconcileBrokerPortfolioV1,
-  type ApplicationRiskStateSnapshotV1,
+  type ApplicationRiskStateSnapshotV2,
+  type ApplicationVerifiedAccountV2,
+  type CandidateCollateralV1,
   type DurableRiskControlStateV1,
   type NormalizedBrokerOrderV1,
   type NormalizedBrokerPositionV1,
@@ -40,32 +48,11 @@ const captureInputSchema = z
   .object({
     sessionDate: z.iso.date(),
     slotStartedAt: z.iso.datetime({ offset: true, precision: 3 }),
-    longContractSymbol: allowedAlpacaOptionSymbolV1Schema,
-    shortContractSymbol: allowedAlpacaOptionSymbolV1Schema,
+    entryPlan: alpacaOptionEntryPlanV2Schema,
     durableControl: durableRiskControlStateV1Schema,
   })
   .strict()
   .superRefine((input, refinement) => {
-    const longIdentity = parseAlpacaOptionSymbol(input.longContractSymbol)
-    const shortIdentity = parseAlpacaOptionSymbol(input.shortContractSymbol)
-    if (input.longContractSymbol === input.shortContractSymbol) {
-      refinement.addIssue({
-        code: "custom",
-        path: ["shortContractSymbol"],
-        message: "Risk capture requires two different option symbols",
-      })
-    }
-    if (
-      !longIdentity.success ||
-      !shortIdentity.success ||
-      longIdentity.identity.root !== shortIdentity.identity.root
-    ) {
-      refinement.addIssue({
-        code: "custom",
-        path: ["shortContractSymbol"],
-        message: "Risk capture requires option symbols for one underlying",
-      })
-    }
     if (input.durableControl.tradingDate !== input.sessionDate) {
       refinement.addIssue({
         code: "custom",
@@ -85,6 +72,7 @@ const rawAccountSchema = z
     options_approved_level: decimal.nullish(),
     options_trading_level: decimal.nullish(),
     buying_power: decimal,
+    cash: decimal,
     equity: decimal,
     last_equity: decimal,
   })
@@ -214,24 +202,23 @@ export const RISK_STATE_CAPTURE_FAILURE_CODES = [
 export type RiskStateCaptureFailureCode =
   (typeof RISK_STATE_CAPTURE_FAILURE_CODES)[number]
 
-export type RiskStateCaptureInputV1 = Readonly<{
+export type RiskStateCaptureInputV2 = Readonly<{
   sessionDate: string
   slotStartedAt: string
-  longContractSymbol: string
-  shortContractSymbol: string
+  entryPlan: AlpacaOptionEntryPlanV2
   durableControl: DurableRiskControlStateV1
   signal: AbortSignal
 }>
 
-export type RiskStateCaptureResultV1 =
-  | Readonly<{ success: true; snapshot: ApplicationRiskStateSnapshotV1 }>
+export type RiskStateCaptureResultV2 =
+  | Readonly<{ success: true; snapshot: ApplicationRiskStateSnapshotV2 }>
   | Readonly<{
       success: false
       reasons: readonly RiskStateCaptureFailureCode[]
     }>
 
 export type RiskStateProvider = Readonly<{
-  capture(input: RiskStateCaptureInputV1): Promise<RiskStateCaptureResultV1>
+  capture(input: RiskStateCaptureInputV2): Promise<RiskStateCaptureResultV2>
 }>
 
 export type CreateAlpacaRiskStateProviderOptions = Readonly<{
@@ -391,8 +378,9 @@ const rawOrderTimestamp = (order: z.infer<typeof rawOrderSchema>) =>
 const normalizeAccount = (
   raw: z.infer<typeof rawAccountSchema>,
   observedAt: string,
-): ApplicationVerifiedAccountV1 | undefined => {
+): ApplicationVerifiedAccountV2 | undefined => {
   const buyingPowerCents = parseExactCents(raw.buying_power)
+  const cashCents = parseExactCents(raw.cash)
   const equityCents = parseExactCents(raw.equity)
   const lastEquityCents = parseExactCents(raw.last_equity)
   const approvedLevel = raw.options_approved_level == null
@@ -403,6 +391,7 @@ const normalizeAccount = (
     : nonnegativeInteger(raw.options_trading_level)
   if (
     buyingPowerCents === undefined || buyingPowerCents < 0 ||
+    cashCents === undefined ||
     equityCents === undefined || equityCents < 0 ||
     lastEquityCents === undefined || lastEquityCents < 0 ||
     approvedLevel === undefined || tradingLevel === undefined
@@ -413,17 +402,74 @@ const normalizeAccount = (
     : ["INACTIVE", "CLOSED", "DISABLED"].includes(statusValue)
       ? "INACTIVE"
       : "UNKNOWN"
-  const parsed = applicationVerifiedAccountV1Schema.safeParse({
+  const parsed = applicationVerifiedAccountV2Schema.safeParse({
+    snapshotVersion: "2.0.0",
     observedAt,
     status,
     tradingRestricted:
       raw.trading_blocked ||
       raw.account_blocked ||
       raw.trade_suspended_by_user,
+    optionsApprovedLevel: approvedLevel,
+    optionsTradingLevel: tradingLevel,
     multilegOptionsApproved: approvedLevel >= 3 && tradingLevel >= 3,
     buyingPowerCents,
+    cashCents,
     equityCents,
     lastEquityCents,
+  })
+  return parsed.success ? parsed.data : undefined
+}
+
+const candidateCollateral = (
+  entryPlan: AlpacaOptionEntryPlanV2,
+  account: ApplicationVerifiedAccountV2,
+  positions: readonly NormalizedBrokerPositionV1[],
+): CandidateCollateralV1 | undefined => {
+  const longUnderlyingShares = Math.max(0, positions
+    .filter(({ assetClass, symbol }) =>
+      assetClass === "us_equity" && symbol === entryPlan.underlying
+    )
+    .reduce((total, { signedQuantity }) => total + signedQuantity, 0))
+  const requiredLongSharesPerUnit = ["COVERED_CALL", "COLLAR"].includes(
+    entryPlan.strategy,
+  )
+    ? entryPlan.legs
+      .filter(({ positionIntent, contractSymbol }) => {
+        const identity = parseAlpacaOptionSymbol(contractSymbol)
+        return positionIntent === "SELL_TO_OPEN" &&
+          identity.success && identity.identity.optionType === "C"
+      })
+      .reduce((total, { ratioQuantity }) => total + ratioQuantity * 100, 0)
+    : 0
+  let requiredCashCentsPerUnit = 0
+  if (entryPlan.strategy === "CASH_SECURED_PUT") {
+    for (const leg of entryPlan.legs) {
+      if (leg.positionIntent !== "SELL_TO_OPEN") continue
+      const identity = parseAlpacaOptionSymbol(leg.contractSymbol)
+      if (!identity.success || identity.identity.optionType !== "P") return undefined
+      const strike = alpacaOptionStrikeCents(identity.identity)
+      if (!strike.success) return undefined
+      requiredCashCentsPerUnit +=
+        strike.strikeCentsPerShare * 100 * leg.ratioQuantity
+    }
+  }
+  const cashAvailableCents = Math.min(
+    Math.max(0, account.cashCents),
+    account.buyingPowerCents,
+  )
+  const parsed = candidateCollateralV1Schema.safeParse({
+    underlying: entryPlan.underlying,
+    longUnderlyingShares,
+    cashAvailableCents,
+    requiredLongSharesPerUnit,
+    requiredCashCentsPerUnit,
+    maxUnitsFromShares: requiredLongSharesPerUnit === 0
+      ? null
+      : Math.floor(longUnderlyingShares / requiredLongSharesPerUnit),
+    maxUnitsFromCash: requiredCashCentsPerUnit === 0
+      ? null
+      : Math.floor(cashAvailableCents / requiredCashCentsPerUnit),
   })
   return parsed.success ? parsed.data : undefined
 }
@@ -437,11 +483,10 @@ const exerciseStyle = (value: string) => {
 }
 
 const normalizeContractLeg = (
-  role: "LONG" | "SHORT",
-  expectedSymbol: string,
+  entryLeg: AlpacaOptionEntryLegV2,
   contract: z.infer<typeof rawContractSchema>,
   snapshot: z.infer<typeof fullOptionSnapshotSchema>,
-): RiskContractLegV1 | undefined => {
+): RiskContractLegV2 | undefined => {
   const multiplier = positiveInteger(contract.size)
   const openInterest = nonnegativeInteger(contract.open_interest)
   const volume = nonnegativeInteger(snapshot.dailyBar.v)
@@ -455,7 +500,7 @@ const normalizeContractLeg = (
     impliedVolatility: finiteNumber(snapshot.impliedVolatility),
   }
   if (
-    contract.symbol !== expectedSymbol ||
+    contract.symbol !== entryLeg.contractSymbol ||
     multiplier === undefined ||
     openInterest === undefined ||
     volume === undefined ||
@@ -464,8 +509,9 @@ const normalizeContractLeg = (
     Object.values(metrics).some((metric) => metric === undefined)
   ) return undefined
   return {
-    role,
-    contractSymbol: expectedSymbol,
+    contractSymbol: entryLeg.contractSymbol,
+    positionIntent: entryLeg.positionIntent,
+    ratioQuantity: entryLeg.ratioQuantity,
     active: contract.status.toLowerCase() === "active",
     tradable: contract.tradable,
     exerciseStyle: exerciseStyle(contract.style),
@@ -654,13 +700,9 @@ export function createAlpacaRiskStateProvider(
       "CONTRACT_RESPONSE_INVALID",
     )
 
-  const getSnapshots = (
-    longSymbol: string,
-    shortSymbol: string,
-    signal: AbortSignal,
-  ) => {
+  const getSnapshots = (symbols: readonly string[], signal: AbortSignal) => {
     const url = new URL("/v1beta1/options/snapshots", dataBaseUrl)
-    url.searchParams.set("symbols", `${longSymbol},${shortSymbol}`)
+    url.searchParams.set("symbols", symbols.join(","))
     url.searchParams.set("feed", "indicative")
     return getJson(
       url,
@@ -671,12 +713,11 @@ export function createAlpacaRiskStateProvider(
   }
 
   return {
-    async capture(input): Promise<RiskStateCaptureResultV1> {
+    async capture(input): Promise<RiskStateCaptureResultV2> {
       const parsedInput = captureInputSchema.safeParse({
         sessionDate: input.sessionDate,
         slotStartedAt: input.slotStartedAt,
-        longContractSymbol: input.longContractSymbol,
-        shortContractSymbol: input.shortContractSymbol,
+        entryPlan: input.entryPlan,
         durableControl: input.durableControl,
       })
       if (!parsedInput.success) {
@@ -696,20 +737,15 @@ export function createAlpacaRiskStateProvider(
           getPositions(input.signal),
           getOrders(input.signal, "OPEN"),
         ])
-        const [
-          rawAccount,
-          rawLongContract,
-          rawShortContract,
-          rawSnapshots,
-        ] = await Promise.all([
+        const contractSymbols = parsedInput.data.entryPlan.legs.map(
+          ({ contractSymbol }) => contractSymbol,
+        )
+        const [rawAccount, rawContracts, rawSnapshots] = await Promise.all([
           getAccount(input.signal),
-          getContract(parsedInput.data.longContractSymbol, input.signal),
-          getContract(parsedInput.data.shortContractSymbol, input.signal),
-          getSnapshots(
-            parsedInput.data.longContractSymbol,
-            parsedInput.data.shortContractSymbol,
-            input.signal,
-          ),
+          Promise.all(contractSymbols.map((symbol) =>
+            getContract(symbol, input.signal)
+          )),
+          getSnapshots(contractSymbols, input.signal),
         ])
         const historyStartedAt = now()
         if (
@@ -777,44 +813,53 @@ export function createAlpacaRiskStateProvider(
           requestStartedAt.toISOString(),
         )
         if (account === undefined) throw new CaptureFailure("ACCOUNT_RESPONSE_INVALID")
+        const collateral = candidateCollateral(
+          parsedInput.data.entryPlan,
+          account,
+          finalPositions,
+        )
+        if (collateral === undefined) {
+          throw new CaptureFailure("ACCOUNT_RESPONSE_INVALID")
+        }
 
-        const longContractRaw = rawContractSchema.safeParse(rawLongContract)
-        const shortContractRaw = rawContractSchema.safeParse(rawShortContract)
-        if (!longContractRaw.success || !shortContractRaw.success) {
+        const parsedContracts = rawContracts.map((raw) =>
+          rawContractSchema.safeParse(raw)
+        )
+        if (parsedContracts.some((contract) => !contract.success)) {
           throw new CaptureFailure("CONTRACT_RESPONSE_INVALID")
         }
         const snapshotsRaw = rawSnapshotsResponseSchema.safeParse(rawSnapshots)
         if (!snapshotsRaw.success) {
           throw new CaptureFailure("OPTION_SNAPSHOT_RESPONSE_INVALID")
         }
-        const partialLongSnapshot =
-          snapshotsRaw.data.snapshots[parsedInput.data.longContractSymbol]
-        const partialShortSnapshot =
-          snapshotsRaw.data.snapshots[parsedInput.data.shortContractSymbol]
-        if (partialLongSnapshot === undefined || partialShortSnapshot === undefined) {
-          throw new CaptureFailure("OPTION_METRICS_UNAVAILABLE")
-        }
-        const longSnapshot = fullOptionSnapshotSchema.safeParse(partialLongSnapshot)
-        const shortSnapshot = fullOptionSnapshotSchema.safeParse(partialShortSnapshot)
-        if (!longSnapshot.success || !shortSnapshot.success) {
-          throw new CaptureFailure("OPTION_METRICS_UNAVAILABLE")
-        }
+        const parsedSnapshots = contractSymbols.map((symbol) => {
+          const snapshot = snapshotsRaw.data.snapshots[symbol]
+          return snapshot === undefined
+            ? undefined
+            : fullOptionSnapshotSchema.safeParse(snapshot)
+        })
         if (
-          longContractRaw.data.symbol !== parsedInput.data.longContractSymbol ||
-          shortContractRaw.data.symbol !== parsedInput.data.shortContractSymbol
-        ) throw new CaptureFailure("CONTRACT_RESPONSE_INVALID")
+          parsedSnapshots.some((snapshot) =>
+            snapshot === undefined || !snapshot.success
+          )
+        ) {
+          throw new CaptureFailure("OPTION_METRICS_UNAVAILABLE")
+        }
+        const snapshots = parsedSnapshots.flatMap((snapshot) =>
+          snapshot?.success ? [snapshot.data] : []
+        )
+        if (snapshots.length !== contractSymbols.length) {
+          throw new CaptureFailure("OPTION_METRICS_UNAVAILABLE")
+        }
         const evaluatedAtNanoseconds = BigInt(evaluatedAtDate.getTime()) * 1_000_000n
-        const longQuote = normalizeAlpacaOptionQuote(
-          parsedInput.data.longContractSymbol,
-          longSnapshot.data.latestQuote,
-          captureCompletedAtNanoseconds,
+        const normalizedQuotes = contractSymbols.map((symbol, index) =>
+          normalizeAlpacaOptionQuote(
+            symbol,
+            snapshots[index]!.latestQuote,
+            captureCompletedAtNanoseconds,
+          )
         )
-        const shortQuote = normalizeAlpacaOptionQuote(
-          parsedInput.data.shortContractSymbol,
-          shortSnapshot.data.latestQuote,
-          captureCompletedAtNanoseconds,
-        )
-        for (const quote of [longQuote, shortQuote]) {
+        for (const quote of normalizedQuotes) {
           if (!quote.success) {
             if (quote.reason === "QUOTE_FROM_FUTURE") {
               throw new CaptureFailure("OPTION_QUOTE_FROM_FUTURE")
@@ -825,28 +870,25 @@ export function createAlpacaRiskStateProvider(
             throw new CaptureFailure("OPTION_SNAPSHOT_RESPONSE_INVALID")
           }
         }
-        if (!longQuote.success || !shortQuote.success) {
+        const successfulQuotes = normalizedQuotes.flatMap((quote) =>
+          quote.success ? [quote] : []
+        )
+        if (successfulQuotes.length !== contractSymbols.length) {
           throw new CaptureFailure("OPTION_SNAPSHOT_RESPONSE_INVALID")
         }
-        const longLeg = normalizeContractLeg(
-          "LONG",
-          parsedInput.data.longContractSymbol,
-          longContractRaw.data,
-          longSnapshot.data,
-        )
-        const shortLeg = normalizeContractLeg(
-          "SHORT",
-          parsedInput.data.shortContractSymbol,
-          shortContractRaw.data,
-          shortSnapshot.data,
-        )
-        if (longLeg === undefined || shortLeg === undefined) {
+        const contractLegs = parsedInput.data.entryPlan.legs.map((entryLeg, index) => {
+          const contract = parsedContracts[index]!
+          if (!contract.success) return undefined
+          return normalizeContractLeg(entryLeg, contract.data, snapshots[index]!)
+        })
+        if (contractLegs.some((leg) => leg === undefined)) {
           throw new CaptureFailure("OPTION_METRICS_UNAVAILABLE")
         }
-        const contracts = contractSnapshotV1Schema.safeParse({
+        const contracts = contractSnapshotV2Schema.safeParse({
+          snapshotVersion: "2.0.0",
           slotStartedAt: parsedInput.data.slotStartedAt,
           observedAt: evaluatedAt,
-          legs: [longLeg, shortLeg],
+          legs: contractLegs,
         })
         if (!contracts.success) throw new CaptureFailure("CONTRACT_RESPONSE_INVALID")
 
@@ -902,15 +944,38 @@ export function createAlpacaRiskStateProvider(
         if (!reconciliation.success) {
           return { success: false, reasons: ["CAPTURE_INPUT_INVALID"] }
         }
-        const freshUntilNanoseconds =
-          longQuote.freshUntilNanoseconds < shortQuote.freshUntilNanoseconds
-            ? longQuote.freshUntilNanoseconds
-            : shortQuote.freshUntilNanoseconds
+        const shareCollateralExplainsPositions =
+          collateral.requiredLongSharesPerUnit > 0 &&
+          (collateral.maxUnitsFromShares ?? 0) >= 1 &&
+          finalPositions.length > 0 &&
+          finalPositions.every(({ assetClass, symbol, signedQuantity }) =>
+            assetClass === "us_equity" &&
+            symbol === parsedInput.data.entryPlan.underlying &&
+            signedQuantity > 0
+          ) &&
+          reconciliation.reasonCodes.every((reason) =>
+            reason === "UNKNOWN_POSITION"
+          )
+        const reconciliationReasonCodes = shareCollateralExplainsPositions
+          ? []
+          : reconciliation.reasonCodes
+        const portfolio = shareCollateralExplainsPositions
+          ? { ...reconciliation.portfolio, consistent: true }
+          : reconciliation.portfolio
+        const freshUntilNanoseconds = successfulQuotes.reduce(
+          (earliest, quote) =>
+            quote.freshUntilNanoseconds < earliest
+              ? quote.freshUntilNanoseconds
+              : earliest,
+          successfulQuotes[0]!.freshUntilNanoseconds,
+        )
         return {
           success: true,
           snapshot: {
+            snapshotVersion: "2.0.0",
             evaluatedAt,
             quoteSnapshot: {
+              snapshotVersion: "2.0.0",
               evaluatedAt,
               snapshotMetadata: {
                 provider: "ALPACA",
@@ -920,13 +985,14 @@ export function createAlpacaRiskStateProvider(
                   freshUntilNanoseconds,
                 ),
               },
-              longQuote: longQuote.quote,
-              shortQuote: shortQuote.quote,
+              quotes: successfulQuotes.map(({ quote }) => quote),
             },
             account,
-            portfolio: reconciliation.portfolio,
-            contracts: contracts.data as ContractSnapshotV1,
-            reconciliationReasonCodes: reconciliation.reasonCodes,
+            positions: finalPositions,
+            candidateCollateral: collateral,
+            portfolio,
+            contracts: contracts.data as ContractSnapshotV2,
+            reconciliationReasonCodes,
           },
         }
       } catch (error) {

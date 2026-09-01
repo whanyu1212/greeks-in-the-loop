@@ -1,32 +1,43 @@
 import { describe, expect, it, vi } from "vitest"
 
 import type {
-  NoActionDecisionV2,
-  ProposedTradeDecisionV2,
-} from "../src/contracts/research-decision-v2.js"
-import type { PreliminaryResearchV2 } from "../src/contracts/preliminary-research-v2.js"
-import type { ResearchReportV3 } from "../src/contracts/research-report-v3.js"
-import type { TradeIntentV2 } from "../src/contracts/trade-intent-v2.js"
+  NoActionDecisionV3,
+  ProposedPortfolioDecisionV3,
+} from "../src/contracts/research-decision-v3.js"
+import { proposalQuoteSnapshotRef } from "../src/contracts/research-decision-v3.js"
+import type { ResearchReportV6 } from "../src/contracts/research-report-v6.js"
+import type { TradeIntentV3 } from "../src/contracts/trade-intent-v3.js"
 import type {
-  LedgerEventV2,
-  StoredLedgerEventV2,
+  LedgerEventV4,
+  StoredLedgerEventV4,
 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { createResearchLifecycleRecorder } from "../src/event-ledger/research-lifecycle-recorder.js"
-import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
-import type { ResearchCycleTerminalRecordV1 } from "../src/research/research-cycle-outcome-v1.js"
-import type { ResearchInvocationV1 } from "../src/research/research-invocation-v1.js"
+import { createSqliteLedgerStore } from "../src/event-ledger/deprecated/sqlite-ledger-store.js"
+import type { ResearchCycleTerminalRecordV3 } from "../src/research/cycle/outcome.js"
+import type { ResearchInvocationV1 } from "../src/research/invocation.js"
+import type { SymbolScreenResultV2 } from "../src/research/symbol-screen.js"
 
 const TIMESTAMP = "2026-08-26T10:00:00.000Z"
+const SNAPSHOT_REF = proposalQuoteSnapshotRef("SPY")
 const signal = new AbortController().signal
+
+const symbolScreen: SymbolScreenResultV2 = {
+  screenVersion: "2.0.0",
+  policyVersion: "2.0.0",
+  mode: "SHADOW",
+  evaluatedAt: TIMESTAMP,
+  universeSnapshotId: `option-universe-v2-${"a".repeat(64)}`,
+  symbols: [],
+}
 
 const researchInvocation: ResearchInvocationV1 = {
   invocationVersion: "3.0.0",
   agentName: "research",
   cycleMode: "STANDARD",
   promptVersion: "1.3.0",
-  decisionContractVersion: "2.0.0",
-  reportVersion: "3.0.0",
+  decisionContractVersion: "3.0.0",
+  reportVersion: "6.0.0",
   providerId: "test-provider",
   modelId: "test-model",
   responseError: false,
@@ -40,8 +51,8 @@ const researchInvocation: ResearchInvocationV1 = {
   },
 }
 
-const noActionDecision: NoActionDecisionV2 = {
-  contractVersion: "2.0.0",
+const noActionDecision: NoActionDecisionV3 = {
+  contractVersion: "3.0.0",
   outcome: "NO_ACTION",
   reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
   evidence: [{
@@ -54,8 +65,8 @@ const noActionDecision: NoActionDecisionV2 = {
   }],
 }
 
-const researchReport: ResearchReportV3 = {
-  reportVersion: "3.0.0",
+const researchReport: ResearchReportV6 = {
+  reportVersion: "6.0.0",
   result: noActionDecision,
   analysis: {
     provenance: "AGENT_REPORTED",
@@ -67,14 +78,18 @@ const researchReport: ResearchReportV3 = {
       optionsTradingApproved: true,
       conflictingStrategyExposure: false,
     },
-    marketRegime: {
+    marketRegimes: [{
       verification: "AGENT_REPORTED",
       temporalClass: "LIVE",
       observedAt: TIMESTAMP,
       signal: "MIXED",
+      underlying: "SPY",
       dailySessionCount: 50,
       intradayBarCount: 30,
-    },
+    }],
+    symbolEvaluations: [],
+    optionSurfaces: [],
+    candidateEvaluations: [],
     externalContext: [
       {
         sourceId: "exa-1",
@@ -94,64 +109,46 @@ const researchReport: ResearchReportV3 = {
   },
 }
 
-const preliminaryResearch: PreliminaryResearchV2 = {
-  contractVersion: "2.0.0",
-  outcome: "PRELIMINARY_RESEARCH",
-  targetSessionDate: "2026-08-26",
-  direction: "UNDETERMINED",
-  thesis: "Prior-close observations warrant a fresh regular-session check.",
-  invalidation: ["Reject if live evidence is unavailable."],
-  evidence: [
-    {
-      claimId: "prior-close-1",
-      kind: "SOURCED_FACT",
-      claim: "The prior session supplied the latest completed daily bar.",
-      provider: "ALPACA",
-      temporalClass: "PRIOR_CLOSE",
-      observedAt: "2026-08-25T20:00:00.000Z",
+const proposedDecision: ProposedPortfolioDecisionV3 = {
+  contractVersion: "3.0.0",
+  outcome: "PROPOSE_TRADES",
+  proposals: [{
+    priority: 1,
+    direction: "BULLISH",
+    thesis: "Daily and intraday direction agree.",
+    candidate: {
+      underlying: "SPY",
+      structure: "BULL_CALL_SPREAD",
+      expiration: "2026-09-18",
+      longLeg: {
+        contractSymbol: "SPY260918C00650000",
+        strike: 650,
+      },
+      shortLeg: {
+        contractSymbol: "SPY260918C00655000",
+        strike: 655,
+      },
     },
-  ],
-  requiresRefresh: true,
-}
-
-const proposedDecision: ProposedTradeDecisionV2 = {
-  contractVersion: "2.0.0",
-  outcome: "PROPOSE_TRADE",
-  direction: "BULLISH",
-  thesis: "Daily and intraday direction agree.",
-  candidate: {
-    underlying: "SPY",
-    structure: "BULL_CALL_SPREAD",
-    expiration: "2026-09-18",
-    longLeg: {
-      contractSymbol: "SPY260918C00650000",
-      strike: 650,
-    },
-    shortLeg: {
-      contractSymbol: "SPY260918C00655000",
-      strike: 655,
-    },
-  },
-  invalidation: ["Reject if refreshed evidence changes the candidate."],
-  evidence: [
-    {
+    invalidation: ["Reject if refreshed evidence changes the candidate."],
+    evidence: [{
       claimId: "fact-1",
       kind: "SOURCED_FACT",
       claim: "The exact proposed legs were confirmed.",
-      snapshotRef: "snapshot-1",
-    },
-  ],
+      snapshotRef: SNAPSHOT_REF,
+    }],
+  }],
 }
 
-const intent: TradeIntentV2 = {
-  contractVersion: "2.0.0",
-  decisionContractVersion: "2.0.0",
+const intent: TradeIntentV3 = {
+  contractVersion: "3.0.0",
+  decisionContractVersion: "3.0.0",
+  underlying: "SPY",
   direction: "BULLISH",
   structure: "BULL_CALL_SPREAD",
   expiration: "2026-09-18",
   longContractSymbol: "SPY260918C00650000",
   shortContractSymbol: "SPY260918C00655000",
-  quoteSnapshotRef: "snapshot-1",
+  quoteSnapshotRef: SNAPSHOT_REF,
   evaluatedAt: TIMESTAMP,
   longQuote: {
     contractSymbol: "SPY260918C00650000",
@@ -191,7 +188,7 @@ const shadowRisk = {
 
 const evidenceSnapshots = [
   {
-    snapshotRef: "snapshot-1",
+    snapshotRef: SNAPSHOT_REF,
     provider: "ALPACA",
     source: "options-snapshots-indicative",
     retrievedAt: TIMESTAMP,
@@ -207,17 +204,17 @@ const evidenceSnapshots = [
 ] as const
 
 const asStored = (
-  event: LedgerEventV2,
+  event: LedgerEventV4,
   sequence: number,
-): StoredLedgerEventV2 =>
+): StoredLedgerEventV4 =>
   ({
     ...event,
     sequence,
     recordedAt: TIMESTAMP,
-  }) as StoredLedgerEventV2
+  }) as StoredLedgerEventV4
 
 const setup = () => {
-  const events: LedgerEventV2[] = []
+  const events: LedgerEventV4[] = []
   const append = vi.fn<LedgerStore["append"]>(async (event, appendSignal) => {
     appendSignal?.throwIfAborted()
     events.push(event)
@@ -272,32 +269,16 @@ const assertCausalChain = (
 
 const terminalMappingCases: readonly {
   name: string
-  record: ResearchCycleTerminalRecordV1
-  eventTypes: readonly LedgerEventV2["eventType"][]
+  record: ResearchCycleTerminalRecordV3
+  eventTypes: readonly LedgerEventV4["eventType"][]
 }[] = [
-  {
-    name: "retained preliminary research",
-    record: {
-      researchInvocation,
-      outcome: {
-        outcomeVersion: "1.0.0",
-        status: "PRELIMINARY_RESEARCH_RETAINED",
-        research: preliminaryResearch,
-      },
-      evidenceSnapshots: [],
-      preliminaryResearch,
-    },
-    eventTypes: [
-      "PRELIMINARY_RESEARCH_RECORDED",
-      "RESEARCH_CYCLE_COMPLETED",
-    ],
-  },
   {
     name: "validated no action",
     record: {
       researchInvocation,
+      symbolScreen,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "VALIDATED_NO_ACTION",
         decision: noActionDecision,
       },
@@ -306,6 +287,7 @@ const terminalMappingCases: readonly {
       researchReport,
     },
     eventTypes: [
+      "RESEARCH_SYMBOL_SCREEN_RECORDED",
       "RESEARCH_REPORT_RECORDED",
       "RESEARCH_DECISION_VALIDATED",
       "RESEARCH_CYCLE_COMPLETED",
@@ -315,8 +297,9 @@ const terminalMappingCases: readonly {
     name: "decision rejection",
     record: {
       researchInvocation,
+      symbolScreen,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [{
           code: "SCHEMA_INVALID",
@@ -327,6 +310,7 @@ const terminalMappingCases: readonly {
       evidenceSnapshots,
     },
     eventTypes: [
+      "RESEARCH_SYMBOL_SCREEN_RECORDED",
       "EVIDENCE_SNAPSHOT_REFERENCED",
       "EVIDENCE_SNAPSHOT_REFERENCED",
       "RESEARCH_DECISION_REJECTED",
@@ -334,43 +318,62 @@ const terminalMappingCases: readonly {
     ],
   },
   {
-    name: "intent derivation rejection with a validated decision",
+    name: "portfolio intent derivation rejection with a validated decision",
     record: {
       researchInvocation,
+      symbolScreen,
       outcome: {
-        outcomeVersion: "1.0.0",
-        status: "INTENT_DERIVATION_REJECTED",
-        reasons: ["QUOTE_STALE"],
+        outcomeVersion: "3.0.0",
+        status: "PORTFOLIO_EVALUATED",
+        decision: proposedDecision,
+        proposals: [{
+          priority: 1,
+          underlying: "SPY",
+          status: "INTENT_DERIVATION_REJECTED",
+          reasons: ["QUOTE_STALE"],
+        }],
       },
       evidenceSnapshots: [evidenceSnapshots[0]],
       validatedDecision: proposedDecision,
     },
     eventTypes: [
+      "RESEARCH_SYMBOL_SCREEN_RECORDED",
       "EVIDENCE_SNAPSHOT_REFERENCED",
       "RESEARCH_DECISION_VALIDATED",
       "TRADE_INTENT_DERIVATION_REJECTED",
+      "PORTFOLIO_SHADOW_PLAN_RECORDED",
       "RESEARCH_CYCLE_COMPLETED",
     ],
   },
   {
-    name: "derived intent without duplicate decision or intent events",
+    name: "evaluated portfolio without duplicate decision or intent events",
     record: {
       researchInvocation,
+      symbolScreen,
       outcome: {
-        outcomeVersion: "1.0.0",
-        status: "INTENT_DERIVED",
+        outcomeVersion: "3.0.0",
+        status: "PORTFOLIO_EVALUATED",
         decision: proposedDecision,
-        intent,
+        proposals: [{
+          priority: 1,
+          underlying: "SPY",
+          status: "RISK_EVALUATED",
+          proposal: proposedDecision.proposals[0]!,
+          intent,
+          shadowRisk,
+          selected: true,
+        }],
       },
       evidenceSnapshots: [evidenceSnapshots[0]],
       validatedDecision: proposedDecision,
-      shadowRisk,
     },
     eventTypes: [
+      "RESEARCH_SYMBOL_SCREEN_RECORDED",
       "EVIDENCE_SNAPSHOT_REFERENCED",
       "RESEARCH_DECISION_VALIDATED",
       "TRADE_INTENT_DERIVED",
       "RISK_SHADOW_DECISION_RECORDED",
+      "PORTFOLIO_SHADOW_PLAN_RECORDED",
       "RESEARCH_CYCLE_COMPLETED",
     ],
   },
@@ -385,7 +388,7 @@ describe("createResearchLifecycleRecorder", () => {
     expect(state.events).toEqual([
       {
         eventId: "id-1",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "OPENCODE_SESSION_STARTED",
         occurredAt: TIMESTAMP,
         correlationId: "id-2",
@@ -411,7 +414,7 @@ describe("createResearchLifecycleRecorder", () => {
     expect(state.events).toEqual([
       {
         eventId: "id-1",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "RESEARCH_LOOP_BREAKER_LATCHED",
         occurredAt: TIMESTAMP,
         correlationId: "id-2",
@@ -425,7 +428,7 @@ describe("createResearchLifecycleRecorder", () => {
       },
       {
         eventId: "id-3",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "RESEARCH_LOOP_BREAKER_RESET",
         occurredAt: TIMESTAMP,
         correlationId: "id-4",
@@ -454,7 +457,7 @@ describe("createResearchLifecycleRecorder", () => {
     expect(state.events).toEqual([
       {
         eventId: "id-3",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "RESEARCH_CYCLE_STARTED",
         occurredAt: TIMESTAMP,
         correlationId: "id-2",
@@ -472,14 +475,14 @@ describe("createResearchLifecycleRecorder", () => {
 
     await cycle.recordInvocationIdentityRejected({
       reason: "MODEL_DRIFT",
-      expected: "gpt-5.6-sol",
-      observed: "gpt-5.6-sol-fast",
+      expected: "gpt-5.6-terra",
+      observed: "gpt-5.6-terra-fast",
     })
 
     expect(state.events).toEqual([
       {
         eventId: "id-4",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "RESEARCH_INVOCATION_IDENTITY_REJECTED",
         occurredAt: TIMESTAMP,
         correlationId: "id-2",
@@ -487,10 +490,10 @@ describe("createResearchLifecycleRecorder", () => {
         cycleId: "id-1",
         sessionId: "session-1",
         payload: {
-          invocationVersion: "3.0.0",
+          invocationVersion: "7.2.0",
           reason: "MODEL_DRIFT",
-          expected: "gpt-5.6-sol",
-          observed: "gpt-5.6-sol-fast",
+          expected: "gpt-5.6-terra",
+          observed: "gpt-5.6-terra-fast",
         },
       },
     ])
@@ -586,13 +589,13 @@ describe("createResearchLifecycleRecorder", () => {
     const cycle = await startCycle(state)
     const missingInvocation = {
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "VALIDATED_NO_ACTION",
         decision: noActionDecision,
       },
       evidenceSnapshots: [],
       validatedDecision: noActionDecision,
-    } as unknown as ResearchCycleTerminalRecordV1
+    } as unknown as ResearchCycleTerminalRecordV3
 
     await expect(
       cycle.outcomeSink.record(missingInvocation, signal),
@@ -611,8 +614,9 @@ describe("createResearchLifecycleRecorder", () => {
 
     await cycle.outcomeSink.record(
       {
+        symbolScreen,
         outcome: {
-          outcomeVersion: "1.0.0",
+          outcomeVersion: "3.0.0",
           status: "DECISION_REJECTED",
           issues: [{
             code: "SCHEMA_INVALID",
@@ -627,6 +631,7 @@ describe("createResearchLifecycleRecorder", () => {
     )
 
     expect(state.events.slice(1).map(({ payload }) => payload)).toEqual([
+      { screen: symbolScreen },
       evidenceSnapshots[0],
       evidenceSnapshots[1],
       {
@@ -654,7 +659,7 @@ describe("createResearchLifecycleRecorder", () => {
 
     expect(state.events.at(-1)).toEqual({
       eventId: "id-4",
-      eventVersion: "2.0.0",
+      eventVersion: "4.0.0",
       eventType: "RESEARCH_CYCLE_INTERRUPTED",
       occurredAt: TIMESTAMP,
       correlationId: cycle.correlationId,
@@ -668,9 +673,10 @@ describe("createResearchLifecycleRecorder", () => {
   it("keeps a failed atomic completion retryable without partial events", async () => {
     const state = setup()
     const cycle = await startCycle(state)
-    const terminalRecord: ResearchCycleTerminalRecordV1 = {
+    const terminalRecord: ResearchCycleTerminalRecordV3 = {
+      symbolScreen,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "VALIDATED_NO_ACTION",
         decision: noActionDecision,
       },
@@ -690,6 +696,7 @@ describe("createResearchLifecycleRecorder", () => {
     await cycle.outcomeSink.record(terminalRecord, signal)
     expect(state.events.map(({ eventType }) => eventType)).toEqual([
       "RESEARCH_CYCLE_STARTED",
+      "RESEARCH_SYMBOL_SCREEN_RECORDED",
       "RESEARCH_DECISION_VALIDATED",
       "RESEARCH_CYCLE_COMPLETED",
     ])
@@ -713,8 +720,9 @@ describe("createResearchLifecycleRecorder", () => {
 
     const completion = cycle.outcomeSink.record(
       {
+        symbolScreen,
         outcome: {
-          outcomeVersion: "1.0.0",
+          outcomeVersion: "3.0.0",
           status: "VALIDATED_NO_ACTION",
           decision: noActionDecision,
         },
@@ -731,6 +739,7 @@ describe("createResearchLifecycleRecorder", () => {
     await Promise.all([completion, interruption])
     expect(state.events.map(({ eventType }) => eventType)).toEqual([
       "RESEARCH_CYCLE_STARTED",
+      "RESEARCH_SYMBOL_SCREEN_RECORDED",
       "RESEARCH_DECISION_VALIDATED",
       "RESEARCH_CYCLE_COMPLETED",
     ])
@@ -743,8 +752,9 @@ describe("createResearchLifecycleRecorder", () => {
     await cycle.interrupt("PROCESS_RESTART", signal)
     await cycle.outcomeSink.record(
       {
+        symbolScreen,
         outcome: {
-          outcomeVersion: "1.0.0",
+          outcomeVersion: "3.0.0",
           status: "VALIDATED_NO_ACTION",
           decision: noActionDecision,
         },
@@ -768,15 +778,16 @@ describe("createResearchLifecycleRecorder", () => {
     let rejectWrite!: (error: Error) => void
     state.appendBatch.mockImplementationOnce(
       async () =>
-        new Promise<readonly StoredLedgerEventV2[]>((_resolve, reject) => {
+        new Promise<readonly StoredLedgerEventV4[]>((_resolve, reject) => {
           rejectWrite = reject
         }),
     )
 
     const completion = cycle.outcomeSink.record(
       {
+        symbolScreen,
         outcome: {
-          outcomeVersion: "1.0.0",
+          outcomeVersion: "3.0.0",
           status: "VALIDATED_NO_ACTION",
           decision: noActionDecision,
         },
@@ -893,26 +904,34 @@ describe("createResearchLifecycleRecorder", () => {
 
     await cycle.outcomeSink.record(
       {
+        symbolScreen,
         outcome: {
-          outcomeVersion: "1.0.0",
-          status: "INTENT_DERIVED",
+          outcomeVersion: "3.0.0",
+          status: "PORTFOLIO_EVALUATED",
           decision: proposedDecision,
-          intent,
+          proposals: [{
+            priority: 1,
+            underlying: "SPY",
+            status: "RISK_EVALUATED",
+            proposal: proposedDecision.proposals[0]!,
+            intent,
+            shadowRisk: {
+              ...shadowRisk,
+              breakerTransitions: [
+                {
+                  stateVersion: "1.0.0",
+                  tradingDate: "2026-08-26",
+                  observedAt: TIMESTAMP,
+                  breaker: "DAILY",
+                },
+              ],
+            },
+            selected: true,
+          }],
         },
         evidenceSnapshots: [evidenceSnapshots[0]],
         researchInvocation,
         validatedDecision: proposedDecision,
-        shadowRisk: {
-          ...shadowRisk,
-          breakerTransitions: [
-            {
-              stateVersion: "1.0.0",
-              tradingDate: "2026-08-26",
-              observedAt: TIMESTAMP,
-              breaker: "DAILY",
-            },
-          ],
-        },
       },
       signal,
     )
@@ -920,11 +939,13 @@ describe("createResearchLifecycleRecorder", () => {
     const stored = await store.list({ cycleId: cycle.cycleId, limit: 10 })
     expect(stored.map(({ eventType }) => eventType)).toEqual([
       "RESEARCH_CYCLE_STARTED",
+      "RESEARCH_SYMBOL_SCREEN_RECORDED",
       "EVIDENCE_SNAPSHOT_REFERENCED",
       "RESEARCH_DECISION_VALIDATED",
       "TRADE_INTENT_DERIVED",
       "RISK_SHADOW_DECISION_RECORDED",
       "RISK_BREAKER_LATCHED",
+      "PORTFOLIO_SHADOW_PLAN_RECORDED",
       "RESEARCH_CYCLE_COMPLETED",
     ])
     assertCausalChain(stored)

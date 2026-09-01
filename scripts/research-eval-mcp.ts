@@ -4,9 +4,11 @@ import { z } from "zod"
 
 import { researchEvalBarRequestMatchesFixture } from "../src/evaluation/research-eval-bar-window.js"
 import {
-  ALLOWED_OPTION_UNDERLYINGS_V1,
-  allowedAlpacaOptionSymbolV1Schema,
-  type AllowedOptionUnderlyingV1,
+  RESEARCH_EVALUATION_OPTION_UNDERLYINGS,
+  type ResearchEvaluationOptionUnderlying,
+} from "../src/evaluation/research-behavior-scenarios.js"
+import {
+  alpacaOptionSymbolSchema,
 } from "../src/shared/alpaca-option-identity.js"
 
 const scenarioId = process.argv[2]?.trim()
@@ -32,23 +34,10 @@ const result = (value: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(value) }],
 })
 
-const commonInput = {
-  symbol: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1).optional(),
-  symbols: z.array(allowedAlpacaOptionSymbolV1Schema).optional(),
-  query: z.string().optional(),
-  start: z.string().optional(),
-  end: z.string().optional(),
-  timeframe: z.string().optional(),
-  adjustment: z.literal("all").optional(),
-  feed: z.enum(["iex", "indicative"]).optional(),
-  limit: z.number().optional(),
-  status: z.string().optional(),
-}
-
 const inputSchemaFor = (name: string) => {
   if (name === "alpaca_get_stock_bars") {
     return z.object({
-      symbol: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1),
+      symbols: z.enum(RESEARCH_EVALUATION_OPTION_UNDERLYINGS),
       timeframe: z.enum(["1Day", "1Min"]),
       adjustment: z.literal("all"),
       feed: z.literal("iex"),
@@ -65,29 +54,91 @@ const inputSchemaFor = (name: string) => {
   }
   if (name === "alpaca_get_stock_latest_quote") {
     return z.object({
-      ...commonInput,
-      symbol: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1),
+      symbols: z.enum(RESEARCH_EVALUATION_OPTION_UNDERLYINGS),
       feed: z.literal("iex"),
-    })
+    }).strict()
   }
   if (name === "alpaca_get_option_chain") {
     return z.object({
-      ...commonInput,
-      symbol: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1).optional(),
-      symbols: z.array(allowedAlpacaOptionSymbolV1Schema).min(1).optional(),
+      underlying_symbol: z.enum(RESEARCH_EVALUATION_OPTION_UNDERLYINGS),
       feed: z.literal("indicative"),
-    }).refine(
-      (input) => input.symbol !== undefined || input.symbols !== undefined,
-      { message: "Option-chain fixture calls require an allowed ETF or OCC symbols" },
-    )
+      expiration_date: z.iso.date().optional(),
+      expiration_date_gte: z.iso.date().optional(),
+      expiration_date_lte: z.iso.date().optional(),
+      type: z.enum(["call", "put"]).optional(),
+      strike_price_gte: z.number().positive().optional(),
+      strike_price_lte: z.number().positive().optional(),
+      limit: z.number().int().positive().max(1_000).optional(),
+      page_token: z.string().min(1).optional(),
+    }).strict()
   }
   if (name === "alpaca_get_option_contracts") {
     return z.object({
-      ...commonInput,
-      symbol: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1),
+      underlying_symbols: z.enum(RESEARCH_EVALUATION_OPTION_UNDERLYINGS),
+      status: z.literal("active").optional(),
+      expiration_date: z.iso.date().optional(),
+      expiration_date_gte: z.iso.date().optional(),
+      expiration_date_lte: z.iso.date().optional(),
+      style: z.literal("american").optional(),
+      type: z.enum(["call", "put"]).optional(),
+      limit: z.number().int().positive().max(10_000).optional(),
+      page_token: z.string().min(1).optional(),
+    }).strict()
+  }
+  if (name === "alpaca_get_option_snapshot") {
+    return z.object({
+      symbols: z.string().min(1),
+      feed: z.literal("indicative"),
+      updated_since: z.string().datetime({ offset: true }).optional(),
+      limit: z.number().int().positive().max(1_000).optional(),
+      page_token: z.string().min(1).optional(),
+    }).strict().superRefine(({ symbols }, refinement) => {
+      for (const symbol of symbols.split(",")) {
+        if (!alpacaOptionSymbolSchema.safeParse(symbol).success) {
+          refinement.addIssue({
+            code: "custom",
+            path: ["symbols"],
+            message: "Option snapshots require comma-separated OCC symbols",
+          })
+        }
+      }
     })
   }
-  return z.object(commonInput)
+  if (name === "fmp_economics") {
+    return z.object({
+      endpoint: z.literal("economics-calendar"),
+      from_date: z.iso.date(),
+      to_date: z.iso.date(),
+      country: z.string().optional(),
+    }).strict()
+  }
+  if (name === "fmp_calendar") {
+    return z.object({
+      endpoint: z.enum([
+        "dividends-calendar",
+        "dividends-company",
+        "earnings-calendar",
+        "earnings-company",
+      ]),
+      symbol: z.enum(RESEARCH_EVALUATION_OPTION_UNDERLYINGS).optional(),
+      from_date: z.iso.date().optional(),
+      to_date: z.iso.date().optional(),
+      limit: z.number().int().positive().optional(),
+    }).strict()
+  }
+  if (name === "exa_web_search_exa") {
+    return z.object({
+      query: z.string().trim().min(1),
+      numResults: z.number().int().positive().optional(),
+    }).strict()
+  }
+  if (name === "alpaca_get_calendar") {
+    return z.object({
+      start: z.string().datetime({ offset: true }).optional(),
+      end: z.string().datetime({ offset: true }).optional(),
+    }).strict()
+  }
+  return z.object({}).strict()
 }
 
 const localToolName = (name: string) => {
@@ -130,7 +181,7 @@ const sessionDates = (() => {
   return dates
 })()
 const fixtureByUnderlying = {
-  SPY: {
+  TSLA: {
     quote: [605.9, 606.1],
     strikes: [600, 605],
     daily: (index: number) => ({
@@ -146,7 +197,7 @@ const fixtureByUnderlying = {
       volume: 100_000 + index * 100,
     }),
   },
-  QQQ: {
+  NVDA: {
     quote: [499.8, 500],
     strikes: [495, 500],
     daily: (index: number) => ({
@@ -162,7 +213,7 @@ const fixtureByUnderlying = {
       volume: 80_000 + index * 80,
     }),
   },
-  IWM: {
+  AMD: {
     quote: [223.7, 223.9],
     strikes: [220, 225],
     daily: (index: number) => ({
@@ -178,31 +229,36 @@ const fixtureByUnderlying = {
       volume: 60_000 + index * 60,
     }),
   },
-} as const satisfies Record<AllowedOptionUnderlyingV1, unknown>
+} as const satisfies Record<ResearchEvaluationOptionUnderlying, unknown>
 
 const requestedUnderlying = (input: Record<string, unknown>) => {
-  if (typeof input.symbol === "string") {
-    return input.symbol as AllowedOptionUnderlyingV1
-  }
-  const optionSymbol = Array.isArray(input.symbols) ? input.symbols[0] : undefined
-  const underlying = ALLOWED_OPTION_UNDERLYINGS_V1.find((candidate) =>
-    typeof optionSymbol === "string" && optionSymbol.startsWith(candidate)
+  const requested = [
+    input.symbols,
+    input.underlying_symbol,
+    input.underlying_symbols,
+  ].find((value): value is string => typeof value === "string")
+  const requestedSymbol = requested?.split(",")[0]
+  const underlying = RESEARCH_EVALUATION_OPTION_UNDERLYINGS.find((candidate) =>
+    requestedSymbol?.startsWith(candidate) === true
   )
   if (underlying === undefined) throw new Error("Fixture underlying is required")
   return underlying
 }
 
-const optionSymbol = (underlying: AllowedOptionUnderlyingV1, strike: number) =>
+const optionSymbol = (
+  underlying: ResearchEvaluationOptionUnderlying,
+  strike: number,
+) =>
   `${underlying}260916C${String(strike * 1_000).padStart(8, "0")}`
 
 const weakEvidencePrices = {
-  SPY: { closes: [600, 604], vwaps: [605, 603] },
-  QQQ: { closes: [498, 502], vwaps: [501, 499] },
-  IWM: { closes: [222, 226], vwaps: [225, 223] },
-} as const satisfies Record<AllowedOptionUnderlyingV1, unknown>
+  TSLA: { closes: [600, 604], vwaps: [605, 603] },
+  NVDA: { closes: [498, 502], vwaps: [501, 499] },
+  AMD: { closes: [222, 226], vwaps: [225, 223] },
+} as const satisfies Record<ResearchEvaluationOptionUnderlying, unknown>
 
 const inactiveAccount = scenarioId === "account-gate-early-stop"
-register("alpaca_get_account", "Return the fixture paper account.", () => ({
+register("alpaca_get_account_info", "Return the fixture paper account.", () => ({
   status: inactiveAccount ? "ACCOUNT_BLOCKED" : "ACTIVE",
   options_trading_level: inactiveAccount ? 0 : 3,
   options_approved_level: inactiveAccount ? 0 : 3,
@@ -211,7 +267,7 @@ register("alpaca_get_account", "Return the fixture paper account.", () => ({
   fixtureScenario: scenarioId,
 }))
 register(
-  "alpaca_get_account_configurations",
+  "alpaca_get_account_config",
   "Return fixture paper-account configurations.",
   () => ({ max_options_trading_level: inactiveAccount ? 0 : 3 }),
 )
@@ -229,7 +285,7 @@ register("alpaca_get_calendar", "Return fixture market sessions.", () => ({
     close: `${date}T20:00:00.000Z`,
   })),
 }))
-register("alpaca_get_stock_bars", "Return fixture completed ETF bars.", (_call, input) => {
+register("alpaca_get_stock_bars", "Return fixture completed underlying bars.", (_call, input) => {
   const underlying = requestedUnderlying(input)
   const fixture = fixtureByUnderlying[underlying]
   const dailyBars = sessionDates.map((date, index) => ({
@@ -284,14 +340,14 @@ register("alpaca_get_stock_bars", "Return fixture completed ETF bars.", (_call, 
         feed: "iex",
       }
 })
-register("alpaca_get_stock_latest_quote", "Return the fixture current ETF quote.", (_call, input) => {
+register("alpaca_get_stock_latest_quote", "Return the fixture current underlying quote.", (_call, input) => {
   const underlying = requestedUnderlying(input)
   const [bid, ask] = fixtureByUnderlying[underlying].quote
   return {
     symbol: underlying,
     bid_price: bid,
     ask_price: ask,
-    timestamp: scenarioId === "stale-snapshot-single-rebuild" && underlying === "SPY"
+    timestamp: scenarioId === "stale-snapshot-single-rebuild" && underlying === "TSLA"
       ? "2026-08-26T14:20:00.000Z"
       : "2026-08-26T14:29:55.000Z",
     feed: "iex",
@@ -329,7 +385,7 @@ register("alpaca_get_option_contracts", "Return fixture option-contract metadata
     ],
   }
 })
-register("alpaca_get_option_chain", "Return the fixture indicative ETF option chain.", (call, input) => {
+register("alpaca_get_option_chain", "Return the fixture indicative option chain.", (call, input) => {
   const underlying = requestedUnderlying(input)
   const [longStrike, shortStrike] = fixtureByUnderlying[underlying].strikes
   const longSymbol = optionSymbol(underlying, longStrike)
@@ -366,30 +422,69 @@ register("alpaca_get_option_chain", "Return the fixture indicative ETF option ch
           openInterestDate: "2026-08-26",
         },
       }
-  const requestedSymbols = Array.isArray(input.symbols)
-    ? new Set(input.symbols)
-    : undefined
   return {
     feed: "indicative",
-    snapshots: requestedSymbols === undefined
-      ? snapshots
-      : Object.fromEntries(
-          Object.entries(snapshots).filter(([symbol]) => requestedSymbols.has(symbol)),
-        ),
+    snapshots,
   }
 })
-register("fmp_get_economic_calendar", "Return bounded fixture macro context.", () => ({
+register("alpaca_get_option_snapshot", "Return exact fixture option snapshots.", (_call, input) => {
+  const underlying = requestedUnderlying(input)
+  const [longStrike, shortStrike] = fixtureByUnderlying[underlying].strikes
+  const changed = scenarioId === "candidate-change-abandoned"
+  const timestamp = scenarioId === "stale-snapshot-single-rebuild"
+    ? "2026-08-26T14:20:00.000Z"
+    : "2026-08-26T14:29:50.000Z"
+  const snapshots = changed
+    ? {
+        [optionSymbol(underlying, longStrike + 1)]: {
+          latestQuote: { bid: 2.1, ask: 2.2, timestamp },
+          greeks: { delta: 0.5, gamma: 0.02, theta: -0.1, vega: 0.15 },
+          impliedVolatility: 0.2,
+          volume: 220,
+        },
+      }
+    : {
+        [optionSymbol(underlying, longStrike)]: {
+          latestQuote: { bid: 2.2, ask: 2.3, timestamp },
+          greeks: { delta: 0.52, gamma: 0.02, theta: -0.1, vega: 0.15 },
+          impliedVolatility: 0.2,
+          volume: 200,
+          openInterest: 1000,
+          openInterestDate: "2026-08-26",
+        },
+        [optionSymbol(underlying, shortStrike)]: {
+          latestQuote: { bid: 1.2, ask: 1.3, timestamp },
+          greeks: { delta: 0.29, gamma: 0.015, theta: -0.08, vega: 0.12 },
+          impliedVolatility: 0.19,
+          volume: 180,
+          openInterest: 900,
+          openInterestDate: "2026-08-26",
+        },
+      }
+  const requestedSymbols = new Set(String(input.symbols).split(","))
+  return {
+    feed: "indicative",
+    snapshots: Object.fromEntries(
+      Object.entries(snapshots).filter(([symbol]) => requestedSymbols.has(symbol)),
+    ),
+  }
+})
+register("fmp_economics", "Return bounded fixture macro context.", () => ({
   events: [],
   observedAt: "2026-08-26T14:00:00.000Z",
 }))
-register("exa_search", "Return fixture current-event context.", (call) => {
+register("fmp_calendar", "Return bounded fixture company-event context.", () => ({
+  events: [],
+  observedAt: "2026-08-26T14:00:00.000Z",
+}))
+register("exa_web_search_exa", "Return fixture current-event context.", (call) => {
   if (scenarioId === "irrelevant-exa-does-not-qualify") {
     return {
       results: [{
         title: "Unrelated corporate headline",
         url: "https://example.com/unrelated",
         publishedAt: "2026-08-26T13:00:00.000Z",
-        summary: "This story has no relationship to SPY, the signal, or its invalidation.",
+        summary: "This story has no relationship to TSLA, the signal, or its invalidation.",
       }],
     }
   }

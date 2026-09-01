@@ -1,17 +1,17 @@
 import { isAbsolute, resolve, sep } from "node:path"
 import { isDeepStrictEqual } from "node:util"
 
-import { NO_ACTION_REASON_CODES } from "../contracts/research-decision-v2.js"
+import { NO_ACTION_REASON_CODES } from "../contracts/research-decision-v3.js"
 import { canonicalExternalUrl } from "../shared/canonical-external-url.js"
 import {
-  researchReportV3Schema,
-  type ResearchReportV3,
-} from "../contracts/research-report-v3.js"
+  researchReportV6Schema,
+  type ResearchReportV6,
+} from "../contracts/research-report-v6.js"
 import {
   RESEARCH_MAX_EXA_CALLS,
   RESEARCH_MAX_FMP_CALLS,
   RESEARCH_MAX_TOOL_CALLS,
-} from "../research/research-agent.js"
+} from "../research/agent.js"
 
 // Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
 // when grader semantics change, so stored artifacts stay attributable to the
@@ -95,7 +95,7 @@ type ResearchBehaviorExpectedTool =
   | Readonly<{ anyOf: readonly ResearchBehaviorExpectedToolMatcher[] }>
 
 export type ResearchBehaviorExpectation = Readonly<{
-  outcome?: ResearchReportV3["result"]["outcome"]
+  outcome?: ResearchReportV6["result"]["outcome"]
   reasonCode?: NoActionReasonCode
   requiredTools?: readonly string[]
   forbiddenTools?: readonly string[]
@@ -154,24 +154,24 @@ export type ResearchBehaviorExpectation = Readonly<{
   expectedSnapshotObservedAt?: string
   expectedAccountObservedAt?: string
   expectedAccountChecks?: Readonly<Partial<Pick<
-    ResearchReportV3["analysis"]["accountChecks"],
+    ResearchReportV6["analysis"]["accountChecks"],
     | "accountStatus"
     | "optionsTradingApproved"
     | "conflictingStrategyExposure"
   >>>
-  expectedMarketSignal?: ResearchReportV3["analysis"]["marketRegime"]["signal"]
+  expectedMarketSignal?: ResearchReportV6["analysis"]["marketRegimes"][number]["signal"]
   expectedProposalCandidate?: Extract<
-    ResearchReportV3["result"],
-    { outcome: "PROPOSE_TRADE" }
-  >["candidate"]
+    ResearchReportV6["result"],
+    { outcome: "PROPOSE_TRADES" }
+  >["proposals"][number]["candidate"]
   expectedCandidateEvaluation?: Readonly<{
     dte: number
     legs: NonNullable<
-      ResearchReportV3["analysis"]["candidateEvaluation"]
-    >["legs"]
+      ResearchReportV6["analysis"]["candidateEvaluations"]
+    >[number]["legs"]
   }>
   expectedSymbolIndicators?: readonly Readonly<
-    NonNullable<ResearchReportV3["analysis"]["symbolIndicators"]>[number]
+    NonNullable<ResearchReportV6["analysis"]["symbolIndicators"]>[number]
   >[]
   expectedMarketRegime?: Readonly<Partial<Record<
     | "dailyClose"
@@ -201,6 +201,11 @@ const indicatorMetrics = [
   "return20d",
   "realizedVolatility20",
   "completedSessionVolumeRatio20",
+  "atrPercent20",
+  "ewmaRealizedVolatility20",
+  "sma20Slope5d",
+  "completedSessionDollarVolumeRatio20",
+  "rangePosition20",
 ] as const
 
 const dimension = (
@@ -211,10 +216,28 @@ const dimension = (
   issueCodes: uniqueSorted(issueCodes),
 } as const)
 
-const toolMatches = (name: string, pattern: string) =>
-  pattern.endsWith("*")
-    ? name.startsWith(pattern.slice(0, -1))
-    : name === pattern
+const productionToolName = (name: string) => {
+  switch (name) {
+    case "alpaca_get_account":
+      return "alpaca_get_account_info"
+    case "alpaca_get_account_configurations":
+      return "alpaca_get_account_config"
+    case "fmp_get_economic_calendar":
+      return "fmp_economics"
+    case "exa_search":
+      return "exa_web_search_exa"
+    default:
+      return name
+  }
+}
+
+const toolMatches = (name: string, pattern: string) => {
+  const actual = productionToolName(name)
+  const expected = productionToolName(pattern)
+  return expected.endsWith("*")
+    ? actual.startsWith(expected.slice(0, -1))
+    : actual === expected
+}
 
 const hasCompletedTool = (
   calls: readonly ResearchBehaviorToolCall[],
@@ -236,7 +259,7 @@ const parseReport = (rawResponse: string) => {
   } catch {
     return { success: false as const, issue: "MALFORMED_JSON" as const }
   }
-  const parsed = researchReportV3Schema.safeParse(input)
+  const parsed = researchReportV6Schema.safeParse(input)
   return parsed.success
     ? { success: true as const, report: parsed.data }
     : { success: false as const, issue: "REPORT_SCHEMA_INVALID" as const }
@@ -345,8 +368,27 @@ export function evaluateResearchBehavior({
   ) => {
     if (actualInput === null || typeof actualInput !== "object") return false
     const actual = actualInput as Record<string, unknown>
+    const actualValue = (key: string, expected: unknown) => {
+      if (key === "symbol") {
+        return actual.symbol ?? actual.symbols ?? actual.underlying_symbol ??
+          actual.underlying_symbols
+      }
+      if (key === "symbols" && Array.isArray(expected) && typeof actual.symbols === "string") {
+        return actual.symbols.split(",")
+      }
+      if (key === "symbols" && typeof expected === "string") {
+        return actual.symbols ?? actual.symbol
+      }
+      if (key === "underlying_symbol") {
+        return actual.underlying_symbol ?? actual.symbol
+      }
+      if (key === "underlying_symbols") {
+        return actual.underlying_symbols ?? actual.symbol
+      }
+      return actual[key]
+    }
     return Object.entries(expectedInput).every(([key, value]) =>
-      isDeepStrictEqual(actual[key], value)
+      isDeepStrictEqual(actualValue(key, value), value)
     )
   }
   for (const { pattern, minimum, maximum } of expected.completedToolCounts ?? []) {
@@ -499,25 +541,29 @@ export function evaluateResearchBehavior({
 
   const externalSources = report?.analysis.externalContext ?? []
   if (report !== undefined) {
+    const primaryProposal = report.result.outcome === "PROPOSE_TRADES"
+      ? report.result.proposals[0]
+      : undefined
     const marketSymbol =
-      "candidate" in report.result && report.result.candidate !== undefined
-        ? report.result.candidate.underlying
-        : "SPY"
+      primaryProposal?.candidate.underlying ??
+      report.analysis.optionUniverse?.candidates[0]?.underlying ??
+      report.analysis.symbolIndicators?.[0]?.underlying
     const hasCompletedBars = (input: Readonly<Record<string, unknown>>) =>
       completedToolCalls.some((call) =>
         call.name === "alpaca_get_stock_bars" &&
         toolInputMatches(call.input, input)
       )
-    const completedUnderlyingSnapshot =
+    const completedUnderlyingSnapshot = marketSymbol !== undefined &&
       hasCompletedBars({
-        symbol: marketSymbol,
+        symbols: marketSymbol,
         timeframe: "1Day",
         adjustment: "all",
         feed: "iex",
       }) &&
-      hasCompletedBars({ symbol: marketSymbol, timeframe: "1Min", feed: "iex" })
-    const marketRegime = report.analysis.marketRegime
+      hasCompletedBars({ symbols: marketSymbol, timeframe: "1Min", feed: "iex" })
+    const marketRegime = report.analysis.marketRegimes[0]
     if (
+      marketRegime !== undefined &&
       !completedUnderlyingSnapshot &&
       (marketRegime.signal !== "UNAVAILABLE" ||
         marketRegime.dailySessionCount !== 0 ||
@@ -547,9 +593,13 @@ export function evaluateResearchBehavior({
             retained.throughSessionDate === expectedIndicator.throughSessionDate &&
             retained.relativeStrengthRank20d ===
               expectedIndicator.relativeStrengthRank20d &&
-            indicatorMetrics.every((metric) =>
-              Math.abs(retained[metric] - expectedIndicator[metric]) <= 0.0001
-            )
+            indicatorMetrics.every((metric) => {
+              const retainedValue = retained[metric]
+              const expectedValue = expectedIndicator[metric]
+              return retainedValue !== undefined &&
+                expectedValue !== undefined &&
+                Math.abs(retainedValue - expectedValue) <= 0.0001
+            })
         })
       if (!indicatorsMatch) {
         evidenceIssues.push("EXPECTED_MARKET_METRIC_MISMATCH")
@@ -655,16 +705,16 @@ export function evaluateResearchBehavior({
     }
     if (
       expected.expectedMarketSignal !== undefined &&
-      report.analysis.marketRegime.signal !== expected.expectedMarketSignal
+      marketRegime?.signal !== expected.expectedMarketSignal
     ) {
       evidenceIssues.push("EXPECTED_MARKET_METRIC_MISMATCH")
     }
     if (expected.expectedSnapshotObservedAt !== undefined) {
       if (
-        report.analysis.marketRegime.observedAt !==
+        marketRegime?.observedAt !==
           expected.expectedSnapshotObservedAt ||
-        (report.analysis.candidateEvaluation !== undefined &&
-          report.analysis.candidateEvaluation.observedAt !==
+        report.analysis.candidateEvaluations.some(
+          ({ observedAt }) => observedAt !==
             expected.expectedSnapshotObservedAt)
       ) {
         evidenceIssues.push("EXPECTED_SNAPSHOT_TIME_MISMATCH")
@@ -672,9 +722,9 @@ export function evaluateResearchBehavior({
     }
     if (expected.expectedProposalCandidate !== undefined) {
       if (
-        report.result.outcome !== "PROPOSE_TRADE" ||
+        primaryProposal === undefined ||
         !isDeepStrictEqual(
-          report.result.candidate,
+          primaryProposal.candidate,
           expected.expectedProposalCandidate,
         )
       ) {
@@ -682,7 +732,7 @@ export function evaluateResearchBehavior({
       }
     }
     if (expected.expectedCandidateEvaluation !== undefined) {
-      const candidateEvaluation = report.analysis.candidateEvaluation
+      const candidateEvaluation = report.analysis.candidateEvaluations[0]
       const actual = candidateEvaluation === undefined
         ? undefined
         : {
@@ -704,7 +754,9 @@ export function evaluateResearchBehavior({
     for (const [metric, expectedValue] of Object.entries(
       expected.expectedMarketRegime ?? {},
     )) {
-      const actualValue = report.analysis.marketRegime[metric as keyof typeof report.analysis.marketRegime]
+      const actualValue = marketRegime?.[
+        metric as keyof NonNullable<typeof marketRegime>
+      ]
       if (
         typeof actualValue !== "number" ||
         Math.abs(actualValue - expectedValue) > 0.0005
