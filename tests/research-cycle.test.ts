@@ -439,7 +439,7 @@ describe("processResearchCycle", () => {
     expect(records).toHaveLength(1)
     expect(records[0]!.symbolScreen).toMatchObject({
       screenVersion: "2.0.0",
-      policyVersion: "2.0.0",
+      policyVersion: "3.0.0",
       mode: "SHADOW",
       universeSnapshotId: optionUniverse.snapshotId,
       symbols: underlyings.map((underlying) => ({

@@ -148,15 +148,16 @@ describe("research agent policy", () => {
   })
 
   it("spells out the strict ordered candidate-leg intents", () => {
-    expect(systemPrompt).toContain("ordered legs `[BUY_TO_OPEN, SELL_TO_OPEN]`")
+    expect(systemPrompt).toContain("one through four ordered opening legs")
+    expect(systemPrompt).toContain("simplest-form positive ratios")
   })
 
   it("defines spread-Greek arithmetic and comparison criteria", () => {
     expect(systemPrompt).toContain("position-weighted sum")
-    expect(systemPrompt).toContain("Bullish net delta must be 0.10 through 0.40")
-    expect(systemPrompt).toContain("bearish net delta -0.40 through -0.10")
+    expect(systemPrompt).toContain("Bullish net delta must be 0.10 through 0.70")
+    expect(systemPrompt).toContain("bearish net delta -0.70 through -0.10")
     expect(systemPrompt).toContain("theta cost")
-    expect(systemPrompt).toContain("absolute vega exposure per directional delta")
+    expect(systemPrompt).toContain("vega exposure")
     expect(systemPrompt).toContain("deterministic code independently recomputes")
   })
 

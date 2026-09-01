@@ -6,6 +6,7 @@ import {
 } from "../contracts/option-universe-v2.js"
 import {
   OPTION_STRATEGIES,
+  OPTION_STRATEGY_CATALOG,
   optionStrategySchema,
   type OptionStrategy,
 } from "../options/strategy.js"
@@ -14,7 +15,8 @@ import { optionUnderlyingV1Schema } from "../shared/alpaca-option-identity.js"
 const LEGACY_SYMBOL_SCREEN_VERSION = "1.0.0" as const
 const LEGACY_SYMBOL_SCREEN_POLICY_VERSION = "1.0.0" as const
 export const SYMBOL_SCREEN_VERSION = "2.0.0" as const
-export const SYMBOL_SCREEN_POLICY_VERSION = "2.0.0" as const
+const LEGACY_SYMBOL_SCREEN_POLICY_VERSION_V2 = "2.0.0" as const
+export const SYMBOL_SCREEN_POLICY_VERSION = "3.0.0" as const
 export const SYMBOL_SCREEN_MIN_ABSOLUTE_MOVE_PERCENT = 0.5
 export const SYMBOL_SCREEN_MIN_LIQUID_CONTRACTS = 4
 export const SYMBOL_SCREEN_MIN_OPEN_INTEREST = 1_000
@@ -186,7 +188,10 @@ const symbolScreenEntryV2Schema = z
 export const symbolScreenResultV2Schema = z
   .object({
     screenVersion: z.literal(SYMBOL_SCREEN_VERSION),
-    policyVersion: z.literal(SYMBOL_SCREEN_POLICY_VERSION),
+    policyVersion: z.enum([
+      LEGACY_SYMBOL_SCREEN_POLICY_VERSION_V2,
+      SYMBOL_SCREEN_POLICY_VERSION,
+    ]),
     mode: z.literal("SHADOW"),
     evaluatedAt: z.iso.datetime({ offset: true, precision: 3 }),
     universeSnapshotId: z.string().regex(/^option-universe-v2-[a-f0-9]{64}$/u),
@@ -263,8 +268,23 @@ export function strategyActionabilityIssuePathV2(
 }
 
 const CURRENT_SCREEN_STRATEGIES = new Set<OptionStrategy>([
+  "LONG_CALL",
+  "LONG_PUT",
+  "COVERED_CALL",
+  "CASH_SECURED_PUT",
   "BULL_CALL_SPREAD",
   "BEAR_PUT_SPREAD",
+  "BEAR_CALL_SPREAD",
+  "BULL_PUT_SPREAD",
+  "LONG_STRADDLE",
+  "LONG_STRANGLE",
+  "CALL_BUTTERFLY",
+  "PUT_BUTTERFLY",
+  "IRON_BUTTERFLY",
+  "IRON_CONDOR",
+  "COLLAR",
+  "CALENDAR_SPREAD",
+  "DIAGONAL_SPREAD",
 ])
 
 const pendingAssessment = (strategy: OptionStrategy) => ({
@@ -282,6 +302,10 @@ const assessedStrategy = (
   if (liquidityReasons.length > 0) {
     return { strategy, actionability: "REJECTED", reasonCodes: [...liquidityReasons] }
   }
+  const outlook = OPTION_STRATEGY_CATALOG[strategy].outlook
+  if (outlook === "NEUTRAL" || outlook === "VOLATILITY") {
+    return { strategy, actionability: "ACTIONABLE", reasonCodes: [] }
+  }
   if (move === undefined) {
     return {
       strategy,
@@ -297,8 +321,8 @@ const assessedStrategy = (
     }
   }
   const matchesDirection = move > 0
-    ? strategy === "BULL_CALL_SPREAD"
-    : strategy === "BEAR_PUT_SPREAD"
+    ? outlook === "BULLISH"
+    : outlook === "BEARISH"
   return matchesDirection
     ? { strategy, actionability: "ACTIONABLE", reasonCodes: [] }
     : { strategy, actionability: "REJECTED", reasonCodes: ["DIRECTION_MISMATCH"] }

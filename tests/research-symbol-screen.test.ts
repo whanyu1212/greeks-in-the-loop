@@ -61,7 +61,7 @@ describe("screenOptionUniverseV2", () => {
 
     expect(screen).toMatchObject({
       screenVersion: "2.0.0",
-      policyVersion: "2.0.0",
+      policyVersion: "3.0.0",
       mode: "SHADOW",
       evaluatedAt: "2026-08-26T14:30:00.000Z",
       symbols: [{ underlying: "SPY" }, { underlying: "QQQ" }],
@@ -80,6 +80,14 @@ describe("screenOptionUniverseV2", () => {
       reasonCodes: [],
     })
     expect(assessment(screen, "QQQ", "LONG_PUT")).toMatchObject({
+      actionability: "ACTIONABLE",
+      reasonCodes: [],
+    })
+    expect(assessment(screen, "SPY", "IRON_CONDOR")).toMatchObject({
+      actionability: "ACTIONABLE",
+      reasonCodes: [],
+    })
+    expect(assessment(screen, "SPY", "DEFINED_RISK_MLEG")).toMatchObject({
       actionability: "UNAVAILABLE",
       reasonCodes: ["APPLICATION_SUPPORT_PENDING"],
     })

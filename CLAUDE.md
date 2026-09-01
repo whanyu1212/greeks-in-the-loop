@@ -21,8 +21,8 @@ Run one test with `pnpm vitest run tests/<file>.test.ts`. Node 22 and pnpm 10 ar
 
 The agent proposes; deterministic code disposes.
 
-- Application code discovers a bounded active, optionable universe each cycle and records a deterministic symbol-strategy screen in shadow mode; one research agent compares the exact universe snapshot and may propose up to three directional debit verticals.
-- The strategy catalog represents Alpaca-supported entry families, but only `BULL_CALL_SPREAD` and `BEAR_PUT_SPREAD` are currently actionable end-to-end. Every other strategy remains `APPLICATION_SUPPORT_PENDING`.
+- Application code discovers a bounded active, optionable universe each cycle and records a deterministic symbol-strategy screen in shadow mode; one research agent compares the exact universe snapshot and may propose up to three screened option strategies.
+- Named Alpaca strategy families are actionable when their application screen passes; the generic `DEFINED_RISK_MLEG` catch-all remains `APPLICATION_SUPPORT_PENDING`.
 - `evaluateTradeIntentRiskV1` in `src/risk/risk-evaluation-v1.ts` is pure: no I/O, history, database access, or ambient state.
 - Only candidate identity crosses from research into risk. Application code refreshes quotes, contracts, account state, portfolio state, and clock data.
 - Application code calculates position-weighted Greeks from refreshed ordered legs; signed directional net delta is the hard Greek limit for bullish and bearish strategies.
