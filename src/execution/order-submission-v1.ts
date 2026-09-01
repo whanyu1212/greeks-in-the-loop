@@ -1,7 +1,7 @@
 import { z } from "zod"
 
-import { type TradeIntentV2 } from "../contracts/trade-intent-v2.js"
-import { allowedAlpacaOptionSymbolV1Schema } from "../shared/alpaca-option-identity.js"
+import { type TradeIntentV4 } from "../contracts/trade-intent-v4.js"
+import { alpacaOptionSymbolSchema } from "../shared/alpaca-option-identity.js"
 
 /**
  * Pure derivation of one broker order request from an approved trade intent.
@@ -52,18 +52,18 @@ export type AlpacaMlegOrderRequestV1 = Readonly<{
 }>
 
 /**
- * Builds the exact Alpaca multi-leg request for an approved debit vertical.
+ * Builds the exact Alpaca multi-leg request for an approved strategy.
  *
- * The limit price is the net debit per share the risk gate already bounded.
- * Both legs open, so a partially recognized request can never leave a naked
- * short: Alpaca accepts or rejects the `mleg` order as one unit.
+ * The limit price is the net premium per strategy unit the risk gate already
+ * bounded. Every leg opens, so a partially recognized request can never leave
+ * a naked short: Alpaca accepts or rejects the `mleg` order as one unit.
  *
  * @param intent Approved trade intent.
  * @param clientOrderId Idempotency key; the ledger cycle id.
  * @returns The request body sent to `POST /v2/orders`.
  */
 export function buildAlpacaMlegOrderRequestV1(
-  intent: TradeIntentV2,
+  intent: TradeIntentV4,
   clientOrderId: string,
 ): AlpacaMlegOrderRequestV1 {
   return {
@@ -71,22 +71,17 @@ export function buildAlpacaMlegOrderRequestV1(
     qty: String(APPROVED_ORDER_QUANTITY),
     type: "limit",
     time_in_force: ORDER_TIME_IN_FORCE,
-    limit_price: centsToDecimalString(intent.entryLimitCentsPerShare),
+    limit_price: centsToDecimalString(intent.entryLimitCentsPerStrategyUnit),
     client_order_id: clientOrderId,
-    legs: [
-      {
-        symbol: intent.longContractSymbol,
-        ratio_qty: "1",
-        side: "buy",
-        position_intent: "buy_to_open",
-      },
-      {
-        symbol: intent.shortContractSymbol,
-        ratio_qty: "1",
-        side: "sell",
-        position_intent: "sell_to_open",
-      },
-    ],
+    legs: intent.legs.map((leg) => ({
+      symbol: leg.contractSymbol,
+      ratio_qty: String(leg.ratioQuantity),
+      side: leg.positionIntent === "BUY_TO_OPEN" ? "buy" as const : "sell" as const,
+      position_intent:
+        leg.positionIntent === "BUY_TO_OPEN"
+          ? "buy_to_open" as const
+          : "sell_to_open" as const,
+    })),
   }
 }
 
@@ -103,12 +98,23 @@ export const orderSubmittedPayloadV1Schema = z
     submissionVersion: z.literal(ORDER_SUBMISSION_VERSION),
     clientOrderId: identifier,
     ruleVersion: identifier,
-    structure: z.enum(["BULL_CALL_SPREAD", "BEAR_PUT_SPREAD"]),
-    longContractSymbol: allowedAlpacaOptionSymbolV1Schema,
-    shortContractSymbol: allowedAlpacaOptionSymbolV1Schema,
+    strategy: z.string().min(1).max(64),
+    underlying: z.string().min(1).max(16),
+    legs: z
+      .array(
+        z
+          .object({
+            contractSymbol: alpacaOptionSymbolSchema,
+            positionIntent: z.enum(["BUY_TO_OPEN", "SELL_TO_OPEN"]),
+            ratioQuantity: positiveSafeInteger,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(4),
     quantity: z.literal(APPROVED_ORDER_QUANTITY),
-    limitPriceCentsPerShare: positiveSafeInteger,
-    maxLossCentsPerContract: positiveSafeInteger,
+    limitPriceCentsPerStrategyUnit: positiveSafeInteger,
+    maxLossCents: positiveSafeInteger,
     timeInForce: z.literal(ORDER_TIME_IN_FORCE),
     quoteSnapshotRef: z.string().min(1).max(128),
   })
@@ -151,22 +157,28 @@ export type OrderRejectedPayloadV1 = Readonly<
  * @param intent Approved trade intent.
  * @param clientOrderId Idempotency key; the ledger cycle id.
  * @param ruleVersion Risk rule version that approved the intent.
+ * @param maxLossCents Bounded loss the risk gate approved.
  */
 export function createOrderSubmittedPayloadV1(
-  intent: TradeIntentV2,
+  intent: TradeIntentV4,
   clientOrderId: string,
   ruleVersion: string,
+  maxLossCents: number,
 ): OrderSubmittedPayloadV1 {
   return orderSubmittedPayloadV1Schema.parse({
     submissionVersion: ORDER_SUBMISSION_VERSION,
     clientOrderId,
     ruleVersion,
-    structure: intent.structure,
-    longContractSymbol: intent.longContractSymbol,
-    shortContractSymbol: intent.shortContractSymbol,
+    strategy: intent.strategy,
+    underlying: intent.underlying,
+    legs: intent.legs.map(({ contractSymbol, positionIntent, ratioQuantity }) => ({
+      contractSymbol,
+      positionIntent,
+      ratioQuantity,
+    })),
     quantity: APPROVED_ORDER_QUANTITY,
-    limitPriceCentsPerShare: intent.entryLimitCentsPerShare,
-    maxLossCentsPerContract: intent.maxLossCentsPerContract,
+    limitPriceCentsPerStrategyUnit: intent.entryLimitCentsPerStrategyUnit,
+    maxLossCents,
     timeInForce: ORDER_TIME_IN_FORCE,
     quoteSnapshotRef: intent.quoteSnapshotRef,
   })

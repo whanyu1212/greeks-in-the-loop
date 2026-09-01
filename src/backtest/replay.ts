@@ -3,16 +3,23 @@ import { z } from "zod"
 import {
   evaluateTradeIntentRiskV1,
   riskEvaluationInputV1Schema,
+  riskEvaluationInputV2Schema,
 } from "../risk/risk-evaluation-v1.js"
 import { newYorkDate } from "../scheduling/research-eligibility.js"
+import { parseAlpacaOptionSymbol } from "../shared/alpaca-option-identity.js"
 import {
   aggregateReplayCents,
+  genericReplayExecutionSchema,
+  genericReplayExitPolicySchema,
+  genericReplayMonitorCyclesSchema,
   replayExecutionSchema,
   replayMonitorCyclesSchema,
+  simulateGenericReplayScenario,
   simulateReplayScenario,
 } from "./replay-core.js"
 
-export const BACKTEST_REPLAY_VERSION = "7.0.0" as const
+const LEGACY_BACKTEST_REPLAY_VERSION = "7.0.0" as const
+export const BACKTEST_REPLAY_VERSION = "8.0.0" as const
 
 const positiveSafeInteger = z
   .number()
@@ -120,7 +127,7 @@ const scenarioSchema = z
 
 const replayInputSchema = z
   .object({
-    replayVersion: z.literal(BACKTEST_REPLAY_VERSION),
+    replayVersion: z.literal(LEGACY_BACKTEST_REPLAY_VERSION),
     initialEquityCents: z.number().int().positive().safe(),
     execution: replayExecutionSchema,
     sessions: replaySessionsSchema,
@@ -143,7 +150,6 @@ const replayInputSchema = z
         })
       }
       scenarioIds.add(scenarioId)
-
       const entrySessionIndex = sessions.findIndex(
         ({ date }) => date === newYorkDate(new Date(riskInput.intent.evaluatedAt)),
       )
@@ -162,10 +168,7 @@ const replayInputSchema = z
         return
       }
       const dailyCloseBySessionDate = new Map(
-        dailyCloses?.map(({ sessionDate, closeMicros }) => [
-          sessionDate,
-          closeMicros,
-        ]),
+        dailyCloses?.map(({ sessionDate, closeMicros }) => [sessionDate, closeMicros]),
       )
       monitorCycles.forEach((cycle, cycleIndex) => {
         const cycleSessionIndex = sessions.findIndex(
@@ -185,7 +188,6 @@ const replayInputSchema = z
           })
         }
         if (session === undefined) return
-
         const decidedAt = Date.parse(cycle.decidedAt)
         const sessionOpen = Date.parse(session.open)
         const sessionClose = Date.parse(session.close)
@@ -219,10 +221,9 @@ const replayInputSchema = z
             trendCloses.every((close) => close !== undefined)
           ? trendCloses.reduce((total, close) => total + BigInt(close!), 0n)
           : undefined
-        const expectedSma20 =
-          trendTotal !== undefined
-            ? Number((trendTotal + 10n) / 20n)
-            : undefined
+        const expectedSma20 = trendTotal === undefined
+          ? undefined
+          : Number((trendTotal + 10n) / 20n)
         if (
           !hasCompletedClose ||
           !hasSma20 ||
@@ -239,7 +240,198 @@ const replayInputSchema = z
     })
   })
 
+const genericScenarioSchema = z
+  .object({
+    scenarioId: z.string().trim().min(1).max(128),
+    riskInput: riskEvaluationInputV2Schema,
+    dailyCloses: replayDailyClosesSchema.optional(),
+    monitorCycles: genericReplayMonitorCyclesSchema,
+  })
+  .strict()
+  .superRefine(({ riskInput, monitorCycles }, context) => {
+    const evaluatedAt = Date.parse(riskInput.intent.evaluatedAt)
+    const expirations = riskInput.intent.legs.flatMap(({ contractSymbol }) => {
+      const parsed = parseAlpacaOptionSymbol(contractSymbol)
+      return parsed.success ? [parsed.identity.expiration] : []
+    })
+    const firstExpiration = [...expirations].sort()[0]
+    if (firstExpiration === undefined) return
+    const expirationDay = Date.parse(`${firstExpiration}T00:00:00.000Z`)
+    monitorCycles.forEach((cycle, index) => {
+      if (Date.parse(cycle.decidedAt) < evaluatedAt) {
+        context.addIssue({
+          code: "custom",
+          path: ["monitorCycles", index, "decidedAt"],
+          message: "Monitor cycles cannot predate intent evaluation",
+        })
+      }
+      const cycleDay = Date.parse(
+        `${newYorkDate(new Date(cycle.decidedAt))}T00:00:00.000Z`,
+      )
+      if (cycle.dte !== (expirationDay - cycleDay) / 86_400_000) {
+        context.addIssue({
+          code: "custom",
+          path: ["monitorCycles", index, "dte"],
+          message: "Monitor cycle DTE must match the nearest expiration",
+        })
+      }
+    })
+  })
+
+const genericReplayInputSchema = z
+  .object({
+    replayVersion: z.literal(BACKTEST_REPLAY_VERSION),
+    initialEquityCents: z.number().int().positive().safe(),
+    execution: genericReplayExecutionSchema,
+    exitPolicy: genericReplayExitPolicySchema,
+    sessions: replaySessionsSchema,
+    scenarios: z.array(genericScenarioSchema).min(1).max(10_000),
+  })
+  .strict()
+  .superRefine(({ scenarios, sessions }, context) => {
+    const scenarioIds = new Set<string>()
+    scenarios.forEach((scenario, index) => {
+      if (scenarioIds.has(scenario.scenarioId)) {
+        context.addIssue({
+          code: "custom",
+          path: ["scenarios", index, "scenarioId"],
+          message: "Replay scenario IDs must be unique",
+        })
+      }
+      scenarioIds.add(scenario.scenarioId)
+      const entrySessionIndex = sessions.findIndex(({ date }) =>
+        date === newYorkDate(new Date(scenario.riskInput.intent.evaluatedAt))
+      )
+      const entrySession = sessions[entrySessionIndex]
+      const entryInstant = Date.parse(scenario.riskInput.intent.evaluatedAt)
+      if (
+        entrySession === undefined ||
+        entryInstant < Date.parse(entrySession.open) ||
+        entryInstant > Date.parse(entrySession.close)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["scenarios", index, "riskInput", "intent", "evaluatedAt"],
+          message: "Replay intent must be evaluated during its entry session",
+        })
+        return
+      }
+      const dailyCloseBySessionDate = new Map(
+        scenario.dailyCloses?.map(({ sessionDate, closeMicros }) => [
+          sessionDate,
+          closeMicros,
+        ]),
+      )
+      scenario.monitorCycles.forEach((cycle, cycleIndex) => {
+        const cycleSessionIndex = sessions.findIndex(({ date }) =>
+          date === newYorkDate(new Date(cycle.decidedAt))
+        )
+        const session = sessions[cycleSessionIndex]
+        const path = ["scenarios", index, "monitorCycles", cycleIndex] as const
+        if (
+          cycleSessionIndex < entrySessionIndex ||
+          cycle.holdingSessionIndex !== cycleSessionIndex - entrySessionIndex + 1
+        ) {
+          context.addIssue({
+            code: "custom",
+            path: [...path, "holdingSessionIndex"],
+            message: "Monitor cycle holding-session index must match the replay calendar",
+          })
+        }
+        if (session === undefined) return
+        const decidedAt = Date.parse(cycle.decidedAt)
+        const sessionOpen = Date.parse(session.open)
+        const sessionClose = Date.parse(session.close)
+        if (cycle.marketOpen !==
+          (decidedAt >= sessionOpen && decidedAt <= sessionClose)) {
+          context.addIssue({
+            code: "custom",
+            path: [...path, "marketOpen"],
+            message: "Monitor cycle market state must match replay session hours",
+          })
+        }
+        if (cycle.minutesToClose !== Math.max(
+          0,
+          Math.floor((sessionClose - decidedAt) / 60_000),
+        )) {
+          context.addIssue({
+            code: "custom",
+            path: [...path, "minutesToClose"],
+            message: "Monitor cycle minutes to close must match replay session hours",
+          })
+        }
+        const hasCompletedClose = cycle.completedDailyCloseMicros !== undefined
+        const hasSma20 = cycle.sma20Micros !== undefined
+        if (!hasCompletedClose && !hasSma20) return
+        const trendCloses = sessions
+          .slice(0, cycleSessionIndex)
+          .slice(-20)
+          .map(({ date }) => dailyCloseBySessionDate.get(date))
+        const trendTotal = trendCloses.length === 20 &&
+            trendCloses.every((close) => close !== undefined)
+          ? trendCloses.reduce((total, close) => total + BigInt(close!), 0n)
+          : undefined
+        const expectedSma20 = trendTotal === undefined
+          ? undefined
+          : Number((trendTotal + 10n) / 20n)
+        if (
+          !hasCompletedClose || !hasSma20 ||
+          cycle.completedDailyCloseMicros !== trendCloses.at(-1) ||
+          cycle.sma20Micros !== expectedSma20
+        ) {
+          context.addIssue({
+            code: "custom",
+            path: [...path, "completedDailyCloseMicros"],
+            message: "Monitor cycle trend evidence must match retained daily closes",
+          })
+        }
+      })
+    })
+  })
+
 export function runBacktestReplay(input: unknown) {
+  if (
+    typeof input === "object" && input !== null &&
+    "replayVersion" in input && input.replayVersion === BACKTEST_REPLAY_VERSION
+  ) {
+    const replay = genericReplayInputSchema.parse(input)
+    const scenarios = replay.scenarios.map((scenario) => {
+      const risk = evaluateTradeIntentRiskV1(scenario.riskInput)
+      const simulation = risk.outcome === "APPROVED" &&
+          risk.strategyEconomics !== undefined
+        ? simulateGenericReplayScenario(
+            scenario.riskInput.intent,
+            risk.strategyEconomics,
+            scenario.monitorCycles,
+            replay.execution,
+            replay.exitPolicy,
+          )
+        : null
+      return { scenarioId: scenario.scenarioId, risk, simulation }
+    })
+    const hasUnpricedExit = scenarios.some(
+      ({ simulation }) => simulation?.outcome === "EXIT_UNPRICED",
+    )
+    return {
+      replayVersion: BACKTEST_REPLAY_VERSION,
+      assumptions: {
+        execution: replay.execution,
+        exitPolicy: replay.exitPolicy,
+        premiumMarks: "NATURAL_CLOSE_COST_CENTS_PER_STRATEGY_UNIT" as const,
+        contractMultiplier: 100 as const,
+      },
+      scenarios,
+      aggregate: hasUnpricedExit
+        ? { status: "INCOMPLETE" as const, reason: "UNPRICED_EXIT" as const }
+        : {
+            status: "COMPLETE" as const,
+            ...aggregateReplayCents(
+              replay.initialEquityCents,
+              scenarios.map(({ simulation }) => simulation?.pnlCents ?? null),
+            ),
+          },
+    }
+  }
   const replay = replayInputSchema.parse(input)
   const scenarios = replay.scenarios.map((scenario) => {
     const risk = evaluateTradeIntentRiskV1(scenario.riskInput)
@@ -256,7 +448,7 @@ export function runBacktestReplay(input: unknown) {
     ({ simulation }) => simulation?.outcome === "EXIT_UNPRICED",
   )
   return {
-    replayVersion: BACKTEST_REPLAY_VERSION,
+    replayVersion: LEGACY_BACKTEST_REPLAY_VERSION,
     scenarios,
     aggregate: hasUnpricedExit
       ? { status: "INCOMPLETE" as const, reason: "UNPRICED_EXIT" as const }

@@ -1,6 +1,8 @@
 import { z } from "zod"
 
-import type { TradeIntentV2 } from "../contracts/trade-intent-v2.js"
+import type { TradeIntentV3 } from "../contracts/trade-intent-v3.js"
+import type { TradeIntentV4 } from "../contracts/trade-intent-v4.js"
+import type { StrategyEconomicsV1 } from "../risk/strategy-economics-v1.js"
 
 const nonnegativeSafeInteger = z
   .number()
@@ -94,8 +96,65 @@ export const replayExecutionSchema = z
   })
   .strict()
 
+export const genericReplayExecutionSchema = z
+  .object({
+    entrySlippageCentsPerLeg: nonnegativeSafeInteger,
+    exitSlippageCentsPerLeg: nonnegativeSafeInteger,
+    commissionCentsPerContract: nonnegativeSafeInteger,
+  })
+  .strict()
+
+export const genericReplayExitPolicySchema = z
+  .object({
+    stopLossBpsOfMaxLoss: z.number().int().positive().max(10_000),
+    profitTargetBps: z.number().int().positive().max(10_000),
+    minimumDte: z.number().int().min(0).max(365),
+    maxHoldingSessions: z.number().int().positive().max(365),
+  })
+  .strict()
+
+export const genericReplayMonitorCyclesSchema = replayMonitorCyclesSchema
+  .element
+  .omit({ markHalfCentsPerShare: true })
+  .extend({
+    closePremiumCentsPerStrategyUnit: nonnegativeSafeInteger.optional(),
+  })
+  .array()
+  .min(1)
+  .max(10_000)
+  .superRefine((cycles, context) => {
+    let lateFillLatched = false
+    cycles.forEach((cycle, index) => {
+      if (lateFillLatched && !cycle.lateFill) {
+        context.addIssue({
+          code: "custom",
+          path: [index, "lateFill"],
+          message: "Late-fill protection must remain latched across monitor cycles",
+        })
+      }
+      lateFillLatched ||= cycle.lateFill
+      if (index > 0 && instant(cycle.decidedAt) <= instant(cycles[index - 1]!.decidedAt)) {
+        context.addIssue({
+          code: "custom",
+          path: [index, "decidedAt"],
+          message: "Monitor cycle timestamps must be strictly increasing",
+        })
+      }
+    })
+  })
+
+export type GenericReplayExecution = Readonly<
+  z.infer<typeof genericReplayExecutionSchema>
+>
+export type GenericReplayExitPolicy = Readonly<
+  z.infer<typeof genericReplayExitPolicySchema>
+>
+export type GenericReplayMonitorCycle = Readonly<
+  z.infer<typeof genericReplayMonitorCyclesSchema>[number]
+>
+
 const exitReason = (
-  intent: TradeIntentV2,
+  intent: TradeIntentV3,
   cycle: ReplayMonitorCycle,
 ): ReplayExitReason | undefined => {
   if (!cycle.marketOpen) return undefined
@@ -153,7 +212,7 @@ export type ReplayScenarioSimulation =
 
 /** Applies the frozen monitor priority and execution model to one entered spread. */
 export function simulateReplayScenario(
-  intent: TradeIntentV2,
+  intent: TradeIntentV3,
   monitorCycles: readonly ReplayMonitorCycle[],
   execution: ReplayExecution,
 ): ReplayScenarioSimulation {
@@ -202,6 +261,132 @@ export function simulateReplayScenario(
     entryFillHalfCentsPerShare: bigintToSafeInteger(entryMark, "Replay entry fill"),
     exitFillHalfCentsPerShare: bigintToSafeInteger(fill, "Replay exit fill"),
     pnlCents: bigintToSafeInteger(pnlCents, "Replay P&L"),
+  }
+}
+
+const genericMarkPnl = (
+  intent: TradeIntentV4,
+  closePremiumCentsPerStrategyUnit: number,
+) => {
+  const entry = BigInt(intent.entryLimitCentsPerStrategyUnit) * 100n
+  const close = BigInt(closePremiumCentsPerStrategyUnit) * 100n
+  return intent.premiumEffect === "DEBIT" ? close - entry : entry - close
+}
+
+const genericExitReason = (
+  intent: TradeIntentV4,
+  economics: StrategyEconomicsV1,
+  cycle: GenericReplayMonitorCycle,
+  policy: GenericReplayExitPolicy,
+): ReplayExitReason | undefined => {
+  if (!cycle.marketOpen) return undefined
+  if (cycle.lateFill) return "LATE_FILL"
+  if (
+    cycle.dte < policy.minimumDte ||
+    (cycle.dte === policy.minimumDte && cycle.minutesToClose <= 60)
+  ) return "EXPIRATION"
+  if (cycle.staleMinutes >= 5) return "STALE_DATA"
+  if (cycle.closePremiumCentsPerStrategyUnit !== undefined) {
+    const pnl = genericMarkPnl(
+      intent,
+      cycle.closePremiumCentsPerStrategyUnit,
+    )
+    if (
+      economics.maxLossCents > 0 &&
+      -pnl * 10_000n >= BigInt(economics.maxLossCents) *
+        BigInt(policy.stopLossBpsOfMaxLoss)
+    ) return "STOP_LOSS"
+    const profitBasis = economics.maxProfitCents ?? economics.entryPremiumCents
+    if (
+      pnl > 0n &&
+      pnl * 10_000n >= BigInt(profitBasis) * BigInt(policy.profitTargetBps)
+    ) return "PROFIT_TARGET"
+  }
+  if (
+    (intent.direction === "BULLISH" || intent.direction === "BEARISH") &&
+    cycle.completedDailyCloseMicros !== undefined &&
+    cycle.sma20Micros !== undefined &&
+    (intent.direction === "BULLISH"
+      ? cycle.completedDailyCloseMicros <= cycle.sma20Micros
+      : cycle.completedDailyCloseMicros >= cycle.sma20Micros)
+  ) return "TREND_INVALIDATION"
+  if (
+    cycle.holdingSessionIndex > policy.maxHoldingSessions ||
+    (cycle.holdingSessionIndex === policy.maxHoldingSessions &&
+      cycle.minutesToClose <= 30)
+  ) return "MAX_HOLDING_PERIOD"
+  return undefined
+}
+
+export type GenericReplayScenarioSimulation =
+  | Readonly<{
+      outcome: "EXIT_UNPRICED"
+      exitReason: ReplayExitReason
+      exitDecidedAt: string
+      entryFillCentsPerStrategyUnit: number
+      pnlCents: null
+    }>
+  | Readonly<{
+      outcome: "CLOSED"
+      exitReason: ReplayExitReason
+      exitDecidedAt: string
+      entryFillCentsPerStrategyUnit: number
+      exitFillCentsPerStrategyUnit: number
+      pnlCents: number
+    }>
+
+/** Replays one V4 strategy under explicit, audit-retained execution assumptions. */
+export function simulateGenericReplayScenario(
+  intent: TradeIntentV4,
+  economics: StrategyEconomicsV1,
+  monitorCycles: readonly GenericReplayMonitorCycle[],
+  execution: GenericReplayExecution,
+  policy: GenericReplayExitPolicy,
+): GenericReplayScenarioSimulation {
+  const triggered = monitorCycles.find((cycle) =>
+    genericExitReason(intent, economics, cycle, policy)
+  )
+  const finalCycle = triggered ??
+    monitorCycles.filter(({ marketOpen }) => marketOpen).at(-1) ??
+    monitorCycles.at(-1)!
+  const reason = triggered === undefined
+    ? "END_OF_REPLAY"
+    : genericExitReason(intent, economics, triggered, policy)!
+  const legUnits = intent.legs.reduce(
+    (total, { ratioQuantity }) => total + BigInt(ratioQuantity),
+    0n,
+  )
+  const entrySlippage = legUnits * BigInt(execution.entrySlippageCentsPerLeg)
+  const entryNatural = BigInt(intent.entryLimitCentsPerStrategyUnit)
+  const entryFill = intent.premiumEffect === "DEBIT"
+    ? entryNatural + entrySlippage
+    : entryNatural > entrySlippage ? entryNatural - entrySlippage : 0n
+  if (finalCycle.closePremiumCentsPerStrategyUnit === undefined) {
+    return {
+      outcome: "EXIT_UNPRICED",
+      exitReason: reason,
+      exitDecidedAt: finalCycle.decidedAt,
+      entryFillCentsPerStrategyUnit: bigintToSafeInteger(entryFill, "Replay entry fill"),
+      pnlCents: null,
+    }
+  }
+  const exitSlippage = legUnits * BigInt(execution.exitSlippageCentsPerLeg)
+  const exitNatural = BigInt(finalCycle.closePremiumCentsPerStrategyUnit)
+  const exitFill = intent.premiumEffect === "DEBIT"
+    ? exitNatural > exitSlippage ? exitNatural - exitSlippage : 0n
+    : exitNatural + exitSlippage
+  const grossPnl = intent.premiumEffect === "DEBIT"
+    ? (exitFill - entryFill) * 100n
+    : (entryFill - exitFill) * 100n
+  const commissions = legUnits *
+    BigInt(execution.commissionCentsPerContract) * 2n
+  return {
+    outcome: "CLOSED",
+    exitReason: reason,
+    exitDecidedAt: finalCycle.decidedAt,
+    entryFillCentsPerStrategyUnit: bigintToSafeInteger(entryFill, "Replay entry fill"),
+    exitFillCentsPerStrategyUnit: bigintToSafeInteger(exitFill, "Replay exit fill"),
+    pnlCents: bigintToSafeInteger(grossPnl - commissions, "Replay P&L"),
   }
 }
 

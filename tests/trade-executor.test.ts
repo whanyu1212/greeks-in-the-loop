@@ -4,10 +4,10 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import type { TradeIntentV2 } from "../src/contracts/trade-intent-v2.js"
-import type { LedgerEventV2 } from "../src/event-ledger/ledger-event-v1.js"
+import type { TradeIntentV4 } from "../src/contracts/trade-intent-v4.js"
+import type { LedgerEventV4 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
-import { createSqliteLedgerStore } from "../src/event-ledger/sqlite-ledger-store.js"
+import { createSqliteLedgerStore } from "../src/event-ledger/deprecated/sqlite-ledger-store.js"
 import type { ShadowRiskResultV1 } from "../src/risk/shadow-risk-v1.js"
 import type {
   BrokerOrderOutcome,
@@ -32,36 +32,42 @@ afterEach(() => {
   }
 })
 
-const intent: TradeIntentV2 = {
-  contractVersion: "2.0.0",
-  decisionContractVersion: "2.0.0",
+const intent: TradeIntentV4 = {
+  contractVersion: "4.0.0",
+  decisionContractVersion: "4.0.0",
+  underlying: "SPY",
   direction: "BULLISH",
-  structure: "BULL_CALL_SPREAD",
-  expiration: "2026-09-18",
-  longContractSymbol: "SPY260918C00650000",
-  shortContractSymbol: "SPY260918C00655000",
+  strategy: "BULL_CALL_SPREAD",
   quoteSnapshotRef: "snapshot-1",
   evaluatedAt: TIMESTAMP,
-  longQuote: {
-    contractSymbol: "SPY260918C00650000",
-    feed: "INDICATIVE",
-    bidCentsPerShare: 220,
-    askCentsPerShare: 223,
-    providerTimestamp: "2026-08-26T09:59:30.000000000Z",
-  },
-  shortQuote: {
-    contractSymbol: "SPY260918C00655000",
-    feed: "INDICATIVE",
-    bidCentsPerShare: 120,
-    askCentsPerShare: 121,
-    providerTimestamp: "2026-08-26T09:59:31.000000000Z",
-  },
-  entryLimitCentsPerShare: 101,
-  widthCentsPerShare: 500,
-  maxLossCentsPerContract: 10_100,
-  maxProfitCentsPerContract: 39_900,
-  stopLossMarkHalfCentsPerShare: 101,
-  profitTargetMarkHalfCentsPerShare: 601,
+  legs: [
+    {
+      contractSymbol: "SPY260918C00650000",
+      positionIntent: "BUY_TO_OPEN",
+      ratioQuantity: 1,
+      quote: {
+        contractSymbol: "SPY260918C00650000",
+        feed: "INDICATIVE",
+        bidCentsPerShare: 220,
+        askCentsPerShare: 223,
+        providerTimestamp: "2026-08-26T09:59:30.000000000Z",
+      },
+    },
+    {
+      contractSymbol: "SPY260918C00655000",
+      positionIntent: "SELL_TO_OPEN",
+      ratioQuantity: 1,
+      quote: {
+        contractSymbol: "SPY260918C00655000",
+        feed: "INDICATIVE",
+        bidCentsPerShare: 120,
+        askCentsPerShare: 121,
+        providerTimestamp: "2026-08-26T09:59:31.000000000Z",
+      },
+    },
+  ],
+  premiumEffect: "DEBIT",
+  entryLimitCentsPerStrategyUnit: 103,
 }
 
 const approvedShadowRisk: ShadowRiskResultV1 = {
@@ -69,7 +75,7 @@ const approvedShadowRisk: ShadowRiskResultV1 = {
     decisionVersion: "1.0.0",
     mode: "SHADOW",
     evaluationVersion: "1.0.0",
-    ruleVersion: "1.1.0",
+    ruleVersion: "2.0.0",
     stage: "EVALUATED",
     outcome: "APPROVED",
     evaluatedIntent: intent,
@@ -88,7 +94,7 @@ const approvedShadowRisk: ShadowRiskResultV1 = {
     },
     evaluation: {
       evaluationVersion: "1.0.0",
-      ruleVersion: "1.1.0",
+      ruleVersion: "2.0.0",
       outcome: "APPROVED",
       evaluatedAt: TIMESTAMP,
       approvedQuantity: 1,
@@ -108,7 +114,7 @@ const rejectedShadowRisk: ShadowRiskResultV1 = {
     outcome: "REJECTED",
     evaluation: {
       evaluationVersion: "1.0.0",
-      ruleVersion: "1.1.0",
+      ruleVersion: "2.0.0",
       outcome: "REJECTED",
       evaluatedAt: TIMESTAMP,
       reasonCodes: ["EXPOSURE_LIMIT_ACTIVE"],
@@ -132,10 +138,10 @@ const seedApprovedCycle = async (
   store: LedgerStore,
   outcome: "APPROVED" | "REJECTED" = "APPROVED",
 ) => {
-  const events: LedgerEventV2[] = [
+  const events: LedgerEventV4[] = [
     {
       eventId: "cycle-start-1",
-      eventVersion: "2.0.0",
+      eventVersion: "4.0.0",
       eventType: "RESEARCH_CYCLE_STARTED",
       occurredAt: TIMESTAMP,
       correlationId: "correlation-1",
@@ -145,7 +151,7 @@ const seedApprovedCycle = async (
     },
     {
       eventId: "intent-1",
-      eventVersion: "2.0.0",
+      eventVersion: "4.0.0",
       eventType: "TRADE_INTENT_DERIVED",
       occurredAt: TIMESTAMP,
       correlationId: "correlation-1",
@@ -156,7 +162,7 @@ const seedApprovedCycle = async (
     },
     {
       eventId: "risk-1",
-      eventVersion: "2.0.0",
+      eventVersion: "4.0.0",
       eventType: "RISK_SHADOW_DECISION_RECORDED",
       occurredAt: TIMESTAMP,
       correlationId: "correlation-1",
@@ -170,7 +176,7 @@ const seedApprovedCycle = async (
             : rejectedShadowRisk.decision,
       },
     },
-  ] as LedgerEventV2[]
+  ] as LedgerEventV4[]
   await store.appendBatch(events)
 }
 
@@ -202,7 +208,7 @@ describe("buildAlpacaMlegOrderRequestV1", () => {
       qty: "1",
       type: "limit",
       time_in_force: "day",
-      limit_price: "1.01",
+      limit_price: "1.03",
       client_order_id: "cycle-1",
       legs: [
         {
@@ -223,12 +229,13 @@ describe("buildAlpacaMlegOrderRequestV1", () => {
 
   it("records the approving rule version with the submission", () => {
     expect(
-      createOrderSubmittedPayloadV1(intent, "cycle-1", "1.1.0"),
+      createOrderSubmittedPayloadV1(intent, "cycle-1", "2.0.0", 10_100),
     ).toMatchObject({
       clientOrderId: "cycle-1",
-      ruleVersion: "1.1.0",
+      ruleVersion: "2.0.0",
       quantity: 1,
-      limitPriceCentsPerShare: 101,
+      limitPriceCentsPerStrategyUnit: 103,
+      maxLossCents: 10_100,
       timeInForce: "day",
     })
   })
@@ -414,14 +421,14 @@ describe("ledger execution invariants", () => {
     await expect(
       store.append({
         eventId: "order-1",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "ORDER_SUBMITTED",
         occurredAt: TIMESTAMP,
         correlationId: "correlation-1",
         causationEventId: "risk-1",
         cycleId: "cycle-1",
-        payload: createOrderSubmittedPayloadV1(intent, "cycle-1", "1.1.0"),
-      } as LedgerEventV2),
+        payload: createOrderSubmittedPayloadV1(intent, "cycle-1", "2.0.0", 10_100),
+      } as LedgerEventV4),
     ).rejects.toThrow()
     await store.close()
   })
@@ -433,7 +440,7 @@ describe("ledger execution invariants", () => {
     await expect(
       store.append({
         eventId: "fill-1",
-        eventVersion: "2.0.0",
+        eventVersion: "4.0.0",
         eventType: "ORDER_FILLED",
         occurredAt: TIMESTAMP,
         correlationId: "correlation-1",
@@ -446,7 +453,7 @@ describe("ledger execution invariants", () => {
           filledQuantity: 1,
           brokerTimestamp: TIMESTAMP,
         },
-      } as LedgerEventV2),
+      } as LedgerEventV4),
     ).rejects.toThrow()
     await store.close()
   })

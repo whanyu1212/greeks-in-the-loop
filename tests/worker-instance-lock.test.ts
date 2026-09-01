@@ -19,10 +19,12 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   acquireWorkerInstanceLock,
   runWithWorkerInstanceLock,
+  workerInstanceLockPath,
+} from "../src/event-ledger/deprecated/worker-instance-lock.js"
+import {
   WorkerInstanceLockInitializationError,
   WorkerInstanceLockUnavailableError,
-  workerInstanceLockPath,
-} from "../src/worker-instance-lock.js"
+} from "../src/event-ledger/worker-instance-lock-errors.js"
 
 const fixturePath = fileURLToPath(
   new URL("fixtures/worker-lock-holder.ts", import.meta.url),

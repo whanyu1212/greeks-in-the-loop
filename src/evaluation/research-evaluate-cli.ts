@@ -2,9 +2,12 @@ import { existsSync, readFileSync } from "node:fs"
 
 import { parse as parseEnv } from "dotenv"
 
-import { createSqliteLedgerStore } from "../event-ledger/sqlite-ledger-store.js"
-import { loadResearchRunV1 } from "../research/research-artifact.js"
-import { evaluateResearchRunV1 } from "./research-run-evaluation-v1.js"
+import {
+  createConfiguredLedgerStore,
+  resolveLedgerBackendConfiguration,
+} from "../event-ledger/ledger-backend.js"
+import { loadResearchRunV1 } from "../research/run/artifact.js"
+import { evaluateResearchRunV1 } from "./research-run-evaluation.js"
 
 type Options = Readonly<{
   ledgerPath: string
@@ -13,7 +16,7 @@ type Options = Readonly<{
 
 const usage = `Usage: pnpm research:evaluate [options]
 
-Evaluate one completed research run from the authoritative SQLite ledger.
+Evaluate one completed research run from the configured authoritative ledger.
 
 Options:
   --ledger <path>   Ledger path (default: RESEARCH_LEDGER_PATH from the environment or .env)
@@ -60,13 +63,19 @@ const parseOptions = (args: readonly string[]): Options => {
 }
 
 const options = parseOptions(process.argv.slice(2))
-if (!existsSync(options.ledgerPath)) {
+const configuration = resolveLedgerBackendConfiguration(
+  { ...fileEnv, ...process.env },
+  options.ledgerPath,
+)
+if (configuration.backend === "sqlite" && !existsSync(options.ledgerPath)) {
   throw new Error(`Research ledger does not exist: ${options.ledgerPath}`)
 }
 
-const store = createSqliteLedgerStore({
-  path: options.ledgerPath,
-  knownCredentialValues: [],
+const store = await createConfiguredLedgerStore({
+  configuration,
+  knownCredentialValues: [process.env.PGPASSWORD?.trim()].filter(
+    (value): value is string => value !== undefined && value.length > 0,
+  ),
   readonly: true,
 })
 try {

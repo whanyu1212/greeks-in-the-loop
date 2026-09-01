@@ -5,7 +5,7 @@ import {
   applyLedgerMigrations,
   LEDGER_MIGRATIONS,
   type LedgerMigration,
-} from "../src/event-ledger/migrations.js"
+} from "../src/event-ledger/deprecated/migrations.js"
 
 type DirectEvent = Readonly<{
   eventId: string
@@ -84,7 +84,15 @@ describe("applyLedgerMigrations", () => {
         applied_at: "2026-08-25T14:30:00.000Z",
       },
       {
-        migration_id: "006_order_execution",
+        migration_id: "006_paper_execution_authorization",
+        applied_at: "2026-08-25T14:30:00.000Z",
+      },
+      {
+        migration_id: "007_portfolio_shadow_risk",
+        applied_at: "2026-08-25T14:30:00.000Z",
+      },
+      {
+        migration_id: "008_deterministic_order_execution",
         applied_at: "2026-08-25T14:30:00.000Z",
       },
     ])
@@ -108,11 +116,7 @@ describe("applyLedgerMigrations", () => {
         ...LEDGER_MIGRATIONS[0]!,
         sql: `${LEDGER_MIGRATIONS[0]!.sql}\nSELECT 1;`,
       },
-      LEDGER_MIGRATIONS[1]!,
-      LEDGER_MIGRATIONS[2]!,
-      LEDGER_MIGRATIONS[3]!,
-      LEDGER_MIGRATIONS[4]!,
-      LEDGER_MIGRATIONS[5]!,
+      ...LEDGER_MIGRATIONS.slice(1),
     ]
 
     expect(() => applyLedgerMigrations(database, modified)).toThrow(
@@ -444,7 +448,7 @@ describe("research lifecycle integrity migration", () => {
 })
 
 describe("shadow risk integrity migration", () => {
-  it("requires one shadow decision between a trade intent and completion", () => {
+  it("allows one shadow decision per trade intent in a portfolio cycle", () => {
     const database = new Database(":memory:")
     applyLedgerMigrations(database)
     insertDirectEvent(database, {
@@ -482,11 +486,23 @@ describe("shadow risk integrity migration", () => {
         causationEventId: "intent-risk",
         cycleId: "cycle-risk",
       }),
-    ).toThrow("UNIQUE constraint failed: ledger_events.cycle_id")
+    ).toThrow("UNIQUE constraint failed: ledger_events.causation_event_id")
+    insertDirectEvent(database, {
+      eventId: "intent-risk-2",
+      eventType: "TRADE_INTENT_DERIVED",
+      causationEventId: "risk-decision",
+      cycleId: "cycle-risk",
+    })
+    insertDirectEvent(database, {
+      eventId: "risk-decision-2",
+      eventType: "RISK_SHADOW_DECISION_RECORDED",
+      causationEventId: "intent-risk-2",
+      cycleId: "cycle-risk",
+    })
     insertDirectEvent(database, {
       eventId: "completion-with-risk",
       eventType: "RESEARCH_CYCLE_COMPLETED",
-      causationEventId: "risk-decision",
+      causationEventId: "risk-decision-2",
       cycleId: "cycle-risk",
       payload: { status: "INTENT_DERIVED" },
     })

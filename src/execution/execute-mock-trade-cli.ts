@@ -5,26 +5,22 @@ import { randomUUID } from "node:crypto"
 import { config as loadEnvironment } from "dotenv"
 
 import {
-  calculateDebitSpreadEconomicsV1,
-} from "../contracts/debit-spread-economics-v1.js"
+  tradeIntentV4Schema,
+  type TradeIntentV4,
+} from "../contracts/trade-intent-v4.js"
 import {
-  tradeIntentV2Schema,
-  type TradeIntentV2,
-} from "../contracts/trade-intent-v2.js"
-import { createSqliteLedgerStore } from "../event-ledger/sqlite-ledger-store.js"
-import type { LedgerEventV2 } from "../event-ledger/ledger-event-v1.js"
+  createConfiguredLedgerStore,
+  resolveLedgerBackendConfiguration,
+} from "../event-ledger/ledger-backend.js"
+import type { LedgerEventV4 } from "../event-ledger/ledger-event-v1.js"
 import { createAlpacaOptionQuoteProvider } from "../market-data/alpaca-option-quotes.js"
 import {
   evaluateTradeIntentRiskV1,
   RISK_EVALUATION_VERSION,
   RISK_RULE_VERSION,
-  type RiskEvaluationInputV1,
 } from "../risk/risk-evaluation-v1.js"
 import { SHADOW_RISK_DECISION_VERSION } from "../risk/shadow-risk-v1.js"
-import {
-  alpacaOptionStrikeCents,
-  parseAlpacaOptionSymbol,
-} from "../shared/alpaca-option-identity.js"
+import { parseAlpacaOptionSymbol } from "../shared/alpaca-option-identity.js"
 import { createAlpacaOrderSubmitter } from "./alpaca-order-submitter.js"
 import { executeApprovedTradeV1 } from "./trade-executor.js"
 
@@ -32,13 +28,13 @@ import { executeApprovedTradeV1 } from "./trade-executor.js"
  * Validation harness that drives one real paper order without the agent.
  *
  * Quotes and the broker are real. Only the application-owned risk *state* —
- * account, portfolio, contract metadata, and the schedule window — is
- * supplied synthetically, so the pure `evaluateTradeIntentRiskV1` still runs
- * in full and an order is still unreachable unless it returns `APPROVED`.
- * This exists to exercise the execution path end to end while the research
+ * account, portfolio, contract metadata, collateral, and the schedule window —
+ * is supplied synthetically, so the pure `evaluateTradeIntentRiskV1` still runs
+ * in full and an order stays unreachable unless it returns `APPROVED`. This
+ * exercises the architecture-plan section 6.A execution path while the research
  * agent cannot reliably produce a passing proposal.
  *
- * It refuses to touch the production ledger and refuses any non-paper broker.
+ * It refuses the production ledger and any non-paper broker endpoint.
  */
 
 const DEFAULT_MOCK_LEDGER_PATH: string = ".state/mock-execution.sqlite"
@@ -135,74 +131,78 @@ const parseOptions = (args: readonly string[]): MockTradeOptions => {
 
 /** Builds the synthetic, application-owned risk state around a real intent. */
 const buildMockRiskContext = (
-  intent: TradeIntentV2,
+  intent: TradeIntentV4,
   options: MockTradeOptions,
   observedAt: string,
   sessionDate: string,
-): RiskEvaluationInputV1["context"] => {
-  const leg = (role: "LONG" | "SHORT", contractSymbol: string) => ({
-    role,
-    contractSymbol,
-    active: true,
-    tradable: true,
-    exerciseStyle: "AMERICAN" as const,
-    multiplier: 100,
-    delta: role === "LONG" ? 0.52 : 0.28,
-    impliedVolatility: 0.17,
-    gamma: 0.012,
-    theta: -0.08,
-    vega: 0.31,
-    volume: 1_200,
-    volumeDate: sessionDate,
-    openInterest: 8_400,
-    openInterestDate: sessionDate,
-  })
-
-  return {
-    provenance: "APPLICATION_VERIFIED",
-    eligibility: {
-      evaluatedAt: observedAt,
-      sessionDate,
-      researchEligible: true,
-      tradeIntentEligible: true,
-      tradeIntentWindow: {
-        slotStartedAt: observedAt,
-        deadline: new Date(Date.parse(observedAt) + 10 * 60_000).toISOString(),
-      },
-    },
-    account: {
-      observedAt,
-      status: "ACTIVE",
-      tradingRestricted: false,
-      multilegOptionsApproved: true,
-      buyingPowerCents: options.buyingPowerCents,
-      equityCents: options.equityCents,
-      lastEquityCents: options.equityCents,
-    },
-    portfolio: {
-      observedAt,
-      consistent: true,
-      openStrategyPositionCount: 0,
-      pendingEntryCount: 0,
-      entriesSubmittedToday: 0,
-      dailyBreakerActive: false,
-      competitionBreakerActive: false,
-    },
-    contracts: {
+) => ({
+  provenance: "APPLICATION_VERIFIED" as const,
+  eligibility: {
+    evaluatedAt: observedAt,
+    sessionDate,
+    researchEligible: true,
+    tradeIntentEligible: true,
+    tradeIntentWindow: {
       slotStartedAt: observedAt,
-      observedAt,
-      legs: [
-        leg("LONG", intent.longContractSymbol),
-        leg("SHORT", intent.shortContractSymbol),
-      ],
+      deadline: new Date(Date.parse(observedAt) + 10 * 60_000).toISOString(),
     },
-  }
-}
+  },
+  account: {
+    observedAt,
+    status: "ACTIVE" as const,
+    tradingRestricted: false,
+    buyingPowerCents: options.buyingPowerCents,
+    equityCents: options.equityCents,
+    lastEquityCents: options.equityCents,
+  },
+  candidateCollateral: {
+    underlying: intent.underlying,
+    longUnderlyingShares: 0,
+    cashAvailableCents: options.buyingPowerCents,
+    requiredLongSharesPerUnit: 0,
+    requiredCashCentsPerUnit: 0,
+    maxUnitsFromShares: null,
+    maxUnitsFromCash: null,
+  },
+  portfolio: {
+    observedAt,
+    consistent: true,
+    openStrategyPositionCount: 0,
+    pendingEntryCount: 0,
+    entriesSubmittedToday: 0,
+    dailyBreakerActive: false,
+    competitionBreakerActive: false,
+  },
+  contracts: {
+    snapshotVersion: "2.0.0" as const,
+    slotStartedAt: observedAt,
+    observedAt,
+    legs: intent.legs.map((leg) => ({
+      contractSymbol: leg.contractSymbol,
+      positionIntent: leg.positionIntent,
+      ratioQuantity: leg.ratioQuantity,
+      active: true,
+      tradable: true,
+      exerciseStyle: "AMERICAN" as const,
+      multiplier: 100,
+      delta: leg.positionIntent === "BUY_TO_OPEN" ? 0.52 : 0.28,
+      impliedVolatility: 0.17,
+      gamma: 0.012,
+      theta: -0.08,
+      vega: 0.31,
+      volume: 1_200,
+      volumeDate: sessionDate,
+      openInterest: 8_400,
+      openInterestDate: sessionDate,
+    })),
+  },
+})
 
 const main = async () => {
   const options = parseOptions(process.argv.slice(2))
   const tradingBaseUrl =
     readSetting("ALPACA_TRADING_BASE_URL") || PAPER_TRADING_ORIGIN
+  // Plan section 9: assert the paper endpoint at startup.
   if (tradingBaseUrl !== PAPER_TRADING_ORIGIN) {
     throw new Error("Mock execution is restricted to the Alpaca paper endpoint")
   }
@@ -215,11 +215,11 @@ const main = async () => {
   const quoteProvider = createAlpacaOptionQuoteProvider({
     apiKey,
     secretKey,
-    baseUrl: readSetting("ALPACA_MARKET_DATA_BASE_URL") || "https://data.alpaca.markets",
+    baseUrl:
+      readSetting("ALPACA_MARKET_DATA_BASE_URL") || "https://data.alpaca.markets",
   })
   const confirmation = await quoteProvider.confirmQuotes({
-    longContractSymbol: options.longContractSymbol,
-    shortContractSymbol: options.shortContractSymbol,
+    contractSymbols: [options.longContractSymbol, options.shortContractSymbol],
     signal,
   })
   if (!confirmation.success) {
@@ -228,60 +228,87 @@ const main = async () => {
     return
   }
 
-  const { longQuote, shortQuote, evaluatedAt, snapshotMetadata } =
-    confirmation.snapshot
-  const quoteSnapshotRef = snapshotMetadata.source
-  const longIdentity = parseAlpacaOptionSymbol(options.longContractSymbol)
-  const shortIdentity = parseAlpacaOptionSymbol(options.shortContractSymbol)
-  if (!longIdentity.success || !shortIdentity.success) {
-    throw new Error("Both legs must be valid OCC option symbols")
-  }
-  const longStrike = alpacaOptionStrikeCents(longIdentity.identity)
-  const shortStrike = alpacaOptionStrikeCents(shortIdentity.identity)
-  if (!longStrike.success || !shortStrike.success) {
-    throw new Error("Both legs must have representable strikes")
-  }
-
-  // 2. Exact economics from those quotes; no model-authored numbers.
-  const economics = calculateDebitSpreadEconomicsV1(
-    longQuote,
-    shortQuote,
-    longStrike.strikeCentsPerShare,
-    shortStrike.strikeCentsPerShare,
+  const { evaluatedAt, snapshotMetadata, quotes } = confirmation.snapshot
+  const longQuote = quotes.find(
+    ({ contractSymbol }) => contractSymbol === options.longContractSymbol,
   )
-  if (!economics.success) {
-    console.error(`Spread economics rejected: ${economics.reason}`)
+  const shortQuote = quotes.find(
+    ({ contractSymbol }) => contractSymbol === options.shortContractSymbol,
+  )
+  if (longQuote === undefined || shortQuote === undefined) {
+    console.error("Confirmed snapshot did not cover both requested legs")
     process.exitCode = 1
     return
   }
 
-  const structure =
+  const longIdentity = parseAlpacaOptionSymbol(options.longContractSymbol)
+  if (!longIdentity.success) {
+    throw new Error("The long leg must be a valid OCC option symbol")
+  }
+
+  // 2. Exact net debit from those quotes; no model-authored numbers.
+  //    TradeIntentV4 prices the entry at the natural debit, so the limit is
+  //    marketable rather than resting at the midpoint.
+  const entryLimitCentsPerStrategyUnit =
+    longQuote.askCentsPerShare - shortQuote.bidCentsPerShare
+  if (entryLimitCentsPerStrategyUnit <= 0) {
+    console.error("Selected legs do not form a net debit spread")
+    process.exitCode = 1
+    return
+  }
+
+  const strategy =
     longIdentity.identity.optionType === "C"
       ? "BULL_CALL_SPREAD"
       : "BEAR_PUT_SPREAD"
-  const intent = tradeIntentV2Schema.parse({
-    contractVersion: "2.0.0",
-    decisionContractVersion: "2.0.0",
-    direction: structure === "BULL_CALL_SPREAD" ? "BULLISH" : "BEARISH",
-    structure,
-    expiration: longIdentity.identity.expiration,
-    longContractSymbol: options.longContractSymbol,
-    shortContractSymbol: options.shortContractSymbol,
-    quoteSnapshotRef,
+  const parsedIntent = tradeIntentV4Schema.safeParse({
+    contractVersion: "4.0.0",
+    decisionContractVersion: "4.0.0",
+    underlying: longIdentity.identity.root,
+    direction: strategy === "BULL_CALL_SPREAD" ? "BULLISH" : "BEARISH",
+    strategy,
+    quoteSnapshotRef: snapshotMetadata.source,
     evaluatedAt,
-    longQuote,
-    shortQuote,
-    ...economics.economics,
-  }) as TradeIntentV2
+    legs: [
+      {
+        contractSymbol: options.longContractSymbol,
+        positionIntent: "BUY_TO_OPEN",
+        ratioQuantity: 1,
+        quote: longQuote,
+      },
+      {
+        contractSymbol: options.shortContractSymbol,
+        positionIntent: "SELL_TO_OPEN",
+        ratioQuantity: 1,
+        quote: shortQuote,
+      },
+    ],
+    premiumEffect: "DEBIT",
+    entryLimitCentsPerStrategyUnit,
+  })
+  if (!parsedIntent.success) {
+    console.error(
+      `Trade intent rejected: ${parsedIntent.error.issues
+        .map(({ path, message }) => `${path.join(".")}: ${message}`)
+        .join("; ")}`,
+    )
+    process.exitCode = 1
+    return
+  }
+  const intent = parsedIntent.data as TradeIntentV4
 
   // 3. The real pure risk gate over synthetic application state.
   const sessionDate = evaluatedAt.slice(0, 10)
   const context = buildMockRiskContext(intent, options, evaluatedAt, sessionDate)
   const evaluation = evaluateTradeIntentRiskV1({ intent, context })
 
-  console.log(`Intent: ${intent.structure} ${intent.longContractSymbol} / ${intent.shortContractSymbol}`)
   console.log(
-    `Entry limit: ${intent.entryLimitCentsPerShare}c per share, width ${intent.widthCentsPerShare}c, max loss ${intent.maxLossCentsPerContract}c`,
+    `Intent: ${intent.strategy} ${intent.legs
+      .map(({ contractSymbol }) => contractSymbol)
+      .join(" / ")}`,
+  )
+  console.log(
+    `Entry limit: ${intent.entryLimitCentsPerStrategyUnit}c per strategy unit`,
   )
   console.log(`Risk: ${evaluation.outcome} (rule ${evaluation.ruleVersion})`)
   if (evaluation.outcome !== "APPROVED") {
@@ -296,14 +323,16 @@ const main = async () => {
 
   // 4. Record the approval durably, then execute against it.
   mkdirSync(dirname(options.ledgerPath), { recursive: true })
-  const store = createSqliteLedgerStore({
-    path: options.ledgerPath,
+  const store = await createConfiguredLedgerStore({
+    configuration: resolveLedgerBackendConfiguration(
+      { ...process.env },
+      options.ledgerPath,
+    ),
     knownCredentialValues: [apiKey, secretKey],
   })
   await store.migrate(signal)
 
   const cycleId = `mock-${randomUUID()}`
-  const correlationId = cycleId
   const occurredAt = new Date().toISOString()
   const decision = {
     decisionVersion: SHADOW_RISK_DECISION_VERSION,
@@ -331,40 +360,18 @@ const main = async () => {
 
   await store.appendBatch(
     [
-      {
-        eventId: randomUUID(),
-        eventVersion: "2.0.0",
-        eventType: "RESEARCH_CYCLE_STARTED",
-        occurredAt,
-        correlationId,
-        cycleId,
-        payload: { cycleNumber: 1 },
-      },
-      {
-        eventId: "intent",
-        eventVersion: "2.0.0",
-        eventType: "TRADE_INTENT_DERIVED",
-        occurredAt,
-        correlationId,
-        cycleId,
-        payload: { intent },
-      },
-      {
-        eventId: "risk",
-        eventVersion: "2.0.0",
-        eventType: "RISK_SHADOW_DECISION_RECORDED",
-        occurredAt,
-        correlationId,
-        cycleId,
-        payload: { decision },
-      },
-    ].map((event, index, events) => ({
+      { eventType: "RESEARCH_CYCLE_STARTED", payload: { cycleNumber: 1 } },
+      { eventType: "TRADE_INTENT_DERIVED", payload: { intent } },
+      { eventType: "RISK_SHADOW_DECISION_RECORDED", payload: { decision } },
+    ].map((event, index) => ({
       ...event,
       eventId: `${cycleId}-${index}`,
-      ...(index === 0
-        ? {}
-        : { causationEventId: `${cycleId}-${index - 1}` }),
-    })) as LedgerEventV2[],
+      eventVersion: "4.0.0",
+      occurredAt,
+      correlationId: cycleId,
+      cycleId,
+      ...(index === 0 ? {} : { causationEventId: `${cycleId}-${index - 1}` }),
+    })) as LedgerEventV4[],
     signal,
   )
 
@@ -384,7 +391,9 @@ const main = async () => {
   console.log(`Execution: ${JSON.stringify(execution)}`)
   const recorded = await store.list({ cycleId, direction: "ASC", limit: 20 })
   console.log(
-    `Ledger (${options.ledgerPath}): ${recorded.map(({ eventType }) => eventType).join(" -> ")}`,
+    `Ledger (${options.ledgerPath}): ${recorded
+      .map((event) => event.eventType)
+      .join(" -> ")}`,
   )
   await store.close()
 }

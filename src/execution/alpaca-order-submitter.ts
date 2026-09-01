@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import type { TradeIntentV2 } from "../contracts/trade-intent-v2.js"
+import type { TradeIntentV4 } from "../contracts/trade-intent-v4.js"
 import {
   buildAlpacaMlegOrderRequestV1,
   type OrderTerminalRejectionCode,
@@ -15,10 +15,15 @@ import {
  * exposed as a tool.
  */
 
-const ALLOWED_TRADING_ORIGINS = [
-  "https://paper-api.alpaca.markets",
-  "https://api.alpaca.markets",
-] as const
+/**
+ * Paper trading only.
+ *
+ * Architecture plan sections 6.A and 9 require the paper endpoint and an
+ * assertion of it both at startup and immediately before submission. The live
+ * origin is deliberately absent so no configuration can reach it.
+ */
+const PAPER_TRADING_ORIGIN = "https://paper-api.alpaca.markets" as const
+const ALLOWED_TRADING_ORIGINS = [PAPER_TRADING_ORIGIN] as const
 
 const normalizeBaseUrl = (value: string, allowCustomHost: boolean) => {
   try {
@@ -35,7 +40,7 @@ const normalizeBaseUrl = (value: string, allowCustomHost: boolean) => {
     return url.origin
   } catch {
     throw new Error(
-      "ALPACA_TRADING_BASE_URL must be a credential-free Alpaca HTTPS URL",
+      "ALPACA_TRADING_BASE_URL must be the credential-free Alpaca paper HTTPS URL",
     )
   }
 }
@@ -125,7 +130,7 @@ export type OrderSubmitter = Readonly<{
   /** Submits one approved intent. Safe to retry: the client order id dedupes. */
   submit(
     input: Readonly<{
-      intent: TradeIntentV2
+      intent: TradeIntentV4
       clientOrderId: string
       signal: AbortSignal
     }>,
@@ -236,6 +241,10 @@ export function createAlpacaOrderSubmitter(
   return {
     async submit({ intent, clientOrderId, signal }) {
       signal.throwIfAborted()
+      // Plan section 9: assert the paper endpoint immediately before submission.
+      if (tradingBaseUrl !== PAPER_TRADING_ORIGIN) {
+        throw new Error("Order submission is restricted to the Alpaca paper endpoint")
+      }
       const body = buildAlpacaMlegOrderRequestV1(intent, clientOrderId)
       let response: Response
       try {

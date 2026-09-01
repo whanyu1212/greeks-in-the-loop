@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto"
 
 import type {
   ResearchCycleOutcomeSink,
-  ResearchCycleTerminalRecordV1,
-} from "../research/research-cycle-outcome-v1.js"
+  ResearchCycleTerminalRecordV3,
+  ResearchCycleTerminalRecordV4,
+} from "../research/cycle/outcome.js"
 import {
   RESEARCH_INVOCATION_VERSION,
   type ResearchModelDriftCode,
-} from "../research/research-invocation-v1.js"
+} from "../research/invocation.js"
 import {
   researchEligibilityV1Schema,
   type ResearchEligibilityV1,
@@ -15,9 +16,10 @@ import {
 import {
   LEDGER_EVENT_VERSION,
   RESEARCH_LOOP_BREAKER_STATE_VERSION,
-  type LedgerEventV2,
+  type LedgerEventV4,
 } from "./ledger-event-v1.js"
 import type { LedgerStore } from "./ledger-store.js"
+import { deriveExecutionAuthorizationV1 } from "../execution/authorization-v1.js"
 
 export const RESEARCH_CYCLE_INTERRUPTION_REASONS = [
   "TIMEOUT",
@@ -125,19 +127,20 @@ const persist = async <T>(
 }
 
 const completionEvents = (
-  record: ResearchCycleTerminalRecordV1,
+  record: ResearchCycleTerminalRecordV3 | ResearchCycleTerminalRecordV4,
   identity: ResearchCycleIdentity,
   startEventId: string,
   occurredAt: string,
   idFactory: () => string,
-): LedgerEventV2[] => {
+  executionWindowDeadline?: string,
+): LedgerEventV4[] => {
   if (record.researchInvocation === undefined) {
     throw new Error("Completed research cycles require invocation metadata")
   }
-  const events: LedgerEventV2[] = []
+  const events: LedgerEventV4[] = []
   let causationEventId = startEventId
 
-  const append = (event: LedgerEventV2) => {
+  const append = (event: LedgerEventV4) => {
     events.push(event)
     causationEventId = event.eventId
   }
@@ -149,6 +152,20 @@ const completionEvents = (
     causationEventId,
     cycleId: identity.cycleId,
     sessionId: identity.sessionId,
+  })
+
+  append({
+    ...envelope(),
+    eventType: "RESEARCH_SYMBOL_SCREEN_RECORDED",
+    payload: {
+      screen: {
+        ...record.symbolScreen,
+        symbols: record.symbolScreen.symbols.map((symbol) => ({
+          ...symbol,
+          strategies: [...symbol.strategies],
+        })),
+      },
+    },
   })
 
   for (const snapshot of record.evidenceSnapshots) {
@@ -167,22 +184,10 @@ const completionEvents = (
       payload: { report: record.researchReport },
     })
   }
-  const preliminaryResearch =
-    record.preliminaryResearch ??
-    (outcome.status === "PRELIMINARY_RESEARCH_RETAINED"
-      ? outcome.research
-      : undefined)
-  if (preliminaryResearch !== undefined) {
-    append({
-      ...envelope(),
-      eventType: "PRELIMINARY_RESEARCH_RECORDED",
-      payload: { research: preliminaryResearch },
-    })
-  }
   const validatedDecision =
     record.validatedDecision ??
     (outcome.status === "VALIDATED_NO_ACTION" ||
-    outcome.status === "INTENT_DERIVED"
+    outcome.status === "PORTFOLIO_EVALUATED"
       ? outcome.decision
       : undefined)
   if (validatedDecision !== undefined) {
@@ -194,8 +199,6 @@ const completionEvents = (
   }
 
   switch (outcome.status) {
-    case "PRELIMINARY_RESEARCH_RETAINED":
-      break
     case "VALIDATED_NO_ACTION":
       break
     case "DECISION_REJECTED":
@@ -222,34 +225,92 @@ const completionEvents = (
         },
       })
       break
-    case "INTENT_DERIVATION_REJECTED":
-      append({
-        ...envelope(),
-        eventType: "TRADE_INTENT_DERIVATION_REJECTED",
-        payload: { reasons: [...outcome.reasons] },
-      })
-      break
-    case "INTENT_DERIVED":
-      append({
-        ...envelope(),
-        eventType: "TRADE_INTENT_DERIVED",
-        payload: { intent: outcome.intent },
-      })
-      if (record.shadowRisk === undefined) {
-        throw new Error("Derived intent completion requires shadow risk")
-      }
-      append({
-        ...envelope(),
-        eventType: "RISK_SHADOW_DECISION_RECORDED",
-        payload: { decision: record.shadowRisk.decision },
-      })
-      for (const transition of record.shadowRisk.breakerTransitions) {
+    case "PORTFOLIO_EVALUATED":
+      for (const proposal of outcome.proposals) {
+        if (proposal.status === "DECISION_REJECTED") {
+          append({
+            ...envelope(),
+            eventType: "RESEARCH_DECISION_REJECTED",
+            payload: {
+              proposal: {
+                priority: proposal.priority,
+                underlying: proposal.underlying,
+              },
+              issues: proposal.issues.map((issue) => ({
+                code: issue.code,
+                path: [...issue.path],
+                ...(!("schemaCategory" in issue) ||
+                    issue.schemaCategory === undefined
+                  ? {}
+                  : { schemaCategory: issue.schemaCategory }),
+              })),
+            },
+          })
+          continue
+        }
+        if (proposal.status === "INTENT_DERIVATION_REJECTED") {
+          append({
+            ...envelope(),
+            eventType: "TRADE_INTENT_DERIVATION_REJECTED",
+            payload: {
+              proposal: {
+                priority: proposal.priority,
+                underlying: proposal.underlying,
+              },
+              reasons: [...proposal.reasons],
+            },
+          })
+          continue
+        }
         append({
           ...envelope(),
-          eventType: "RISK_BREAKER_LATCHED",
-          payload: transition,
+          eventType: "TRADE_INTENT_DERIVED",
+          payload: { intent: proposal.intent },
         })
+        const riskEvent: LedgerEventV4 = {
+          ...envelope(),
+          eventType: "RISK_SHADOW_DECISION_RECORDED",
+          payload: { decision: proposal.shadowRisk.decision },
+        }
+        append(riskEvent)
+        const authorization =
+          proposal.selected &&
+          record.researchInvocation.cycleMode === "STANDARD" &&
+          executionWindowDeadline !== undefined
+            ? deriveExecutionAuthorizationV1({
+                authorizationId: identity.cycleId,
+                issuedAt: occurredAt,
+                expiresAt: executionWindowDeadline,
+                riskDecision: proposal.shadowRisk.decision,
+              })
+            : undefined
+        if (authorization !== undefined) {
+          append({
+            ...envelope(),
+            eventType: "EXECUTION_AUTHORIZATION_RECORDED",
+            payload: { instruction: authorization },
+          })
+        }
+        for (const transition of proposal.shadowRisk.breakerTransitions) {
+          append({
+            ...envelope(),
+            eventType: "RISK_BREAKER_LATCHED",
+            payload: transition,
+          })
+        }
       }
+      append({
+        ...envelope(),
+        eventType: "PORTFOLIO_SHADOW_PLAN_RECORDED",
+        payload: {
+          proposalCount: outcome.proposals.length,
+          selectedUnderlyings: outcome.proposals.flatMap((proposal) =>
+            proposal.status === "RISK_EVALUATED" && proposal.selected
+              ? [proposal.underlying]
+              : [],
+          ),
+        },
+      })
       break
   }
 
@@ -433,6 +494,7 @@ export function createResearchLifecycleRecorder({
                   startEventId,
                   now().toISOString(),
                   idFactory,
+                  initialEligibility?.tradeIntentWindow?.deadline,
                 ),
                 recordSignal,
               ),

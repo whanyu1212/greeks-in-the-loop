@@ -1,0 +1,17 @@
+.claude
+.codegraph
+.env
+.git
+.state
+assets
+dev_notes
+dist
+docs
+node_modules
+tests
+workspace
+gha-creds-*.json
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal

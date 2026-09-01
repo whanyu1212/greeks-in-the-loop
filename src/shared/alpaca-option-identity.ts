@@ -10,15 +10,10 @@ export const ALPACA_OPTION_SYMBOL_PARSE_FAILURE_CODES = [
 export type AlpacaOptionSymbolParseFailureCode =
   (typeof ALPACA_OPTION_SYMBOL_PARSE_FAILURE_CODES)[number]
 
-export const OPTION_UNIVERSE_POLICY_VERSION = "1.0.0" as const
-export const ALLOWED_OPTION_UNDERLYINGS_V1 = ["SPY", "QQQ", "IWM"] as const
-export type AllowedOptionUnderlyingV1 =
-  (typeof ALLOWED_OPTION_UNDERLYINGS_V1)[number]
-export const OPTION_UNIVERSE_V1_FAILURE_CODES = [
-  "UNDERLYING_NOT_SUPPORTED",
-] as const
-export type OptionUniverseV1FailureCode =
-  (typeof OPTION_UNIVERSE_V1_FAILURE_CODES)[number]
+export const optionUnderlyingV1Schema = z
+  .string()
+  // ponytail: OCC roots with punctuation need an explicit asset-to-root mapping.
+  .regex(/^[A-Z0-9]{1,6}$/u)
 
 export type AlpacaOptionIdentity = Readonly<{
   provider: "ALPACA"
@@ -37,13 +32,6 @@ export type ParseAlpacaOptionSymbolResult =
   | Readonly<{
       success: false
       reason: AlpacaOptionSymbolParseFailureCode
-    }>
-
-export type OptionUniverseV1Result =
-  | Readonly<{ success: true }>
-  | Readonly<{
-      success: false
-      reason: OptionUniverseV1FailureCode
     }>
 
 export type AlpacaOptionStrikeCentsResult =
@@ -114,19 +102,6 @@ export function parseAlpacaOptionSymbol(
 }
 
 /**
- * Applies the current strategy-universe policy independently of symbol syntax.
- */
-export function validateOptionUniverseV1(
-  identity: AlpacaOptionIdentity,
-): OptionUniverseV1Result {
-  return ALLOWED_OPTION_UNDERLYINGS_V1.includes(
-    identity.root as AllowedOptionUnderlyingV1,
-  )
-    ? { success: true }
-    : { success: false, reason: "UNDERLYING_NOT_SUPPORTED" }
-}
-
-/**
  * Projects an exact Alpaca strike into the cent unit used by financial paths.
  */
 export function alpacaOptionStrikeCents(
@@ -154,19 +129,3 @@ export const alpacaOptionSymbolSchema = z
       })
     }
   })
-
-/** Compact Alpaca syntax composed with the current bounded universe policy. */
-export const allowedAlpacaOptionSymbolV1Schema = alpacaOptionSymbolSchema.superRefine(
-  (symbol, refinement) => {
-    const parsed = parseAlpacaOptionSymbol(symbol)
-    if (
-      parsed.success &&
-      !validateOptionUniverseV1(parsed.identity).success
-    ) {
-      refinement.addIssue({
-        code: "custom",
-        message: "The option underlying is not supported by the V1 universe",
-      })
-    }
-  },
-)

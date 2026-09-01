@@ -54,8 +54,7 @@ const expectFailure = async (
     now,
   )
   const result = await provider.confirmQuotes({
-    longContractSymbol: longSymbol,
-    shortContractSymbol: shortSymbol,
+    contractSymbols: [longSymbol, shortSymbol],
     signal: new AbortController().signal,
   })
 
@@ -105,14 +104,14 @@ describe("Alpaca option quote provider", () => {
     const provider = createProvider(fetchMock)
 
     const result = await provider.confirmQuotes({
-      longContractSymbol: longSymbol,
-      shortContractSymbol: shortSymbol,
+      contractSymbols: [longSymbol, shortSymbol],
       signal: new AbortController().signal,
     })
 
     expect(result).toEqual({
       success: true,
       snapshot: {
+        snapshotVersion: "2.0.0",
         evaluatedAt: "2026-08-25T14:31:00.000Z",
         snapshotMetadata: {
           provider: "ALPACA",
@@ -120,20 +119,22 @@ describe("Alpaca option quote provider", () => {
           retrievedAt: "2026-08-25T14:31:00.000Z",
           freshUntil: "2026-08-25T14:31:30.123Z",
         },
-        longQuote: {
-          contractSymbol: longSymbol,
-          feed: "INDICATIVE",
-          bidCentsPerShare: 220,
-          askCentsPerShare: 223,
-          providerTimestamp: "2026-08-25T14:30:30.123456789Z",
-        },
-        shortQuote: {
-          contractSymbol: shortSymbol,
-          feed: "INDICATIVE",
-          bidCentsPerShare: 120,
-          askCentsPerShare: 121,
-          providerTimestamp: "2026-08-25T14:30:31.987654321Z",
-        },
+        quotes: [
+          {
+            contractSymbol: longSymbol,
+            feed: "INDICATIVE",
+            bidCentsPerShare: 220,
+            askCentsPerShare: 223,
+            providerTimestamp: "2026-08-25T14:30:30.123456789Z",
+          },
+          {
+            contractSymbol: shortSymbol,
+            feed: "INDICATIVE",
+            bidCentsPerShare: 120,
+            askCentsPerShare: 121,
+            providerTimestamp: "2026-08-25T14:30:31.987654321Z",
+          },
+        ],
       },
     })
 
@@ -157,6 +158,56 @@ describe("Alpaca option quote provider", () => {
     expect(requestInit).not.toHaveProperty("body")
   })
 
+  it("captures one through four quotes in requested order", async () => {
+    const symbols = [
+      "SPY260918P00640000",
+      longSymbol,
+      shortSymbol,
+      "SPY260918C00660000",
+    ]
+    const snapshots = Object.fromEntries([...symbols].reverse().map(
+      (symbol, index) => [symbol, {
+        latestQuote: {
+          bp: (1 + index / 10).toFixed(2),
+          ap: (1.05 + index / 10).toFixed(2),
+          t: `2026-08-25T14:30:3${index}.000Z`,
+        },
+      }],
+    ))
+    const provider = createProvider(
+      vi.fn<typeof fetch>().mockResolvedValue(response({ snapshots })),
+    )
+
+    const result = await provider.confirmQuotes({
+      contractSymbols: symbols,
+      signal: new AbortController().signal,
+    })
+
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error("Expected quote confirmation")
+    expect(result.snapshot.quotes.map(({ contractSymbol }) => contractSymbol))
+      .toEqual(symbols)
+  })
+
+  it("rejects empty, duplicate, and over-limit quote requests before I/O", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+    const provider = createProvider(fetchMock)
+    for (const contractSymbols of [
+      [],
+      [longSymbol, longSymbol],
+      [longSymbol, shortSymbol, "SPY260918C00660000", "SPY260918C00665000", "SPY260918C00670000"],
+    ]) {
+      await expect(provider.confirmQuotes({
+        contractSymbols,
+        signal: new AbortController().signal,
+      })).resolves.toEqual({
+        success: false,
+        reasons: ["QUOTE_SYMBOL_MISSING"],
+      })
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it.each([
     ["malformed", "not-a-symbol"],
     ["mixed-underlying", "QQQ260918C00650000"],
@@ -170,8 +221,7 @@ describe("Alpaca option quote provider", () => {
 
       await expect(
         provider.confirmQuotes({
-          longContractSymbol: invalidSymbol,
-          shortContractSymbol: shortSymbol,
+          contractSymbols: [invalidSymbol, shortSymbol],
           signal: new AbortController().signal,
         }),
       ).resolves.toEqual({
@@ -195,8 +245,7 @@ describe("Alpaca option quote provider", () => {
     )
 
     await expect(provider.confirmQuotes({
-      longContractSymbol: qqqLong,
-      shortContractSymbol: qqqShort,
+      contractSymbols: [qqqLong, qqqShort],
       signal: new AbortController().signal,
     })).resolves.toMatchObject({ success: true })
   })
@@ -207,15 +256,16 @@ describe("Alpaca option quote provider", () => {
     )
 
     const result = await provider.confirmQuotes({
-      longContractSymbol: longSymbol,
-      shortContractSymbol: shortSymbol,
+      contractSymbols: [longSymbol, shortSymbol],
       signal: new AbortController().signal,
     })
 
     expect(result.success).toBe(true)
     if (!result.success) throw new Error("Expected quote confirmation")
-    expect(result.snapshot.longQuote.contractSymbol).toBe(longSymbol)
-    expect(result.snapshot.shortQuote.contractSymbol).toBe(shortSymbol)
+    expect(result.snapshot.quotes.map(({ contractSymbol }) => contractSymbol)).toEqual([
+      longSymbol,
+      shortSymbol,
+    ])
   })
 
   it("accepts a quote fresh at the exact 60-second boundary", async () => {
@@ -239,8 +289,7 @@ describe("Alpaca option quote provider", () => {
       ),
     )
     const result = await provider.confirmQuotes({
-      longContractSymbol: longSymbol,
-      shortContractSymbol: shortSymbol,
+      contractSymbols: [longSymbol, shortSymbol],
       signal: new AbortController().signal,
     })
     expect(result.success).toBe(true)
@@ -305,8 +354,7 @@ describe("Alpaca option quote provider", () => {
 
     await expect(
       nonSuccessProvider.confirmQuotes({
-        longContractSymbol: longSymbol,
-        shortContractSymbol: shortSymbol,
+        contractSymbols: [longSymbol, shortSymbol],
         signal: new AbortController().signal,
       }),
     ).resolves.toEqual({
@@ -315,8 +363,7 @@ describe("Alpaca option quote provider", () => {
     })
     await expect(
       malformedProvider.confirmQuotes({
-        longContractSymbol: longSymbol,
-        shortContractSymbol: shortSymbol,
+        contractSymbols: [longSymbol, shortSymbol],
         signal: new AbortController().signal,
       }),
     ).resolves.toEqual({
@@ -333,8 +380,7 @@ describe("Alpaca option quote provider", () => {
 
     await expect(
       provider.confirmQuotes({
-        longContractSymbol: longSymbol,
-        shortContractSymbol: shortSymbol,
+        contractSymbols: [longSymbol, shortSymbol],
         signal: AbortSignal.abort(abortReason),
       }),
     ).rejects.toBe(abortReason)
@@ -354,8 +400,7 @@ describe("Alpaca option quote provider", () => {
 
     await expect(
       provider.confirmQuotes({
-        longContractSymbol: longSymbol,
-        shortContractSymbol: shortSymbol,
+        contractSymbols: [longSymbol, shortSymbol],
         signal: controller.signal,
       }),
     ).rejects.toBe(abortReason)
@@ -373,8 +418,7 @@ describe("Alpaca option quote provider", () => {
     })
 
     const result = await provider.confirmQuotes({
-      longContractSymbol: longSymbol,
-      shortContractSymbol: shortSymbol,
+      contractSymbols: [longSymbol, shortSymbol],
       signal: new AbortController().signal,
     })
 

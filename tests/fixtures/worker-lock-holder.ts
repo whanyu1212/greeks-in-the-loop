@@ -1,4 +1,4 @@
-import { acquireWorkerInstanceLock } from "../../src/worker-instance-lock.js"
+import { acquireWorkerInstanceLock } from "../../src/event-ledger/deprecated/worker-instance-lock.js"
 
 const ledgerPath = process.argv[2]
 const releaseOnSignal = process.argv[3] === "release-on-signal"

@@ -5,12 +5,15 @@ import { join } from "node:path"
 import Database from "better-sqlite3"
 import { afterEach, describe, expect, it } from "vitest"
 
-import type { LedgerEventV2 } from "../src/event-ledger/ledger-event-v1.js"
-import { loadResearchContextV1 } from "../src/research/research-context-v1.js"
+import {
+  MAX_LEDGER_EVENT_PAYLOAD_BYTES,
+  type LedgerEventV4,
+} from "../src/event-ledger/ledger-event-v1.js"
+import { loadResearchContextV1 } from "../src/research/context.js"
 import {
   createSqliteLedgerStore as createConfiguredSqliteLedgerStore,
   type CreateSqliteLedgerStoreOptions,
-} from "../src/event-ledger/sqlite-ledger-store.js"
+} from "../src/event-ledger/deprecated/sqlite-ledger-store.js"
 
 const temporaryDirectories: string[] = []
 
@@ -30,11 +33,11 @@ const createTemporaryPath = () => {
 
 const cycleStarted = (
   eventId: string,
-  overrides: Partial<LedgerEventV2> = {},
-): LedgerEventV2 =>
+  overrides: Partial<LedgerEventV4> = {},
+): LedgerEventV4 =>
   ({
     eventId,
-    eventVersion: "2.0.0",
+    eventVersion: "4.0.0",
     eventType: "RESEARCH_CYCLE_STARTED",
     occurredAt: "2026-08-25T14:30:00.000Z",
     correlationId: "correlation-1",
@@ -44,14 +47,14 @@ const cycleStarted = (
       cycleNumber: 1,
     },
     ...overrides,
-  }) as LedgerEventV2
+  }) as LedgerEventV4
 
 const cycleCompleted = (
   eventId: string,
   causationEventId: string,
-): LedgerEventV2 => ({
+): LedgerEventV4 => ({
   eventId,
-  eventVersion: "2.0.0",
+  eventVersion: "4.0.0",
   eventType: "RESEARCH_CYCLE_COMPLETED",
   occurredAt: "2026-08-25T14:31:00.000Z",
   correlationId: "correlation-1",
@@ -177,14 +180,14 @@ describe("createSqliteLedgerStore", () => {
 
     const unsafeDecision = {
       eventId: "event-2",
-      eventVersion: "2.0.0",
+      eventVersion: "4.0.0",
       eventType: "RESEARCH_DECISION_VALIDATED",
       occurredAt: "2026-08-25T14:30:10.000Z",
       correlationId: "correlation-1",
       cycleId: "cycle-1",
       payload: {
         decision: {
-          contractVersion: "2.0.0",
+          contractVersion: "3.0.0",
           outcome: "NO_ACTION",
           reasonCodes: ["SIGNAL_NOT_ACTIONABLE"],
           evidence: [
@@ -200,7 +203,7 @@ describe("createSqliteLedgerStore", () => {
           ],
         },
       },
-    } as LedgerEventV2
+    } as LedgerEventV4
 
     await expect(
       store.appendBatch([
@@ -222,7 +225,7 @@ describe("createSqliteLedgerStore", () => {
         cycleNumber: 1,
         refreshToken: "secret-value",
       },
-    } as unknown as LedgerEventV2
+    } as unknown as LedgerEventV4
 
     await expect(store.append(unsafeEvent)).rejects.toThrow(
       "Unsafe persistence payload",
@@ -249,7 +252,7 @@ describe("createSqliteLedgerStore", () => {
         retrievedAt: "2026-08-25T14:30:00.000Z",
         freshUntil: "2026-08-25T14:31:00.000Z",
       },
-    } as LedgerEventV2
+    } as LedgerEventV4
 
     await expect(store.append(credentialBearingEvent)).rejects.toThrow(
       "Unsafe persistence payload",
@@ -266,7 +269,7 @@ describe("createSqliteLedgerStore", () => {
     const invalidEvent = {
       ...cycleStarted("event-1"),
       [unsafeProperty]: true,
-    } as unknown as LedgerEventV2
+    } as unknown as LedgerEventV4
 
     let error: unknown
     try {
@@ -280,12 +283,12 @@ describe("createSqliteLedgerStore", () => {
     await store.close()
   })
 
-  it("rejects schema-valid payloads larger than 64 KiB", async () => {
+  it("rejects schema-valid payloads larger than the configured cap", async () => {
     const store = createSqliteLedgerStore({ path: ":memory:" })
     await store.migrate()
     const oversizedEvent = {
       eventId: "event-oversized",
-      eventVersion: "2.0.0",
+      eventVersion: "4.0.0",
       eventType: "RESEARCH_DECISION_REJECTED",
       occurredAt: "2026-08-25T14:30:10.000Z",
       correlationId: "correlation-1",
@@ -300,10 +303,10 @@ describe("createSqliteLedgerStore", () => {
           ),
         })),
       },
-    } as LedgerEventV2
+    } as LedgerEventV4
 
     await expect(store.append(oversizedEvent)).rejects.toThrow(
-      "Ledger event payload cannot exceed 65536 bytes",
+      `Ledger event payload cannot exceed ${MAX_LEDGER_EVENT_PAYLOAD_BYTES} bytes`,
     )
     await expect(store.list({ limit: 10 })).resolves.toEqual([])
 

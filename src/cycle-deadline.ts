@@ -1,7 +1,7 @@
 /** Options for running work under a timeout and worker shutdown signal. */
 export type CycleDeadlineOptions<T> = {
-  /** Maximum duration for the work, in milliseconds. */
-  timeoutMs: number
+  /** Maximum duration for the work, or undefined for no elapsed-time deadline. */
+  timeoutMs?: number
   /** Long-lived signal used to stop the worker. */
   shutdownSignal: AbortSignal
   /** Work that receives a signal combining the deadline and worker shutdown. */
@@ -39,10 +39,12 @@ export async function runWithCycleDeadline<T>({
     rejectInterruption(reason)
   }
   const abortForShutdown = () => interrupt(shutdownSignal.reason)
-  const timeout = setTimeout(() => {
-    timedOut = true
-    interrupt(new DOMException("Agent cycle timed out", "TimeoutError"))
-  }, timeoutMs)
+  const timeout = timeoutMs === undefined
+    ? undefined
+    : setTimeout(() => {
+        timedOut = true
+        interrupt(new DOMException("Agent cycle timed out", "TimeoutError"))
+      }, timeoutMs)
 
   shutdownSignal.addEventListener("abort", abortForShutdown, { once: true })
   if (shutdownSignal.aborted) abortForShutdown()
@@ -53,7 +55,7 @@ export async function runWithCycleDeadline<T>({
     if (timedOut && !shutdownSignal.aborted) await onTimeout()
     throw error
   } finally {
-    clearTimeout(timeout)
+    if (timeout !== undefined) clearTimeout(timeout)
     shutdownSignal.removeEventListener("abort", abortForShutdown)
   }
 }

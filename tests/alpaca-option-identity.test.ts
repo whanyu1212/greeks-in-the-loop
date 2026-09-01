@@ -4,8 +4,6 @@ import {
   alpacaOptionStrikeCents,
   alpacaOptionSymbolSchema,
   parseAlpacaOptionSymbol,
-  allowedAlpacaOptionSymbolV1Schema,
-  validateOptionUniverseV1,
 } from "../src/shared/alpaca-option-identity.js"
 
 const parseIdentity = (symbol: string) => {
@@ -29,7 +27,7 @@ describe("parseAlpacaOptionSymbol", () => {
     })
   })
 
-  it("parses and authorizes a valid QQQ identity", () => {
+  it("parses a valid QQQ identity", () => {
     const parsed = parseAlpacaOptionSymbol("QQQ260918P00650000")
 
     expect(parsed).toEqual({
@@ -43,8 +41,6 @@ describe("parseAlpacaOptionSymbol", () => {
         strikeThousandthsPerShare: 650_000,
       },
     })
-    if (!parsed.success) throw new Error("Expected QQQ identity to parse")
-    expect(validateOptionUniverseV1(parsed.identity)).toEqual({ success: true })
   })
 
   it.each([
@@ -94,18 +90,6 @@ describe("parseAlpacaOptionSymbol", () => {
 })
 
 describe("Alpaca option identity policies", () => {
-  it("admits the ETF allowlist and rejects other roots", () => {
-    for (const root of ["SPY", "QQQ", "IWM"]) {
-      expect(
-        validateOptionUniverseV1(parseIdentity(`${root}260918C00650000`)),
-      ).toEqual({ success: true })
-    }
-    expect(validateOptionUniverseV1(parseIdentity("DIA260918C00650000"))).toEqual({
-      success: false,
-      reason: "UNDERLYING_NOT_SUPPORTED",
-    })
-  })
-
   it("projects exact thousandths into integer cents", () => {
     expect(
       alpacaOptionStrikeCents(parseIdentity("SPY260918C00650000")),
@@ -125,24 +109,15 @@ describe("Alpaca option identity policies", () => {
     })
   })
 
-  it("keeps syntax-only and allowlisted schemas distinct", () => {
+  it("accepts any syntactically representable OCC root", () => {
     expect(alpacaOptionSymbolSchema.safeParse("DIA260918C00650000").success).toBe(
       true,
     )
-    expect(
-      allowedAlpacaOptionSymbolV1Schema.safeParse("DIA260918C00650000").success,
-    ).toBe(false)
-    expect(
-      allowedAlpacaOptionSymbolV1Schema.safeParse("QQQ260918C00650000").success,
-    ).toBe(true)
   })
 
-  it("makes both schemas fail closed on impossible dates", () => {
+  it("fails closed on impossible dates", () => {
     expect(
       alpacaOptionSymbolSchema.safeParse("SPY260431C00650000").success,
-    ).toBe(false)
-    expect(
-      allowedAlpacaOptionSymbolV1Schema.safeParse("SPY260431C00650000").success,
     ).toBe(false)
   })
 })

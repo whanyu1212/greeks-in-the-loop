@@ -2,10 +2,14 @@ import { randomUUID } from "node:crypto"
 
 import {
   LEDGER_EVENT_VERSION,
-  type LedgerEventV2,
+  type LedgerEventV4,
 } from "../event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import { LedgerPersistenceError } from "../event-ledger/research-lifecycle-recorder.js"
+import {
+  TRADE_INTENT_V4_CONTRACT_VERSION,
+  type TradeIntentV4,
+} from "../contracts/trade-intent-v4.js"
 import type { ShadowRiskResultV1 } from "../risk/shadow-risk-v1.js"
 import type { OrderSubmitter } from "./alpaca-order-submitter.js"
 import {
@@ -86,7 +90,11 @@ export async function executeApprovedTradeV1({
 }: ExecuteApprovedTradeOptions): Promise<TradeExecutionOutcome> {
   signal.throwIfAborted()
   const decision = shadowRisk.decision
-  if (decision.stage !== "EVALUATED" || decision.outcome !== "APPROVED") {
+  if (
+    decision.stage !== "EVALUATED" ||
+    decision.outcome !== "APPROVED" ||
+    decision.evaluation.outcome !== "APPROVED"
+  ) {
     return { status: "SKIPPED", reason: "RISK_NOT_APPROVED" }
   }
 
@@ -95,10 +103,20 @@ export async function executeApprovedTradeV1({
     return { status: "SKIPPED", reason: "APPROVAL_NOT_RECORDED" }
   }
 
+  // Stored decisions still decode legacy intent versions, but only a current
+  // V4 intent carries the leg plan the Alpaca order request is built from.
+  const intent = decision.evaluatedIntent
+  if (intent.contractVersion !== TRADE_INTENT_V4_CONTRACT_VERSION) {
+    return { status: "SKIPPED", reason: "INTENT_CONTRACT_UNSUPPORTED" }
+  }
+  const maxLossCents = decision.evaluation.maxLossCents
+  if (maxLossCents === undefined) {
+    return { status: "SKIPPED", reason: "APPROVAL_MISSING_MAX_LOSS" }
+  }
+
   // The cycle id is the idempotency key: one approved entry per cycle, both
   // in the ledger (unique index) and at the broker (client order id).
   const clientOrderId = cycleId
-  const intent = decision.evaluatedIntent
   const envelope = (causationEventId: string) => ({
     eventId: idFactory(),
     eventVersion: LEDGER_EVENT_VERSION,
@@ -111,13 +129,14 @@ export async function executeApprovedTradeV1({
       : { sessionId: riskEvent.sessionId }),
   })
 
-  const submissionEvent: LedgerEventV2 = {
+  const submissionEvent: LedgerEventV4 = {
     ...envelope(riskEvent.eventId),
     eventType: "ORDER_SUBMITTED",
     payload: createOrderSubmittedPayloadV1(
       intent,
       clientOrderId,
       decision.ruleVersion,
+      maxLossCents,
     ),
   }
 
@@ -137,9 +156,13 @@ export async function executeApprovedTradeV1({
     throw new LedgerPersistenceError("order submission append", error)
   }
 
-  const outcome = await submitter.submit({ intent, clientOrderId, signal })
+  const outcome = await submitter.submit({
+    intent: intent as TradeIntentV4,
+    clientOrderId,
+    signal,
+  })
 
-  const appendTerminal = async (event: LedgerEventV2) => {
+  const appendTerminal = async (event: LedgerEventV4) => {
     try {
       await store.append(event, signal)
     } catch (error) {

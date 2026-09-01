@@ -1,10 +1,11 @@
-import type { ProposedTradeDecisionV2 } from "../contracts/research-decision-v2.js"
+import type { TradeProposalV4 } from "../contracts/research-decision-v4.js"
 import {
-  deriveTradeIntentV2,
-  type TradeIntentV2,
-} from "../contracts/trade-intent-v2.js"
+  deriveTradeIntentV4,
+  type TradeIntentV4,
+} from "../contracts/trade-intent-v4.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import { LedgerPersistenceError } from "../event-ledger/research-lifecycle-recorder.js"
+import { ALPACA_OPTION_ORDER_CAPABILITY_VERSION } from "../options/alpaca-capabilities.js"
 import type { ResearchEligibilityV1 } from "../scheduling/research-eligibility.js"
 import {
   NOOP_TERMINAL_STAGE_REPORTER,
@@ -37,8 +38,8 @@ export type DurableRiskControlStateLoader = Readonly<{
 
 export type ShadowRiskEvaluator = Readonly<{
   evaluate(input: Readonly<{
-    decision: ProposedTradeDecisionV2
-    sourceIntent: TradeIntentV2
+    decision: TradeProposalV4
+    sourceIntent: TradeIntentV4
     captureEligibility: ResearchEligibilityV1 & Readonly<{
       sessionDate: string
       tradeIntentWindow: NonNullable<ResearchEligibilityV1["tradeIntentWindow"]>
@@ -161,10 +162,10 @@ const breakerTransitionsFor = (
 export function createShadowRiskEvaluator(options: Readonly<{
   provider: RiskStateProvider
   durableControl: DurableRiskControlStateLoader
-  deriveIntent?: typeof deriveTradeIntentV2
+  deriveIntent?: typeof deriveTradeIntentV4
   evaluateRisk?: typeof evaluateTradeIntentRiskV1
 }>): ShadowRiskEvaluator {
-  const deriveIntent = options.deriveIntent ?? deriveTradeIntentV2
+  const deriveIntent = options.deriveIntent ?? deriveTradeIntentV4
   const evaluateRisk = options.evaluateRisk ?? evaluateTradeIntentRiskV1
   return {
     async evaluate(input) {
@@ -185,8 +186,18 @@ export function createShadowRiskEvaluator(options: Readonly<{
       const capture = await options.provider.capture({
         sessionDate,
         slotStartedAt: tradeIntentWindow.slotStartedAt,
-        longContractSymbol: input.sourceIntent.longContractSymbol,
-        shortContractSymbol: input.sourceIntent.shortContractSymbol,
+        entryPlan: {
+          capabilityVersion: ALPACA_OPTION_ORDER_CAPABILITY_VERSION,
+          strategy: input.sourceIntent.strategy,
+          underlying: input.sourceIntent.underlying,
+          legs: input.sourceIntent.legs.map(
+            ({ contractSymbol, positionIntent, ratioQuantity }) => ({
+              contractSymbol,
+              positionIntent,
+              ratioQuantity,
+            }),
+          ),
+        },
         durableControl,
         signal: input.signal,
       })
@@ -223,11 +234,37 @@ export function createShadowRiskEvaluator(options: Readonly<{
         durableControl,
         capture.snapshot.portfolio,
       )
+      const quoteBySymbol = new Map(
+        capture.snapshot.quoteSnapshot.quotes.map((quote) => [
+          quote.contractSymbol,
+          quote,
+        ]),
+      )
+      const refreshedQuotes = input.sourceIntent.legs.flatMap(
+        ({ contractSymbol }) => {
+          const quote = quoteBySymbol.get(contractSymbol)
+          return quote === undefined ? [] : [quote]
+        },
+      )
+      if (refreshedQuotes.length !== input.sourceIntent.legs.length) {
+        return {
+          decision: shadowRiskDecisionV1Schema.parse({
+            decisionVersion: SHADOW_RISK_DECISION_VERSION,
+            mode: "SHADOW",
+            evaluationVersion: RISK_EVALUATION_VERSION,
+            ruleVersion: RISK_RULE_VERSION,
+            stage: "STATE_CAPTURE_FAILED",
+            outcome: "REJECTED",
+            evaluatedAt: capture.snapshot.evaluatedAt,
+            captureReasonCodes: ["OPTION_SNAPSHOT_RESPONSE_INVALID"],
+          }),
+          breakerTransitions,
+        }
+      }
       const refreshed = deriveIntent(input.decision, {
         quoteSnapshotRef: SHADOW_RISK_QUOTE_SNAPSHOT_REF,
         evaluatedAt: capture.snapshot.evaluatedAt,
-        longQuote: capture.snapshot.quoteSnapshot.longQuote,
-        shortQuote: capture.snapshot.quoteSnapshot.shortQuote,
+        quotes: refreshedQuotes,
       })
       input.signal.throwIfAborted()
       if (!refreshed.success) {
@@ -252,8 +289,9 @@ export function createShadowRiskEvaluator(options: Readonly<{
 
       stageReporter.report("risk.intent_refresh", "COMPLETED", {
         evaluatedAt: refreshed.intent.evaluatedAt,
-        entryLimitCentsPerShare: refreshed.intent.entryLimitCentsPerShare,
-        maxLossCentsPerContract: refreshed.intent.maxLossCentsPerContract,
+        premiumEffect: refreshed.intent.premiumEffect,
+        entryLimitCentsPerStrategyUnit:
+          refreshed.intent.entryLimitCentsPerStrategyUnit,
       })
 
       const evaluation = evaluateRisk({
@@ -262,6 +300,7 @@ export function createShadowRiskEvaluator(options: Readonly<{
           provenance: "APPLICATION_VERIFIED",
           eligibility: input.getEvaluationEligibility(),
           account: capture.snapshot.account,
+          candidateCollateral: capture.snapshot.candidateCollateral,
           portfolio: capture.snapshot.portfolio,
           contracts: capture.snapshot.contracts,
         },

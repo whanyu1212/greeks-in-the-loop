@@ -2,18 +2,24 @@ import { z } from "zod"
 
 import {
   agentReportedEvidenceSchema,
-  researchCandidateV2Schema,
-  researchDecisionV2Schema,
-} from "../contracts/research-decision-v2.js"
-import { preliminaryResearchV2Schema } from "../contracts/preliminary-research-v2.js"
-import { tradeIntentV2Schema } from "../contracts/trade-intent-v2.js"
-import { researchReportV3Schema } from "../contracts/research-report-v3.js"
+  researchCandidateV3Schema,
+  researchDecisionV3Schema,
+} from "../contracts/research-decision-v3.js"
+import { researchDecisionV4Schema } from "../contracts/research-decision-v4.js"
+import { tradeIntentV3Schema } from "../contracts/trade-intent-v3.js"
+import { tradeIntentV4Schema } from "../contracts/trade-intent-v4.js"
+import { researchReportV6Schema } from "../contracts/research-report-v6.js"
+import { researchReportV7Schema } from "../contracts/research-report-v7.js"
 import { researchEligibilityV1Schema } from "../scheduling/research-eligibility.js"
 import {
   RESEARCH_MODEL_DRIFT_CODES,
   researchInvocationV1Schema,
   SUPPORTED_RESEARCH_INVOCATION_VERSIONS,
-} from "../research/research-invocation-v1.js"
+} from "../research/invocation.js"
+import {
+  symbolScreenResultV1Schema,
+  symbolScreenResultV2Schema,
+} from "../research/symbol-screen.js"
 import { SCHEMA_VIOLATION_CATEGORIES } from "../shared/schema-diagnostics.js"
 import {
   riskBreakerTransitionV1Schema,
@@ -24,17 +30,19 @@ import {
   orderRejectedPayloadV1Schema,
   orderSubmittedPayloadV1Schema,
 } from "../execution/order-submission-v1.js"
+import { executionAuthorizationV1Schema } from "../execution/authorization-v1.js"
+import { paperTraderResultV1Schema } from "../execution/paper-trader-result-v1.js"
 
 export const LEGACY_LEDGER_EVENT_VERSION = "1.0.0" as const
-export const LEDGER_EVENT_VERSION = "2.0.0" as const
+export const LEDGER_EVENT_VERSION = "4.0.0" as const
 export const RESEARCH_LOOP_BREAKER_STATE_VERSION = "1.0.0" as const
-export const MAX_LEDGER_EVENT_PAYLOAD_BYTES = 64 * 1024
+export const MAX_LEDGER_EVENT_PAYLOAD_BYTES = 256 * 1024
 
 export const LEDGER_EVENT_TYPES = [
   "OPENCODE_SESSION_STARTED",
   "RESEARCH_CYCLE_STARTED",
+  "RESEARCH_SYMBOL_SCREEN_RECORDED",
   "EVIDENCE_SNAPSHOT_REFERENCED",
-  "PRELIMINARY_RESEARCH_RECORDED",
   "RESEARCH_REPORT_RECORDED",
   "RESEARCH_DECISION_VALIDATED",
   "RESEARCH_DECISION_REJECTED",
@@ -50,6 +58,9 @@ export const LEDGER_EVENT_TYPES = [
   "ORDER_SUBMITTED",
   "ORDER_FILLED",
   "ORDER_REJECTED",
+  "PORTFOLIO_SHADOW_PLAN_RECORDED",
+  "EXECUTION_AUTHORIZATION_RECORDED",
+  "PAPER_TRADER_RESULT_RECORDED",
 ] as const
 
 export const STORED_LEDGER_EVENT_TYPES = [
@@ -107,6 +118,11 @@ const payloadSchemas = {
         })
       }
     }),
+  RESEARCH_SYMBOL_SCREEN_RECORDED: z
+    .object({
+      screen: z.union([symbolScreenResultV1Schema, symbolScreenResultV2Schema]),
+    })
+    .strict(),
   EVIDENCE_SNAPSHOT_REFERENCED: z
     .object({
       snapshotRef: identifier,
@@ -125,23 +141,25 @@ const payloadSchemas = {
         message: "Snapshot freshness cannot end before retrieval",
       },
     ),
-  PRELIMINARY_RESEARCH_RECORDED: z
-    .object({
-      research: preliminaryResearchV2Schema,
-    })
-    .strict(),
   RESEARCH_REPORT_RECORDED: z
     .object({
-      report: researchReportV3Schema,
+      report: z.union([researchReportV6Schema, researchReportV7Schema]),
     })
     .strict(),
   RESEARCH_DECISION_VALIDATED: z
     .object({
-      decision: researchDecisionV2Schema,
+      decision: z.union([researchDecisionV3Schema, researchDecisionV4Schema]),
     })
     .strict(),
   RESEARCH_DECISION_REJECTED: z
     .object({
+      proposal: z
+        .object({
+          priority: z.number().int().min(1).max(3),
+          underlying: identifier,
+        })
+        .strict()
+        .optional(),
       issues: z
         .array(
           z
@@ -158,11 +176,18 @@ const payloadSchemas = {
     .strict(),
   TRADE_INTENT_DERIVED: z
     .object({
-      intent: tradeIntentV2Schema,
+      intent: z.union([tradeIntentV3Schema, tradeIntentV4Schema]),
     })
     .strict(),
   TRADE_INTENT_DERIVATION_REJECTED: z
     .object({
+      proposal: z
+        .object({
+          priority: z.number().int().min(1).max(3),
+          underlying: identifier,
+        })
+        .strict()
+        .optional(),
       reasons: z.array(boundedCode).min(1).max(64),
     })
     .strict(),
@@ -170,10 +195,8 @@ const payloadSchemas = {
     .object({
       status: z.enum([
         "VALIDATED_NO_ACTION",
-        "PRELIMINARY_RESEARCH_RETAINED",
         "DECISION_REJECTED",
-        "INTENT_DERIVATION_REJECTED",
-        "INTENT_DERIVED",
+        "PORTFOLIO_EVALUATED",
       ]),
       researchInvocation: researchInvocationV1Schema.optional(),
     })
@@ -228,6 +251,18 @@ const payloadSchemas = {
   ORDER_SUBMITTED: orderSubmittedPayloadV1Schema,
   ORDER_FILLED: orderFilledPayloadV1Schema,
   ORDER_REJECTED: orderRejectedPayloadV1Schema,
+  PORTFOLIO_SHADOW_PLAN_RECORDED: z
+    .object({
+      proposalCount: z.number().int().min(1).max(3),
+      selectedUnderlyings: z.array(identifier).max(1),
+    })
+    .strict(),
+  EXECUTION_AUTHORIZATION_RECORDED: z
+    .object({ instruction: executionAuthorizationV1Schema })
+    .strict(),
+  PAPER_TRADER_RESULT_RECORDED: z
+    .object({ result: paperTraderResultV1Schema })
+    .strict(),
 } as const
 
 const legacyVersion = z.string().trim().min(1).max(32)
@@ -280,7 +315,7 @@ const legacyCandidateBearingDecisionSchema = z.discriminatedUnion("outcome", [
       strategyVersion: legacyVersion,
       outcome: z.literal("PROPOSE_TRADE"),
       direction: z.enum(["BULLISH", "BEARISH"]),
-      candidate: researchCandidateV2Schema,
+      candidate: researchCandidateV3Schema,
     })
     .passthrough(),
 ])
@@ -368,7 +403,7 @@ const legacyPayloadSchemas = {
           outcome: z.literal("PRELIMINARY_RESEARCH"),
           targetSessionDate: z.iso.date(),
           direction: z.enum(["BULLISH", "BEARISH", "UNDETERMINED"]),
-          candidate: researchCandidateV2Schema.optional(),
+          candidate: researchCandidateV3Schema.optional(),
           evidence: agentReportedEvidenceSchema,
         })
         .passthrough(),
@@ -500,6 +535,24 @@ const createEventSchemas = (
         return
       }
 
+      if (
+        eventType === "EXECUTION_AUTHORIZATION_RECORDED" ||
+        eventType === "PAPER_TRADER_RESULT_RECORDED"
+      ) {
+        const payloadId = eventType === "EXECUTION_AUTHORIZATION_RECORDED"
+          ? (event.payload as { instruction?: { authorizationId?: unknown } })
+              .instruction?.authorizationId
+          : (event.payload as { result?: { authorizationId?: unknown } })
+              .result?.authorizationId
+        if (event.cycleId === undefined || payloadId !== event.cycleId) {
+          refinement.addIssue({
+            code: "custom",
+            path: ["cycleId"],
+            message: "Execution identity must match its research cycle",
+          })
+        }
+      }
+
       if (event.cycleId === undefined) {
         refinement.addIssue({
           code: "custom",
@@ -514,11 +567,11 @@ export type LedgerEventV1 = VersionedLedgerEvent<
   typeof LEGACY_LEDGER_EVENT_VERSION,
   typeof legacyPayloadSchemas
 >
-export type LedgerEventV2 = VersionedLedgerEvent<
+export type LedgerEventV4 = VersionedLedgerEvent<
   typeof LEDGER_EVENT_VERSION,
   typeof payloadSchemas
 >
-export type LedgerEvent = LedgerEventV1 | LedgerEventV2
+export type LedgerEvent = LedgerEventV1 | LedgerEventV4
 
 const legacyEventSchemas = createEventSchemas(
   legacyPayloadSchemas,
@@ -533,16 +586,16 @@ export const ledgerEventV1Schema = z.union(
     ...(typeof legacyEventSchemas)[number][],
   ],
 ) as z.ZodType<LedgerEventV1>
-export const ledgerEventV2Schema = z.union(
+export const ledgerEventV4Schema = z.union(
   eventSchemas as [
     (typeof eventSchemas)[number],
     (typeof eventSchemas)[number],
     ...(typeof eventSchemas)[number][],
   ],
-) as z.ZodType<LedgerEventV2>
+) as z.ZodType<LedgerEventV4>
 export const ledgerEventSchema = z.union([
   ledgerEventV1Schema,
-  ledgerEventV2Schema,
+  ledgerEventV4Schema,
 ]) as z.ZodType<LedgerEvent>
 
 type Stored<Event extends LedgerEvent> = Event extends LedgerEvent ? Event & {
@@ -551,5 +604,5 @@ type Stored<Event extends LedgerEvent> = Event extends LedgerEvent ? Event & {
 } : never
 
 export type StoredLedgerEventV1 = Stored<LedgerEventV1>
-export type StoredLedgerEventV2 = Stored<LedgerEventV2>
-export type StoredLedgerEvent = StoredLedgerEventV1 | StoredLedgerEventV2
+export type StoredLedgerEventV4 = Stored<LedgerEventV4>
+export type StoredLedgerEvent = StoredLedgerEventV1 | StoredLedgerEventV4

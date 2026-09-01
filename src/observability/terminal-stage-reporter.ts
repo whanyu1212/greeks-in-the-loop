@@ -49,9 +49,9 @@ const stageLabel = (stage: string) =>
   ({
     "runtime.session": "Runtime session",
     eligibility: "Eligibility",
+    "universe.discover": "Option universe",
     "research.agent": "Research agent",
     "research.report": "Research report",
-    "preliminary.validate": "Preliminary validation",
     "decision.validate": "Decision validation",
     "quotes.confirm": "Quote confirmation",
     "intent.derive": "Intent derivation",
@@ -109,6 +109,10 @@ const prettySummary = (
           ? undefined
           : `deadline ${String(detail(details, "deadline"))}`,
       ].filter(Boolean).join(" | ")
+    case "universe.discover": {
+      const candidates = detail(details, "candidates")
+      return Array.isArray(candidates) ? candidates.join(", ") : ""
+    }
     case "research.agent": {
       const model = detail(details, "modelId")
       if (model === undefined) {
@@ -128,8 +132,6 @@ const prettySummary = (
         detail(details, "direction"),
         detail(details, "structure"),
       ].filter(Boolean).join(" | ")
-    case "preliminary.validate":
-      return `${String(detail(details, "direction"))} | ${String(detail(details, "evidenceCount"))} evidence claims`
     case "quotes.confirm":
       return `${String(detail(details, "longContractSymbol"))} / ${String(detail(details, "shortContractSymbol"))}`
     case "intent.derive":

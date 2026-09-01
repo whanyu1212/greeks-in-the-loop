@@ -1,13 +1,14 @@
 /**
- * Entry point for the structured, non-executing trading research worker.
+ * Entry point for the structured Alpaca paper-trading worker.
  *
  * The worker starts a managed local OpenCode server, creates an isolated session
  * for each sequential research cycle, and runs until a process signal or cycle
  * limit stops it. Every cycle selects the checked-in, deny-by-default research
- * agent, while `startOpencode` owns cleanup of the server and its MCP
- * descendants.
+ * agent and may hand one immutable authorization to a separate trader session,
+ * while `startOpencode` owns cleanup of the server and its MCP descendants.
  */
 
+import { randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync } from "node:fs"
 import { dirname } from "node:path"
 
@@ -21,14 +22,20 @@ import {
   runAgentLoop,
 } from "./agent-loop.js"
 import { parseAgentOptions } from "./agent-options.js"
-import { acquireWorkerInstanceLock } from "./worker-instance-lock.js"
 import { runWithCycleDeadline } from "./cycle-deadline.js"
 import {
   createResearchLifecycleRecorder,
   LedgerPersistenceError,
 } from "./event-ledger/research-lifecycle-recorder.js"
-import { createSqliteLedgerStore } from "./event-ledger/sqlite-ledger-store.js"
+import { LEDGER_EVENT_VERSION } from "./event-ledger/ledger-event-v1.js"
+import {
+  createConfiguredLedgerStore,
+  resolveLedgerBackendConfiguration,
+} from "./event-ledger/ledger-backend.js"
+import type { LedgerStore } from "./event-ledger/ledger-store.js"
+import { resolveExecutionAuthorizationV1 } from "./execution/authorization-v1.js"
 import { createAlpacaOptionQuoteProvider } from "./market-data/alpaca-option-quotes.js"
+import { createAlpacaOptionUniverseProvider } from "./market-data/alpaca-option-universe.js"
 import { createAlpacaCalendarClient } from "./market-data/alpaca-calendar-client.js"
 import { summarizeOpenCodeInvocation } from "./observability/opencode-telemetry-summary.js"
 import { startResearchTelemetry } from "./observability/research-telemetry.js"
@@ -42,7 +49,7 @@ import {
   RESEARCH_INVOCATION_PROVENANCE_BY_VERSION,
   RESEARCH_INVOCATION_VERSION,
   type ResearchInvocationV1,
-} from "./research/research-invocation-v1.js"
+} from "./research/invocation.js"
 import { startOpencode } from "./opencode-runtime.js"
 import { createAlpacaOrderSubmitter } from "./execution/alpaca-order-submitter.js"
 import {
@@ -54,20 +61,21 @@ import {
   buildResearchCyclePrompt,
   buildResearchReportRepairPrompt,
   researchToolBudgetViolation,
-} from "./research/research-agent.js"
-import { loadResearchRunV1 } from "./research/research-artifact.js"
+} from "./research/agent.js"
+import { loadResearchRunV1 } from "./research/run/artifact.js"
 import {
   buildResearchRunPresentation,
   writeResearchRunArtifacts,
-} from "./research/research-run-presentation.js"
+} from "./research/run/presentation.js"
 import {
   loadResearchContextV1,
   reconstructResearchContextV1,
-} from "./research/research-context-v1.js"
+} from "./research/context.js"
 import {
   processResearchCycle,
-  repairResearchReportV3ResponseOnce,
-} from "./research/research-cycle.js"
+  repairResearchReportV7ResponseOnce,
+} from "./research/cycle.js"
+import { screenOptionUniverseV2 } from "./research/symbol-screen.js"
 import { createAlpacaRiskStateProvider } from "./risk/alpaca-risk-state-provider.js"
 import {
   createLedgerDurableRiskControlStateLoader,
@@ -79,6 +87,7 @@ import {
   evaluateResearchEligibility,
   newYorkDate,
 } from "./scheduling/research-eligibility.js"
+import { acquirePostgresWorkerInstanceLock } from "./event-ledger/postgres-worker-instance-lock.js"
 
 /** Settings parsed from the project environment file without exporting secrets. */
 const fileEnv = (() => {
@@ -192,8 +201,21 @@ const agentOptions = parseAgentOptions(
   readSetting("RESEARCH_LEDGER_PATH"),
 )
 const { once, dryRun, execute, ledgerPath } = agentOptions
+const deploymentRole = readSetting("DEPLOYMENT_ROLE")?.trim() || "FULL"
+if (deploymentRole !== "FULL" && deploymentRole !== "RESEARCH_ONLY") {
+  throw new Error("DEPLOYMENT_ROLE must be FULL or RESEARCH_ONLY")
+}
+if (deploymentRole === "RESEARCH_ONLY" && !dryRun) {
+  throw new Error("RESEARCH_ONLY deployment requires --dry-run")
+}
+const ledgerConfiguration = resolveLedgerBackendConfiguration(
+  { ...fileEnv, ...process.env },
+  ledgerPath,
+)
 const breakerResetInstruction =
-  `run pnpm agent:reset-breaker -- --ledger <ledger-path> for ${JSON.stringify(ledgerPath)}`
+  ledgerConfiguration.backend === "postgres"
+    ? "run pnpm agent:reset-breaker with the same PostgreSQL ledger environment"
+    : `run pnpm agent:reset-breaker -- --ledger <ledger-path> for ${JSON.stringify(ledgerPath)}`
 const researchMode = dryRun ? DRY_RUN_MODE : undefined
 const intervalMs = readPositiveInteger("AGENT_INTERVAL_MS", 5 * 60 * 1000)
 const maxBackoffMs = readPositiveInteger(
@@ -210,7 +232,9 @@ if (maxBackoffMs / 2 < intervalMs) {
 if (maxBackoffMs > MAX_AGENT_LOOP_DELAY_MS) {
   throw new Error(`AGENT_MAX_BACKOFF_MS must not exceed ${MAX_AGENT_LOOP_DELAY_MS}`)
 }
-const cycleTimeoutMs = readPositiveInteger("AGENT_CYCLE_TIMEOUT_MS", 5 * 60 * 1000)
+const cycleTimeoutMs = dryRun && readSetting("AGENT_CYCLE_TIMEOUT_MS") === undefined
+  ? undefined
+  : readPositiveInteger("AGENT_CYCLE_TIMEOUT_MS", 10 * 60 * 1000)
 const cycleAbortTimeoutMs = readPositiveInteger("AGENT_CYCLE_ABORT_TIMEOUT_MS", 5_000)
 const maxCycles = once
   ? 1
@@ -223,11 +247,24 @@ const serverTimeout = readPositiveInteger("OPENCODE_SERVER_TIMEOUT_MS", 60_000)
 const task = readSetting("AGENT_TASK")?.trim()
 const alpacaApiKey = readRequiredSetting("ALPACA_API_KEY")
 const alpacaSecretKey = readRequiredSetting("ALPACA_SECRET_KEY")
+const alpacaTradingBaseUrl =
+  readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
+  "https://paper-api.alpaca.markets"
+let alpacaTradingOrigin: string
+try {
+  alpacaTradingOrigin = new URL(alpacaTradingBaseUrl).origin
+} catch {
+  throw new Error("ALPACA_TRADING_BASE_URL must be a valid URL")
+}
+if (alpacaTradingOrigin !== "https://paper-api.alpaca.markets") {
+  throw new Error("ALPACA_TRADING_BASE_URL must remain pinned to Alpaca paper trading")
+}
 const knownCredentialValues = [
   alpacaApiKey,
   alpacaSecretKey,
   readSetting("FMP_API_KEY")?.trim(),
   readSetting("EXA_API_KEY")?.trim(),
+  readSetting("PGPASSWORD")?.trim(),
 ].filter((value): value is string => value !== undefined && value.length > 0)
 const quoteProvider = createAlpacaOptionQuoteProvider({
   apiKey: alpacaApiKey,
@@ -236,6 +273,15 @@ const quoteProvider = createAlpacaOptionQuoteProvider({
     readSetting("ALPACA_MARKET_DATA_BASE_URL")?.trim() ||
     "https://data.alpaca.markets",
 })
+const optionUniverseProvider = createAlpacaOptionUniverseProvider({
+  apiKey: alpacaApiKey,
+  secretKey: alpacaSecretKey,
+  dataBaseUrl:
+    readSetting("ALPACA_MARKET_DATA_BASE_URL")?.trim() ||
+    "https://data.alpaca.markets",
+  tradingBaseUrl:
+    alpacaTradingBaseUrl,
+})
 const riskStateProvider = createAlpacaRiskStateProvider({
   apiKey: alpacaApiKey,
   secretKey: alpacaSecretKey,
@@ -243,8 +289,7 @@ const riskStateProvider = createAlpacaRiskStateProvider({
     readSetting("ALPACA_MARKET_DATA_BASE_URL")?.trim() ||
     "https://data.alpaca.markets",
   tradingBaseUrl:
-    readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
-    "https://paper-api.alpaca.markets",
+    alpacaTradingBaseUrl,
 })
 const orderSubmitter = execute
   ? createAlpacaOrderSubmitter({
@@ -259,8 +304,7 @@ const calendar = createAlpacaCalendarClient({
   apiKey: alpacaApiKey,
   secretKey: alpacaSecretKey,
   baseUrl:
-    readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
-    "https://paper-api.alpaca.markets",
+    alpacaTradingBaseUrl,
 })
 const premarketStartEt =
   readSetting("AGENT_PREMARKET_START_ET")?.trim() ||
@@ -279,13 +323,26 @@ const traceVersions = {
   decisionContractVersion: researchCompatibility.decisionContractVersion,
   reportVersion: researchCompatibility.reportVersion,
 } as const
-mkdirSync(dirname(ledgerPath), { recursive: true })
-const workerInstanceLock = acquireWorkerInstanceLock({ ledgerPath })
-let ledgerStore: ReturnType<typeof createSqliteLedgerStore> | undefined
+let workerInstanceLock: Readonly<{ release(): Promise<void> }>
+if (ledgerConfiguration.backend === "postgres") {
+  workerInstanceLock = await acquirePostgresWorkerInstanceLock(
+    ledgerConfiguration.poolConfig,
+  )
+} else {
+  mkdirSync(dirname(ledgerPath), { recursive: true })
+  const { acquireWorkerInstanceLock } = await import(
+    "./event-ledger/deprecated/worker-instance-lock.js"
+  )
+  const sqliteLock = acquireWorkerInstanceLock({ ledgerPath })
+  workerInstanceLock = {
+    release: async () => sqliteLock.release(),
+  }
+}
+let ledgerStore: LedgerStore | undefined
 let telemetry: ReturnType<typeof startResearchTelemetry> | undefined
 try {
-  const activeLedgerStore = createSqliteLedgerStore({
-    path: ledgerPath,
+  const activeLedgerStore = await createConfiguredLedgerStore({
+    configuration: ledgerConfiguration,
     knownCredentialValues,
   })
   ledgerStore = activeLedgerStore
@@ -333,6 +390,12 @@ try {
     port,
     signal: abortController.signal,
     timeoutMs: serverTimeout,
+    environment: {
+      ...process.env,
+      EXECUTION_LEDGER_PATH: ledgerPath,
+      EXECUTION_LEDGER_BACKEND: ledgerConfiguration.backend,
+      DEPLOYMENT_ROLE: deploymentRole,
+    },
   })
 
   try {
@@ -351,10 +414,12 @@ try {
           "research.eligibility",
           async () => {
             const eligibilityEvaluatedAt = new Date()
-            const calendarSignal = AbortSignal.any([
-              abortController.signal,
-              AbortSignal.timeout(cycleTimeoutMs),
-            ])
+            const calendarSignal = cycleTimeoutMs === undefined
+              ? abortController.signal
+              : AbortSignal.any([
+                  abortController.signal,
+                  AbortSignal.timeout(cycleTimeoutMs),
+                ])
             const requestedSessionDate =
               agentOptions.sessionDate ?? newYorkDate(eligibilityEvaluatedAt)
             const session = await calendar.getSession(
@@ -518,9 +583,31 @@ try {
 
         try {
           const processed = await runWithCycleDeadline({
-            timeoutMs: cycleTimeoutMs,
+            ...(cycleTimeoutMs === undefined ? {} : { timeoutMs: cycleTimeoutMs }),
             shutdownSignal: abortController.signal,
             run: async (signal) => {
+              stageReporter.report("universe.discover", "STARTED")
+              const optionUniverse = await cycleTrace.run(
+                "market.option_universe.discover",
+                () => optionUniverseProvider.discover(sessionDate, signal),
+              )
+              stageReporter.report("universe.discover", "COMPLETED", {
+                snapshotId: optionUniverse.snapshotId,
+                candidates: optionUniverse.candidates.map(
+                  ({ underlying }) => underlying,
+                ),
+              })
+              const symbolScreen = screenOptionUniverseV2(optionUniverse)
+              stageReporter.report("universe.screen", "COMPLETED", {
+                policyVersion: symbolScreen.policyVersion,
+                actionableUnderlyings: symbolScreen.symbols.flatMap((symbol) =>
+                  symbol.strategies.some(
+                      ({ actionability }) => actionability === "ACTIONABLE",
+                    )
+                    ? [symbol.underlying]
+                    : [],
+                ),
+              })
               const response = await cycleTrace.run(
                 "opencode.session.prompt",
                 async () => {
@@ -583,12 +670,14 @@ try {
                     buildResearchCyclePrompt(
                       cycleNumber,
                       new Date(cycle.startedAt),
+                      optionUniverse,
                       task,
                       researchContext,
                       initialEligibility,
+                      symbolScreen,
                     ),
                   )
-                  const resolvedResponse = await repairResearchReportV3ResponseOnce(
+                  const resolvedResponse = await repairResearchReportV7ResponseOnce(
                     textResponse(initialResponse.parts),
                     async (issues) => {
                       const availableTools = await runtime.client.tool.ids({ signal })
@@ -691,6 +780,8 @@ try {
               return processResearchCycle({
                 rawResponse: response.text,
                 cycleStartedAt: cycle.startedAt,
+                optionUniverse,
+                symbolScreen,
                 signal,
                 quoteProvider,
                 shadowRiskEvaluator,
@@ -718,15 +809,22 @@ try {
             },
           })
           cycleTrace.setOutcome(processed.outcome.status)
-          // Execution runs only after the approval is durably recorded, so a
-          // submitted order always has a persisted risk decision behind it.
+          // Architecture plan section 6.A: deterministic code submits, never
+          // the model. Execution runs only after the approval is durably
+          // recorded, so a submitted order always has a persisted decision
+          // behind it. Plan section 5 allows at most one entry per cycle, so
+          // only the first approved proposal is executed.
           let executionReport: string | undefined
-          if (orderSubmitter !== undefined && processed.shadowRisk !== undefined) {
+          const approvedShadowRisk = processed.shadowRisks?.find(
+            ({ decision }) =>
+              decision.stage === "EVALUATED" && decision.outcome === "APPROVED",
+          )
+          if (orderSubmitter !== undefined && approvedShadowRisk !== undefined) {
             const execution = await cycleTrace.run("order.execute", () =>
               executeApprovedTradeV1({
                 store: activeLedgerStore,
                 submitter: orderSubmitter,
-                shadowRisk: processed.shadowRisk!,
+                shadowRisk: approvedShadowRisk,
                 cycleId: cycle.cycleId,
                 signal: abortController.signal,
               }),
@@ -860,7 +958,7 @@ try {
     try {
       await telemetry?.shutdown()
     } finally {
-      workerInstanceLock.release()
+      await workerInstanceLock.release()
     }
   }
 }

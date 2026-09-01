@@ -13,12 +13,12 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import type { ResearchRunV1 } from "../src/research/research-artifact.js"
+import type { ResearchRunV1 } from "../src/research/run/artifact.js"
 import type { ShadowRiskStateProvenanceV1 } from "../src/risk/shadow-risk-v1.js"
 import {
   buildResearchRunPresentation,
   writeResearchRunArtifacts,
-} from "../src/research/research-run-presentation.js"
+} from "../src/research/run/presentation.js"
 
 const temporaryDirectories: string[] = []
 
@@ -30,7 +30,7 @@ afterEach(() => {
 
 const noActionRun = (): ResearchRunV1 => {
   const decision = {
-    contractVersion: "2.0.0" as const,
+    contractVersion: "3.0.0" as const,
     outcome: "NO_ACTION" as const,
     reasonCodes: ["SIGNAL_NOT_ACTIONABLE" as const],
     evidence: [{
@@ -44,7 +44,7 @@ const noActionRun = (): ResearchRunV1 => {
     }],
   }
   return {
-    runVersion: "3.0.0",
+    runVersion: "6.0.0",
     cycle: {
       cycleId: "cycle-presentation-1",
       cycleNumber: 3,
@@ -64,8 +64,23 @@ const noActionRun = (): ResearchRunV1 => {
       reason: "OUTSIDE_TRADE_INTENT_WINDOW",
     },
     evidenceSnapshots: [],
+    symbolScreen: {
+      screenVersion: "1.0.0",
+      policyVersion: "1.0.0",
+      mode: "SHADOW",
+      evaluatedAt: "2026-08-27T15:35:59.000Z",
+      universeSnapshotId: `option-universe-v2-${"a".repeat(64)}`,
+      results: [{
+        rank: 1,
+        underlying: "SPY",
+        actionability: "WATCH",
+        direction: "NEUTRAL",
+        reasonCodes: ["SESSION_MOVE_BELOW_THRESHOLD"],
+        evidence: { sessionPercentChange: 0.2 },
+      }],
+    },
     researchReport: {
-      reportVersion: "3.0.0",
+      reportVersion: "6.0.0",
       result: decision,
       analysis: {
         provenance: "AGENT_REPORTED",
@@ -77,18 +92,22 @@ const noActionRun = (): ResearchRunV1 => {
           optionsTradingApproved: true,
           conflictingStrategyExposure: false,
         },
-        marketRegime: {
+        marketRegimes: [{
           verification: "AGENT_REPORTED",
           temporalClass: "LIVE",
           observedAt: "2026-08-27T15:36:45.000Z",
           signal: "MIXED",
+          underlying: "SPY",
           dailyClose: 765.94,
           sma20: 766.58,
           sma50: 752.86,
           spotMidpoint: 770.07,
           dailySessionCount: 50,
           intradayBarCount: 126,
-        },
+        }],
+        symbolEvaluations: [],
+        optionSurfaces: [],
+        candidateEvaluations: [],
         symbolIndicators: [
           {
             underlying: "SPY",
@@ -140,7 +159,7 @@ const noActionRun = (): ResearchRunV1 => {
     },
     validatedDecision: decision,
     outcome: {
-      outcomeVersion: "1.0.0",
+      outcomeVersion: "3.0.0",
       status: "VALIDATED_NO_ACTION",
       decision,
     },
@@ -153,8 +172,9 @@ const noActionRun = (): ResearchRunV1 => {
 }
 
 const derivedIntent = {
-  contractVersion: "2.0.0",
-  decisionContractVersion: "2.0.0",
+  contractVersion: "3.0.0",
+  decisionContractVersion: "3.0.0",
+  underlying: "SPY",
   direction: "BULLISH",
   structure: "BULL_CALL_SPREAD",
   expiration: "2026-09-18",
@@ -186,30 +206,37 @@ const derivedIntent = {
 
 const intentRun = (): ResearchRunV1 => {
   const source = noActionRun()
+  if (source.researchReport?.reportVersion !== "6.0.0") {
+    throw new Error("Expected a legacy report fixture")
+  }
+  const legacyReport = source.researchReport
   const decision = {
-    contractVersion: "2.0.0" as const,
-    outcome: "PROPOSE_TRADE" as const,
-    direction: "BULLISH" as const,
-    thesis: "Trend and intraday confirmation align.",
-    candidate: {
-      underlying: "SPY" as const,
-      structure: "BULL_CALL_SPREAD" as const,
-      expiration: "2026-09-18",
-      longLeg: {
-        contractSymbol: "SPY260918C00650000",
-        strike: 650,
+    contractVersion: "3.0.0" as const,
+    outcome: "PROPOSE_TRADES" as const,
+    proposals: [{
+      priority: 1,
+      direction: "BULLISH" as const,
+      thesis: "Trend and intraday confirmation align.",
+      candidate: {
+        underlying: "SPY" as const,
+        structure: "BULL_CALL_SPREAD" as const,
+        expiration: "2026-09-18",
+        longLeg: {
+          contractSymbol: "SPY260918C00650000",
+          strike: 650,
+        },
+        shortLeg: {
+          contractSymbol: "SPY260918C00655000",
+          strike: 655,
+        },
       },
-      shortLeg: {
-        contractSymbol: "SPY260918C00655000",
-        strike: 655,
-      },
-    },
-    invalidation: ["Reject if refreshed evidence changes the candidate."],
-    evidence: [{
-      claimId: "quote-fact",
-      kind: "SOURCED_FACT" as const,
-      claim: "The candidate was confirmed against the quote snapshot.",
-      snapshotRef: "alpaca-proposal-quotes-v1",
+      invalidation: ["Reject if refreshed evidence changes the candidate."],
+      evidence: [{
+        claimId: "quote-fact",
+        kind: "SOURCED_FACT" as const,
+        claim: "The candidate was confirmed against the quote snapshot.",
+        snapshotRef: "alpaca-proposal-quotes-v1",
+      }],
     }],
   }
   return {
@@ -223,22 +250,30 @@ const intentRun = (): ResearchRunV1 => {
       temporalClass: "LIVE",
     }],
     researchReport: {
-      ...source.researchReport!,
+      ...legacyReport,
       result: decision,
       analysis: {
-        ...source.researchReport!.analysis,
-        marketRegime: {
-          ...source.researchReport!.analysis.marketRegime,
+        ...legacyReport.analysis,
+        marketRegimes: [{
+          ...legacyReport.analysis.marketRegimes[0]!,
           signal: "BULLISH",
           dailyClose: 770,
           sma20: 765,
           sma50: 750,
           sessionVwap: 768,
           spotMidpoint: 770,
-        },
-        candidateEvaluation: {
+        }],
+        symbolEvaluations: [{
+          underlying: "SPY",
+          disposition: "PROPOSE",
+          direction: "BULLISH",
+          summary: "Retained for deep research.",
+        }],
+        candidateEvaluations: [{
           verification: "AGENT_REPORTED",
           observedAt: "2026-08-27T15:37:00.000Z",
+          underlying: "SPY",
+          expiration: "2026-09-18",
           dte: 22,
           legs: [
             {
@@ -266,15 +301,16 @@ const intentRun = (): ResearchRunV1 => {
               openInterestDate: "2026-08-27",
             },
           ],
-        },
+        }],
       },
     },
     validatedDecision: decision,
     outcome: {
-      outcomeVersion: "1.0.0",
-      status: "INTENT_DERIVED",
+      outcomeVersion: "3.0.0",
+      status: "PORTFOLIO_EVALUATED",
       decision,
-      intent: derivedIntent,
+      intents: [derivedIntent],
+      selectedUnderlyings: ["SPY"],
     },
   }
 }
@@ -290,7 +326,7 @@ describe("research run presentation", () => {
     expect(first.markdown.split("\n").slice(0, 18)).toEqual([
       "# Research Cycle 3 - 2026-08-27",
       "",
-      "> Derived operator view. SQLite is authoritative and the canonical JSON is the portable machine record. No order was submitted.",
+      "> Derived operator view. The event ledger is authoritative and the canonical JSON is the portable machine record. No order was submitted.",
       "",
       "## At a Glance",
       "",
@@ -308,7 +344,12 @@ describe("research run presentation", () => {
       "**Result:** NO_ACTION",
     ])
     expect(first.markdown).toContain("## Offline Audit")
-    expect(first.markdown).toContain("## ETF Indicator Context")
+    expect(first.markdown).toContain("## Universe Indicator Context")
+    expect(first.markdown).toContain("## Deterministic Symbol Screen")
+    expect(first.markdown).toContain("| SPY actionability | WATCH |")
+    expect(first.markdown).toContain(
+      "| SPY agent disposition | UNAVAILABLE |",
+    )
     expect(first.markdown).toContain("SPY 20-day return | 3.00%")
     expect(first.markdown).toContain(
       "mixed-regime \\[ALPACA LIVE, 2026-08-27T15:36:45.000Z\\]: The retained market regime signal was mixed.",
@@ -324,38 +365,15 @@ describe("research run presentation", () => {
 
   it("maps every terminal outcome to non-executing actionability", () => {
     const source = noActionRun()
-    const preliminary = {
-      ...source,
-      outcome: {
-        outcomeVersion: "1.0.0",
-        status: "PRELIMINARY_RESEARCH_RETAINED",
-        research: {},
-      },
-    } as unknown as ResearchRunV1
     const decisionRejected = {
       ...source,
       outcome: {
-        outcomeVersion: "1.0.0",
+        outcomeVersion: "3.0.0",
         status: "DECISION_REJECTED",
         issues: [{ code: "SCHEMA_INVALID", path: ["result"] }],
       },
     } as ResearchRunV1
-    const derivationRejected = {
-      ...source,
-      outcome: {
-        outcomeVersion: "1.0.0",
-        status: "INTENT_DERIVATION_REJECTED",
-        reasons: ["QUOTE_STALE"],
-      },
-    } as ResearchRunV1
-
-    expect(buildResearchRunPresentation(preliminary).actionability).toBe(
-      "RESEARCH_ONLY_REFRESH_REQUIRED",
-    )
     expect(buildResearchRunPresentation(decisionRejected).actionability).toBe(
-      "REJECTED",
-    )
-    expect(buildResearchRunPresentation(derivationRejected).actionability).toBe(
       "REJECTED",
     )
     const intent = buildResearchRunPresentation(intentRun())
@@ -364,6 +382,111 @@ describe("research run presentation", () => {
     )
     expect(intent.markdown).toContain("| Maximum loss | $101.00 per contract |")
     expect(intent.markdown).toContain("| Stop-loss mark | $0.505 per share |")
+    expect(intent.markdown).toContain(
+      "**Agent-reported spread Greeks (long minus short):**",
+    )
+    expect(intent.markdown).toContain("| Net delta | 0.24 |")
+  })
+
+  it("presents the selected proposal and intent when priority two wins", () => {
+    const source = intentRun()
+    if (
+      source.validatedDecision?.outcome !== "PROPOSE_TRADES" ||
+      source.validatedDecision.contractVersion !== "3.0.0" ||
+      source.researchReport?.result.outcome !== "PROPOSE_TRADES" ||
+      source.researchReport.reportVersion !== "6.0.0" ||
+      source.outcome.status !== "PORTFOLIO_EVALUATED" ||
+      source.outcome.outcomeVersion !== "3.0.0"
+    ) {
+      throw new Error("Expected a portfolio fixture")
+    }
+    const firstProposal = source.validatedDecision.proposals[0]!
+    const secondProposal = {
+      ...firstProposal,
+      priority: 2,
+      thesis: "QQQ has the better refreshed execution quality.",
+      candidate: {
+        ...firstProposal.candidate,
+        underlying: "QQQ",
+        longLeg: {
+          contractSymbol: "QQQ260918C00650000",
+          strike: 650,
+        },
+        shortLeg: {
+          contractSymbol: "QQQ260918C00655000",
+          strike: 655,
+        },
+      },
+      evidence: [{
+        ...firstProposal.evidence[0]!,
+        claimId: "qqq-quote-fact",
+        snapshotRef: "alpaca-proposal-quotes-v1-qqq",
+      }],
+    }
+    const firstIntent = source.outcome.intents[0]!
+    if (firstIntent.contractVersion !== "3.0.0") {
+      throw new Error("Expected a legacy debit-spread intent")
+    }
+    const secondIntent = {
+      ...firstIntent,
+      underlying: "QQQ",
+      longContractSymbol: "QQQ260918C00650000",
+      shortContractSymbol: "QQQ260918C00655000",
+      quoteSnapshotRef: "alpaca-proposal-quotes-v1-qqq",
+      longQuote: {
+        ...firstIntent.longQuote,
+        contractSymbol: "QQQ260918C00650000",
+      },
+      shortQuote: {
+        ...firstIntent.shortQuote,
+        contractSymbol: "QQQ260918C00655000",
+      },
+    }
+    const decision = {
+      ...source.validatedDecision,
+      proposals: [firstProposal, secondProposal],
+    }
+    const firstDiagnostics = source.researchReport.analysis.candidateEvaluations[0]!
+    const run: ResearchRunV1 = {
+      ...source,
+      researchReport: {
+        ...source.researchReport,
+        result: decision,
+        analysis: {
+          ...source.researchReport.analysis,
+          candidateEvaluations: [
+            firstDiagnostics,
+            {
+              ...firstDiagnostics,
+              underlying: "QQQ",
+              legs: firstDiagnostics.legs.map((leg) => ({
+                ...leg,
+                contractSymbol: leg.role === "LONG"
+                  ? "QQQ260918C00650000"
+                  : "QQQ260918C00655000",
+              })),
+            },
+          ],
+        },
+      },
+      validatedDecision: decision,
+      outcome: {
+        ...source.outcome,
+        decision,
+        intents: [source.outcome.intents[0]!, secondIntent],
+        selectedUnderlyings: ["QQQ"],
+      },
+    }
+
+    const presentation = buildResearchRunPresentation(run)
+
+    expect(presentation.markdown).toContain("| Underlying | QQQ |")
+    expect(presentation.markdown).toContain(
+      "| Quote snapshot | alpaca-proposal-quotes-v1-qqq |",
+    )
+    expect(presentation.markdown).toContain(
+      "| LONG open interest | 1000 |",
+    )
   })
 
   it.each([
@@ -441,6 +564,13 @@ describe("research run presentation", () => {
                   approvedQuantity: 1 as const,
                   maxLossCents: 10_100,
                   projectedBuyingPowerCents: 1_000_000,
+                  spreadGreeks: {
+                    calculation: "LONG_MINUS_SHORT" as const,
+                    netDelta: 0.24,
+                    netGamma: 0.005,
+                    netTheta: -0.02,
+                    netVega: 0.03,
+                  },
                 }
               : {
                   evaluationVersion: "1.0.0" as const,
@@ -448,6 +578,13 @@ describe("research run presentation", () => {
                   outcome: "REJECTED" as const,
                   evaluatedAt: "2026-08-27T15:37:21.000Z",
                   reasonCodes: ["MAX_LOSS_EXCEEDED" as const],
+                  spreadGreeks: {
+                    calculation: "LONG_MINUS_SHORT" as const,
+                    netDelta: 0.24,
+                    netGamma: 0.005,
+                    netTheta: -0.02,
+                    netVega: 0.03,
+                  },
                 },
           }
     const presentation = buildResearchRunPresentation({
@@ -473,6 +610,7 @@ describe("research run presentation", () => {
       expect(presentation.markdown).not.toContain(
         "| Maximum loss | $101.00 per contract |",
       )
+      expect(presentation.markdown).toContain("| Verified net delta | 0.24 |")
     }
   })
 

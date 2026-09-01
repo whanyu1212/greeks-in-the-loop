@@ -28,6 +28,7 @@ const OPENCODE_TOOL_SPAN_NAME = "opencode.tool"
 
 export const RESEARCH_TRACE_OPERATIONS = [
   "research.eligibility",
+  "market.option_universe.discover",
   "opencode.session.prompt",
   "research.report.parse",
   "research.decision.validate",
@@ -43,6 +44,7 @@ export type ResearchTraceOperation = typeof RESEARCH_TRACE_OPERATIONS[number]
 
 const OPERATION_KINDS: Readonly<Record<ResearchTraceOperation, OpenInferenceSpanKind>> = {
   "research.eligibility": OpenInferenceSpanKind.GUARDRAIL,
+  "market.option_universe.discover": OpenInferenceSpanKind.TOOL,
   "opencode.session.prompt": OpenInferenceSpanKind.AGENT,
   "research.report.parse": OpenInferenceSpanKind.GUARDRAIL,
   "research.decision.validate": OpenInferenceSpanKind.GUARDRAIL,
