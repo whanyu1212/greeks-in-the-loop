@@ -12,6 +12,57 @@ import {
 } from "../shared/schema-diagnostics.js"
 export const RESEARCH_DECISION_CONTRACT_VERSION = "2.0.0" as const
 
+/**
+ * Explicit order-leg vocabulary for downstream option-trading consumers.
+ *
+ * `direction` describes the broker instruction, not the market thesis. For
+ * example, a bull call spread contains both BUY_CALL and SELL_CALL legs.
+ * Keeping the side and option type in this application-owned dictionary lets
+ * downstream code translate a validated decision without parsing enum names.
+ */
+export const OPTION_TRADE_DIRECTIONS = [
+  "BUY_CALL",
+  "BUY_PUT",
+  "SELL_CALL",
+  "SELL_PUT",
+] as const
+
+export const optionTradeDirectionSchema = z.enum(OPTION_TRADE_DIRECTIONS)
+
+export type OptionTradeDirection = z.infer<typeof optionTradeDirectionSchema>
+
+export const OPTION_TRADE_DIRECTION_DICTIONARY = {
+  BUY_CALL: {
+    orderSide: "BUY",
+    optionType: "CALL",
+    symbolOptionType: "C",
+  },
+  BUY_PUT: {
+    orderSide: "BUY",
+    optionType: "PUT",
+    symbolOptionType: "P",
+  },
+  SELL_CALL: {
+    orderSide: "SELL",
+    optionType: "CALL",
+    symbolOptionType: "C",
+  },
+  SELL_PUT: {
+    orderSide: "SELL",
+    optionType: "PUT",
+    symbolOptionType: "P",
+  },
+} as const satisfies Readonly<
+  Record<
+    OptionTradeDirection,
+    Readonly<{
+      orderSide: "BUY" | "SELL"
+      optionType: "CALL" | "PUT"
+      symbolOptionType: "C" | "P"
+    }>
+  >
+>
+
 export const NO_ACTION_REASON_CODES = [
   "MARKET_WINDOW_INELIGIBLE",
   "ACCOUNT_STATE_INELIGIBLE",
@@ -131,6 +182,203 @@ const evidenceClaimSchema = z.discriminatedUnion("kind", [
   sourcedFactSchema,
   inferenceSchema,
 ])
+
+export const TRADING_DECISION_CONTRACT_VERSION = "1.0.0" as const
+
+export const OPTION_TRADING_STRATEGIES = [
+  "LONG_CALL",
+  "LONG_PUT",
+  "SHORT_CALL",
+  "SHORT_PUT",
+  "BULL_CALL_SPREAD",
+  "BEAR_PUT_SPREAD",
+] as const
+
+export type OptionTradingStrategy =
+  (typeof OPTION_TRADING_STRATEGIES)[number]
+
+/**
+ * Ordered leg directions for each supported strategy. Consumers should use
+ * this dictionary instead of inferring an order side or option type from prose.
+ */
+export const OPTION_TRADING_STRATEGY_DICTIONARY = {
+  LONG_CALL: ["BUY_CALL"],
+  LONG_PUT: ["BUY_PUT"],
+  SHORT_CALL: ["SELL_CALL"],
+  SHORT_PUT: ["SELL_PUT"],
+  BULL_CALL_SPREAD: ["BUY_CALL", "SELL_CALL"],
+  BEAR_PUT_SPREAD: ["BUY_PUT", "SELL_PUT"],
+} as const satisfies Readonly<
+  Record<OptionTradingStrategy, readonly OptionTradeDirection[]>
+>
+
+const positiveContractQuantity = z
+  .number()
+  .int()
+  .positive()
+  .max(Number.MAX_SAFE_INTEGER)
+
+/**
+ * One normalized broker instruction. Ticker and redundant contract fields are
+ * deliberately cross-checked against the compact Alpaca/OCC symbol so a
+ * downstream order planner never needs to guess which asset a leg belongs to.
+ *
+ * Research may propose entries only. Position exits remain owned by the
+ * deterministic exit-management stage in the application pipeline.
+ */
+export const optionTradingOrderLegV1Schema = z
+  .object({
+    legId: boundedIdentifier,
+    ticker: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1),
+    direction: optionTradeDirectionSchema,
+    positionEffect: z.literal("OPEN"),
+    contractSymbol,
+    expiration: expirationDate,
+    strike: z.number().finite().positive(),
+    quantity: positiveContractQuantity,
+  })
+  .strict()
+  .superRefine((leg, refinement) => {
+    const parsedSymbol = parseAlpacaOptionSymbol(leg.contractSymbol)
+    const semantics = OPTION_TRADE_DIRECTION_DICTIONARY[leg.direction]
+    if (
+      !parsedSymbol.success ||
+      !validateOptionUniverseV1(parsedSymbol.identity).success ||
+      parsedSymbol.identity.root !== leg.ticker ||
+      parsedSymbol.identity.expiration !== leg.expiration ||
+      parsedSymbol.identity.optionType !== semantics.symbolOptionType ||
+      parsedSymbol.identity.strikeThousandthsPerShare / 1_000 !== leg.strike
+    ) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["contractSymbol"],
+        message:
+          "The contract symbol must match the leg ticker, direction, expiration, and strike",
+      })
+    }
+  })
+
+export type OptionTradingOrderLegV1 = Readonly<
+  z.infer<typeof optionTradingOrderLegV1Schema>
+>
+
+const proposedOptionTradingDecisionV1Schema = z
+  .object({
+    contractVersion: z.literal(TRADING_DECISION_CONTRACT_VERSION),
+    outcome: z.literal("PROPOSE_TRADE"),
+    decisionId: boundedIdentifier,
+    ticker: z.enum(ALLOWED_OPTION_UNDERLYINGS_V1),
+    strategy: z.enum(OPTION_TRADING_STRATEGIES),
+    thesis: boundedText,
+    orders: z.array(optionTradingOrderLegV1Schema).min(1).max(2),
+    invalidation: z.array(boundedText).min(1).max(16),
+    evidence: z.array(evidenceClaimSchema).min(1).max(64),
+  })
+  .strict()
+  .superRefine((decision, refinement) => {
+    const expectedDirections =
+      OPTION_TRADING_STRATEGY_DICTIONARY[decision.strategy]
+
+    if (
+      decision.orders.length !== expectedDirections.length ||
+      decision.orders.some(
+        (order, index) => order.direction !== expectedDirections[index],
+      )
+    ) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["orders"],
+        message:
+          "The ordered broker directions must match the selected strategy dictionary",
+      })
+    }
+
+    decision.orders.forEach((order, index) => {
+      if (order.ticker !== decision.ticker) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["orders", index, "ticker"],
+          message: "Every order leg ticker must match the decision ticker",
+        })
+      }
+    })
+
+    if (new Set(decision.orders.map(({ legId }) => legId)).size !== decision.orders.length) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["orders"],
+        message: "Order leg identifiers must be unique",
+      })
+    }
+
+    if (decision.orders.length === 2) {
+      const [longLeg, shortLeg] = decision.orders
+      if (longLeg === undefined || shortLeg === undefined) return
+
+      if (
+        longLeg.expiration !== shortLeg.expiration ||
+        longLeg.quantity !== shortLeg.quantity
+      ) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["orders"],
+          message: "Vertical-spread legs must have equal quantity and expiration",
+        })
+      }
+
+      const strikesAreOrdered =
+        decision.strategy === "BULL_CALL_SPREAD"
+          ? longLeg.strike < shortLeg.strike
+          : decision.strategy === "BEAR_PUT_SPREAD"
+            ? longLeg.strike > shortLeg.strike
+            : false
+      if (!strikesAreOrdered) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["orders"],
+          message: "Vertical-spread strikes are not ordered for the strategy",
+        })
+      }
+    }
+
+    if (!decision.evidence.some(({ kind }) => kind === "SOURCED_FACT")) {
+      refinement.addIssue({
+        code: "custom",
+        path: ["evidence"],
+        message: "A trade proposal requires at least one sourced fact",
+      })
+    }
+  })
+
+const noOptionTradingActionV1Schema = z
+  .object({
+    contractVersion: z.literal(TRADING_DECISION_CONTRACT_VERSION),
+    outcome: z.literal("NO_ACTION"),
+    reasonCodes: z
+      .array(z.enum(NO_ACTION_REASON_CODES))
+      .min(1)
+      .max(NO_ACTION_REASON_CODES.length),
+    evidence: agentReportedEvidenceSchema,
+  })
+  .strip()
+
+/**
+ * Research-to-validation decision dictionary. Passing this schema means only
+ * that the proposal is structurally coherent; it does not authorize an order.
+ * Offline audit, deterministic risk gates, and immutable order-plan creation
+ * remain mandatory downstream stages.
+ */
+export const optionTradingDecisionV1Schema = z.discriminatedUnion("outcome", [
+  noOptionTradingActionV1Schema,
+  proposedOptionTradingDecisionV1Schema,
+])
+
+export type OptionTradingDecisionV1 = Readonly<
+  z.infer<typeof optionTradingDecisionV1Schema>
+>
+export type ProposedOptionTradingDecisionV1 = Readonly<
+  z.infer<typeof proposedOptionTradingDecisionV1Schema>
+>
 
 const optionLegSchema = z
   .object({
