@@ -58,6 +58,7 @@ export default withMermaid(defineConfig({
         collapsed: false,
         items: [
           { text: 'Event Ledger V1', link: '/event-ledger-v1' },
+          { text: 'Order Execution V1', link: '/order-execution-v1' },
           { text: 'Observability', link: '/observability' },
         ],
       },
@@ -75,7 +76,7 @@ export default withMermaid(defineConfig({
     },
 
     footer: {
-      message: 'Non-executing by design. No order-submission code exists in this repository.',
+      message: 'The agent proposes; deterministic code disposes. Order submission is application-owned, paper-only, and off by default.',
     },
   },
 }))

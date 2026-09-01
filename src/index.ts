@@ -33,7 +33,6 @@ import {
   resolveLedgerBackendConfiguration,
 } from "./event-ledger/ledger-backend.js"
 import type { LedgerStore } from "./event-ledger/ledger-store.js"
-import { resolveExecutionAuthorizationV1 } from "./execution/authorization-v1.js"
 import { createAlpacaOptionQuoteProvider } from "./market-data/alpaca-option-quotes.js"
 import { createAlpacaOptionUniverseProvider } from "./market-data/alpaca-option-universe.js"
 import { createAlpacaCalendarClient } from "./market-data/alpaca-calendar-client.js"

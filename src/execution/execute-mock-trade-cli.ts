@@ -3,6 +3,7 @@ import { dirname } from "node:path"
 import { randomUUID } from "node:crypto"
 
 import { config as loadEnvironment } from "dotenv"
+import { z } from "zod"
 
 import {
   tradeIntentV4Schema,
@@ -16,6 +17,7 @@ import type { LedgerEventV4 } from "../event-ledger/ledger-event-v1.js"
 import { createAlpacaOptionQuoteProvider } from "../market-data/alpaca-option-quotes.js"
 import {
   evaluateTradeIntentRiskV1,
+  riskEvaluationInputV2Schema,
   RISK_EVALUATION_VERSION,
   RISK_RULE_VERSION,
 } from "../risk/risk-evaluation-v1.js"
@@ -129,13 +131,19 @@ const parseOptions = (args: readonly string[]): MockTradeOptions => {
   }
 }
 
-/** Builds the synthetic, application-owned risk state around a real intent. */
+/**
+ * Builds the synthetic, application-owned risk state around a real intent.
+ *
+ * Typed against the risk input schema so a future change to the captured
+ * state shape breaks `pnpm typecheck` here, rather than silently degrading
+ * this harness into a permanent `RISK_INPUT_INVALID` rejection.
+ */
 const buildMockRiskContext = (
   intent: TradeIntentV4,
   options: MockTradeOptions,
   observedAt: string,
   sessionDate: string,
-) => ({
+): z.input<typeof riskEvaluationInputV2Schema>["context"] => ({
   provenance: "APPLICATION_VERIFIED" as const,
   eligibility: {
     evaluatedAt: observedAt,
@@ -148,12 +156,19 @@ const buildMockRiskContext = (
     },
   },
   account: {
+    snapshotVersion: "2.0.0" as const,
     observedAt,
     status: "ACTIVE" as const,
     tradingRestricted: false,
     buyingPowerCents: options.buyingPowerCents,
     equityCents: options.equityCents,
     lastEquityCents: options.equityCents,
+    cashCents: options.buyingPowerCents,
+    // Level 3 is the multi-leg approval the risk gate requires; the two
+    // fields must agree or the account schema rejects the state.
+    optionsApprovedLevel: 3,
+    optionsTradingLevel: 3,
+    multilegOptionsApproved: true,
   },
   candidateCollateral: {
     underlying: intent.underlying,
