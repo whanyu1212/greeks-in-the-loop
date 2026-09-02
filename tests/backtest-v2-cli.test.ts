@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -33,6 +33,22 @@ describe("Backtest V2 CLI", () => {
       expect(report.counts.scheduledDecisionEvaluations).toBe(2)
       expect(readFileSync(join(outputDirectory, "config-resolved.json"), "utf8"))
         .toContain('"experimentId": "golden-smoke-v1"')
+    } finally {
+      rmSync(outputDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it("does not overwrite a historical config in the output directory", () => {
+    const outputDirectory = mkdtempSync(join(tmpdir(), "backtest-v2-cli-input-"))
+    try {
+      const configPath = join(outputDirectory, "config-resolved.json")
+      const config = readFileSync("config/backtest-v2/historical-smoke.json", "utf8")
+      writeFileSync(configPath, config)
+
+      expect(() => runBacktestV2Cli({ configPath, outputDirectory }))
+        .toThrow("Backtest V2 output must not overwrite an input")
+      expect(readFileSync(configPath, "utf8")).toBe(config)
+      expect(existsSync(join(outputDirectory, "run.sqlite"))).toBe(false)
     } finally {
       rmSync(outputDirectory, { recursive: true, force: true })
     }

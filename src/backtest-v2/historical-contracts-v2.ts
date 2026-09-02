@@ -12,6 +12,18 @@ const symbol = z.string().trim().regex(/^[A-Z][A-Z0-9.]{0,9}$/)
 const positiveInteger = z.number().int().positive().safe()
 const nonnegativeInteger = z.number().int().nonnegative().safe()
 
+const dateInNewYork = (value: string) => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value))
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? ""
+  return `${part("year")}-${part("month")}-${part("day")}`
+}
+
 const validateSymbol = (value: string, context: z.RefinementCtx, path: PropertyKey[]) => {
   if (!goldenTechOptionsSymbolSetV1.has(value)) {
     context.addIssue({
@@ -193,10 +205,17 @@ export const historicalReplayExperimentV2Schema = z
     if (experiment.selector.minDte > experiment.selector.maxDte) context.addIssue({ code: "custom", path: ["selector", "maxDte"], message: "maxDte is below minDte" })
     if (experiment.selector.minWidthHalfCents > experiment.selector.maxWidthHalfCents) context.addIssue({ code: "custom", path: ["selector", "maxWidthHalfCents"], message: "max width is below min width" })
     const selected = new Set(experiment.replaySelection.symbols)
+    const decisionIds = new Set<string>()
     experiment.replaySelection.symbols.forEach((value, index) => validateSymbol(value, context, ["replaySelection", "symbols", index]))
     experiment.signals.forEach((signal, index) => {
       validateSymbol(signal.symbol, context, ["signals", index, "symbol"])
       if (!selected.has(signal.symbol)) context.addIssue({ code: "custom", path: ["signals", index, "symbol"], message: "signal symbol is not selected" })
+      if (decisionIds.has(signal.decisionId)) context.addIssue({ code: "custom", path: ["signals", index, "decisionId"], message: "duplicate decisionId" })
+      decisionIds.add(signal.decisionId)
+      const decisionDate = dateInNewYork(signal.decisionAt)
+      if (decisionDate < experiment.replaySelection.startDate || decisionDate > experiment.replaySelection.endDate) context.addIssue({ code: "custom", path: ["signals", index, "decisionAt"], message: "decisionAt is outside replay selection" })
+      const exitDate = dateInNewYork(signal.exitAt)
+      if (exitDate < experiment.replaySelection.startDate || exitDate > experiment.replaySelection.endDate) context.addIssue({ code: "custom", path: ["signals", index, "exitAt"], message: "exitAt is outside replay selection" })
       if (signal.exitAt <= signal.decisionAt) context.addIssue({ code: "custom", path: ["signals", index, "exitAt"], message: "exitAt must be after decisionAt" })
     })
   })

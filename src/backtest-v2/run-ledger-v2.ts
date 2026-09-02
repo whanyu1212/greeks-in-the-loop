@@ -196,7 +196,7 @@ export const createBacktestRunLedgerV2 = (input: Readonly<{
     insertMetric(name: string, integerValue: number | null, textValue: string | null = null) {
       database.prepare("INSERT INTO backtest_metrics VALUES (?, ?, ?, ?)").run(input.runId, name, integerValue, textValue)
     },
-    complete(status: "COMPLETE" | "INCOMPLETE" | "FAILED", endingEquityCents: number, netPnlCents: number, occurredAt: string) {
+    complete(status: "COMPLETE" | "INCOMPLETE" | "FAILED", endingEquityCents: number | null, netPnlCents: number | null, occurredAt: string) {
       const terminalEventId = appendEvent("RUN_TERMINAL", occurredAt, { status, endingEquityCents, netPnlCents })
       database.prepare("UPDATE backtest_runs SET status = ?, ending_equity_cents = ?, net_pnl_cents = ?, terminal_event_hash = ? WHERE run_id = ?").run(
         status, endingEquityCents, netPnlCents, previousEventHash, input.runId,

@@ -84,6 +84,14 @@ export const runBacktestV2Cli = (options: BacktestV2CliOptions): string => {
     }
     const outputDirectory = resolve(options.outputDirectory)
     const runLedgerPath = join(outputDirectory, "run.sqlite")
+    const summaryPath = join(outputDirectory, "summary.json")
+    const resolvedConfigPath = join(outputDirectory, "config-resolved.json")
+    if (
+      pathsReferToSameFile(configPath, summaryPath) ||
+      pathsReferToSameFile(configPath, resolvedConfigPath)
+    ) {
+      throw new Error("Backtest V2 output must not overwrite an input")
+    }
     if (existsSync(runLedgerPath)) {
       throw new Error(`Immutable Backtest V2 run ledger already exists: ${runLedgerPath}`)
     }
@@ -93,8 +101,6 @@ export const runBacktestV2Cli = (options: BacktestV2CliOptions): string => {
       databasePath: resolve(historicalExperiment.data.databasePath),
     }
     const report = runHistoricalReplayV2(resolvedExperiment, outputDirectory)
-    const summaryPath = join(outputDirectory, "summary.json")
-    const resolvedConfigPath = join(outputDirectory, "config-resolved.json")
     writeFileSync(summaryPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 })
     writeFileSync(resolvedConfigPath, `${JSON.stringify(resolvedExperiment, null, 2)}\n`, { mode: 0o600 })
     return `${summaryPath}\n`

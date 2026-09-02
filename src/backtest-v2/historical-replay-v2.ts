@@ -50,8 +50,8 @@ export type HistoricalReplayReportV2 = Readonly<{
   experimentId: string
   runLedgerPath: string
   initialEquityCents: number
-  endingEquityCents: number
-  netPnlCents: number
+  endingEquityCents: number | null
+  netPnlCents: number | null
   decisions: number
   selectedSpreads: number
   openedPositions: number
@@ -253,8 +253,10 @@ export const runHistoricalReplayV2 = (
       ledger.insertSnapshot({ occurredAt: signal.exitAt, cashCents, realizedPnlCents, unrealizedPnlCents: 0, liquidationValueCents: 0, equityCents: cashCents })
     }
 
-    const endingEquityCents = cashCents
-    const netPnlCents = endingEquityCents - experiment.portfolio.initialCapitalCents
+    const endingEquityCents = status === "COMPLETE" ? cashCents : null
+    const netPnlCents = endingEquityCents === null
+      ? null
+      : endingEquityCents - experiment.portfolio.initialCapitalCents
     ledger.insertMetric("NET_PNL_CENTS", netPnlCents)
     ledger.insertMetric("ENDING_EQUITY_CENTS", endingEquityCents)
     ledger.insertMetric("TOTAL_FEES_CENTS", totalFeesCents)
