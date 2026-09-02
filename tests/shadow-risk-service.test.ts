@@ -190,9 +190,12 @@ const durableControl = {
   })),
 }
 
-const evaluate = (provider: RiskStateProvider) =>
+const evaluate = (
+  provider: RiskStateProvider,
+  proposal: TradeProposalV4 = decision,
+) =>
   createShadowRiskEvaluator({ provider, durableControl }).evaluate({
-    decision,
+    decision: proposal,
     sourceIntent,
     captureEligibility: eligibility,
     getEvaluationEligibility: () => eligibility,
@@ -250,6 +253,105 @@ describe("shadow risk evaluator", () => {
       },
     })
     expect(result.breakerTransitions).toEqual([])
+  })
+
+  it("bounds net delta on a structure whose thesis is not directional", async () => {
+    const putSymbol = "SPY260918P00600000"
+    const straddleQuotes = (timestamp: string) => ({
+      longQuote: {
+        contractSymbol: longSymbol,
+        feed: "INDICATIVE" as const,
+        bidCentsPerShare: 300,
+        askCentsPerShare: 310,
+        providerTimestamp: timestamp,
+      },
+      putQuote: {
+        contractSymbol: putSymbol,
+        feed: "INDICATIVE" as const,
+        bidCentsPerShare: 290,
+        askCentsPerShare: 300,
+        providerTimestamp: timestamp,
+      },
+    })
+    const straddle: TradeProposalV4 = {
+      ...decision,
+      direction: "VOLATILITY",
+      candidate: {
+        underlying: "SPY",
+        strategy: "LONG_STRADDLE",
+        legs: [
+          { contractSymbol: longSymbol, positionIntent: "BUY_TO_OPEN", ratioQuantity: 1 },
+          { contractSymbol: putSymbol, positionIntent: "BUY_TO_OPEN", ratioQuantity: 1 },
+        ],
+      },
+    }
+    const straddleIntent = (() => {
+      const derived = deriveTradeIntentV4(straddle, {
+        quoteSnapshotRef: "alpaca-proposal-quotes-v2-SPY",
+        evaluatedAt: "2026-08-27T14:30:10.000Z",
+        quotes: Object.values(straddleQuotes("2026-08-27T14:30:00.000000000Z")),
+      })
+      if (!derived.success) throw new Error("Straddle intent could not be derived")
+      return derived.intent
+    })()
+    // A real straddle carries near-zero net delta. These legs sum to 0.25,
+    // which is a directional bet wearing a volatility label; nothing rejected
+    // it before, because the directional band applies only to BULLISH and
+    // BEARISH intents and the screen never tested direction for this outlook.
+    const straddleSnapshot = () => {
+      const base = snapshot()
+      return {
+        ...base,
+        quoteSnapshot: {
+          ...base.quoteSnapshot,
+          quotes: Object.values(straddleQuotes("2026-08-27T14:30:20.000000000Z")),
+        },
+        contracts: {
+          ...base.contracts,
+          legs: [
+            { ...base.contracts.legs[0]!, delta: 0.55 },
+            {
+              ...base.contracts.legs[1]!,
+              contractSymbol: putSymbol,
+              positionIntent: "BUY_TO_OPEN" as const,
+              delta: -0.3,
+            },
+          ],
+        },
+      }
+    }
+    const rejectedStraddle = await createShadowRiskEvaluator({
+      provider: { capture: vi.fn(async () => ({
+        success: true as const,
+        snapshot: straddleSnapshot(),
+      })) },
+      durableControl,
+    }).evaluate({
+      decision: straddle,
+      sourceIntent: straddleIntent,
+      captureEligibility: eligibility,
+      getEvaluationEligibility: () => eligibility,
+      signal,
+    })
+
+    expect(rejectedStraddle.decision).toMatchObject({
+      stage: "EVALUATED",
+      outcome: "REJECTED",
+      evaluation: {
+        reasonCodes: expect.arrayContaining(["SPREAD_GREEKS_INELIGIBLE"]),
+      },
+    })
+  })
+
+  it("keeps the legacy directional band untouched", async () => {
+    const approved = await evaluate({
+      capture: vi.fn<RiskStateProvider["capture"]>(async () => ({
+        success: true,
+        snapshot: snapshot(),
+      })),
+    })
+
+    expect(approved.decision).toMatchObject({ outcome: "APPROVED" })
   })
 
   it("rejects when the captured Alpaca option level cannot open the strategy", async () => {

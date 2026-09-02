@@ -73,6 +73,15 @@ const MAX_LOSS_CENTS = 50_000
 const DAILY_DRAWDOWN_CENTS = 150_000
 const COMPETITION_BREAKER_EQUITY_CENTS = 9_250_000
 const MAX_GENERIC_DIRECTIONAL_NET_DELTA = 0.7
+/**
+ * Symmetric net-delta bound for structures whose thesis is not directional.
+ *
+ * A neutral or volatility structure carrying material net delta is a
+ * directional bet wearing a volatility label. Until this bound existed no
+ * layer objected: the screen never tested direction for these outlooks, and
+ * the directional band below applies only to BULLISH and BEARISH intents.
+ */
+export const MAX_NONDIRECTIONAL_ABSOLUTE_NET_DELTA = 0.15
 
 const timestamp = z.iso.datetime({ offset: true, precision: 3 })
 const riskRuleVersion = z.enum(SUPPORTED_RISK_RULE_VERSIONS)
@@ -817,6 +826,11 @@ const evaluateGenericTradeIntentRiskV1 = (
       directionalNetDelta < MIN_DIRECTIONAL_NET_DELTA ||
       directionalNetDelta > MAX_GENERIC_DIRECTIONAL_NET_DELTA
     ) reject("SPREAD_GREEKS_INELIGIBLE")
+  } else if (
+    Math.abs(aggregateGreeks.netDelta) >
+      MAX_NONDIRECTIONAL_ABSOLUTE_NET_DELTA
+  ) {
+    reject("SPREAD_GREEKS_INELIGIBLE")
   }
 
   const combinedQuoteWidth = intent.legs.reduce(
