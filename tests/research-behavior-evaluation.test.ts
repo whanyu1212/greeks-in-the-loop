@@ -89,7 +89,7 @@ describe("research behavior evaluation", () => {
     )
 
     expect(prompt).toContain('"strategy":"BULL_CALL_SPREAD","actionability":"ACTIONABLE"')
-    expect(prompt).toContain('"strategy":"BEAR_PUT_SPREAD","actionability":"REJECTED"')
+    expect(prompt).toContain('"strategy":"BEAR_PUT_SPREAD","actionability":"ACTIONABLE"')
     expect(prompt).toContain("distinct Exa searches")
   })
 

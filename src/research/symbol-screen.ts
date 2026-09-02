@@ -6,7 +6,6 @@ import {
 } from "../contracts/option-universe-v2.js"
 import {
   OPTION_STRATEGIES,
-  OPTION_STRATEGY_CATALOG,
   optionStrategySchema,
   type OptionStrategy,
 } from "../options/strategy.js"
@@ -17,8 +16,8 @@ const LEGACY_SYMBOL_SCREEN_POLICY_VERSION = "1.0.0" as const
 export const SYMBOL_SCREEN_VERSION = "2.0.0" as const
 const LEGACY_SYMBOL_SCREEN_POLICY_VERSION_V2 = "2.0.0" as const
 const LEGACY_SYMBOL_SCREEN_POLICY_VERSION_V3 = "3.0.0" as const
-export const SYMBOL_SCREEN_POLICY_VERSION = "4.0.0" as const
-export const SYMBOL_SCREEN_MIN_ABSOLUTE_MOVE_PERCENT = 0.5
+const LEGACY_SYMBOL_SCREEN_POLICY_VERSION_V4 = "4.0.0" as const
+export const SYMBOL_SCREEN_POLICY_VERSION = "5.0.0" as const
 export const SYMBOL_SCREEN_MIN_LIQUID_CONTRACTS = 4
 export const SYMBOL_SCREEN_MIN_OPEN_INTEREST = 1_000
 // ponytail: open-interest coverage is measured across the whole 14-30 DTE
@@ -34,6 +33,9 @@ export const SYMBOL_SCREEN_REASON_CODES = [
   "LIQUID_CONTRACT_COUNT_LOW",
   "OPEN_INTEREST_LOW",
   "OPEN_INTEREST_COVERAGE_LOW",
+  // Unreachable since policy 5.0.0 moved direction to the agent, and
+  // OPEN_INTEREST_COVERAGE_LOW since 4.0.0 disabled that gate. All four stay
+  // so persisted screens keep parsing.
   "SESSION_MOVE_UNAVAILABLE",
   "SESSION_MOVE_BELOW_THRESHOLD",
   "DIRECTION_MISMATCH",
@@ -198,6 +200,7 @@ export const symbolScreenResultV2Schema = z
     policyVersion: z.enum([
       LEGACY_SYMBOL_SCREEN_POLICY_VERSION_V2,
       LEGACY_SYMBOL_SCREEN_POLICY_VERSION_V3,
+      LEGACY_SYMBOL_SCREEN_POLICY_VERSION_V4,
       SYMBOL_SCREEN_POLICY_VERSION,
     ]),
     mode: z.literal("SHADOW"),
@@ -275,65 +278,41 @@ export function strategyActionabilityIssuePathV2(
         ]
 }
 
+// The screen no longer expresses a directional opinion, so nothing
+// deterministic constrains structure choice; a small catalog is what replaces
+// it. Defined-risk verticals plus one volatility structure. Re-expand once
+// there is outcome data to justify a structure, not before.
 const CURRENT_SCREEN_STRATEGIES = new Set<OptionStrategy>([
-  "LONG_CALL",
-  "LONG_PUT",
-  "COVERED_CALL",
-  "CASH_SECURED_PUT",
   "BULL_CALL_SPREAD",
   "BEAR_PUT_SPREAD",
   "BEAR_CALL_SPREAD",
   "BULL_PUT_SPREAD",
   "LONG_STRADDLE",
-  "LONG_STRANGLE",
-  "CALL_BUTTERFLY",
-  "PUT_BUTTERFLY",
-  "IRON_BUTTERFLY",
-  "IRON_CONDOR",
-  "COLLAR",
-  "CALENDAR_SPREAD",
-  "DIAGONAL_SPREAD",
 ])
-
 const pendingAssessment = (strategy: OptionStrategy) => ({
   strategy,
   actionability: "UNAVAILABLE" as const,
   reasonCodes: ["APPLICATION_SUPPORT_PENDING" as const],
 })
 
+/**
+ * Assesses one symbol-strategy pair on application support and liquidity.
+ *
+ * Direction is deliberately not tested here. A single session's percent move
+ * is a far weaker directional signal than the completed-session evidence the
+ * agent weighs, and gating on it rejected clean multi-week trends whenever the
+ * current session happened to be quiet. The agent owns direction; the screen
+ * owns whether a pair is supported and tradeable.
+ */
 const assessedStrategy = (
   strategy: OptionStrategy,
   liquidityReasons: readonly SymbolScreenReasonCode[],
-  move: number | undefined,
 ): SymbolStrategyAssessmentV2 => {
   if (!CURRENT_SCREEN_STRATEGIES.has(strategy)) return pendingAssessment(strategy)
   if (liquidityReasons.length > 0) {
     return { strategy, actionability: "REJECTED", reasonCodes: [...liquidityReasons] }
   }
-  const outlook = OPTION_STRATEGY_CATALOG[strategy].outlook
-  if (outlook === "NEUTRAL" || outlook === "VOLATILITY") {
-    return { strategy, actionability: "ACTIONABLE", reasonCodes: [] }
-  }
-  if (move === undefined) {
-    return {
-      strategy,
-      actionability: "WATCH",
-      reasonCodes: ["SESSION_MOVE_UNAVAILABLE"],
-    }
-  }
-  if (Math.abs(move) < SYMBOL_SCREEN_MIN_ABSOLUTE_MOVE_PERCENT) {
-    return {
-      strategy,
-      actionability: "WATCH",
-      reasonCodes: ["SESSION_MOVE_BELOW_THRESHOLD"],
-    }
-  }
-  const matchesDirection = move > 0
-    ? outlook === "BULLISH"
-    : outlook === "BEARISH"
-  return matchesDirection
-    ? { strategy, actionability: "ACTIONABLE", reasonCodes: [] }
-    : { strategy, actionability: "REJECTED", reasonCodes: ["DIRECTION_MISMATCH"] }
+  return { strategy, actionability: "ACTIONABLE", reasonCodes: [] }
 }
 
 /** Screens application-owned universe evidence for proposal actionability. */
@@ -373,11 +352,7 @@ export function screenOptionUniverseV2(
       underlying: candidate.underlying,
       evidence,
       strategies: OPTION_STRATEGIES.map((strategy) =>
-        assessedStrategy(
-          strategy,
-          liquidityReasons,
-          candidate.sessionPercentChange,
-        )
+        assessedStrategy(strategy, liquidityReasons)
       ),
     }
   })
