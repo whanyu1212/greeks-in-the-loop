@@ -598,6 +598,7 @@ const runScenario = async (
       rawResponse,
       toolCalls: behaviorToolCalls(invocationParts),
       expected: liveExpectation(scenario.id, scenario.expected),
+      requiredReportVersion: "7.0.0",
       readRoot: fixtureRoot,
     })
     const workflow = await runResearchWorkflowEvaluation({

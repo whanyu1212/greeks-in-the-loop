@@ -336,11 +336,26 @@ describe("research behavior evaluation", () => {
       rawResponse: JSON.stringify(report),
       toolCalls: [],
       expected: {},
+      requiredReportVersion: "7.0.0",
     })
 
     expect(evaluation.dimensions.contractCompliance).toEqual({
       status: "PASS",
       issueCodes: [],
+    })
+  })
+
+  it("rejects legacy reports when a live evaluation requires V7", () => {
+    const source = researchBehaviorScenarios[0]!
+    const evaluation = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "live-v6-report",
+      requiredReportVersion: "7.0.0",
+    })
+
+    expect(evaluation.dimensions.contractCompliance).toEqual({
+      status: "FAIL",
+      issueCodes: ["REPORT_SCHEMA_INVALID"],
     })
   })
 

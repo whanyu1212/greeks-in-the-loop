@@ -20,7 +20,7 @@ import {
 // Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
 // when grader semantics change, so stored artifacts stay attributable to the
 // revision that produced them.
-export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.1.0" as const
+export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.2.0" as const
 
 export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "MALFORMED_JSON",
@@ -201,6 +201,7 @@ export type EvaluateResearchBehaviorInput = Readonly<{
   rawResponse: string
   toolCalls: readonly ResearchBehaviorToolCall[]
   expected: ResearchBehaviorExpectation
+  requiredReportVersion?: "7.0.0"
   readRoot?: string
 }>
 
@@ -263,7 +264,10 @@ const firstToolIndex = (
   pattern: string,
 ) => calls.findIndex(({ name }) => toolMatches(name, pattern))
 
-const parseReport = (rawResponse: string) => {
+const parseReport = (
+  rawResponse: string,
+  requiredReportVersion?: "7.0.0",
+) => {
   let input: unknown
   try {
     input = JSON.parse(rawResponse)
@@ -272,6 +276,9 @@ const parseReport = (rawResponse: string) => {
   }
   const current = researchReportV7Schema.safeParse(input)
   if (current.success) return { success: true as const, report: current.data }
+  if (requiredReportVersion === "7.0.0") {
+    return { success: false as const, issue: "REPORT_SCHEMA_INVALID" as const }
+  }
   const fixture = researchReportV6Schema.safeParse(input)
   return fixture.success
     ? { success: true as const, report: fixture.data }
@@ -287,6 +294,7 @@ export function evaluateResearchBehavior({
   rawResponse,
   toolCalls,
   expected,
+  requiredReportVersion,
   readRoot,
 }: EvaluateResearchBehaviorInput): ResearchBehaviorEvaluationV1 {
   const contractIssues: ResearchBehaviorIssueCode[] = []
@@ -295,7 +303,7 @@ export function evaluateResearchBehavior({
   const toolIssues: ResearchBehaviorIssueCode[] = []
   const evidenceIssues: ResearchBehaviorIssueCode[] = []
 
-  const parsed = parseReport(rawResponse)
+  const parsed = parseReport(rawResponse, requiredReportVersion)
   if (!parsed.success) contractIssues.push(parsed.issue)
   const report = parsed.success ? parsed.report : undefined
 
