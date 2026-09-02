@@ -8,6 +8,10 @@ import {
   type ResearchReportV6,
 } from "../contracts/research-report-v6.js"
 import {
+  researchReportV7Schema,
+  type ResearchReportV7,
+} from "../contracts/research-report-v7.js"
+import {
   RESEARCH_MAX_EXA_CALLS,
   RESEARCH_MAX_FMP_CALLS,
   RESEARCH_MAX_TOOL_CALLS,
@@ -16,7 +20,7 @@ import {
 // Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
 // when grader semantics change, so stored artifacts stay attributable to the
 // revision that produced them.
-export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.0.0" as const
+export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.1.0" as const
 
 export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "MALFORMED_JSON",
@@ -160,16 +164,23 @@ export type ResearchBehaviorExpectation = Readonly<{
     | "conflictingStrategyExposure"
   >>>
   expectedMarketSignal?: ResearchReportV6["analysis"]["marketRegimes"][number]["signal"]
-  expectedProposalCandidate?: Extract<
-    ResearchReportV6["result"],
-    { outcome: "PROPOSE_TRADES" }
-  >["proposals"][number]["candidate"]
-  expectedCandidateEvaluation?: Readonly<{
-    dte: number
-    legs: NonNullable<
-      ResearchReportV6["analysis"]["candidateEvaluations"]
-    >[number]["legs"]
-  }>
+  expectedProposalCandidate?:
+    | Extract<
+      ResearchReportV6["result"],
+      { outcome: "PROPOSE_TRADES" }
+    >["proposals"][number]["candidate"]
+    | Extract<
+      ResearchReportV7["result"],
+      { outcome: "PROPOSE_TRADES" }
+    >["proposals"][number]["candidate"]
+  expectedCandidateEvaluation?:
+    | Readonly<{
+      dte: number
+      legs: ResearchReportV6["analysis"]["candidateEvaluations"][number]["legs"]
+    }>
+    | Readonly<{
+      legs: ResearchReportV7["analysis"]["candidateEvaluations"][number]["legs"]
+    }>
   expectedSymbolIndicators?: readonly Readonly<
     NonNullable<ResearchReportV6["analysis"]["symbolIndicators"]>[number]
   >[]
@@ -259,9 +270,11 @@ const parseReport = (rawResponse: string) => {
   } catch {
     return { success: false as const, issue: "MALFORMED_JSON" as const }
   }
-  const parsed = researchReportV6Schema.safeParse(input)
-  return parsed.success
-    ? { success: true as const, report: parsed.data }
+  const current = researchReportV7Schema.safeParse(input)
+  if (current.success) return { success: true as const, report: current.data }
+  const fixture = researchReportV6Schema.safeParse(input)
+  return fixture.success
+    ? { success: true as const, report: fixture.data }
     : { success: false as const, issue: "REPORT_SCHEMA_INVALID" as const }
 }
 
@@ -733,20 +746,36 @@ export function evaluateResearchBehavior({
     }
     if (expected.expectedCandidateEvaluation !== undefined) {
       const candidateEvaluation = report.analysis.candidateEvaluations[0]
-      const actual = candidateEvaluation === undefined
+      const expectsV6 = "dte" in expected.expectedCandidateEvaluation
+      const actual = candidateEvaluation === undefined ||
+          expectsV6 !== ("dte" in candidateEvaluation)
         ? undefined
-        : {
+        : expectsV6 && "dte" in candidateEvaluation
+        ? {
             dte: candidateEvaluation.dte,
             legs: [...candidateEvaluation.legs].sort((left, right) =>
               left.role.localeCompare(right.role)
             ),
           }
-      const expectedEvaluation = {
-        dte: expected.expectedCandidateEvaluation.dte,
-        legs: [...expected.expectedCandidateEvaluation.legs].sort((left, right) =>
-          left.role.localeCompare(right.role)
-        ),
-      }
+        : {
+            legs: [...candidateEvaluation.legs].sort((left, right) =>
+              left.contractSymbol.localeCompare(right.contractSymbol)
+            ),
+          }
+      const expectedEvaluation = expectsV6
+        ? {
+            dte: expected.expectedCandidateEvaluation.dte,
+            legs: [...expected.expectedCandidateEvaluation.legs].sort((left, right) =>
+              "role" in left && "role" in right
+                ? left.role.localeCompare(right.role)
+                : left.contractSymbol.localeCompare(right.contractSymbol)
+            ),
+          }
+        : {
+            legs: [...expected.expectedCandidateEvaluation.legs].sort((left, right) =>
+              left.contractSymbol.localeCompare(right.contractSymbol)
+            ),
+          }
       if (!isDeepStrictEqual(actual, expectedEvaluation)) {
         evidenceIssues.push("EXPECTED_CANDIDATE_MISMATCH")
       }
