@@ -20,7 +20,7 @@ import {
 // Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
 // when grader semantics change, so stored artifacts stay attributable to the
 // revision that produced them.
-export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.3.0" as const
+export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.4.0" as const
 
 export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "MALFORMED_JSON",
@@ -751,10 +751,14 @@ export function evaluateResearchBehavior({
             const actualValue = broadMarketContext[
               field as keyof typeof broadMarketContext
             ]
-            return typeof expectedValue === "number"
-              ? typeof actualValue === "number" &&
-                Math.abs(actualValue - expectedValue) <= 0.0005
-              : isDeepStrictEqual(actualValue, expectedValue)
+            if (typeof expectedValue !== "number") {
+              return isDeepStrictEqual(actualValue, expectedValue)
+            }
+            const tolerance = field === "realizedVolatility20"
+              ? Math.abs(expectedValue) * 0.005
+              : 0.0005
+            return typeof actualValue === "number" &&
+              Math.abs(actualValue - expectedValue) <= tolerance
           },
         )
       if (!contextMatches) {

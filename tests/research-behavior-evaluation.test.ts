@@ -1573,6 +1573,22 @@ describe("research behavior evaluation", () => {
         },
       },
     })
+    const fabricatedBroadMarketVolatility = JSON.parse(valid.rawResponse) as any
+    fabricatedBroadMarketVolatility.analysis.broadMarketContext = {
+      ...fabricatedBroadMarketVolatility.analysis.broadMarketContext,
+      realizedVolatility20: 0.0005,
+    }
+    const broadMarketVolatilityEvaluation = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "fabricated-broad-market-volatility",
+      rawResponse: JSON.stringify(fabricatedBroadMarketVolatility),
+      expected: {
+        ...valid.expected,
+        expectedBroadMarketContext: {
+          realizedVolatility20: 0.000013946469539875664,
+        },
+      },
+    })
 
     const weak = researchBehaviorScenarios[9]!
     const mislabeledWeak = JSON.parse(weak.rawResponse) as {
@@ -1646,6 +1662,9 @@ describe("research behavior evaluation", () => {
     expect(broadMarketEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_BROAD_MARKET_CONTEXT_MISMATCH",
     ])
+    expect(
+      broadMarketVolatilityEvaluation.dimensions.evidenceDiscipline.issueCodes,
+    ).toEqual(["EXPECTED_BROAD_MARKET_CONTEXT_MISMATCH"])
     expect(relevanceEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_RELEVANCE_MISSING",
     ])
