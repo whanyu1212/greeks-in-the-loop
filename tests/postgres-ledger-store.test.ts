@@ -2,12 +2,24 @@ import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import type { LedgerEventV4 } from "../src/event-ledger/ledger-event-v1.js"
+import { POSTGRES_LEDGER_MIGRATIONS } from "../src/event-ledger/postgres-migrations.js"
 import { createPostgresLedgerStore } from "../src/event-ledger/postgres-ledger-store.js"
 import { acquirePostgresWorkerInstanceLock } from "../src/event-ledger/postgres-worker-instance-lock.js"
 import { WorkerInstanceLockUnavailableError } from "../src/event-ledger/worker-instance-lock-errors.js"
 
 const connectionString = process.env.TEST_POSTGRES_URL
 const integration = describe.runIf(connectionString !== undefined)
+
+describe("PostgreSQL ledger migrations", () => {
+  it("restores the per-cycle transaction lock before validation triggers", () => {
+    const migration = POSTGRES_LEDGER_MIGRATIONS.find(
+      ({ id }) => id === "005_restore_cycle_advisory_lock",
+    )
+
+    expect(migration?.sql).toContain("pg_advisory_xact_lock")
+    expect(migration?.sql).toContain("ledger_events_00_lock_cycle_insert")
+  })
+})
 
 const cycleStarted = (
   cycleId: string,

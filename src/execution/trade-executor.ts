@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto"
 import {
   LEDGER_EVENT_VERSION,
   type LedgerEventV4,
+  type StoredLedgerEvent,
 } from "../event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import { LedgerPersistenceError } from "../event-ledger/research-lifecycle-recorder.js"
@@ -277,27 +278,47 @@ export async function reconcileOpenOrderRecordsV1({
   if (!Number.isSafeInteger(notFoundGraceMs) || notFoundGraceMs < 0) {
     throw new Error("notFoundGraceMs must be a non-negative safe integer")
   }
-  const submissions = await store.list({
-    eventTypes: ["ORDER_SUBMITTED"],
-    direction: "DESC",
-    limit: maxOrders,
-  })
-  if (submissions.length === 0) return []
+  if (!Number.isSafeInteger(maxOrders) || maxOrders <= 0 || maxOrders > 1_000) {
+    throw new Error("maxOrders must be a positive safe integer no greater than 1000")
+  }
 
-  const terminals = await store.list({
-    eventTypes: ["ORDER_FILLED", "ORDER_REJECTED"],
-    direction: "DESC",
-    limit: maxOrders,
-  })
-  const settledCycleIds = new Set(
-    terminals.flatMap((event) => (event.cycleId ? [event.cycleId] : [])),
-  )
+  const submissions: StoredLedgerEvent[] = []
+  const pageSize = Math.max(100, maxOrders)
+  let beforeSequence: number | undefined
+  while (submissions.length < maxOrders) {
+    const page = await store.list({
+      eventTypes: ["ORDER_SUBMITTED"],
+      direction: "DESC",
+      limit: pageSize,
+      ...(beforeSequence === undefined ? {} : { beforeSequence }),
+    })
+    if (page.length === 0) break
+
+    for (const submission of page) {
+      signal.throwIfAborted()
+      const cycleId = submission.cycleId
+      if (cycleId === undefined) continue
+      const terminal = await store.list({
+        cycleId,
+        eventTypes: ["ORDER_FILLED", "ORDER_REJECTED"],
+        direction: "DESC",
+        limit: 1,
+      })
+      if (terminal.length === 0) submissions.push(submission)
+      if (submissions.length >= maxOrders) break
+    }
+
+    beforeSequence = page.at(-1)?.sequence
+    if (beforeSequence === undefined || page.length < pageSize) break
+    signal.throwIfAborted()
+  }
+  if (submissions.length === 0) return []
 
   const reconciled: ReconciledOrderRecord[] = []
   for (const submission of submissions) {
     signal.throwIfAborted()
     const cycleId = submission.cycleId
-    if (cycleId === undefined || settledCycleIds.has(cycleId)) continue
+    if (cycleId === undefined) continue
     const payload = submission.payload as {
       clientOrderId?: unknown
       correlationId?: unknown

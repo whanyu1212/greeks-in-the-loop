@@ -74,7 +74,7 @@ is always recoverable by client order id; reconciliation never resubmits. A
 failed lookup and a recent confirmed 404 remain non-terminal. The cycle id is
 the idempotency key in both the ledger (partial unique index) and at the broker
 (`client_order_id`). SQLite migrations 008-009 and PostgreSQL migrations
-003-004 make an order that skipped the risk gate or a terminal event that does
+003-005 make an order that skipped the risk gate or a terminal event that does
 not match its exact submission unrepresentable.
 
 `pnpm execute:mock` drives one real paper order using real quotes and the real

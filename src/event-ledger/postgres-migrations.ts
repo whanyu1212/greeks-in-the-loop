@@ -447,6 +447,31 @@ export const POSTGRES_LEDGER_MIGRATIONS: readonly PostgresLedgerMigration[] = [
       FOR EACH ROW EXECUTE FUNCTION ledger_events_validate_order_terminal_identity();
     `,
   },
+  {
+    id: "005_restore_cycle_advisory_lock",
+    sql: `
+      -- Trigger names run alphabetically for the same timing/event. Acquire the
+      -- cycle lock before any trigger performs state-dependent validation.
+      CREATE FUNCTION ledger_events_lock_cycle_insert()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $ledger_cycle_lock$
+      BEGIN
+        IF NEW.cycle_id IS NOT NULL THEN
+          PERFORM pg_advisory_xact_lock(
+            hashtextextended('greeks-ledger-cycle:' || NEW.cycle_id, 0)
+          );
+        END IF;
+
+        RETURN NEW;
+      END
+      $ledger_cycle_lock$;
+
+      CREATE TRIGGER ledger_events_00_lock_cycle_insert
+      BEFORE INSERT ON ledger_events
+      FOR EACH ROW EXECUTE FUNCTION ledger_events_lock_cycle_insert();
+    `,
+  },
 ]
 
 const checksum = (sql: string) =>

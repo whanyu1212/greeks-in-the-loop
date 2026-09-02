@@ -143,11 +143,30 @@ const createStore = async () => {
   return store
 }
 
+type SeedCycleIdentity = Readonly<{
+  cycleId: string
+  correlationId: string
+  startEventId: string
+  intentEventId: string
+  riskEventId: string
+}>
+
+const cycleIdentity = (suffix: string): SeedCycleIdentity => ({
+  cycleId: `cycle-${suffix}`,
+  correlationId: `correlation-${suffix}`,
+  startEventId: `cycle-start-${suffix}`,
+  intentEventId: `intent-${suffix}`,
+  riskEventId: `risk-${suffix}`,
+})
+
+const defaultCycleIdentity = cycleIdentity("1")
+
 /** Seeds the durable prefix an execution requires: intent, then risk decision. */
 const seedApprovedCycle = async (
   store: LedgerStore,
   outcome: "APPROVED" | "REJECTED" = "APPROVED",
   approvedRisk: ShadowRiskResultV1 = approvedShadowRisk,
+  identity: SeedCycleIdentity = defaultCycleIdentity,
 ) => {
   const decision =
     outcome === "APPROVED" ? approvedRisk.decision : rejectedShadowRisk.decision
@@ -155,34 +174,34 @@ const seedApprovedCycle = async (
     decision.stage === "EVALUATED" ? decision.evaluatedIntent : intent
   const events: LedgerEventV4[] = [
     {
-      eventId: "cycle-start-1",
+      eventId: identity.startEventId,
       eventVersion: "4.0.0",
       eventType: "RESEARCH_CYCLE_STARTED",
       occurredAt: TIMESTAMP,
-      correlationId: "correlation-1",
-      cycleId: "cycle-1",
+      correlationId: identity.correlationId,
+      cycleId: identity.cycleId,
       sessionId: "ses_example",
       payload: { cycleNumber: 1 },
     },
     {
-      eventId: "intent-1",
+      eventId: identity.intentEventId,
       eventVersion: "4.0.0",
       eventType: "TRADE_INTENT_DERIVED",
       occurredAt: TIMESTAMP,
-      correlationId: "correlation-1",
-      causationEventId: "cycle-start-1",
-      cycleId: "cycle-1",
+      correlationId: identity.correlationId,
+      causationEventId: identity.startEventId,
+      cycleId: identity.cycleId,
       sessionId: "ses_example",
       payload: { intent: seededIntent },
     },
     {
-      eventId: "risk-1",
+      eventId: identity.riskEventId,
       eventVersion: "4.0.0",
       eventType: "RISK_SHADOW_DECISION_RECORDED",
       occurredAt: TIMESTAMP,
-      correlationId: "correlation-1",
-      causationEventId: "intent-1",
-      cycleId: "cycle-1",
+      correlationId: identity.correlationId,
+      causationEventId: identity.intentEventId,
+      cycleId: identity.cycleId,
       sessionId: "ses_example",
       payload: {
         decision,
@@ -606,8 +625,11 @@ describe("ledger execution invariants", () => {
 })
 
 describe("reconcileOpenOrderRecordsV1", () => {
-  const submitOpen = async (store: LedgerStore) => {
-    await seedApprovedCycle(store)
+  const submitOpen = async (
+    store: LedgerStore,
+    identity: SeedCycleIdentity = defaultCycleIdentity,
+  ) => {
+    await seedApprovedCycle(store, "APPROVED", approvedShadowRisk, identity)
     await executeApprovedTradeV1({
       store,
       submitter: stubSubmitter({
@@ -616,7 +638,7 @@ describe("reconcileOpenOrderRecordsV1", () => {
         brokerStatus: "new",
       }),
       shadowRisk: approvedShadowRisk,
-      cycleId: "cycle-1",
+      cycleId: identity.cycleId,
       now: () => new Date(TIMESTAMP),
       signal: AbortSignal.timeout(5_000),
     })
@@ -768,6 +790,50 @@ describe("reconcileOpenOrderRecordsV1", () => {
       }),
     ).toEqual([])
     expect(calls).toEqual([])
+    await store.close()
+  })
+
+  it("continues past a settled page to reconcile an older open submission", async () => {
+    const store = await createStore()
+    const openIdentity = cycleIdentity("open")
+    await submitOpen(store, openIdentity)
+
+    for (let index = 0; index < 100; index += 1) {
+      const identity = cycleIdentity(`settled-${index}`)
+      await seedApprovedCycle(store, "APPROVED", approvedShadowRisk, identity)
+      await executeApprovedTradeV1({
+        store,
+        submitter: stubSubmitter({
+          status: "FILLED",
+          brokerOrderId: `broker-settled-${index}`,
+          filledQuantity: 1,
+          brokerTimestamp: TIMESTAMP,
+        }),
+        shadowRisk: approvedShadowRisk,
+        cycleId: identity.cycleId,
+        signal: AbortSignal.timeout(5_000),
+      })
+    }
+
+    const reconciled = await reconcileOpenOrderRecordsV1({
+      store,
+      submitter: stubSubmitter({
+        status: "FILLED",
+        brokerOrderId: "broker-open",
+        filledQuantity: 1,
+        brokerTimestamp: TIMESTAMP,
+      }),
+      maxOrders: 1,
+      signal: AbortSignal.timeout(5_000),
+    })
+
+    expect(reconciled).toEqual([
+      {
+        cycleId: openIdentity.cycleId,
+        clientOrderId: openIdentity.cycleId,
+        resolution: "FILLED",
+      },
+    ])
     await store.close()
   })
 })

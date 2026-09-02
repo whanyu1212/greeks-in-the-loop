@@ -1,17 +1,19 @@
 import { mkdirSync } from "node:fs"
-import { dirname } from "node:path"
+import { dirname, resolve } from "node:path"
 import { randomUUID } from "node:crypto"
+import { fileURLToPath } from "node:url"
 
 import { config as loadEnvironment } from "dotenv"
 import { z } from "zod"
 
+import { canonicalLedgerTargetPath } from "../agent-options.js"
 import {
   tradeIntentV4Schema,
   type TradeIntentV4,
 } from "../contracts/trade-intent-v4.js"
 import {
   createConfiguredLedgerStore,
-  resolveLedgerBackendConfiguration,
+  type LedgerBackendConfiguration,
 } from "../event-ledger/ledger-backend.js"
 import type { LedgerEventV4 } from "../event-ledger/ledger-event-v1.js"
 import { createAlpacaOptionQuoteProvider } from "../market-data/alpaca-option-quotes.js"
@@ -50,6 +52,19 @@ const readRequiredSetting = (name: string) => {
   const value = readSetting(name)
   if (!value) throw new Error(`${name} is required`)
   return value
+}
+
+/** Forces the mutation harness onto its dedicated local backend. */
+export const resolveMockLedgerConfiguration = (
+  ledgerPath: string,
+): LedgerBackendConfiguration => {
+  if (
+    canonicalLedgerTargetPath(ledgerPath) ===
+      canonicalLedgerTargetPath(PRODUCTION_LEDGER_PATH)
+  ) {
+    throw new Error("Mock execution cannot use the production research ledger")
+  }
+  return { backend: "sqlite", path: ledgerPath }
 }
 
 type MockTradeOptions = Readonly<{
@@ -117,9 +132,7 @@ const parseOptions = (args: readonly string[]): MockTradeOptions => {
   ) {
     throw new Error("Synthetic account amounts must be positive integers")
   }
-  if (ledgerPath === PRODUCTION_LEDGER_PATH) {
-    throw new Error("Mock execution cannot use the production research ledger")
-  }
+  resolveMockLedgerConfiguration(ledgerPath)
 
   return {
     longContractSymbol,
@@ -339,10 +352,7 @@ const main = async () => {
   // 4. Record the approval durably, then execute against it.
   mkdirSync(dirname(options.ledgerPath), { recursive: true })
   const store = await createConfiguredLedgerStore({
-    configuration: resolveLedgerBackendConfiguration(
-      { ...process.env },
-      options.ledgerPath,
-    ),
+    configuration: resolveMockLedgerConfiguration(options.ledgerPath),
     knownCredentialValues: [apiKey, secretKey],
   })
   await store.migrate(signal)
@@ -413,4 +423,7 @@ const main = async () => {
   await store.close()
 }
 
-await main()
+const isMain =
+  process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))
+if (isMain) await main()
