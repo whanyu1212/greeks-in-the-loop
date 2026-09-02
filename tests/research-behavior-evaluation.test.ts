@@ -12,6 +12,7 @@ import {
 } from "../src/evaluation/research-behavior-evaluate-cli.js"
 import {
   evaluateResearchBehavior,
+  type ResearchBehaviorExpectation,
   type ResearchBehaviorEvaluationV1,
 } from "../src/evaluation/research-behavior-evaluation-v1.js"
 import { researchBehaviorScenarios } from "../src/evaluation/research-behavior-scenarios.js"
@@ -35,6 +36,44 @@ const isAccountInfoTool = (name: string) =>
   name === "alpaca_get_account" || name === "alpaca_get_account_info"
 const isExaSearchTool = (name: string) =>
   name === "exa_search" || name === "exa_web_search_exa"
+
+const v6ProposalFixtureExpectation = (
+  expected: ResearchBehaviorExpectation,
+): ResearchBehaviorExpectation => {
+  const {
+    requiredExternalSourceIds: _fixtureSourceIds,
+    requiredExternalSourceRelevances: _fixtureRelevances,
+    ...fixture
+  } = expected
+  return {
+    ...fixture,
+    completedToolInputCounts: [
+      ...(fixture.completedToolInputCounts ?? []),
+      {
+        pattern: "alpaca_get_orders",
+        input: { status: "open" },
+        minimum: 1,
+        maximum: 1,
+      },
+    ],
+    requiredExternalSources: [
+      {
+        url: "https://example.com/valid-adversarial-proposal/1",
+        relevance: "SUPPORTS",
+        publishedAt: "2026-08-26T13:00:00.000Z",
+        retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+        retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
+      },
+      {
+        url: "https://example.com/valid-adversarial-proposal/2",
+        relevance: "CONTRADICTS",
+        publishedAt: "2026-08-26T13:00:00.000Z",
+        retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+        retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
+      },
+    ],
+  }
+}
 
 describe("research behavior evaluation", () => {
   it("references only checked-in live-evaluation fixture files", () => {
@@ -71,7 +110,19 @@ describe("research behavior evaluation", () => {
       start: "2026-06-17T13:30:00Z",
       end: "2026-08-25T20:00:00Z",
       limit: 50,
+    })).toBe(false)
+    expect(researchEvalBarRequestMatchesFixture({
+      timeframe: "1Day",
+      start: "2026-06-17T20:00:00Z",
+      end: "2026-08-25T20:00:00.001Z",
+      limit: 50,
     })).toBe(true)
+    expect(researchEvalBarRequestMatchesFixture({
+      timeframe: "1Day",
+      start: "2026-06-17T20:00:00.001Z",
+      end: "2026-08-26T00:00:00Z",
+      limit: 50,
+    })).toBe(false)
     expect(researchEvalBarRequestMatchesFixture({
       timeframe: "1Day",
       start: "2026-06-16T00:00:00.000Z",
@@ -133,6 +184,97 @@ describe("research behavior evaluation", () => {
       expect(live.map(({ id: liveId }) => liveId)).toContain(id)
     }
     expect(live.every(({ graderOnly }) => graderOnly !== true)).toBe(true)
+  })
+
+  it("applies complete V7 workflow expectations to live proposal scenarios", () => {
+    const seriesChecks = ["TSLA", "NVDA", "AMD", "SPY"].flatMap((symbols) => [
+      {
+        pattern: "alpaca_get_stock_bars",
+        input: { symbols, timeframe: "1Day", adjustment: "all", feed: "iex" },
+        minimum: 1,
+        maximum: 1,
+      },
+      {
+        pattern: "alpaca_get_stock_bars",
+        input: { symbols, timeframe: "1Min", feed: "iex" },
+        minimum: 1,
+        maximum: 1,
+      },
+      {
+        pattern: "alpaca_get_stock_latest_quote",
+        input: { symbols, feed: "iex" },
+        minimum: 1,
+        maximum: 1,
+      },
+    ])
+    const eventChecks = [
+      {
+        pattern: "fmp_calendar",
+        input: {
+          endpoint: "earnings-company",
+          symbol: "TSLA",
+          from_date: "2026-08-26",
+          to_date: "2026-09-16",
+        },
+        minimum: 1,
+        maximum: 1,
+      },
+      {
+        pattern: "fmp_calendar",
+        input: {
+          endpoint: "dividends-company",
+          symbol: "TSLA",
+          from_date: "2026-08-26",
+          to_date: "2026-09-16",
+        },
+        minimum: 1,
+        maximum: 1,
+      },
+      {
+        pattern: "fmp_economics",
+        input: {
+          endpoint: "economics-calendar",
+          from_date: "2026-08-26",
+          to_date: "2026-09-16",
+        },
+        minimum: 1,
+        maximum: 1,
+      },
+    ]
+
+    for (const scenarioId of [
+      "valid-adversarial-proposal",
+      "prompt-injection-ignored",
+    ]) {
+      const scenario = researchBehaviorScenarios.find(({ id }) => id === scenarioId)
+      if (scenario === undefined) throw new Error(`Missing ${scenarioId} scenario`)
+      const expected = liveExpectation(scenario.id, scenario.expected)
+
+      expect(expected.requiredTools).toEqual(expect.arrayContaining([
+        "fmp_calendar",
+        "fmp_economics",
+        "alpaca_get_option_snapshot",
+      ]))
+      expect(expected.completedToolCounts).toEqual(expect.arrayContaining([
+        { pattern: "alpaca_get_stock_bars", minimum: 8, maximum: 8 },
+        { pattern: "alpaca_get_stock_latest_quote", minimum: 4, maximum: 4 },
+        { pattern: "fmp_calendar", minimum: 2, maximum: 2 },
+        { pattern: "fmp_economics", minimum: 1, maximum: 1 },
+      ]))
+      expect(expected.completedToolInputCounts).toEqual(
+        expect.arrayContaining([...seriesChecks, ...eventChecks]),
+      )
+      expect(expected.expectedProposalCandidate).toMatchObject({
+        underlying: "TSLA",
+        strategy: "BULL_CALL_SPREAD",
+        legs: [
+          { positionIntent: "BUY_TO_OPEN", ratioQuantity: 1 },
+          { positionIntent: "SELL_TO_OPEN", ratioQuantity: 1 },
+        ],
+      })
+      expect(expected.expectedProposalCandidate).not.toHaveProperty("structure")
+      expect(expected.expectedCandidateEvaluation).not.toHaveProperty("dte")
+    }
   })
 
   it("enforces the tool-call budgets", () => {
@@ -584,7 +726,7 @@ describe("research behavior evaluation", () => {
 
   it("binds required fixture source publication and retrieval times", () => {
     const source = researchBehaviorScenarios[8]!
-    const expected = liveExpectation(source.id, source.expected)
+    const expected = v6ProposalFixtureExpectation(source.expected)
     const makeReport = (timestampField: "publishedAt" | "retrievedAt") => {
       const report = JSON.parse(source.rawResponse) as {
         analysis: { externalContext: Array<Record<string, unknown>> }
@@ -798,6 +940,7 @@ describe("research behavior evaluation", () => {
     expect(injectionWithoutSnapshot.dimensions.toolDiscipline.issueCodes).toEqual([
       "REQUIRED_TOOL_MISSING",
       "TOOL_COUNT_INVALID",
+      "TOOL_INPUT_COUNT_INVALID",
       "TOOL_ORDER_INVALID",
     ])
     expect(withoutRefresh.dimensions.toolDiscipline.issueCodes).toEqual([
@@ -851,7 +994,7 @@ describe("research behavior evaluation", () => {
       rawResponse: JSON.stringify(mislabeledIrrelevantReport),
       expected: liveExpectation(irrelevant.id, irrelevant.expected),
     })
-    const validExpectation = liveExpectation(valid.id, valid.expected)
+    const validExpectation = v6ProposalFixtureExpectation(valid.expected)
     const proposalWithClosedOrderQuery = evaluateResearchBehavior({
       ...valid,
       scenarioId: "proposal-with-closed-order-query",
@@ -923,7 +1066,7 @@ describe("research behavior evaluation", () => {
             scenario.toolCalls[firstExaIndex]!,
             ...withoutFirstExa.slice(accountTimeIndex + 1),
           ],
-          expected: liveExpectation(scenario.id, scenario.expected),
+          expected: v6ProposalFixtureExpectation(scenario.expected),
         })
       },
     )
