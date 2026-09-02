@@ -1,0 +1,48 @@
+{
+  "backtestVersion": "2.0.0",
+  "experimentId": "historical-smoke-aapl-v1",
+  "capability": "HISTORICAL_CHAIN_REPLAY",
+  "databasePath": "workspace/backtest-v2/datasets/historical-options.sqlite",
+  "datasetId": "historical-smoke-aapl-v1",
+  "universeId": "golden-tech-options-v1",
+  "replaySelection": {
+    "startDate": "2025-01-02",
+    "endDate": "2025-01-03",
+    "timezone": "America/New_York",
+    "symbols": ["AAPL"]
+  },
+  "signals": [
+    {
+      "decisionId": "aapl-bullish-2025-01-02",
+      "decisionAt": "2025-01-02T10:00:00.000-05:00",
+      "symbol": "AAPL",
+      "direction": "BULLISH",
+      "exitAt": "2025-01-03T15:00:00.000-05:00"
+    }
+  ],
+  "selector": {
+    "minDte": 10,
+    "maxDte": 30,
+    "minWidthHalfCents": 1000,
+    "maxWidthHalfCents": 1000,
+    "maxQuoteAgeMilliseconds": 5000
+  },
+  "execution": {
+    "latencyMilliseconds": 1000,
+    "slippageHalfCentsPerLeg": 1,
+    "commissionCentsPerContract": 65,
+    "missingQuote": "INCOMPLETE_RUN"
+  },
+  "exitPolicy": {
+    "profitTargetBps": 2500,
+    "stopLossBps": 5000,
+    "expirationGuardDte": 3,
+    "priority": ["EXPIRATION_GUARD", "STOP_LOSS", "PROFIT_TARGET", "MAX_HOLD"]
+  },
+  "portfolio": {
+    "initialCapitalCents": 1000000,
+    "quantity": 1,
+    "maxConcurrentPositions": 1,
+    "endOfTest": "LIQUIDATE_AT_END"
+  }
+}

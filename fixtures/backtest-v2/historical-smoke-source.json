@@ -1,0 +1,129 @@
+{
+  "sourceVersion": "2.0.0",
+  "datasetId": "historical-smoke-aapl-v1",
+  "universeId": "golden-tech-options-v1",
+  "evidenceTier": "TEST_FIXTURE_REPLAY",
+  "provider": "COMMITTED_FIXTURE",
+  "feed": "TEST_BID_ASK",
+  "timezone": "America/New_York",
+  "requestedStartDate": "2025-01-02",
+  "requestedEndDate": "2025-01-03",
+  "sessions": [
+    {
+      "sessionDate": "2025-01-02",
+      "openAt": "2025-01-02T09:30:00.000-05:00",
+      "closeAt": "2025-01-02T16:00:00.000-05:00"
+    },
+    {
+      "sessionDate": "2025-01-03",
+      "openAt": "2025-01-03T09:30:00.000-05:00",
+      "closeAt": "2025-01-03T16:00:00.000-05:00"
+    }
+  ],
+  "underlyingBars": [
+    {
+      "barId": "aapl-2025-01-02-095958",
+      "symbol": "AAPL",
+      "observedAt": "2025-01-02T09:59:58.000-05:00",
+      "availableAt": "2025-01-02T09:59:59.000-05:00",
+      "closeHalfCents": 38000
+    },
+    {
+      "barId": "aapl-2025-01-03-145958",
+      "symbol": "AAPL",
+      "observedAt": "2025-01-03T14:59:58.000-05:00",
+      "availableAt": "2025-01-03T14:59:59.000-05:00",
+      "closeHalfCents": 38600
+    }
+  ],
+  "contracts": [
+    {
+      "contractId": "aapl-2025-01-17-c-190",
+      "optionSymbol": "AAPL250117C00190000",
+      "underlying": "AAPL",
+      "right": "CALL",
+      "strikeHalfCents": 38000,
+      "expirationDate": "2025-01-17",
+      "multiplier": 100,
+      "listedAt": "2024-12-02T09:30:00.000-05:00"
+    },
+    {
+      "contractId": "aapl-2025-01-17-c-195",
+      "optionSymbol": "AAPL250117C00195000",
+      "underlying": "AAPL",
+      "right": "CALL",
+      "strikeHalfCents": 39000,
+      "expirationDate": "2025-01-17",
+      "multiplier": 100,
+      "listedAt": "2024-12-02T09:30:00.000-05:00"
+    }
+  ],
+  "quotes": [
+    {
+      "quoteId": "aapl-c190-decision",
+      "contractId": "aapl-2025-01-17-c-190",
+      "observedAt": "2025-01-02T09:59:58.000-05:00",
+      "availableAt": "2025-01-02T09:59:59.000-05:00",
+      "bidHalfCents": 990,
+      "askHalfCents": 1000,
+      "bidSize": 20,
+      "askSize": 20,
+      "sourceSequence": 1
+    },
+    {
+      "quoteId": "aapl-c195-decision",
+      "contractId": "aapl-2025-01-17-c-195",
+      "observedAt": "2025-01-02T09:59:58.000-05:00",
+      "availableAt": "2025-01-02T09:59:59.000-05:00",
+      "bidHalfCents": 400,
+      "askHalfCents": 410,
+      "bidSize": 20,
+      "askSize": 20,
+      "sourceSequence": 1
+    },
+    {
+      "quoteId": "aapl-c190-entry",
+      "contractId": "aapl-2025-01-17-c-190",
+      "observedAt": "2025-01-02T10:00:00.000-05:00",
+      "availableAt": "2025-01-02T10:00:01.000-05:00",
+      "bidHalfCents": 990,
+      "askHalfCents": 1000,
+      "bidSize": 20,
+      "askSize": 20,
+      "sourceSequence": 2
+    },
+    {
+      "quoteId": "aapl-c195-entry",
+      "contractId": "aapl-2025-01-17-c-195",
+      "observedAt": "2025-01-02T10:00:00.000-05:00",
+      "availableAt": "2025-01-02T10:00:01.000-05:00",
+      "bidHalfCents": 400,
+      "askHalfCents": 410,
+      "bidSize": 20,
+      "askSize": 20,
+      "sourceSequence": 2
+    },
+    {
+      "quoteId": "aapl-c190-exit",
+      "contractId": "aapl-2025-01-17-c-190",
+      "observedAt": "2025-01-03T14:59:59.000-05:00",
+      "availableAt": "2025-01-03T15:00:00.000-05:00",
+      "bidHalfCents": 1400,
+      "askHalfCents": 1410,
+      "bidSize": 20,
+      "askSize": 20,
+      "sourceSequence": 3
+    },
+    {
+      "quoteId": "aapl-c195-exit",
+      "contractId": "aapl-2025-01-17-c-195",
+      "observedAt": "2025-01-03T14:59:59.000-05:00",
+      "availableAt": "2025-01-03T15:00:00.000-05:00",
+      "bidHalfCents": 590,
+      "askHalfCents": 600,
+      "bidSize": 20,
+      "askSize": 20,
+      "sourceSequence": 3
+    }
+  ]
+}

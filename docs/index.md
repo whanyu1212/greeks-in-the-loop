@@ -31,3 +31,5 @@ Start with:
 - [Risk Engine V1](/risk-engine-v1)
 - [Event Ledger V3](/event-ledger-v1)
 - [Deterministic replay](/backtest-replay-v1)
+- [Backtesting V2 plan](/backtest-v2-plan)
+- [Backtesting V2 forward-data helper](/backtest-v2-helper)

@@ -51,6 +51,8 @@ export default withMermaid(defineConfig({
           { text: 'Offline Research Evaluation', link: '/research-evaluation' },
           { text: 'Research Behavior Evaluation', link: '/research-behavior-evaluation' },
           { text: 'Deterministic Replay', link: '/backtest-replay-v1' },
+          { text: 'Backtesting V2 Plan', link: '/backtest-v2-plan' },
+          { text: 'Backtesting V2 Data Helper', link: '/backtest-v2-helper' },
         ],
       },
       {

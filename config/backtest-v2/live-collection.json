@@ -1,0 +1,17 @@
+{
+  "configVersion": "1.0.0",
+  "databasePath": "workspace/backtest-v2/live-collection/options-forward.sqlite",
+  "symbols": ["SPY", "QQQ", "SLV", "GLD", "IWM", "MU", "TSLA", "META"],
+  "feed": "indicative",
+  "stockFeed": "iex",
+  "minDte": 7,
+  "maxDte": 45,
+  "minMoneyness": 0.8,
+  "maxMoneyness": 1.2,
+  "pollSeconds": 60,
+  "contractRefreshMinutes": 15,
+  "snapshotBatchSize": 100,
+  "requestTimeoutMilliseconds": 30000,
+  "freshQuoteMilliseconds": 60000,
+  "researchArtifactRoot": "workspace/research"
+}

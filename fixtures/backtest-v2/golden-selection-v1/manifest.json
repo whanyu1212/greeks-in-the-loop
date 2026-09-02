@@ -1,0 +1,19 @@
+{
+  "datasetVersion": "2.0.0",
+  "datasetId": "golden-selection-v1",
+  "evidenceTier": "FIXTURE_SELECTION_ONLY",
+  "universeId": "golden-tech-options-v1",
+  "timezone": "America/New_York",
+  "startDate": "2025-01-02",
+  "endDate": "2025-01-03",
+  "coveredSymbols": [
+    "AAPL", "ADBE", "ADI", "ADSK", "ALAB", "AMAT", "AMD", "APP",
+    "ARM", "ASML", "AVGO", "CDNS", "CRWD", "CRWV", "DASH", "DDOG",
+    "FTNT", "GOOG", "GOOGL", "INTC", "INTU", "KLAC", "LITE", "LRCX",
+    "MCHP", "META", "MPWR", "MRVL", "MSFT", "MSTR", "MU", "NBIS",
+    "NVDA", "NXPI", "PANW", "PDD", "PLTR", "QCOM", "ROP", "SHOP",
+    "SNDK", "SNPS", "STX", "TER", "TRI", "TXN", "WDAY", "WDC"
+  ],
+  "sessionDates": ["2025-01-02", "2025-01-03"],
+  "source": "COMMITTED_FIXTURE"
+}
