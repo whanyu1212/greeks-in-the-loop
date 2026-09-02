@@ -53,6 +53,18 @@ describe("research agent policy", () => {
     expect(hasFrontmatterLine(research.frontmatter, "  reasoningEffort: xhigh")).toBe(true)
   })
 
+  it("pins a reasoning effort the configured provider accepts", () => {
+    // An unsupported effort is rejected per request and retried inside
+    // OpenCode, so the cycle stalls silently until its deadline instead of
+    // failing. Catch it here rather than in a live run.
+    const model = /^model:\s*(\S+)$/mu.exec(research.frontmatter)?.[1]
+    const effort = /^\s+reasoningEffort:\s*(\S+)$/mu.exec(research.frontmatter)?.[1]
+    expect(model).toBeDefined()
+    if (model?.startsWith("opencode-go/")) {
+      expect(["low", "high", "max"]).toContain(effort)
+    }
+  })
+
   it("denies unknown capabilities and permits only reviewed research MCP patterns", () => {
     for (const line of [
       '  "*": deny',

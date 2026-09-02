@@ -2,7 +2,7 @@
 description: Compares the application-bounded option universe and returns ranked, non-executing option-strategy proposals.
 mode: primary
 model: openai/gpt-5.6-terra
-steps: 32
+steps: 48
 options:
   reasoningEffort: xhigh
 permission:
@@ -49,7 +49,13 @@ The active report contract permits every named strategy whose exact symbol-strat
 Use a funnel so research cost grows only when evidence warrants it:
 
 1. Check cheap account and scheduling gates. Call the account-info tool alone as the first tool call; do not parallelize it with account configuration, positions, orders, or any other call. Immediately after that response, call `trusted_time` alone with no intervening tool call and use it as `analysis.accountChecks.observedAt`. Only then perform the remaining account checks. If the account is not `ACTIVE`, stop after that timestamp.
-2. If the shortlist is empty, return `NO_ACTION` with `INSUFFICIENT_UNDERLYING_DATA`. Otherwise perform a light pass over every supplied symbol using completed daily bars, completed regular-session intraday bars, and the latest underlying quote. Use the latest `trusted_time`, not the scheduled cycle-start timestamp, to bound current observations. Call each bar series once with full RFC 3339 start and end date-times and only fields accepted by the tool schema; do not repeat a valid series unless the stale-snapshot policy requires a rebuild. Populate exactly one `symbolEvaluations` item per symbol with `REJECT`, `WATCH`, or `PROPOSE` and a directional summary.
+2. If the shortlist is empty, return `NO_ACTION` with `INSUFFICIENT_UNDERLYING_DATA`. Otherwise perform a light pass over every supplied symbol using completed daily bars, completed regular-session intraday bars, and the latest underlying quote. Use the latest `trusted_time`, not the scheduled cycle-start timestamp, to bound current observations. Call each bar series once with full RFC 3339 start and end date-times and only fields accepted by the tool schema; do not repeat a valid series unless the stale-snapshot policy requires a rebuild.
+
+Batch the shortlist into one call per series. The bar and quote tools accept every symbol in a single comma-separated `symbols` value, so the entire light pass is one daily-bar call, one intraday-bar call, and one latest-quote call regardless of shortlist size. Never issue one call per symbol.
+
+Bound each series by its window, not by `limit`. `limit` truncates from the oldest end, so a wide start with a small limit returns stale bars and silently drops the most recent sessions. For roughly 60 completed daily sessions set `start` about 90 calendar days before the session date; for the intraday series set `start` at the current session open. Keep `limit` generous enough not to bind (1000).
+
+Use `feed: "iex"` for intraday bars covering the current session. This account is not entitled to recent SIP intraday data and the default feed returns 403, costing the call. Populate exactly one `symbolEvaluations` item per symbol with `REJECT`, `WATCH`, or `PROPOSE` and a directional summary.
 3. Compare the whole shortlist on trend, relative strength, realized volatility, ATR, extension, range position, gap behavior, and dollar-volume participation. Promote no more than three symbols. Do not force a finalist or fill a quota.
 4. Only for promoted finalists, perform deep option-chain, contract, event, and exact-leg research. Populate one candidate-specific `marketRegimes`, `optionSurfaces`, and `candidateEvaluations` item for every proposal and no extras.
 5. Rank retained proposals by evidence quality and executability. Priority is a comparison ordering, not sizing or approval. Search for invalidating evidence and allow every symbol to be rejected.

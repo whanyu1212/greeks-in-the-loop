@@ -61,7 +61,7 @@ describe("screenOptionUniverseV2", () => {
 
     expect(screen).toMatchObject({
       screenVersion: "2.0.0",
-      policyVersion: "3.0.0",
+      policyVersion: "4.0.0",
       mode: "SHADOW",
       evaluatedAt: "2026-08-26T14:30:00.000Z",
       symbols: [{ underlying: "SPY" }, { underlying: "QQQ" }],
@@ -148,11 +148,8 @@ describe("screenOptionUniverseV2", () => {
     })
     expect(assessment(screen, "QQQ", "BEAR_PUT_SPREAD")).toMatchObject({
       actionability: "REJECTED",
-      reasonCodes: [
-        "LIQUID_CONTRACT_COUNT_LOW",
-        "OPEN_INTEREST_LOW",
-        "OPEN_INTEREST_COVERAGE_LOW",
-      ],
+      // Coverage is retained as evidence but no longer gates the screen.
+      reasonCodes: ["LIQUID_CONTRACT_COUNT_LOW", "OPEN_INTEREST_LOW"],
     })
   })
 

@@ -356,10 +356,14 @@ try {
     provider: riskStateProvider,
     durableControl: createLedgerDurableRiskControlStateLoader(activeLedgerStore),
   })
+  // Assigned per cycle so a retried provider stream is attributed to the
+  // cycle it stalls; OpenCode owns the subscription for the whole run.
+  let reportSessionError: ((detail: string) => void) | undefined
   const runtime = await startOpencode({
     port,
     signal: abortController.signal,
     timeoutMs: serverTimeout,
+    onSessionError: (detail) => reportSessionError?.(detail),
     environment: {
       ...process.env,
       EXECUTION_LEDGER_PATH: ledgerPath,
@@ -496,6 +500,8 @@ try {
           startedAt: cycle.startedAt,
           format: terminalLogFormat,
         })
+        reportSessionError = (detail) =>
+          stageReporter.report("research.agent.stream", "REJECTED", { detail })
         stageReporter.report("runtime.session", "COMPLETED", {
           sessionId,
           url: runtime.url,
@@ -564,6 +570,26 @@ try {
                     )
                     ? [symbol.underlying]
                     : [],
+                ),
+                // Which threshold cut each non-actionable symbol; the
+                // actionable count alone cannot say whether discovery or the
+                // screen policy is the binding constraint.
+                rejectionReasons: symbolScreen.symbols.flatMap((symbol) =>
+                  symbol.strategies.some(
+                      ({ actionability }) => actionability === "ACTIONABLE",
+                    )
+                    ? []
+                    : [
+                      `${symbol.underlying}=${
+                        [
+                          ...new Set(
+                            symbol.strategies.flatMap(
+                              ({ reasonCodes }) => reasonCodes,
+                            ),
+                          ),
+                        ].join("+") || "NONE"
+                      }`,
+                    ]
                 ),
               })
               const response = await cycleTrace.run(

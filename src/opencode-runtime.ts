@@ -41,6 +41,15 @@ type StartOpencodeOptions = {
   signal: AbortSignal
   /** Maximum time allowed for server startup, in milliseconds. */
   timeoutMs: number
+  /**
+   * Receives bounded provider-stream failures as OpenCode reports them.
+   *
+   * OpenCode retries a failed provider stream internally, so a rejected
+   * request (an unsupported reasoning effort, an expired key) otherwise
+   * presents as silence until the cycle deadline. This is diagnostic only and
+   * never terminates a cycle.
+   */
+  onSessionError?: (detail: string) => void
 }
 
 /**
@@ -161,6 +170,7 @@ export async function startOpencode({
   port,
   signal,
   timeoutMs,
+  onSessionError,
 }: StartOpencodeOptions): Promise<OpencodeRuntime> {
   signal.throwIfAborted()
   const configHome = mkdtempSync(join(tmpdir(), "greeks-opencode-"))
@@ -238,6 +248,28 @@ export async function startOpencode({
     fetch: (request) =>
       globalThis.fetch(request, { dispatcher } as RequestInit),
   })
+  if (onSessionError !== undefined) {
+    void (async () => {
+      try {
+        const events = await client.event.subscribe({ signal })
+        for await (const event of events.stream) {
+          if (event.type !== "session.error") continue
+          const error = event.properties.error
+          onSessionError(
+            error === undefined
+              ? "unknown"
+              : `${error.name}: ${String(
+                (error.data as { message?: unknown } | undefined)?.message ??
+                  "",
+              ).slice(0, 300)}`,
+          )
+        }
+      } catch {
+        // The event stream is diagnostic; losing it must not fail a cycle.
+      }
+    })()
+  }
+
   let closing: Promise<void> | undefined
 
   /**
