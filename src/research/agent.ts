@@ -16,7 +16,7 @@ import type { SymbolScreenResultV2 } from "./symbol-screen.js"
 /** Checked-in OpenCode primary agent used by every unattended cycle. */
 export const RESEARCH_AGENT_NAME = "research" as const
 /** Increment when the system prompt or cycle-request behavior changes. */
-export const RESEARCH_PROMPT_VERSION = "7.2.0" as const
+export const RESEARCH_PROMPT_VERSION = "7.3.0" as const
 
 /** Hard OpenCode turn bound mirrored by the checked-in agent configuration. */
 export const RESEARCH_MAX_AGENT_STEPS = 48
