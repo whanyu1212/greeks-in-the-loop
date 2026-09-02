@@ -75,7 +75,7 @@ describe("research agent request construction", () => {
         "Run structured research cycle 3 at 2026-08-25T13:30:00.000Z.",
         "The application-authoritative option universe follows. Copy it exactly into analysis.optionUniverse; do not add or substitute symbols.",
         JSON.stringify(optionUniverse),
-        "Lightly evaluate every shortlisted underlying (TSLA, NVDA, AMD), promote at most three to deep option research, and return either NO_ACTION or one to three ranked proposals using only exact ACTIONABLE symbol-strategy pairs from the application screen.",
+        "Lightly evaluate every shortlisted underlying (TSLA, NVDA, AMD), promote exactly one to deep option research or none, and return either NO_ACTION or a single proposal using only an exact ACTIONABLE symbol-strategy pair from the application screen.",
         "Current operator objective: Compare downside catalysts.",
       ].join("\n"),
     )

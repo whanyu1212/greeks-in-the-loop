@@ -103,7 +103,7 @@ export function buildResearchCyclePrompt(
     JSON.stringify(optionUniverse),
     underlyings.length === 0
       ? "The dynamic shortlist is empty. Return NO_ACTION with INSUFFICIENT_UNDERLYING_DATA and do not substitute a symbol."
-      : `Lightly evaluate every shortlisted underlying (${underlyings.join(", ")}), promote at most three to deep option research, and return either NO_ACTION or one to three ranked proposals using only exact ACTIONABLE symbol-strategy pairs from the application screen.`,
+      : `Lightly evaluate every shortlisted underlying (${underlyings.join(", ")}), promote exactly one to deep option research or none, and return either NO_ACTION or a single proposal using only an exact ACTIONABLE symbol-strategy pair from the application screen.`,
     symbolScreen
       ? [
           "The application-authoritative symbol-strategy screen follows. Return a proposal only for an exact underlying and strategy pair marked ACTIONABLE. WATCH, REJECTED, and UNAVAILABLE pairs are not proposal candidates; catalog presence, Alpaca capability, or account approval does not override this screen.",
@@ -125,7 +125,7 @@ export function buildResearchCyclePrompt(
             : undefined,
           JSON.stringify(eligibility),
           eligibility.tradeIntentEligible
-            ? "Fresh PROPOSE_TRADES candidates may be returned if every strategy requirement passes. Rank them by priority; deterministic code independently evaluates each and selects within current portfolio capacity."
+            ? "A fresh PROPOSE_TRADES candidate may be returned if every strategy requirement passes. Deterministic code independently evaluates it and selects within current portfolio capacity."
             : "Do not return PROPOSE_TRADES. Return NO_ACTION with MARKET_WINDOW_INELIGIBLE while retaining useful research in analysis.",
         ]
           .filter((line) => line !== undefined)
