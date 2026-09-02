@@ -37,10 +37,11 @@ describe("ResearchInvocationV1", () => {
       "7.4.0",
       "7.5.0",
       "7.6.0",
+      "7.7.0",
     ])
     expect(RESEARCH_INVOCATION_PROVENANCE_BY_VERSION[RESEARCH_INVOCATION_VERSION]).toEqual({
       agentName: "research",
-      promptVersion: "7.5.0",
+      promptVersion: "7.6.0",
       decisionContractVersion: "4.0.0",
       reportVersion: "7.0.0",
       providerId: "openai",

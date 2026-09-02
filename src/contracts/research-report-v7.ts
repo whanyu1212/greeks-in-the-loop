@@ -300,11 +300,11 @@ export const researchReportV7Schema = z
       })
     }
     report.analysis.symbolIndicators?.forEach((indicator, index) => {
+      // Only the metrics that gate a decision are required. The rest stayed
+      // mandatory long after they stopped deciding anything, and demanding
+      // them cost model reasoning on every cycle without changing an outcome.
       for (const metric of [
-        "atrPercent20",
         "ewmaRealizedVolatility20",
-        "sma20Slope5d",
-        "completedSessionDollarVolumeRatio20",
         "rangePosition20",
       ] as const) {
         if (indicator[metric] === undefined) {
@@ -420,19 +420,15 @@ export const researchReportV7Schema = z
           message: "A proposal requires an identified option quote feed",
         })
       }
-      for (const metric of [
-        "termStructureSlope",
-        "putCallSkew25Delta",
-        "verticalLegIvDifference",
-        "smileCurvature",
-      ] as const) {
-        if (surface[metric] === undefined) {
-          refinement.addIssue({
-            code: "custom",
-            path: ["analysis", "optionSurfaces", surfaceIndex, metric],
-            message: "A proposal requires every option-surface dimension",
-          })
-        }
+      // `ivRvVarianceSpread` gates the structure choice and is cross-checked
+      // below; the remaining surface dimensions are retained when observed but
+      // no longer required, for the same reason as the indicators above.
+      if (surface.verticalLegIvDifference === undefined) {
+        refinement.addIssue({
+          code: "custom",
+          path: ["analysis", "optionSurfaces", surfaceIndex, "verticalLegIvDifference"],
+          message: "A proposal requires the vertical leg IV difference",
+        })
       }
       if (
         surface.eventRisk.status === "UNKNOWN" ||
