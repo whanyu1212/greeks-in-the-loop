@@ -25,6 +25,7 @@
     "research:eval:live": "tsx src/evaluation/research-behavior-evaluate-cli.ts",
     "research:run": "tsx src/research/run/cli.ts",
     "risk:report": "tsx src/risk/risk-report-cli.ts",
+    "execute:mock": "tsx src/execution/execute-mock-trade-cli.ts",
     "backtest": "tsx src/backtest/backtest-cli.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",

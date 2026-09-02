@@ -39,6 +39,7 @@ describe("parseAgentOptions", () => {
       "--session requires --dry-run",
     )
     expect(() => parseAgentOptions(["--research-anytime"])).toThrow("Unknown option")
+    expect(() => parseAgentOptions(["--execute"])).toThrow("Unknown option")
     expect(() =>
       parseAgentOptions(
         ["--once", "--dry-run", "--ledger", ".state/live.sqlite"],

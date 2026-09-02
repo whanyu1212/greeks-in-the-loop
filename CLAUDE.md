@@ -13,6 +13,7 @@ pnpm research:run
 pnpm research:evaluate
 pnpm risk:report
 pnpm backtest -- --scenarios <json> [--output <json>]
+pnpm execute:mock -- --long <OCC> --short <OCC> [--confirm]
 ```
 
 Run one test with `pnpm vitest run tests/<file>.test.ts`. Node 22 and pnpm 10 are enforced.
@@ -27,7 +28,8 @@ The agent proposes; deterministic code disposes.
 - Only candidate identity crosses from research into risk. Application code refreshes quotes, contracts, account state, portfolio state, and clock data.
 - Application code calculates position-weighted Greeks from refreshed ordered legs; signed directional net delta is the hard Greek limit for bullish and bearish strategies.
 - Money is integer cents; exit marks are half-cents per share.
-- Only the isolated `trader` agent may submit an order, and only from an immutable, unexpired, application-derived authorization through the paper-pinned Alpaca MCP. Research remains non-executing.
+- The unwired order-submission foundation lives in `src/execution/`. Only the explicit mock harness reaches it, after an `APPROVED` shadow decision is durably recorded; the ordinary worker has no broker-submission callsite.
+- No agent has execution authority. Per architecture plan section 6.A, deterministic code calls the Alpaca paper Trading API; the Alpaca MCP mutation tool is never enabled for a model. The `trader` agent and its authorization modules remain in the tree but are not wired into the executing path.
 
 ## Pipeline
 
@@ -41,8 +43,7 @@ OptionUniverseSnapshotV2
   -> capture application-owned risk state
   -> refresh TradeIntentV4
   -> evaluateTradeIntentRiskV1
-  -> append ledger events, including any eligible paper authorization
-  -> isolated trader resolves the opaque authorization ID
+  -> append ledger events
 ```
 
 `src/index.ts` is the composition root. `src/research/cycle.ts` orchestrates one cycle.
@@ -56,6 +57,7 @@ OptionUniverseSnapshotV2
 - `src/scheduling/`: standard and dry-run eligibility.
 - `src/event-ledger/`: append-only lifecycle with PostgreSQL deployment and deprecated SQLite local/test adapters isolated under `deprecated/`.
 - `src/backtest/`: self-contained deterministic replay.
+- `src/execution/`: pure order derivation, the only broker-mutating client, and crash-safe submission.
 
 `opencode.json` is globally deny-by-default. The checked-in `research` agent has read-only market authority and no arbitrary skill-loading, shell, subagent, web, or broker-mutation authority. The separate `trader` agent may resolve one opaque ledger authorization, read Alpaca state, and submit option orders only through the paper-pinned Alpaca MCP; it has no stock, crypto, cancellation, replacement, filesystem, or external-research authority. The application invokes it in a separate session only for selected, risk-approved, positive-debit multi-leg authorizations. Credit, single-leg, expired, dry-run, and non-paper paths remain non-executing.
 
@@ -64,6 +66,21 @@ OptionUniverseSnapshotV2
 Current breaking contracts are `OptionUniverseSnapshotV2`, `ResearchDecisionV4`, `ResearchReportV7`, and `TradeIntentV4`. Persisted V3/V6 decisions, reports, and trade intents remain readable. Schemas are strict on proposal paths; safe `NO_ACTION` strips irrelevant prose. Do not add other compatibility parsers without an explicit requirement.
 
 Failures expose bounded reason codes, never raw model or provider input.
+
+## Execution
+
+`ORDER_SUBMITTED` is appended before the broker call, so an interrupted attempt
+is always recoverable by client order id; reconciliation never resubmits. A
+failed lookup and a recent confirmed 404 remain non-terminal. The cycle id is
+the idempotency key in both the ledger (partial unique index) and at the broker
+(`client_order_id`). SQLite migrations 008-009 and PostgreSQL migrations
+003-005 make an order that skipped the risk gate or a terminal event that does
+not match its exact submission unrepresentable.
+
+`pnpm execute:mock` drives one real paper order using real quotes and the real
+risk function over synthetic account, portfolio, contract, and window state. Use
+it to exercise the otherwise-unwired execution path; it refuses the production
+ledger and any non-paper endpoint.
 
 ## Backtest
 

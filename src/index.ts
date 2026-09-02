@@ -4,8 +4,8 @@
  * The worker starts a managed local OpenCode server, creates an isolated session
  * for each sequential research cycle, and runs until a process signal or cycle
  * limit stops it. Every cycle selects the checked-in, deny-by-default research
- * agent and may hand one immutable authorization to a separate trader session,
- * while `startOpencode` owns cleanup of the server and its MCP descendants.
+ * agent, while `startOpencode` owns cleanup of the server and its MCP
+ * descendants.
  */
 
 import { randomUUID } from "node:crypto"
@@ -33,8 +33,6 @@ import {
   resolveLedgerBackendConfiguration,
 } from "./event-ledger/ledger-backend.js"
 import type { LedgerStore } from "./event-ledger/ledger-store.js"
-import { resolveExecutionAuthorizationV1 } from "./execution/authorization-v1.js"
-import { invokePaperTrader } from "./execution/paper-trader.js"
 import { createAlpacaOptionQuoteProvider } from "./market-data/alpaca-option-quotes.js"
 import { createAlpacaOptionUniverseProvider } from "./market-data/alpaca-option-universe.js"
 import { createAlpacaCalendarClient } from "./market-data/alpaca-calendar-client.js"
@@ -399,14 +397,15 @@ try {
               calendarSignal,
               dryRun && agentOptions.sessionDate === undefined,
             )
+            const scheduled = evaluateResearchEligibility({
+              evaluatedAt: eligibilityEvaluatedAt,
+              ...(session === undefined ? {} : { session }),
+              premarketStartEt,
+              ...(researchMode === undefined ? {} : { researchMode }),
+            })
             return {
               session,
-              initialEligibility: evaluateResearchEligibility({
-                evaluatedAt: eligibilityEvaluatedAt,
-                ...(session === undefined ? {} : { session }),
-                premarketStartEt,
-                ...(researchMode === undefined ? {} : { researchMode }),
-              }),
+              initialEligibility: scheduled,
             }
           },
         )
@@ -768,59 +767,6 @@ try {
             },
           })
           cycleTrace.setOutcome(processed.outcome.status)
-          let paperTraderStatus: string | undefined
-          if (!dryRun) {
-            let authorization
-            try {
-              authorization = await resolveExecutionAuthorizationV1(
-                activeLedgerStore,
-                cycle.cycleId,
-              )
-            } catch (error) {
-              throw new LedgerPersistenceError(
-                "execution-authorization query",
-                error,
-              )
-            }
-            if (authorization.status === "AUTHORIZED") {
-              stageReporter.report("paper-trader.handoff", "STARTED", {
-                authorizationId: authorization.authorization.authorizationId,
-              })
-              const result = await invokePaperTrader({
-                client: runtime.client,
-                authorization: authorization.authorization,
-                signal: abortController.signal,
-              })
-              try {
-                await activeLedgerStore.append(
-                  {
-                    eventId: randomUUID(),
-                    eventVersion: LEDGER_EVENT_VERSION,
-                    eventType: "PAPER_TRADER_RESULT_RECORDED",
-                    occurredAt: new Date().toISOString(),
-                    correlationId: cycle.correlationId,
-                    causationEventId: authorization.eventId,
-                    cycleId: cycle.cycleId,
-                    sessionId: cycle.sessionId,
-                    payload: { result },
-                  },
-                  abortController.signal,
-                )
-              } catch (error) {
-                throw new LedgerPersistenceError("paper-trader result append", error)
-              }
-              paperTraderStatus = result.status
-              stageReporter.report(
-                "paper-trader.handoff",
-                result.status === "SUBMITTED" ? "COMPLETED" : "REJECTED",
-                {
-                  authorizationId: result.authorizationId,
-                  status: result.status,
-                  reasonCodes: result.reasonCodes,
-                },
-              )
-            }
-          }
           try {
             const artifacts = await cycleTrace.run(
               "research.artifact.project",
@@ -858,9 +804,6 @@ try {
               `Audit: ${artifacts.presentation.audit.passCount} PASS / ${artifacts.presentation.audit.failCount} FAIL / ${artifacts.presentation.audit.notApplicableCount} N/A`,
               `Research brief: ${artifacts.markdownPath}`,
               `Canonical JSON: ${artifacts.jsonPath}`,
-              ...(paperTraderStatus === undefined
-                ? []
-                : [`Paper trader: ${paperTraderStatus}`]),
             ].join("\n")
           } catch {
             stageReporter.report("artifact.write", "REJECTED", {
@@ -869,11 +812,10 @@ try {
             console.error(
               `[cycle ${cycleNumber}] validated outcome recorded, but research artifact could not be written`,
             )
-            return `${processed.report}\nResearch artifacts: unavailable${
-              paperTraderStatus === undefined
-                ? ""
-                : `\nPaper trader: ${paperTraderStatus}`
-            }`
+            return [
+              processed.report,
+              "Research artifacts: unavailable",
+            ].join("\n")
           }
         } catch (error) {
           if (error instanceof LedgerPersistenceError) {

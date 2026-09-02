@@ -230,6 +230,248 @@ export const POSTGRES_LEDGER_MIGRATIONS: readonly PostgresLedgerMigration[] = [
         WHERE event_type = 'RISK_SHADOW_DECISION_RECORDED';
     `,
   },
+  {
+    id: "003_deterministic_order_execution",
+    sql: `
+      -- Plan section 5: at most one new approved entry per scheduled cycle.
+      CREATE UNIQUE INDEX ledger_events_one_order_submission
+        ON ledger_events(cycle_id)
+        WHERE event_type = 'ORDER_SUBMITTED';
+
+      CREATE UNIQUE INDEX ledger_events_one_order_terminal
+        ON ledger_events(cycle_id)
+        WHERE event_type IN ('ORDER_FILLED', 'ORDER_REJECTED');
+
+      CREATE OR REPLACE FUNCTION ledger_events_validate_order_insert()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $ledger_order_insert$
+      BEGIN
+        -- Plan section 3: the executor consumes only a risk-approved plan, so
+        -- an order that skipped the gate is unrepresentable.
+        IF NEW.event_type = 'ORDER_SUBMITTED'
+          AND (
+            NEW.cycle_id IS NULL OR NOT EXISTS (
+              SELECT 1
+              FROM ledger_events
+              WHERE event_id = NEW.causation_event_id
+                AND cycle_id = NEW.cycle_id
+                AND event_type = 'RISK_SHADOW_DECISION_RECORDED'
+                AND payload_json #>> '{decision,stage}' = 'EVALUATED'
+                AND payload_json #>> '{decision,outcome}' = 'APPROVED'
+            )
+          )
+        THEN
+          RAISE EXCEPTION 'order submission must follow approved risk';
+        END IF;
+
+        IF NEW.event_type IN ('ORDER_FILLED', 'ORDER_REJECTED')
+          AND (
+            NEW.cycle_id IS NULL OR NOT EXISTS (
+              SELECT 1
+              FROM ledger_events
+              WHERE cycle_id = NEW.cycle_id
+                AND event_type = 'ORDER_SUBMITTED'
+            )
+          )
+        THEN
+          RAISE EXCEPTION 'order terminal must follow its submission';
+        END IF;
+
+        RETURN NEW;
+      END
+      $ledger_order_insert$;
+
+      CREATE TRIGGER ledger_events_validate_order_insert_trigger
+      BEFORE INSERT ON ledger_events
+      FOR EACH ROW EXECUTE FUNCTION ledger_events_validate_order_insert();
+
+      -- Deterministic execution runs after the cycle terminal, so order events
+      -- join the paper-trader result as the kinds allowed to land afterwards.
+      CREATE OR REPLACE FUNCTION ledger_events_validate_insert()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $ledger_insert$
+      BEGIN
+        IF NEW.causation_event_id IS NOT NULL
+          AND NEW.causation_event_id = NEW.event_id
+        THEN
+          RAISE EXCEPTION 'an event cannot cause itself';
+        END IF;
+
+        IF NEW.cycle_id IS NOT NULL
+          AND NEW.event_type <> 'RESEARCH_CYCLE_STARTED'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE cycle_id = NEW.cycle_id
+              AND event_type = 'RESEARCH_CYCLE_STARTED'
+              AND correlation_id = NEW.correlation_id
+              AND session_id IS NOT DISTINCT FROM NEW.session_id
+          )
+        THEN
+          RAISE EXCEPTION 'cycle identity must match its cycle start';
+        END IF;
+
+        IF NEW.cycle_id IS NOT NULL
+          AND NEW.event_type <> 'RESEARCH_CYCLE_STARTED'
+          AND (
+            NEW.causation_event_id IS NULL OR NOT EXISTS (
+              SELECT 1
+              FROM ledger_events
+              WHERE event_id = NEW.causation_event_id
+                AND cycle_id IS NOT DISTINCT FROM NEW.cycle_id
+            )
+          )
+        THEN
+          RAISE EXCEPTION 'causation must reference the same research cycle';
+        END IF;
+
+        IF NEW.cycle_id IS NOT NULL
+          AND NEW.event_type NOT IN (
+            'PAPER_TRADER_RESULT_RECORDED',
+            'ORDER_SUBMITTED',
+            'ORDER_FILLED',
+            'ORDER_REJECTED'
+          )
+          AND EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE cycle_id = NEW.cycle_id
+              AND event_type IN (
+                'RESEARCH_CYCLE_COMPLETED',
+                'RESEARCH_CYCLE_INTERRUPTED'
+              )
+          )
+        THEN
+          RAISE EXCEPTION 'cannot append after a cycle terminal event';
+        END IF;
+
+        IF NEW.event_type = 'RISK_SHADOW_DECISION_RECORDED'
+          AND (
+            NEW.cycle_id IS NULL OR NOT EXISTS (
+              SELECT 1
+              FROM ledger_events
+              WHERE event_id = NEW.causation_event_id
+                AND cycle_id = NEW.cycle_id
+                AND event_type = 'TRADE_INTENT_DERIVED'
+            )
+          )
+        THEN
+          RAISE EXCEPTION 'shadow risk decision must follow its trade intent';
+        END IF;
+
+        IF NEW.event_type = 'RISK_BREAKER_LATCHED'
+          AND (
+            NEW.cycle_id IS NULL OR NOT EXISTS (
+              SELECT 1
+              FROM ledger_events
+              WHERE cycle_id = NEW.cycle_id
+                AND event_type = 'RISK_SHADOW_DECISION_RECORDED'
+            )
+          )
+        THEN
+          RAISE EXCEPTION 'breaker latch must follow a shadow risk decision';
+        END IF;
+
+        IF NEW.event_type = 'EXECUTION_AUTHORIZATION_RECORDED'
+          AND (
+            NEW.cycle_id IS NULL OR NOT EXISTS (
+              SELECT 1
+              FROM ledger_events
+              WHERE event_id = NEW.causation_event_id
+                AND cycle_id = NEW.cycle_id
+                AND event_type = 'RISK_SHADOW_DECISION_RECORDED'
+                AND payload_json #>> '{decision,stage}' = 'EVALUATED'
+                AND payload_json #>> '{decision,outcome}' = 'APPROVED'
+            )
+          )
+        THEN
+          RAISE EXCEPTION 'execution authorization must follow approved risk';
+        END IF;
+
+        IF NEW.event_type = 'PAPER_TRADER_RESULT_RECORDED'
+          AND (
+            NEW.cycle_id IS NULL OR NOT EXISTS (
+              SELECT 1
+              FROM ledger_events
+              WHERE event_id = NEW.causation_event_id
+                AND cycle_id = NEW.cycle_id
+                AND event_type = 'EXECUTION_AUTHORIZATION_RECORDED'
+            ) OR NOT EXISTS (
+              SELECT 1
+              FROM ledger_events
+              WHERE cycle_id = NEW.cycle_id
+                AND event_type = 'RESEARCH_CYCLE_COMPLETED'
+            )
+          )
+        THEN
+          RAISE EXCEPTION 'paper trader result must follow completed authorization';
+        END IF;
+
+        RETURN NEW;
+      END
+      $ledger_insert$;
+    `,
+  },
+  {
+    id: "004_exact_order_terminal_causation",
+    sql: `
+      CREATE OR REPLACE FUNCTION ledger_events_validate_order_terminal_identity()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $ledger_order_terminal_identity$
+      BEGIN
+        IF NEW.event_type IN ('ORDER_FILLED', 'ORDER_REJECTED')
+          AND (
+            NEW.cycle_id IS NULL OR NOT EXISTS (
+              SELECT 1
+              FROM ledger_events
+              WHERE event_id = NEW.causation_event_id
+                AND cycle_id = NEW.cycle_id
+                AND event_type = 'ORDER_SUBMITTED'
+                AND payload_json ->> 'clientOrderId' =
+                  NEW.payload_json ->> 'clientOrderId'
+            )
+          )
+        THEN
+          RAISE EXCEPTION 'order terminal must match its submission';
+        END IF;
+
+        RETURN NEW;
+      END
+      $ledger_order_terminal_identity$;
+
+      CREATE TRIGGER ledger_events_validate_order_terminal_identity_trigger
+      BEFORE INSERT ON ledger_events
+      FOR EACH ROW EXECUTE FUNCTION ledger_events_validate_order_terminal_identity();
+    `,
+  },
+  {
+    id: "005_restore_cycle_advisory_lock",
+    sql: `
+      -- Trigger names run alphabetically for the same timing/event. Acquire the
+      -- cycle lock before any trigger performs state-dependent validation.
+      CREATE FUNCTION ledger_events_lock_cycle_insert()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $ledger_cycle_lock$
+      BEGIN
+        IF NEW.cycle_id IS NOT NULL THEN
+          PERFORM pg_advisory_xact_lock(
+            hashtextextended('greeks-ledger-cycle:' || NEW.cycle_id, 0)
+          );
+        END IF;
+
+        RETURN NEW;
+      END
+      $ledger_cycle_lock$;
+
+      CREATE TRIGGER ledger_events_00_lock_cycle_insert
+      BEFORE INSERT ON ledger_events
+      FOR EACH ROW EXECUTE FUNCTION ledger_events_lock_cycle_insert();
+    `,
+  },
 ]
 
 const checksum = (sql: string) =>

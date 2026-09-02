@@ -25,6 +25,11 @@ import {
   riskBreakerTransitionV1Schema,
   shadowRiskDecisionV1Schema,
 } from "../risk/shadow-risk-v1.js"
+import {
+  orderFilledPayloadV1Schema,
+  orderRejectedPayloadV1Schema,
+  orderSubmittedPayloadV1Schema,
+} from "../execution/order-submission-v1.js"
 import { executionAuthorizationV1Schema } from "../execution/authorization-v1.js"
 import { paperTraderResultV1Schema } from "../execution/paper-trader-result-v1.js"
 
@@ -50,6 +55,9 @@ export const LEDGER_EVENT_TYPES = [
   "RESEARCH_LOOP_BREAKER_RESET",
   "RISK_SHADOW_DECISION_RECORDED",
   "RISK_BREAKER_LATCHED",
+  "ORDER_SUBMITTED",
+  "ORDER_FILLED",
+  "ORDER_REJECTED",
   "PORTFOLIO_SHADOW_PLAN_RECORDED",
   "EXECUTION_AUTHORIZATION_RECORDED",
   "PAPER_TRADER_RESULT_RECORDED",
@@ -240,6 +248,9 @@ const payloadSchemas = {
     })
     .strict(),
   RISK_BREAKER_LATCHED: riskBreakerTransitionV1Schema,
+  ORDER_SUBMITTED: orderSubmittedPayloadV1Schema,
+  ORDER_FILLED: orderFilledPayloadV1Schema,
+  ORDER_REJECTED: orderRejectedPayloadV1Schema,
   PORTFOLIO_SHADOW_PLAN_RECORDED: z
     .object({
       proposalCount: z.number().int().min(1).max(3),
