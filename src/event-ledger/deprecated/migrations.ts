@@ -481,6 +481,28 @@ export const LEDGER_MIGRATIONS: readonly LedgerMigration[] = [
       END;
     `,
   },
+  {
+    id: "009_exact_order_terminal_causation",
+    sql: `
+      CREATE TRIGGER ledger_events_order_terminal_matches_submission
+      BEFORE INSERT ON ledger_events
+      WHEN NEW.event_type IN ('ORDER_FILLED', 'ORDER_REJECTED')
+      BEGIN
+        SELECT CASE
+          WHEN NEW.cycle_id IS NULL OR NOT EXISTS (
+            SELECT 1
+            FROM ledger_events
+            WHERE event_id = NEW.causation_event_id
+              AND cycle_id = NEW.cycle_id
+              AND event_type = 'ORDER_SUBMITTED'
+              AND json_extract(payload_json, '$.clientOrderId') =
+                json_extract(NEW.payload_json, '$.clientOrderId')
+          )
+          THEN RAISE(ABORT, 'order terminal must match its submission')
+        END;
+      END;
+    `,
+  },
 ]
 
 const checksum = (sql: string) =>

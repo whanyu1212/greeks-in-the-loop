@@ -4,12 +4,16 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import type { TradeIntentV4 } from "../src/contracts/trade-intent-v4.js"
+import {
+  tradeIntentV4Schema,
+  type TradeIntentV4,
+} from "../src/contracts/trade-intent-v4.js"
 import type { LedgerEventV4 } from "../src/event-ledger/ledger-event-v1.js"
 import type { LedgerStore } from "../src/event-ledger/ledger-store.js"
 import { createSqliteLedgerStore } from "../src/event-ledger/deprecated/sqlite-ledger-store.js"
 import type { ShadowRiskResultV1 } from "../src/risk/shadow-risk-v1.js"
 import type {
+  BrokerOrderLookupResult,
   BrokerOrderOutcome,
   OrderSubmitter,
 } from "../src/execution/alpaca-order-submitter.js"
@@ -19,7 +23,6 @@ import {
 } from "../src/execution/order-submission-v1.js"
 import {
   executeApprovedTradeV1,
-  hasHeldExecutedEntryV1,
   reconcileOpenOrderRecordsV1,
 } from "../src/execution/trade-executor.js"
 
@@ -68,6 +71,13 @@ const intent: TradeIntentV4 = {
   ],
   premiumEffect: "DEBIT",
   entryLimitCentsPerStrategyUnit: 103,
+}
+
+const longCallIntent: TradeIntentV4 = {
+  ...intent,
+  strategy: "LONG_CALL",
+  legs: [intent.legs[0]!],
+  entryLimitCentsPerStrategyUnit: 223,
 }
 
 const approvedShadowRisk: ShadowRiskResultV1 = {
@@ -137,7 +147,12 @@ const createStore = async () => {
 const seedApprovedCycle = async (
   store: LedgerStore,
   outcome: "APPROVED" | "REJECTED" = "APPROVED",
+  approvedRisk: ShadowRiskResultV1 = approvedShadowRisk,
 ) => {
+  const decision =
+    outcome === "APPROVED" ? approvedRisk.decision : rejectedShadowRisk.decision
+  const seededIntent =
+    decision.stage === "EVALUATED" ? decision.evaluatedIntent : intent
   const events: LedgerEventV4[] = [
     {
       eventId: "cycle-start-1",
@@ -158,7 +173,7 @@ const seedApprovedCycle = async (
       causationEventId: "cycle-start-1",
       cycleId: "cycle-1",
       sessionId: "ses_example",
-      payload: { intent },
+      payload: { intent: seededIntent },
     },
     {
       eventId: "risk-1",
@@ -170,10 +185,7 @@ const seedApprovedCycle = async (
       cycleId: "cycle-1",
       sessionId: "ses_example",
       payload: {
-        decision:
-          outcome === "APPROVED"
-            ? approvedShadowRisk.decision
-            : rejectedShadowRisk.decision,
+        decision,
       },
     },
   ] as LedgerEventV4[]
@@ -190,9 +202,12 @@ const stubSubmitter = (
   },
   async lookup({ clientOrderId }) {
     calls.push(`lookup:${clientOrderId}`)
+    if (outcome.status === "UNKNOWN") {
+      return { status: "LOOKUP_UNKNOWN", reason: outcome.reason }
+    }
     return outcome.status === "REJECTED" && outcome.brokerOrderId === undefined
-      ? undefined
-      : outcome
+      ? { status: "CONFIRMED_NOT_FOUND" }
+      : { status: "FOUND", order: outcome }
   },
 })
 
@@ -225,6 +240,29 @@ describe("buildAlpacaMlegOrderRequestV1", () => {
         },
       ],
     })
+  })
+
+  it("rejects valid but unsupported V4 order shapes", () => {
+    const creditCallSpread: TradeIntentV4 = {
+      ...intent,
+      direction: "BEARISH",
+      strategy: "BEAR_CALL_SPREAD",
+      legs: [
+        { ...intent.legs[0]!, positionIntent: "SELL_TO_OPEN" },
+        { ...intent.legs[1]!, positionIntent: "BUY_TO_OPEN" },
+      ],
+      premiumEffect: "CREDIT",
+      entryLimitCentsPerStrategyUnit: 99,
+    }
+
+    expect(tradeIntentV4Schema.safeParse(longCallIntent).success).toBe(true)
+    expect(tradeIntentV4Schema.safeParse(creditCallSpread).success).toBe(true)
+    expect(() =>
+      buildAlpacaMlegOrderRequestV1(longCallIntent, "cycle-1"),
+    ).toThrow("supports only")
+    expect(() =>
+      buildAlpacaMlegOrderRequestV1(creditCallSpread, "cycle-1"),
+    ).toThrow("supports only")
   })
 
   it("records the approving rule version with the submission", () => {
@@ -332,6 +370,88 @@ describe("executeApprovedTradeV1", () => {
     await store.close()
   })
 
+  it("refuses an in-memory approval that does not exactly match the ledger", async () => {
+    const store = await createStore()
+    await seedApprovedCycle(store)
+    const calls: string[] = []
+    const approvedDecision = approvedShadowRisk.decision as Extract<
+      ShadowRiskResultV1["decision"],
+      { stage: "EVALUATED" }
+    >
+    const mismatchedApproval: ShadowRiskResultV1 = {
+      ...approvedShadowRisk,
+      decision: {
+        ...approvedDecision,
+        stateProvenance: {
+          ...approvedDecision.stateProvenance,
+          capturedAt: "2026-08-26T10:00:01.000Z",
+        },
+      },
+    }
+
+    const result = await executeApprovedTradeV1({
+      store,
+      submitter: stubSubmitter(
+        {
+          status: "FILLED",
+          brokerOrderId: "broker-1",
+          filledQuantity: 1,
+          brokerTimestamp: TIMESTAMP,
+        },
+        calls,
+      ),
+      shadowRisk: mismatchedApproval,
+      cycleId: "cycle-1",
+      signal: AbortSignal.timeout(5_000),
+    })
+
+    expect(result).toEqual({ status: "SKIPPED", reason: "APPROVAL_NOT_RECORDED" })
+    expect(calls).toEqual([])
+    expect(await eventTypes(store)).not.toContain("ORDER_SUBMITTED")
+    await store.close()
+  })
+
+  it("rejects unsupported intents before ledger or broker mutation", async () => {
+    const store = await createStore()
+    const calls: string[] = []
+    const approvedDecision = approvedShadowRisk.decision as Extract<
+      ShadowRiskResultV1["decision"],
+      { stage: "EVALUATED" }
+    >
+    const unsupportedRisk: ShadowRiskResultV1 = {
+      ...approvedShadowRisk,
+      decision: {
+        ...approvedDecision,
+        evaluatedIntent: longCallIntent,
+      },
+    }
+    await seedApprovedCycle(store, "APPROVED", unsupportedRisk)
+
+    const result = await executeApprovedTradeV1({
+      store,
+      submitter: stubSubmitter(
+        {
+          status: "FILLED",
+          brokerOrderId: "broker-1",
+          filledQuantity: 1,
+          brokerTimestamp: TIMESTAMP,
+        },
+        calls,
+      ),
+      shadowRisk: unsupportedRisk,
+      cycleId: "cycle-1",
+      signal: AbortSignal.timeout(5_000),
+    })
+
+    expect(result).toEqual({
+      status: "SKIPPED",
+      reason: "EXECUTION_INTENT_UNSUPPORTED",
+    })
+    expect(calls).toEqual([])
+    expect(await eventTypes(store)).not.toContain("ORDER_SUBMITTED")
+    await store.close()
+  })
+
   it("submits at most once per cycle even when run twice", async () => {
     const store = await createStore()
     await seedApprovedCycle(store)
@@ -379,6 +499,7 @@ describe("executeApprovedTradeV1", () => {
       }),
       shadowRisk: approvedShadowRisk,
       cycleId: "cycle-1",
+      now: () => new Date(TIMESTAMP),
       signal: AbortSignal.timeout(5_000),
     })
 
@@ -408,6 +529,31 @@ describe("executeApprovedTradeV1", () => {
     const types = await eventTypes(store)
     expect(types).toContain("ORDER_SUBMITTED")
     expect(types).not.toContain("ORDER_FILLED")
+    expect(types).not.toContain("ORDER_REJECTED")
+    await store.close()
+  })
+
+  it("leaves an ambiguous broker response unresolved", async () => {
+    const store = await createStore()
+    await seedApprovedCycle(store)
+
+    const result = await executeApprovedTradeV1({
+      store,
+      submitter: stubSubmitter({
+        status: "UNKNOWN",
+        reason: "BROKER_REQUEST_FAILED",
+      }),
+      shadowRisk: approvedShadowRisk,
+      cycleId: "cycle-1",
+      signal: AbortSignal.timeout(5_000),
+    })
+
+    expect(result).toMatchObject({
+      status: "UNRESOLVED",
+      reason: "BROKER_REQUEST_FAILED",
+    })
+    const types = await eventTypes(store)
+    expect(types).toContain("ORDER_SUBMITTED")
     expect(types).not.toContain("ORDER_REJECTED")
     await store.close()
   })
@@ -471,6 +617,7 @@ describe("reconcileOpenOrderRecordsV1", () => {
       }),
       shadowRisk: approvedShadowRisk,
       cycleId: "cycle-1",
+      now: () => new Date(TIMESTAMP),
       signal: AbortSignal.timeout(5_000),
     })
   }
@@ -512,7 +659,7 @@ describe("reconcileOpenOrderRecordsV1", () => {
         },
         async lookup() {
           calls.push("lookup")
-          return undefined
+          return { status: "CONFIRMED_NOT_FOUND" } as const
         },
       },
       signal: AbortSignal.timeout(5_000),
@@ -530,6 +677,43 @@ describe("reconcileOpenOrderRecordsV1", () => {
       })
     )[0]
     expect(rejection?.payload).toMatchObject({ reason: "SUBMISSION_ABANDONED" })
+    await store.close()
+  })
+
+  it.each([
+    {
+      name: "a recent confirmed absence",
+      lookup: { status: "CONFIRMED_NOT_FOUND" } as BrokerOrderLookupResult,
+    },
+    {
+      name: "an uncertain lookup",
+      lookup: {
+        status: "LOOKUP_UNKNOWN",
+        reason: "BROKER_REQUEST_FAILED",
+      } as BrokerOrderLookupResult,
+    },
+  ])("leaves $name unresolved without a terminal event", async ({ lookup }) => {
+    const store = await createStore()
+    await submitOpen(store)
+
+    const reconciled = await reconcileOpenOrderRecordsV1({
+      store,
+      submitter: {
+        async submit() {
+          throw new Error("reconciliation must never submit")
+        },
+        async lookup() {
+          return lookup
+        },
+      },
+      now: () => new Date("2026-08-26T10:10:00.000Z"),
+      signal: AbortSignal.timeout(5_000),
+    })
+
+    expect(reconciled).toEqual([
+      { cycleId: "cycle-1", clientOrderId: "cycle-1", resolution: "UNRESOLVED" },
+    ])
+    expect(await eventTypes(store)).not.toContain("ORDER_REJECTED")
     await store.close()
   })
 
@@ -584,31 +768,6 @@ describe("reconcileOpenOrderRecordsV1", () => {
       }),
     ).toEqual([])
     expect(calls).toEqual([])
-    await store.close()
-  })
-})
-
-describe("hasHeldExecutedEntryV1", () => {
-  it("reports a held entry only after a fill is recorded", async () => {
-    const store = await createStore()
-    await seedApprovedCycle(store)
-    const signal = AbortSignal.timeout(5_000)
-    expect(await hasHeldExecutedEntryV1(store, signal)).toBe(false)
-
-    await executeApprovedTradeV1({
-      store,
-      submitter: stubSubmitter({
-        status: "FILLED",
-        brokerOrderId: "broker-1",
-        filledQuantity: 1,
-        brokerTimestamp: TIMESTAMP,
-      }),
-      shadowRisk: approvedShadowRisk,
-      cycleId: "cycle-1",
-      signal,
-    })
-
-    expect(await hasHeldExecutedEntryV1(store, signal)).toBe(true)
     await store.close()
   })
 })

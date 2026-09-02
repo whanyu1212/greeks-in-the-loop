@@ -4,8 +4,8 @@
  * The worker starts a managed local OpenCode server, creates an isolated session
  * for each sequential research cycle, and runs until a process signal or cycle
  * limit stops it. Every cycle selects the checked-in, deny-by-default research
- * agent and may hand one immutable authorization to a separate trader session,
- * while `startOpencode` owns cleanup of the server and its MCP descendants.
+ * agent, while `startOpencode` owns cleanup of the server and its MCP
+ * descendants.
  */
 
 import { randomUUID } from "node:crypto"
@@ -50,12 +50,6 @@ import {
   type ResearchInvocationV1,
 } from "./research/invocation.js"
 import { startOpencode } from "./opencode-runtime.js"
-import { createAlpacaOrderSubmitter } from "./execution/alpaca-order-submitter.js"
-import {
-  executeApprovedTradeV1,
-  hasHeldExecutedEntryV1,
-  reconcileOpenOrderRecordsV1,
-} from "./execution/trade-executor.js"
 import {
   buildResearchCyclePrompt,
   buildResearchReportRepairPrompt,
@@ -199,7 +193,7 @@ const agentOptions = parseAgentOptions(
   process.argv.slice(2),
   readSetting("RESEARCH_LEDGER_PATH"),
 )
-const { once, dryRun, execute, ledgerPath } = agentOptions
+const { once, dryRun, ledgerPath } = agentOptions
 const deploymentRole = readSetting("DEPLOYMENT_ROLE")?.trim() || "FULL"
 if (deploymentRole !== "FULL" && deploymentRole !== "RESEARCH_ONLY") {
   throw new Error("DEPLOYMENT_ROLE must be FULL or RESEARCH_ONLY")
@@ -290,15 +284,6 @@ const riskStateProvider = createAlpacaRiskStateProvider({
   tradingBaseUrl:
     alpacaTradingBaseUrl,
 })
-const orderSubmitter = execute
-  ? createAlpacaOrderSubmitter({
-      apiKey: alpacaApiKey,
-      secretKey: alpacaSecretKey,
-      tradingBaseUrl:
-        readSetting("ALPACA_TRADING_BASE_URL")?.trim() ||
-        "https://paper-api.alpaca.markets",
-    })
-  : undefined
 const calendar = createAlpacaCalendarClient({
   apiKey: alpacaApiKey,
   secretKey: alpacaSecretKey,
@@ -371,20 +356,6 @@ try {
     provider: riskStateProvider,
     durableControl: createLedgerDurableRiskControlStateLoader(activeLedgerStore),
   })
-  if (orderSubmitter !== undefined) {
-    // Resolve any submission left without a terminal record by an earlier
-    // crash before a new cycle can approve another entry.
-    const reconciled = await reconcileOpenOrderRecordsV1({
-      store: activeLedgerStore,
-      submitter: orderSubmitter,
-      signal: abortController.signal,
-    })
-    for (const record of reconciled) {
-      console.log(
-        `[startup] reconciled order ${record.clientOrderId}: ${record.resolution}`,
-      )
-    }
-  }
   const runtime = await startOpencode({
     port,
     signal: abortController.signal,
@@ -432,21 +403,9 @@ try {
               premarketStartEt,
               ...(researchMode === undefined ? {} : { researchMode }),
             })
-            // Withhold trade-intent eligibility while an executed entry is
-            // still held, so the cycle is not spent on a proposal the risk
-            // gate would reject for exposure anyway.
-            const heldEntry =
-              orderSubmitter !== undefined &&
-              scheduled.tradeIntentEligible &&
-              (await hasHeldExecutedEntryV1(
-                activeLedgerStore,
-                abortController.signal,
-              ))
             return {
               session,
-              initialEligibility: heldEntry
-                ? { ...scheduled, tradeIntentEligible: false }
-                : scheduled,
+              initialEligibility: scheduled,
             }
           },
         )
@@ -808,39 +767,6 @@ try {
             },
           })
           cycleTrace.setOutcome(processed.outcome.status)
-          // Architecture plan section 6.A: deterministic code submits, never
-          // the model. Execution runs only after the approval is durably
-          // recorded, so a submitted order always has a persisted decision
-          // behind it. Plan section 5 allows at most one entry per cycle, so
-          // only the first approved proposal is executed.
-          let executionReport: string | undefined
-          const approvedShadowRisk = processed.shadowRisks?.find(
-            ({ decision }) =>
-              decision.stage === "EVALUATED" && decision.outcome === "APPROVED",
-          )
-          if (orderSubmitter !== undefined && approvedShadowRisk !== undefined) {
-            const execution = await cycleTrace.run("order.execute", () =>
-              executeApprovedTradeV1({
-                store: activeLedgerStore,
-                submitter: orderSubmitter,
-                shadowRisk: approvedShadowRisk,
-                cycleId: cycle.cycleId,
-                signal: abortController.signal,
-              }),
-            )
-            stageReporter.report(
-              "order.execute",
-              execution.status === "REJECTED" ? "REJECTED" : "COMPLETED",
-              { ...execution },
-            )
-            executionReport = `Order: ${execution.status}${
-              execution.status === "SKIPPED"
-                ? ` (${execution.reason})`
-                : execution.status === "REJECTED"
-                  ? ` (${execution.reason})`
-                  : ` ${execution.brokerOrderId}`
-            }`
-          }
           try {
             const artifacts = await cycleTrace.run(
               "research.artifact.project",
@@ -874,7 +800,6 @@ try {
             })
             return [
               processed.report,
-              ...(executionReport === undefined ? [] : [executionReport]),
               `Actionability: ${artifacts.presentation.actionability}`,
               `Audit: ${artifacts.presentation.audit.passCount} PASS / ${artifacts.presentation.audit.failCount} FAIL / ${artifacts.presentation.audit.notApplicableCount} N/A`,
               `Research brief: ${artifacts.markdownPath}`,
@@ -889,7 +814,6 @@ try {
             )
             return [
               processed.report,
-              ...(executionReport === undefined ? [] : [executionReport]),
               "Research artifacts: unavailable",
             ].join("\n")
           }

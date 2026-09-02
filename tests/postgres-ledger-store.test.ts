@@ -124,4 +124,127 @@ integration("PostgreSQL ledger integration", () => {
     )
     await second.release()
   })
+
+  it("enforces exact order approval and terminal causation in PostgreSQL", async () => {
+    type RawEvent = Readonly<{
+      eventId: string
+      eventType: string
+      cycleId: string
+      causationEventId?: string
+      payload?: unknown
+    }>
+    const appendRaw = ({
+      eventId,
+      eventType,
+      cycleId,
+      causationEventId,
+      payload = {},
+    }: RawEvent) =>
+      administrativePool.query(
+        `INSERT INTO ledger_events (
+           event_id, event_version, event_type, occurred_at, recorded_at,
+           correlation_id, causation_event_id, cycle_id, session_id, payload_json
+         ) VALUES ($1, '4.0.0', $2, $3, $3, $4, $5, $6, $7, $8::jsonb)`,
+        [
+          eventId,
+          eventType,
+          "2026-09-01T14:03:00.000Z",
+          `correlation-${cycleId}`,
+          causationEventId ?? null,
+          cycleId,
+          `session-${cycleId}`,
+          JSON.stringify(payload),
+        ],
+      )
+
+    await appendRaw({
+      eventId: "start-order-rejected",
+      eventType: "RESEARCH_CYCLE_STARTED",
+      cycleId: "order-rejected",
+    })
+    await appendRaw({
+      eventId: "intent-order-rejected",
+      eventType: "TRADE_INTENT_DERIVED",
+      cycleId: "order-rejected",
+      causationEventId: "start-order-rejected",
+    })
+    await appendRaw({
+      eventId: "risk-order-rejected",
+      eventType: "RISK_SHADOW_DECISION_RECORDED",
+      cycleId: "order-rejected",
+      causationEventId: "intent-order-rejected",
+      payload: { decision: { stage: "EVALUATED", outcome: "REJECTED" } },
+    })
+    await expect(
+      appendRaw({
+        eventId: "submission-order-rejected",
+        eventType: "ORDER_SUBMITTED",
+        cycleId: "order-rejected",
+        causationEventId: "risk-order-rejected",
+        payload: { clientOrderId: "order-rejected" },
+      }),
+    ).rejects.toThrow("order submission must follow approved risk")
+
+    await appendRaw({
+      eventId: "start-order-approved",
+      eventType: "RESEARCH_CYCLE_STARTED",
+      cycleId: "order-approved",
+    })
+    await appendRaw({
+      eventId: "intent-order-approved",
+      eventType: "TRADE_INTENT_DERIVED",
+      cycleId: "order-approved",
+      causationEventId: "start-order-approved",
+    })
+    await appendRaw({
+      eventId: "risk-order-approved",
+      eventType: "RISK_SHADOW_DECISION_RECORDED",
+      cycleId: "order-approved",
+      causationEventId: "intent-order-approved",
+      payload: { decision: { stage: "EVALUATED", outcome: "APPROVED" } },
+    })
+    await appendRaw({
+      eventId: "submission-order-approved",
+      eventType: "ORDER_SUBMITTED",
+      cycleId: "order-approved",
+      causationEventId: "risk-order-approved",
+      payload: { clientOrderId: "order-approved" },
+    })
+    await expect(
+      appendRaw({
+        eventId: "submission-order-approved-duplicate",
+        eventType: "ORDER_SUBMITTED",
+        cycleId: "order-approved",
+        causationEventId: "risk-order-approved",
+        payload: { clientOrderId: "order-approved" },
+      }),
+    ).rejects.toThrow()
+    await expect(
+      appendRaw({
+        eventId: "fill-order-approved-wrong-cause",
+        eventType: "ORDER_FILLED",
+        cycleId: "order-approved",
+        causationEventId: "risk-order-approved",
+        payload: { clientOrderId: "order-approved" },
+      }),
+    ).rejects.toThrow("order terminal must match its submission")
+    await expect(
+      appendRaw({
+        eventId: "fill-order-approved-wrong-client",
+        eventType: "ORDER_FILLED",
+        cycleId: "order-approved",
+        causationEventId: "submission-order-approved",
+        payload: { clientOrderId: "different-client" },
+      }),
+    ).rejects.toThrow("order terminal must match its submission")
+    await expect(
+      appendRaw({
+        eventId: "fill-order-approved",
+        eventType: "ORDER_FILLED",
+        cycleId: "order-approved",
+        causationEventId: "submission-order-approved",
+        payload: { clientOrderId: "order-approved" },
+      }),
+    ).resolves.toBeDefined()
+  })
 })

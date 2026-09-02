@@ -1,19 +1,22 @@
 import { z } from "zod"
 
-import { type TradeIntentV4 } from "../contracts/trade-intent-v4.js"
+import {
+  tradeIntentV4Schema,
+  type TradeIntentV4,
+} from "../contracts/trade-intent-v4.js"
 import { alpacaOptionSymbolSchema } from "../shared/alpaca-option-identity.js"
 
 /**
  * Pure derivation of one broker order request from an approved trade intent.
  *
  * Nothing here performs I/O. The request body is a total function of the
- * intent that already passed `evaluateTradeIntentRiskV1`, so the exact order
- * that reaches the broker is reproducible from the ledger alone.
+ * supported intent that already passed `evaluateTradeIntentRiskV1`, so the
+ * exact order that reaches the broker is reproducible from the ledger alone.
  */
 
 export const ORDER_SUBMISSION_VERSION = "1.0.0" as const
 
-/** Only one contract per approved intent; risk rule 1.1.0 approves quantity 1. */
+/** Only one contract per approved intent; risk rule 2.0.0 approves quantity 1. */
 export const APPROVED_ORDER_QUANTITY = 1 as const
 
 /** Day orders only: the entry window closes with the session. */
@@ -21,14 +24,32 @@ export const ORDER_TIME_IN_FORCE = "day" as const
 
 export const ORDER_TERMINAL_REJECTION_CODES = [
   "BROKER_REJECTED",
-  "BROKER_REQUEST_FAILED",
-  "BROKER_RESPONSE_INVALID",
   "ORDER_EXPIRED",
   "ORDER_CANCELED",
   "SUBMISSION_ABANDONED",
 ] as const
 export type OrderTerminalRejectionCode =
   (typeof ORDER_TERMINAL_REJECTION_CODES)[number]
+
+export const SUPPORTED_EXECUTION_STRATEGIES_V1 = [
+  "BULL_CALL_SPREAD",
+  "BEAR_PUT_SPREAD",
+] as const
+
+/** V1 deliberately matches the two debit spreads covered by replay and exits. */
+export const isSupportedExecutionIntentV1 = (input: unknown): input is TradeIntentV4 => {
+  const parsed = tradeIntentV4Schema.safeParse(input)
+  if (!parsed.success) return false
+  const intent = parsed.data
+  return (
+    intent.premiumEffect === "DEBIT" &&
+    SUPPORTED_EXECUTION_STRATEGIES_V1.some(
+      (strategy) => strategy === intent.strategy,
+    ) &&
+    intent.legs.length === 2 &&
+    intent.legs.every(({ ratioQuantity }) => ratioQuantity === 1)
+  )
+}
 
 const centsToDecimalString = (cents: number) => {
   const sign = cents < 0 ? "-" : ""
@@ -66,6 +87,9 @@ export function buildAlpacaMlegOrderRequestV1(
   intent: TradeIntentV4,
   clientOrderId: string,
 ): AlpacaMlegOrderRequestV1 {
+  if (!isSupportedExecutionIntentV1(intent)) {
+    throw new Error("Execution V1 supports only 1:1 bull-call and bear-put debit spreads")
+  }
   return {
     order_class: "mleg",
     qty: String(APPROVED_ORDER_QUANTITY),
@@ -98,7 +122,7 @@ export const orderSubmittedPayloadV1Schema = z
     submissionVersion: z.literal(ORDER_SUBMISSION_VERSION),
     clientOrderId: identifier,
     ruleVersion: identifier,
-    strategy: z.string().min(1).max(64),
+    strategy: z.enum(SUPPORTED_EXECUTION_STRATEGIES_V1),
     underlying: z.string().min(1).max(16),
     legs: z
       .array(
@@ -106,12 +130,11 @@ export const orderSubmittedPayloadV1Schema = z
           .object({
             contractSymbol: alpacaOptionSymbolSchema,
             positionIntent: z.enum(["BUY_TO_OPEN", "SELL_TO_OPEN"]),
-            ratioQuantity: positiveSafeInteger,
+            ratioQuantity: z.literal(1),
           })
           .strict(),
       )
-      .min(1)
-      .max(4),
+      .length(2),
     quantity: z.literal(APPROVED_ORDER_QUANTITY),
     limitPriceCentsPerStrategyUnit: positiveSafeInteger,
     maxLossCents: positiveSafeInteger,

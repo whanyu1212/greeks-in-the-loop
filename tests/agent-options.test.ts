@@ -20,13 +20,11 @@ describe("parseAgentOptions", () => {
     expect(parseAgentOptions([])).toEqual({
       once: false,
       dryRun: false,
-      execute: false,
       ledgerPath: DEFAULT_RESEARCH_LEDGER_PATH,
     })
     expect(parseAgentOptions(["--once", "--dry-run", "--session", "2026-08-25"])).toEqual({
       once: true,
       dryRun: true,
-      execute: false,
       sessionDate: "2026-08-25",
       ledgerPath: DEFAULT_DRY_RUN_LEDGER_PATH,
     })
@@ -41,6 +39,7 @@ describe("parseAgentOptions", () => {
       "--session requires --dry-run",
     )
     expect(() => parseAgentOptions(["--research-anytime"])).toThrow("Unknown option")
+    expect(() => parseAgentOptions(["--execute"])).toThrow("Unknown option")
     expect(() =>
       parseAgentOptions(
         ["--once", "--dry-run", "--ledger", ".state/live.sqlite"],

@@ -8,13 +8,14 @@ import type { LedgerStore } from "../event-ledger/ledger-store.js"
 import { LedgerPersistenceError } from "../event-ledger/research-lifecycle-recorder.js"
 import {
   TRADE_INTENT_V4_CONTRACT_VERSION,
-  type TradeIntentV4,
 } from "../contracts/trade-intent-v4.js"
 import type { ShadowRiskResultV1 } from "../risk/shadow-risk-v1.js"
+import { canonicalJson } from "../shared/canonical-json.js"
 import type { OrderSubmitter } from "./alpaca-order-submitter.js"
 import {
   ORDER_SUBMISSION_VERSION,
   createOrderSubmittedPayloadV1,
+  isSupportedExecutionIntentV1,
   type OrderTerminalRejectionCode,
 } from "./order-submission-v1.js"
 
@@ -23,9 +24,9 @@ import {
  *
  * Ordering is the safety property. `ORDER_SUBMITTED` is durably appended
  * before the broker is contacted, so a crash anywhere after that point leaves
- * a record that startup reconciliation can resolve by client order id. The
- * ledger therefore never holds an order the broker does not have, and never
- * misses one it does.
+ * a record that explicit reconciliation can resolve by client order id. The
+ * ledger may contain an attempt the broker never received, but cannot omit an
+ * order that might have reached it.
  */
 
 export type TradeExecutionOutcome =
@@ -35,6 +36,11 @@ export type TradeExecutionOutcome =
   | Readonly<{
       status: "REJECTED"
       reason: OrderTerminalRejectionCode
+      clientOrderId: string
+    }>
+  | Readonly<{
+      status: "UNRESOLVED"
+      reason: string
       clientOrderId: string
     }>
 
@@ -59,18 +65,25 @@ const isoTimestamp = (date: Date) => date.toISOString()
  * requires order events to match; taking it from here rather than from the
  * caller removes the only way those could drift apart.
  */
-const findApprovedRiskEvent = async (store: LedgerStore, cycleId: string) => {
+const findApprovedRiskEvent = async (
+  store: LedgerStore,
+  cycleId: string,
+  expectedDecision: ShadowRiskResultV1["decision"],
+) => {
   const events = await store.list({
     cycleId,
     eventTypes: ["RISK_SHADOW_DECISION_RECORDED"],
     direction: "DESC",
-    limit: 1,
+    limit: 16,
   })
-  const event = events[0]
-  if (event === undefined) return undefined
-  const decision = (event.payload as { decision?: { outcome?: unknown } })
-    .decision
-  return decision?.outcome === "APPROVED" ? event : undefined
+  const expected = canonicalJson(expectedDecision)
+  return events.find((event) => {
+    const decision = (event.payload as { decision?: { outcome?: unknown } })
+      .decision
+    return (
+      decision?.outcome === "APPROVED" && canonicalJson(decision) === expected
+    )
+  })
 }
 
 /**
@@ -98,7 +111,7 @@ export async function executeApprovedTradeV1({
     return { status: "SKIPPED", reason: "RISK_NOT_APPROVED" }
   }
 
-  const riskEvent = await findApprovedRiskEvent(store, cycleId)
+  const riskEvent = await findApprovedRiskEvent(store, cycleId, decision)
   if (riskEvent === undefined) {
     return { status: "SKIPPED", reason: "APPROVAL_NOT_RECORDED" }
   }
@@ -108,6 +121,9 @@ export async function executeApprovedTradeV1({
   const intent = decision.evaluatedIntent
   if (intent.contractVersion !== TRADE_INTENT_V4_CONTRACT_VERSION) {
     return { status: "SKIPPED", reason: "INTENT_CONTRACT_UNSUPPORTED" }
+  }
+  if (!isSupportedExecutionIntentV1(intent)) {
+    return { status: "SKIPPED", reason: "EXECUTION_INTENT_UNSUPPORTED" }
   }
   const maxLossCents = decision.evaluation.maxLossCents
   if (maxLossCents === undefined) {
@@ -157,7 +173,7 @@ export async function executeApprovedTradeV1({
   }
 
   const outcome = await submitter.submit({
-    intent: intent as TradeIntentV4,
+    intent,
     clientOrderId,
     signal,
   })
@@ -212,6 +228,10 @@ export async function executeApprovedTradeV1({
     return { status: "REJECTED", reason: outcome.reason, clientOrderId }
   }
 
+  if (outcome.status === "UNKNOWN") {
+    return { status: "UNRESOLVED", reason: outcome.reason, clientOrderId }
+  }
+
   // Working at the broker. Reconciliation resolves it; no terminal event yet.
   return {
     status: "OPEN",
@@ -227,21 +247,22 @@ export type ReconcileOpenOrdersOptions = Readonly<{
   idFactory?: () => string
   now?: () => Date
   maxOrders?: number
+  notFoundGraceMs?: number
 }>
 
 export type ReconciledOrderRecord = Readonly<{
   cycleId: string
   clientOrderId: string
-  resolution: "FILLED" | "REJECTED" | "STILL_OPEN"
+  resolution: "FILLED" | "REJECTED" | "STILL_OPEN" | "UNRESOLVED"
 }>
 
 /**
- * Resolves submissions that have no terminal event, at startup.
+ * Resolves submissions that have no terminal event when explicitly invoked.
  *
  * This is what makes a crash between the submission record and the broker
  * response recoverable: the order is looked up by client order id and closed
- * out from what the broker actually holds. An order the broker never received
- * resolves to `SUBMISSION_ABANDONED`; it is never resubmitted here.
+ * out from what the broker actually holds. An aged submission the broker
+ * confirms absent resolves to `SUBMISSION_ABANDONED`; it is never resubmitted.
  */
 export async function reconcileOpenOrderRecordsV1({
   store,
@@ -250,8 +271,12 @@ export async function reconcileOpenOrderRecordsV1({
   idFactory = randomUUID,
   now = () => new Date(),
   maxOrders = 100,
+  notFoundGraceMs = 15 * 60_000,
 }: ReconcileOpenOrdersOptions): Promise<readonly ReconciledOrderRecord[]> {
   signal.throwIfAborted()
+  if (!Number.isSafeInteger(notFoundGraceMs) || notFoundGraceMs < 0) {
+    throw new Error("notFoundGraceMs must be a non-negative safe integer")
+  }
   const submissions = await store.list({
     eventTypes: ["ORDER_SUBMITTED"],
     direction: "DESC",
@@ -284,15 +309,29 @@ export async function reconcileOpenOrderRecordsV1({
     if (clientOrderId === undefined) continue
 
     const observed = await submitter.lookup({ clientOrderId, signal })
-    if (observed !== undefined && observed.status === "OPEN") {
+    signal.throwIfAborted()
+    if (observed.status === "LOOKUP_UNKNOWN") {
+      reconciled.push({ cycleId, clientOrderId, resolution: "UNRESOLVED" })
+      continue
+    }
+    if (observed.status === "FOUND" && observed.order.status === "OPEN") {
       reconciled.push({ cycleId, clientOrderId, resolution: "STILL_OPEN" })
+      continue
+    }
+
+    const observedAt = now()
+    if (
+      observed.status === "CONFIRMED_NOT_FOUND" &&
+      observedAt.getTime() - Date.parse(submission.occurredAt) < notFoundGraceMs
+    ) {
+      reconciled.push({ cycleId, clientOrderId, resolution: "UNRESOLVED" })
       continue
     }
 
     const envelope = {
       eventId: idFactory(),
       eventVersion: LEDGER_EVENT_VERSION,
-      occurredAt: isoTimestamp(now()),
+      occurredAt: isoTimestamp(observedAt),
       correlationId: submission.correlationId,
       causationEventId: submission.eventId,
       cycleId,
@@ -301,7 +340,8 @@ export async function reconcileOpenOrderRecordsV1({
         : { sessionId: submission.sessionId }),
     }
 
-    if (observed !== undefined && observed.status === "FILLED") {
+    if (observed.status === "FOUND" && observed.order.status === "FILLED") {
+      const order = observed.order
       await store.append(
         {
           ...envelope,
@@ -309,15 +349,15 @@ export async function reconcileOpenOrderRecordsV1({
           payload: {
             submissionVersion: ORDER_SUBMISSION_VERSION,
             clientOrderId,
-            brokerOrderId: observed.brokerOrderId,
-            filledQuantity: observed.filledQuantity,
-            ...(observed.filledAvgPriceCentsPerShare === undefined
+            brokerOrderId: order.brokerOrderId,
+            filledQuantity: order.filledQuantity,
+            ...(order.filledAvgPriceCentsPerShare === undefined
               ? {}
               : {
                   filledAvgPriceCentsPerShare:
-                    observed.filledAvgPriceCentsPerShare,
+                    order.filledAvgPriceCentsPerShare,
                 }),
-            brokerTimestamp: observed.brokerTimestamp,
+            brokerTimestamp: order.brokerTimestamp,
           },
         },
         signal,
@@ -333,14 +373,16 @@ export async function reconcileOpenOrderRecordsV1({
         payload: {
           submissionVersion: ORDER_SUBMISSION_VERSION,
           clientOrderId,
-          ...(observed?.status === "REJECTED" && observed.brokerOrderId
-            ? { brokerOrderId: observed.brokerOrderId }
+          ...(observed.status === "FOUND" &&
+          observed.order.status === "REJECTED" &&
+          observed.order.brokerOrderId
+            ? { brokerOrderId: observed.order.brokerOrderId }
             : {}),
           reason:
-            observed?.status === "REJECTED"
-              ? observed.reason
+            observed.status === "FOUND" && observed.order.status === "REJECTED"
+              ? observed.order.reason
               : "SUBMISSION_ABANDONED",
-          observedAt: isoTimestamp(now()),
+          observedAt: isoTimestamp(observedAt),
         },
       },
       signal,
@@ -349,25 +391,4 @@ export async function reconcileOpenOrderRecordsV1({
   }
 
   return reconciled
-}
-
-/**
- * Reports whether the ledger records a filled entry that is still held.
- *
- * No exit path exists yet, so a fill means an open position until it is
- * flattened manually. Callers use this to withhold trade-intent eligibility
- * before spending an agent cycle; the authoritative exposure check remains
- * `evaluateTradeIntentRiskV1`, which reads live broker state.
- */
-export async function hasHeldExecutedEntryV1(
-  store: LedgerStore,
-  signal: AbortSignal,
-): Promise<boolean> {
-  signal.throwIfAborted()
-  const fills = await store.list({
-    eventTypes: ["ORDER_FILLED"],
-    direction: "DESC",
-    limit: 1,
-  })
-  return fills.length > 0
 }

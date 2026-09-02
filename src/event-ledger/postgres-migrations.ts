@@ -414,6 +414,39 @@ export const POSTGRES_LEDGER_MIGRATIONS: readonly PostgresLedgerMigration[] = [
       $ledger_insert$;
     `,
   },
+  {
+    id: "004_exact_order_terminal_causation",
+    sql: `
+      CREATE OR REPLACE FUNCTION ledger_events_validate_order_terminal_identity()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $ledger_order_terminal_identity$
+      BEGIN
+        IF NEW.event_type IN ('ORDER_FILLED', 'ORDER_REJECTED')
+          AND (
+            NEW.cycle_id IS NULL OR NOT EXISTS (
+              SELECT 1
+              FROM ledger_events
+              WHERE event_id = NEW.causation_event_id
+                AND cycle_id = NEW.cycle_id
+                AND event_type = 'ORDER_SUBMITTED'
+                AND payload_json ->> 'clientOrderId' =
+                  NEW.payload_json ->> 'clientOrderId'
+            )
+          )
+        THEN
+          RAISE EXCEPTION 'order terminal must match its submission';
+        END IF;
+
+        RETURN NEW;
+      END
+      $ledger_order_terminal_identity$;
+
+      CREATE TRIGGER ledger_events_validate_order_terminal_identity_trigger
+      BEFORE INSERT ON ledger_events
+      FOR EACH ROW EXECUTE FUNCTION ledger_events_validate_order_terminal_identity();
+    `,
+  },
 ]
 
 const checksum = (sql: string) =>

@@ -13,8 +13,6 @@ export const DEFAULT_DRY_RUN_LEDGER_PATH = ".state/dry-run.sqlite" as const
 export type AgentOptions = Readonly<{
   once: boolean
   dryRun: boolean
-  /** Enables real broker order submission for approved shadow decisions. */
-  execute: boolean
   sessionDate?: string
   ledgerPath: string
 }>
@@ -139,7 +137,6 @@ export function parseAgentOptions(
 ): AgentOptions {
   let once = false
   let dryRun = false
-  let execute = false
   let sessionDate: string | undefined
   let cliLedgerPath: string | undefined
 
@@ -152,10 +149,6 @@ export function parseAgentOptions(
     }
     if (argument === "--dry-run") {
       dryRun = true
-      continue
-    }
-    if (argument === "--execute") {
-      execute = true
       continue
     }
     if (argument === "--session") {
@@ -186,9 +179,6 @@ export function parseAgentOptions(
   }
 
   if (dryRun && !once) throw new Error("--dry-run requires --once")
-  if (execute && dryRun) {
-    throw new Error("--execute cannot be combined with --dry-run")
-  }
   if (sessionDate !== undefined && !dryRun) {
     throw new Error("--session requires --dry-run")
   }
@@ -210,7 +200,6 @@ export function parseAgentOptions(
   return {
     once,
     dryRun,
-    execute,
     ...(sessionDate === undefined ? {} : { sessionDate }),
     ledgerPath,
   }

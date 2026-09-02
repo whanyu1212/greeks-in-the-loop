@@ -95,6 +95,10 @@ describe("applyLedgerMigrations", () => {
         migration_id: "008_deterministic_order_execution",
         applied_at: "2026-08-25T14:30:00.000Z",
       },
+      {
+        migration_id: "009_exact_order_terminal_causation",
+        applied_at: "2026-08-25T14:30:00.000Z",
+      },
     ])
     expect(
       database
@@ -532,6 +536,67 @@ describe("shadow risk integrity migration", () => {
     })
 
     expect(() => applyLedgerMigrations(database)).not.toThrow()
+    database.close()
+  })
+})
+
+describe("order execution integrity migrations", () => {
+  it("requires terminal events to match the exact submitted order", () => {
+    const database = new Database(":memory:")
+    applyLedgerMigrations(database)
+    insertDirectEvent(database, {
+      eventId: "start-order",
+      eventType: "RESEARCH_CYCLE_STARTED",
+      cycleId: "cycle-order",
+    })
+    insertDirectEvent(database, {
+      eventId: "intent-order",
+      eventType: "TRADE_INTENT_DERIVED",
+      causationEventId: "start-order",
+      cycleId: "cycle-order",
+    })
+    insertDirectEvent(database, {
+      eventId: "risk-order",
+      eventType: "RISK_SHADOW_DECISION_RECORDED",
+      causationEventId: "intent-order",
+      cycleId: "cycle-order",
+      payload: { decision: { stage: "EVALUATED", outcome: "APPROVED" } },
+    })
+    insertDirectEvent(database, {
+      eventId: "submission-order",
+      eventType: "ORDER_SUBMITTED",
+      causationEventId: "risk-order",
+      cycleId: "cycle-order",
+      payload: { clientOrderId: "cycle-order" },
+    })
+
+    expect(() =>
+      insertDirectEvent(database, {
+        eventId: "fill-wrong-cause",
+        eventType: "ORDER_FILLED",
+        causationEventId: "risk-order",
+        cycleId: "cycle-order",
+        payload: { clientOrderId: "cycle-order" },
+      }),
+    ).toThrow("order terminal must match its submission")
+    expect(() =>
+      insertDirectEvent(database, {
+        eventId: "fill-wrong-client",
+        eventType: "ORDER_FILLED",
+        causationEventId: "submission-order",
+        cycleId: "cycle-order",
+        payload: { clientOrderId: "different-client" },
+      }),
+    ).toThrow("order terminal must match its submission")
+    expect(() =>
+      insertDirectEvent(database, {
+        eventId: "fill-order",
+        eventType: "ORDER_FILLED",
+        causationEventId: "submission-order",
+        cycleId: "cycle-order",
+        payload: { clientOrderId: "cycle-order" },
+      }),
+    ).not.toThrow()
     database.close()
   })
 })

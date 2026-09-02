@@ -13,7 +13,6 @@ pnpm research:run
 pnpm research:evaluate
 pnpm risk:report
 pnpm backtest -- --scenarios <json> [--output <json>]
-pnpm agent -- --execute
 pnpm execute:mock -- --long <OCC> --short <OCC> [--confirm]
 ```
 
@@ -29,7 +28,7 @@ The agent proposes; deterministic code disposes.
 - Only candidate identity crosses from research into risk. Application code refreshes quotes, contracts, account state, portfolio state, and clock data.
 - Application code calculates position-weighted Greeks from refreshed ordered legs; signed directional net delta is the hard Greek limit for bullish and bearish strategies.
 - Money is integer cents; exit marks are half-cents per share.
-- Order submission lives in `src/execution/`, reached only from application code after an `APPROVED` shadow decision is durably recorded. It is off unless `--execute` is passed, and is refused under `--dry-run`.
+- The unwired order-submission foundation lives in `src/execution/`. Only the explicit mock harness reaches it, after an `APPROVED` shadow decision is durably recorded; the ordinary worker has no broker-submission callsite.
 - No agent has execution authority. Per architecture plan section 6.A, deterministic code calls the Alpaca paper Trading API; the Alpaca MCP mutation tool is never enabled for a model. The `trader` agent and its authorization modules remain in the tree but are not wired into the executing path.
 
 ## Pipeline
@@ -45,7 +44,6 @@ OptionUniverseSnapshotV2
   -> refresh TradeIntentV4
   -> evaluateTradeIntentRiskV1
   -> append ledger events
-  -> executeApprovedTradeV1 (only with --execute)
 ```
 
 `src/index.ts` is the composition root. `src/research/cycle.ts` orchestrates one cycle.
@@ -71,17 +69,18 @@ Failures expose bounded reason codes, never raw model or provider input.
 
 ## Execution
 
-`ORDER_SUBMITTED` is appended before the broker call, so a crash always leaves a
-record that startup reconciliation resolves by client order id; it never
-resubmits. The cycle id is the idempotency key in both the ledger (partial
-unique index) and at the broker (`client_order_id`). SQLite migration 008 and
-PostgreSQL migration 003 make an order that skipped the risk gate
-unrepresentable.
+`ORDER_SUBMITTED` is appended before the broker call, so an interrupted attempt
+is always recoverable by client order id; reconciliation never resubmits. A
+failed lookup and a recent confirmed 404 remain non-terminal. The cycle id is
+the idempotency key in both the ledger (partial unique index) and at the broker
+(`client_order_id`). SQLite migrations 008-009 and PostgreSQL migrations
+003-004 make an order that skipped the risk gate or a terminal event that does
+not match its exact submission unrepresentable.
 
 `pnpm execute:mock` drives one real paper order using real quotes and the real
 risk function over synthetic account, portfolio, contract, and window state. Use
-it to exercise the execution path; it refuses the production ledger and any
-non-paper endpoint.
+it to exercise the otherwise-unwired execution path; it refuses the production
+ledger and any non-paper endpoint.
 
 ## Backtest
 

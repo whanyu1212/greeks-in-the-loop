@@ -89,6 +89,7 @@ const OPEN_ORDER_STATUSES = new Set([
   "new",
   "accepted",
   "pending_new",
+  "pending_cancel",
   "accepted_for_bidding",
   "partially_filled",
   "held",
@@ -100,7 +101,6 @@ const OPEN_ORDER_STATUSES = new Set([
 const REJECTION_BY_STATUS: Readonly<Record<string, OrderTerminalRejectionCode>> = {
   rejected: "BROKER_REJECTED",
   canceled: "ORDER_CANCELED",
-  pending_cancel: "ORDER_CANCELED",
   expired: "ORDER_EXPIRED",
   done_for_day: "ORDER_EXPIRED",
   stopped: "BROKER_REJECTED",
@@ -125,6 +125,33 @@ export type BrokerOrderOutcome =
       brokerOrderId?: string
       reason: OrderTerminalRejectionCode
     }>
+  | Readonly<{
+      status: "UNKNOWN"
+      reason: BrokerOrderUncertaintyCode
+    }>
+
+export const BROKER_ORDER_UNCERTAINTY_CODES = [
+  "BROKER_REQUEST_FAILED",
+  "BROKER_RESPONSE_INVALID",
+] as const
+export type BrokerOrderUncertaintyCode =
+  (typeof BROKER_ORDER_UNCERTAINTY_CODES)[number]
+
+export type BrokerOrderLookupResult =
+  | Readonly<{
+      status: "FOUND"
+      order: Exclude<BrokerOrderOutcome, { status: "UNKNOWN" }>
+    }>
+  | Readonly<{ status: "CONFIRMED_NOT_FOUND" }>
+  | Readonly<{
+      status: "LOOKUP_UNKNOWN"
+      reason: BrokerOrderUncertaintyCode
+    }>
+
+type ResolvedBrokerOrderOutcome = Exclude<
+  BrokerOrderOutcome,
+  { status: "UNKNOWN" }
+>
 
 export type OrderSubmitter = Readonly<{
   /** Submits one approved intent. Safe to retry: the client order id dedupes. */
@@ -138,7 +165,7 @@ export type OrderSubmitter = Readonly<{
   /** Resolves what the broker holds for one client order id, if anything. */
   lookup(
     input: Readonly<{ clientOrderId: string; signal: AbortSignal }>,
-  ): Promise<BrokerOrderOutcome | undefined>
+  ): Promise<BrokerOrderLookupResult>
 }>
 
 export type CreateAlpacaOrderSubmitterOptions = Readonly<{
@@ -156,7 +183,7 @@ export type CreateAlpacaOrderSubmitterOptions = Readonly<{
  * unrecognized state resolves on the next reconciliation instead of inventing
  * a terminal record.
  */
-const normalizeOrder = (raw: unknown): BrokerOrderOutcome | undefined => {
+const normalizeOrder = (raw: unknown): ResolvedBrokerOrderOutcome | undefined => {
   const parsed = rawOrderSchema.safeParse(raw)
   if (!parsed.success) return undefined
   const order = parsed.data
@@ -224,17 +251,20 @@ export function createAlpacaOrderSubmitter(
         headers,
         signal,
       })
-    } catch (error) {
-      if (signal.aborted) throw signal.reason ?? error
-      return undefined
+    } catch {
+      return { status: "LOOKUP_UNKNOWN", reason: "BROKER_REQUEST_FAILED" }
     }
-    if (response.status === 404) return undefined
-    if (!response.ok) return undefined
+    if (response.status === 404) return { status: "CONFIRMED_NOT_FOUND" }
+    if (!response.ok) {
+      return { status: "LOOKUP_UNKNOWN", reason: "BROKER_REQUEST_FAILED" }
+    }
     try {
-      return normalizeOrder(await response.json())
-    } catch (error) {
-      if (signal.aborted) throw signal.reason ?? error
-      return undefined
+      const order = normalizeOrder(await response.json())
+      return order === undefined
+        ? { status: "LOOKUP_UNKNOWN", reason: "BROKER_RESPONSE_INVALID" }
+        : { status: "FOUND", order }
+    } catch {
+      return { status: "LOOKUP_UNKNOWN", reason: "BROKER_RESPONSE_INVALID" }
     }
   }
 
@@ -255,40 +285,59 @@ export function createAlpacaOrderSubmitter(
           body: JSON.stringify(body),
           signal,
         })
-      } catch (error) {
-        if (signal.aborted) throw signal.reason ?? error
+      } catch {
         // The request may still have reached the broker. Resolve by identity
         // rather than assuming nothing was created.
+        if (signal.aborted) {
+          return { status: "UNKNOWN", reason: "BROKER_REQUEST_FAILED" }
+        }
         const existing = await lookup({ clientOrderId, signal })
-        return existing ?? { status: "REJECTED", reason: "BROKER_REQUEST_FAILED" }
+        return existing.status === "FOUND"
+          ? existing.order
+          : {
+              status: "UNKNOWN",
+              reason:
+                existing.status === "LOOKUP_UNKNOWN"
+                  ? existing.reason
+                  : "BROKER_REQUEST_FAILED",
+            }
       }
 
       if (!response.ok) {
         // A duplicate client order id is a successful dedupe, not a failure.
         const existing = await lookup({ clientOrderId, signal })
-        if (existing !== undefined) return existing
-        return {
-          status: "REJECTED",
-          reason:
-            response.status >= 500
-              ? "BROKER_REQUEST_FAILED"
-              : "BROKER_REJECTED",
+        if (existing.status === "FOUND") return existing.order
+        if (existing.status === "LOOKUP_UNKNOWN") {
+          return { status: "UNKNOWN", reason: existing.reason }
         }
+        const isDefinitiveClientRejection =
+          response.status >= 400 &&
+          response.status < 500 &&
+          ![408, 409, 425, 429].includes(response.status)
+        return isDefinitiveClientRejection
+          ? { status: "REJECTED", reason: "BROKER_REJECTED" }
+          : { status: "UNKNOWN", reason: "BROKER_REQUEST_FAILED" }
       }
 
       let payload: unknown
       try {
         payload = await response.json()
-      } catch (error) {
-        if (signal.aborted) throw signal.reason ?? error
+      } catch {
+        if (signal.aborted) {
+          return { status: "UNKNOWN", reason: "BROKER_RESPONSE_INVALID" }
+        }
         const existing = await lookup({ clientOrderId, signal })
-        return existing ?? { status: "REJECTED", reason: "BROKER_RESPONSE_INVALID" }
+        return existing.status === "FOUND"
+          ? existing.order
+          : { status: "UNKNOWN", reason: "BROKER_RESPONSE_INVALID" }
       }
 
       const normalized = normalizeOrder(payload)
       if (normalized === undefined) {
         const existing = await lookup({ clientOrderId, signal })
-        return existing ?? { status: "REJECTED", reason: "BROKER_RESPONSE_INVALID" }
+        return existing.status === "FOUND"
+          ? existing.order
+          : { status: "UNKNOWN", reason: "BROKER_RESPONSE_INVALID" }
       }
       return normalized
     },
