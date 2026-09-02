@@ -9,6 +9,7 @@ import {
   buildResearchBehaviorScenarioPrompt,
   liveExpectation,
   RESEARCH_BEHAVIOR_FIXTURE_PATHS,
+  researchBehaviorScenarioFailed,
 } from "../src/evaluation/research-behavior-evaluate-cli.js"
 import {
   evaluateResearchBehavior,
@@ -264,6 +265,25 @@ describe("research behavior evaluation", () => {
       expect(expected.completedToolInputCounts).toEqual(
         expect.arrayContaining([...seriesChecks, ...eventChecks]),
       )
+      const expectedScreeningOrder = seriesChecks.flatMap(({ pattern, input }) =>
+        ["exa_*", "fmp_*", "alpaca_get_option_chain"].map((after) => [
+          { pattern, input },
+          after,
+        ])
+      )
+      expect(expected.requiredOrder).toEqual(
+        expect.arrayContaining(expectedScreeningOrder),
+      )
+      expect(expected.expectedBroadMarketContext).toEqual({
+        temporalClass: "LIVE",
+        observedAt: "2026-08-26T14:30:00.000Z",
+        benchmark: "SPY",
+        signal: "BULLISH",
+        dailyClose: 651.25,
+        sma20: 648.875,
+        sma50: 645.125,
+        realizedVolatility20: 0.000013946469539875664,
+      })
       expect(expected.expectedProposalCandidate).toMatchObject({
         underlying: "TSLA",
         strategy: "BULL_CALL_SPREAD",
@@ -303,6 +323,92 @@ describe("research behavior evaluation", () => {
       .not.toContain("EXA_TOOL_BUDGET_EXCEEDED")
     expect(budgeted(repeat("fmp_quote", RESEARCH_MAX_FMP_CALLS)))
       .not.toContain("FMP_TOOL_BUDGET_EXCEEDED")
+  })
+
+  it("enforces input-specific tool ordering", () => {
+    const source = researchBehaviorScenarios[0]!
+    const expectedCall = {
+      pattern: "alpaca_get_stock_bars",
+      input: { symbols: "SPY", timeframe: "1Day" },
+    }
+    const ordered = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "input-order-valid",
+      toolCalls: [
+        {
+          ...completed("alpaca_get_stock_bars"),
+          input: { symbols: "SPY", timeframe: "1Day" },
+        },
+        completed("exa_search"),
+      ],
+      expected: { requiredOrder: [[expectedCall, "exa_*"]] },
+    })
+    const wrongSeriesFirst = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "input-order-invalid",
+      toolCalls: [
+        {
+          ...completed("alpaca_get_stock_bars"),
+          input: { symbols: "TSLA", timeframe: "1Day" },
+        },
+        completed("exa_search"),
+        {
+          ...completed("alpaca_get_stock_bars"),
+          input: { symbols: "SPY", timeframe: "1Day" },
+        },
+        completed("exa_search"),
+      ],
+      expected: { requiredOrder: [[expectedCall, "exa_*"]] },
+    })
+
+    expect(ordered.dimensions.toolDiscipline.issueCodes).toEqual([])
+    expect(wrongSeriesFirst.dimensions.toolDiscipline.issueCodes).toEqual([
+      "TOOL_ORDER_INVALID",
+    ])
+  })
+
+  it("fails a scenario when the canonical workflow rejects a clean behavior result", () => {
+    const source = researchBehaviorScenarios[0]!
+    const evaluation = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "canonical-workflow-rejection",
+    })
+
+    expect(researchBehaviorScenarioFailed({
+      evaluation,
+      expectedWorkflow: {
+        outcome: "VALIDATED_NO_ACTION",
+        actionability: "NO_ACTION",
+      },
+      workflow: {
+        outcome: "DECISION_REJECTED",
+        actionability: "REJECTED",
+        evaluation: {
+          evaluationVersion: "2.0.0",
+          cycleId: "cycle",
+          terminalEventId: "terminal",
+          outcomeStatus: "DECISION_REJECTED",
+          versions: { runVersion: "6.0.0" },
+          dimensions: {
+            contractCompliance: { status: "PASS", issueCodes: [] },
+            temporalIntegrity: { status: "PASS", issueCodes: [] },
+            grounding: { status: "PASS", issueCodes: [] },
+            candidateIdentity: { status: "NOT_APPLICABLE", issueCodes: [] },
+            failClosedBehavior: { status: "PASS", issueCodes: [] },
+          },
+          metrics: {
+            sourcedFactCount: 0,
+            inferenceCount: 0,
+            groundedInferenceCount: 0,
+            snapshotReferenceCount: 0,
+            exaSourceCount: 0,
+            fmpSourceCount: 0,
+          },
+        },
+        runArtifactPath: "run.json",
+        operatorBriefPath: "run.md",
+      },
+    })).toBe(true)
   })
 
   it("rejects prose-wrapped or malformed model output", () => {
@@ -1293,6 +1399,7 @@ describe("research behavior evaluation", () => {
     ).toEqual(["EARLY_STOP_VIOLATED"])
     for (const bypass of proposalPreflightBypasses) {
       expect(bypass.dimensions.toolDiscipline.issueCodes).toEqual([
+        "TOOL_ORDER_INVALID",
         "TOOL_SEQUENCE_INVALID",
       ])
     }
@@ -1444,6 +1551,28 @@ describe("research behavior evaluation", () => {
       scenarioId: "invented-account-time",
       rawResponse: JSON.stringify(inventedAccountTime),
     })
+    const inventedBroadMarketContext = JSON.parse(valid.rawResponse) as any
+    inventedBroadMarketContext.analysis.broadMarketContext = {
+      ...inventedBroadMarketContext.analysis.broadMarketContext,
+      benchmark: "AMD",
+      signal: "BEARISH",
+    }
+    const broadMarketEvaluation = evaluateResearchBehavior({
+      ...valid,
+      scenarioId: "invented-broad-market-context",
+      rawResponse: JSON.stringify(inventedBroadMarketContext),
+      expected: {
+        ...valid.expected,
+        expectedBroadMarketContext: {
+          benchmark: "SPY",
+          signal: "BULLISH",
+          dailyClose: 650,
+          sma20: 645,
+          sma50: 640,
+          realizedVolatility20: 0.16,
+        },
+      },
+    })
 
     const weak = researchBehaviorScenarios[9]!
     const mislabeledWeak = JSON.parse(weak.rawResponse) as {
@@ -1513,6 +1642,9 @@ describe("research behavior evaluation", () => {
     ])
     expect(accountTimeEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_SNAPSHOT_TIME_MISMATCH",
+    ])
+    expect(broadMarketEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
+      "EXPECTED_BROAD_MARKET_CONTEXT_MISMATCH",
     ])
     expect(relevanceEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_RELEVANCE_MISSING",

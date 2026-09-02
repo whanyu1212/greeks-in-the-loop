@@ -20,7 +20,7 @@ import {
 // Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
 // when grader semantics change, so stored artifacts stay attributable to the
 // revision that produced them.
-export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.2.0" as const
+export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.3.0" as const
 
 export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "MALFORMED_JSON",
@@ -50,6 +50,7 @@ export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "EXPECTED_SNAPSHOT_TIME_MISMATCH",
   "EXPECTED_SOURCE_TIMESTAMP_MISMATCH",
   "EXPECTED_ACCOUNT_STATE_MISMATCH",
+  "EXPECTED_BROAD_MARKET_CONTEXT_MISMATCH",
 ] as const
 
 export type ResearchBehaviorIssueCode =
@@ -103,7 +104,9 @@ export type ResearchBehaviorExpectation = Readonly<{
   reasonCode?: NoActionReasonCode
   requiredTools?: readonly string[]
   forbiddenTools?: readonly string[]
-  requiredOrder?: readonly (readonly [string, string])[]
+  requiredOrder?: readonly Readonly<
+    [ResearchBehaviorExpectedTool, ResearchBehaviorExpectedTool]
+  >[]
   completedToolCounts?: readonly Readonly<{
     pattern: string
     minimum: number
@@ -164,6 +167,17 @@ export type ResearchBehaviorExpectation = Readonly<{
     | "conflictingStrategyExposure"
   >>>
   expectedMarketSignal?: ResearchReportV6["analysis"]["marketRegimes"][number]["signal"]
+  expectedBroadMarketContext?: Readonly<Partial<Pick<
+    NonNullable<ResearchReportV6["analysis"]["broadMarketContext"]>,
+    | "temporalClass"
+    | "observedAt"
+    | "benchmark"
+    | "signal"
+    | "dailyClose"
+    | "sma20"
+    | "sma50"
+    | "realizedVolatility20"
+  >>>
   expectedProposalCandidate?:
     | Extract<
       ResearchReportV6["result"],
@@ -367,19 +381,6 @@ export function evaluateResearchBehavior({
       toolIssues.push("REQUIRED_TOOL_MISSING")
     }
   }
-  for (const [before, after] of expected.requiredOrder ?? []) {
-    const orderIsSatisfied = toolCalls.some(
-      ({ name, outcome }, beforeIndex) =>
-        toolMatches(name, before) &&
-        (outcome === undefined || outcome === "completed") &&
-        toolCalls.slice(beforeIndex + 1).some(
-          ({ name: laterName, outcome: laterOutcome }) =>
-            toolMatches(laterName, after) &&
-            (laterOutcome === undefined || laterOutcome === "completed"),
-        ),
-    )
-    if (!orderIsSatisfied) toolIssues.push("TOOL_ORDER_INVALID")
-  }
   const completedToolCalls = toolCalls.filter(
     ({ outcome }) => outcome === undefined || outcome === "completed",
   )
@@ -446,6 +447,18 @@ export function evaluateResearchBehavior({
     }
     return toolMatches(call.name, expectedCall.pattern) &&
       toolInputMatches(call.input, expectedCall.input)
+  }
+  for (const [before, after] of expected.requiredOrder ?? []) {
+    const completedIndex = (expectedCall: ResearchBehaviorExpectedTool) =>
+      toolCalls.findIndex((call) =>
+        (call.outcome === undefined || call.outcome === "completed") &&
+        expectedToolMatches(call, expectedCall)
+      )
+    const beforeIndex = completedIndex(before)
+    const afterIndex = completedIndex(after)
+    const orderIsSatisfied =
+      beforeIndex >= 0 && afterIndex >= 0 && beforeIndex < afterIndex
+    if (!orderIsSatisfied) toolIssues.push("TOOL_ORDER_INVALID")
   }
   if (expected.requiredCompletedToolPrefix !== undefined) {
     const prefixIsValid = expected.requiredCompletedToolPrefix.every(
@@ -729,6 +742,24 @@ export function evaluateResearchBehavior({
       marketRegime?.signal !== expected.expectedMarketSignal
     ) {
       evidenceIssues.push("EXPECTED_MARKET_METRIC_MISMATCH")
+    }
+    if (expected.expectedBroadMarketContext !== undefined) {
+      const broadMarketContext = report.analysis.broadMarketContext
+      const contextMatches = broadMarketContext !== undefined &&
+        Object.entries(expected.expectedBroadMarketContext).every(
+          ([field, expectedValue]) => {
+            const actualValue = broadMarketContext[
+              field as keyof typeof broadMarketContext
+            ]
+            return typeof expectedValue === "number"
+              ? typeof actualValue === "number" &&
+                Math.abs(actualValue - expectedValue) <= 0.0005
+              : isDeepStrictEqual(actualValue, expectedValue)
+          },
+        )
+      if (!contextMatches) {
+        evidenceIssues.push("EXPECTED_BROAD_MARKET_CONTEXT_MISMATCH")
+      }
     }
     if (expected.expectedSnapshotObservedAt !== undefined) {
       if (
