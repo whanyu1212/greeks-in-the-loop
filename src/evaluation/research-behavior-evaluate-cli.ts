@@ -32,6 +32,7 @@ import {
   RESEARCH_EVALUATION_OPTION_UNIVERSE,
   researchBehaviorScenarios,
 } from "./research-behavior-scenarios.js"
+import { runResearchWorkflowEvaluation } from "./research-workflow-evaluation.js"
 
 const usage = `Usage: pnpm research:eval:live [options]
 
@@ -554,12 +555,19 @@ const runScenario = async (
       expected: liveExpectation(scenario.id, scenario.expected),
       readRoot: fixtureRoot,
     })
+    const workflow = await runResearchWorkflowEvaluation({
+      scenarioId: scenario.id,
+      rawResponse,
+      invocation,
+      outputRoot,
+    })
     const result = {
       scenarioId: scenario.id,
       description: scenario.description,
       invocation,
       toolTrace: sanitizedToolTrace(invocationParts),
       evaluation,
+      workflow,
       rawResponse,
     }
     await mkdir(outputRoot, { recursive: true })
@@ -596,7 +604,10 @@ export async function runResearchBehaviorEvaluateCli(args: readonly string[]) {
     results.push(await runScenario(sourceRoot, outputRoot, scenario))
   }
   const failed = results.filter((result) =>
-    Object.values(result.evaluation.dimensions).some(({ status }) => status === "FAIL"),
+    Object.values(result.evaluation.dimensions).some(({ status }) => status === "FAIL") ||
+    Object.values(result.workflow.evaluation.dimensions).some(
+      ({ status }) => status === "FAIL",
+    ),
   )
   const summary = {
     scenarioCount: results.length,

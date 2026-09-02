@@ -318,7 +318,7 @@ register(
 register("alpaca_get_all_positions", "Return fixture open positions.", () => [])
 register("alpaca_get_orders", "Return fixture open or historical orders.", () => [])
 register("alpaca_get_clock", "Return the fixture market clock.", () => ({
-  timestamp: "2026-08-26T14:29:55.000Z",
+  timestamp: "2026-08-26T14:30:00.000Z",
   is_open: true,
   next_close: "2026-08-26T20:00:00.000Z",
 }))
@@ -399,7 +399,7 @@ register("alpaca_get_stock_latest_quote", "Return the fixture current underlying
     ask_price: ask,
     timestamp: scenarioId === "stale-snapshot-single-rebuild" && underlying === "TSLA"
       ? "2026-08-26T14:20:00.000Z"
-      : "2026-08-26T14:29:55.000Z",
+      : "2026-08-26T14:30:00.000Z",
     feed: "iex",
   }
 })
@@ -473,7 +473,7 @@ register("alpaca_get_option_chain", "Return the fixture indicative option chain.
   const stale = scenarioId === "stale-snapshot-single-rebuild"
   const timestamp = stale
     ? "2026-08-26T14:20:00.000Z"
-    : "2026-08-26T14:29:55.000Z"
+    : "2026-08-26T14:30:00.000Z"
   const snapshots = changed
     ? {
         [optionSymbol(underlying, longStrike + 1)]: {
@@ -545,7 +545,7 @@ register("alpaca_get_option_snapshot", "Return exact fixture option snapshots.",
   const changed = scenarioId === "candidate-change-abandoned"
   const timestamp = scenarioId === "stale-snapshot-single-rebuild"
     ? "2026-08-26T14:20:00.000Z"
-    : "2026-08-26T14:29:55.000Z"
+    : "2026-08-26T14:30:00.000Z"
   const snapshots = changed
     ? {
         [optionSymbol(underlying, longStrike + 1)]: {

@@ -1,4 +1,7 @@
 import { existsSync } from "node:fs"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { describe, expect, it } from "vitest"
 
@@ -13,6 +16,7 @@ import {
 } from "../src/evaluation/research-behavior-evaluation-v1.js"
 import { researchBehaviorScenarios } from "../src/evaluation/research-behavior-scenarios.js"
 import { researchEvalBarRequestMatchesFixture } from "../src/evaluation/research-eval-bar-window.js"
+import { runResearchWorkflowEvaluation } from "../src/evaluation/research-workflow-evaluation.js"
 import {
   RESEARCH_MAX_EXA_CALLS,
   RESEARCH_MAX_FMP_CALLS,
@@ -66,6 +70,12 @@ describe("research behavior evaluation", () => {
       timeframe: "1Day",
       start: "2026-06-17T13:30:00Z",
       end: "2026-08-25T20:00:00Z",
+      limit: 50,
+    })).toBe(true)
+    expect(researchEvalBarRequestMatchesFixture({
+      timeframe: "1Day",
+      start: "2026-06-16T00:00:00.000Z",
+      end: "2026-08-26T14:30:00.000Z",
       limit: 50,
     })).toBe(true)
     expect(researchEvalBarRequestMatchesFixture({
@@ -190,6 +200,59 @@ describe("research behavior evaluation", () => {
       status: "PASS",
       issueCodes: [],
     })
+  })
+
+  it("writes canonical dry-run artifacts with a scenario-owned clock", async () => {
+    const report = JSON.parse(researchBehaviorScenarios[0]!.rawResponse) as {
+      reportVersion: string
+      result: { contractVersion: string }
+    }
+    report.reportVersion = "7.0.0"
+    report.result.contractVersion = "4.0.0"
+    const outputRoot = await mkdtemp(join(tmpdir(), "research-workflow-eval-test-"))
+    try {
+      const workflow = await runResearchWorkflowEvaluation({
+        scenarioId: "off-hours-workflow",
+        rawResponse: JSON.stringify(report),
+        invocation: {
+          providerId: "openai",
+          modelId: "gpt-5.6-terra",
+          responseError: false,
+          toolCallCount: 0,
+          toolErrorCount: 0,
+          toolIncompleteCount: 0,
+          toolCalls: [],
+          omittedToolCallCount: 0,
+        },
+        outputRoot,
+      })
+      const run = JSON.parse(
+        await readFile(join(outputRoot, workflow.runArtifactPath), "utf8"),
+      ) as {
+        runVersion: string
+        initialEligibility: { researchMode: string }
+        outcome: { status: string }
+      }
+      const operatorBrief = await readFile(
+        join(outputRoot, workflow.operatorBriefPath),
+        "utf8",
+      )
+
+      expect(workflow.outcome).toBe("VALIDATED_NO_ACTION")
+      expect(Object.values(workflow.evaluation.dimensions).every(
+        ({ status }) => status !== "FAIL",
+      )).toBe(true)
+      expect(run).toMatchObject({
+        runVersion: "7.0.0",
+        initialEligibility: { researchMode: "DRY_RUN" },
+        outcome: { status: "VALIDATED_NO_ACTION" },
+      })
+      expect(operatorBrief).toContain("Derived operator view")
+      expect(operatorBrief).toContain("| Cycle mode | DRY\\_RUN |")
+      expect(operatorBrief).toContain("No order was submitted")
+    } finally {
+      await rm(outputRoot, { recursive: true, force: true })
+    }
   })
 
   it("detects authority expansion, missing tools, ordering, and early-stop failures", () => {

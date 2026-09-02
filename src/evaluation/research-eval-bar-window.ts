@@ -10,7 +10,7 @@ const instants = (values: readonly string[]): ReadonlySet<number> =>
 const dailyStartMinimum = Date.parse("2026-06-01T00:00:00Z")
 const dailyStartMaximum = Date.parse("2026-06-18T00:00:00Z")
 const dailyEndMinimum = Date.parse("2026-08-25T20:00:00Z")
-const dailyEndMaximum = Date.parse("2026-08-26T13:30:00Z")
+const dailyEndMaximum = Date.parse("2026-08-26T14:31:00Z")
 const intradayStarts = instants(["2026-08-26T13:30:00Z"])
 const intradayEndMinimum = Date.parse("2026-08-26T14:29:59Z")
 const intradayEndMaximum = Date.parse("2026-08-26T14:31:00Z")
