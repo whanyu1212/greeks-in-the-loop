@@ -13,6 +13,12 @@ export const RESEARCH_EVALUATION_OPTION_UNDERLYINGS = [
 export type ResearchEvaluationOptionUnderlying =
   (typeof RESEARCH_EVALUATION_OPTION_UNDERLYINGS)[number]
 
+const RESEARCH_EVALUATION_SESSION_MOVES = {
+  TSLA: 0.6,
+  NVDA: -0.6,
+  AMD: 0.1,
+} as const satisfies Record<ResearchEvaluationOptionUnderlying, number>
+
 /** Captured dynamic-discovery output used only by deterministic evaluations. */
 export const RESEARCH_EVALUATION_OPTION_UNIVERSE = {
   snapshotVersion: "2.0.0",
@@ -26,6 +32,7 @@ export const RESEARCH_EVALUATION_OPTION_UNIVERSE = {
       rank: index + 1 as 1 | 2 | 3,
       underlying,
       activityRank: index + 1,
+      sessionPercentChange: RESEARCH_EVALUATION_SESSION_MOVES[underlying],
       optionLiquidity: {
         expirationCount: 2,
         viableSeriesCount: 4 - index,
@@ -33,7 +40,7 @@ export const RESEARCH_EVALUATION_OPTION_UNIVERSE = {
         contractCount: 40 - index * 4,
         liquidContractCount: 24 - index * 4,
         totalOpenInterest: 24_000 - index * 4_000,
-        openInterestCoverage: 1,
+        openInterestCoverage: index === 0 ? 1 : 0.79,
       },
     }),
   ),

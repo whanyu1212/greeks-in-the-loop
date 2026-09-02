@@ -8,6 +8,10 @@ import {
   type ResearchReportV6,
 } from "../contracts/research-report-v6.js"
 import {
+  researchReportV7Schema,
+  type ResearchReportV7,
+} from "../contracts/research-report-v7.js"
+import {
   RESEARCH_MAX_EXA_CALLS,
   RESEARCH_MAX_FMP_CALLS,
   RESEARCH_MAX_TOOL_CALLS,
@@ -16,7 +20,7 @@ import {
 // Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
 // when grader semantics change, so stored artifacts stay attributable to the
 // revision that produced them.
-export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.0.0" as const
+export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.4.0" as const
 
 export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "MALFORMED_JSON",
@@ -46,6 +50,7 @@ export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "EXPECTED_SNAPSHOT_TIME_MISMATCH",
   "EXPECTED_SOURCE_TIMESTAMP_MISMATCH",
   "EXPECTED_ACCOUNT_STATE_MISMATCH",
+  "EXPECTED_BROAD_MARKET_CONTEXT_MISMATCH",
 ] as const
 
 export type ResearchBehaviorIssueCode =
@@ -99,7 +104,9 @@ export type ResearchBehaviorExpectation = Readonly<{
   reasonCode?: NoActionReasonCode
   requiredTools?: readonly string[]
   forbiddenTools?: readonly string[]
-  requiredOrder?: readonly (readonly [string, string])[]
+  requiredOrder?: readonly Readonly<
+    [ResearchBehaviorExpectedTool, ResearchBehaviorExpectedTool]
+  >[]
   completedToolCounts?: readonly Readonly<{
     pattern: string
     minimum: number
@@ -160,16 +167,34 @@ export type ResearchBehaviorExpectation = Readonly<{
     | "conflictingStrategyExposure"
   >>>
   expectedMarketSignal?: ResearchReportV6["analysis"]["marketRegimes"][number]["signal"]
-  expectedProposalCandidate?: Extract<
-    ResearchReportV6["result"],
-    { outcome: "PROPOSE_TRADES" }
-  >["proposals"][number]["candidate"]
-  expectedCandidateEvaluation?: Readonly<{
-    dte: number
-    legs: NonNullable<
-      ResearchReportV6["analysis"]["candidateEvaluations"]
-    >[number]["legs"]
-  }>
+  expectedBroadMarketContext?: Readonly<Partial<Pick<
+    NonNullable<ResearchReportV6["analysis"]["broadMarketContext"]>,
+    | "temporalClass"
+    | "observedAt"
+    | "benchmark"
+    | "signal"
+    | "dailyClose"
+    | "sma20"
+    | "sma50"
+    | "realizedVolatility20"
+  >>>
+  expectedProposalCandidate?:
+    | Extract<
+      ResearchReportV6["result"],
+      { outcome: "PROPOSE_TRADES" }
+    >["proposals"][number]["candidate"]
+    | Extract<
+      ResearchReportV7["result"],
+      { outcome: "PROPOSE_TRADES" }
+    >["proposals"][number]["candidate"]
+  expectedCandidateEvaluation?:
+    | Readonly<{
+      dte: number
+      legs: ResearchReportV6["analysis"]["candidateEvaluations"][number]["legs"]
+    }>
+    | Readonly<{
+      legs: ResearchReportV7["analysis"]["candidateEvaluations"][number]["legs"]
+    }>
   expectedSymbolIndicators?: readonly Readonly<
     NonNullable<ResearchReportV6["analysis"]["symbolIndicators"]>[number]
   >[]
@@ -190,6 +215,7 @@ export type EvaluateResearchBehaviorInput = Readonly<{
   rawResponse: string
   toolCalls: readonly ResearchBehaviorToolCall[]
   expected: ResearchBehaviorExpectation
+  requiredReportVersion?: "7.0.0"
   readRoot?: string
 }>
 
@@ -252,16 +278,24 @@ const firstToolIndex = (
   pattern: string,
 ) => calls.findIndex(({ name }) => toolMatches(name, pattern))
 
-const parseReport = (rawResponse: string) => {
+const parseReport = (
+  rawResponse: string,
+  requiredReportVersion?: "7.0.0",
+) => {
   let input: unknown
   try {
     input = JSON.parse(rawResponse)
   } catch {
     return { success: false as const, issue: "MALFORMED_JSON" as const }
   }
-  const parsed = researchReportV6Schema.safeParse(input)
-  return parsed.success
-    ? { success: true as const, report: parsed.data }
+  const current = researchReportV7Schema.safeParse(input)
+  if (current.success) return { success: true as const, report: current.data }
+  if (requiredReportVersion === "7.0.0") {
+    return { success: false as const, issue: "REPORT_SCHEMA_INVALID" as const }
+  }
+  const fixture = researchReportV6Schema.safeParse(input)
+  return fixture.success
+    ? { success: true as const, report: fixture.data }
     : { success: false as const, issue: "REPORT_SCHEMA_INVALID" as const }
 }
 
@@ -274,6 +308,7 @@ export function evaluateResearchBehavior({
   rawResponse,
   toolCalls,
   expected,
+  requiredReportVersion,
   readRoot,
 }: EvaluateResearchBehaviorInput): ResearchBehaviorEvaluationV1 {
   const contractIssues: ResearchBehaviorIssueCode[] = []
@@ -282,7 +317,7 @@ export function evaluateResearchBehavior({
   const toolIssues: ResearchBehaviorIssueCode[] = []
   const evidenceIssues: ResearchBehaviorIssueCode[] = []
 
-  const parsed = parseReport(rawResponse)
+  const parsed = parseReport(rawResponse, requiredReportVersion)
   if (!parsed.success) contractIssues.push(parsed.issue)
   const report = parsed.success ? parsed.report : undefined
 
@@ -345,19 +380,6 @@ export function evaluateResearchBehavior({
     if (!hasCompletedTool(toolCalls, pattern)) {
       toolIssues.push("REQUIRED_TOOL_MISSING")
     }
-  }
-  for (const [before, after] of expected.requiredOrder ?? []) {
-    const orderIsSatisfied = toolCalls.some(
-      ({ name, outcome }, beforeIndex) =>
-        toolMatches(name, before) &&
-        (outcome === undefined || outcome === "completed") &&
-        toolCalls.slice(beforeIndex + 1).some(
-          ({ name: laterName, outcome: laterOutcome }) =>
-            toolMatches(laterName, after) &&
-            (laterOutcome === undefined || laterOutcome === "completed"),
-        ),
-    )
-    if (!orderIsSatisfied) toolIssues.push("TOOL_ORDER_INVALID")
   }
   const completedToolCalls = toolCalls.filter(
     ({ outcome }) => outcome === undefined || outcome === "completed",
@@ -425,6 +447,18 @@ export function evaluateResearchBehavior({
     }
     return toolMatches(call.name, expectedCall.pattern) &&
       toolInputMatches(call.input, expectedCall.input)
+  }
+  for (const [before, after] of expected.requiredOrder ?? []) {
+    const completedIndex = (expectedCall: ResearchBehaviorExpectedTool) =>
+      toolCalls.findIndex((call) =>
+        (call.outcome === undefined || call.outcome === "completed") &&
+        expectedToolMatches(call, expectedCall)
+      )
+    const beforeIndex = completedIndex(before)
+    const afterIndex = completedIndex(after)
+    const orderIsSatisfied =
+      beforeIndex >= 0 && afterIndex >= 0 && beforeIndex < afterIndex
+    if (!orderIsSatisfied) toolIssues.push("TOOL_ORDER_INVALID")
   }
   if (expected.requiredCompletedToolPrefix !== undefined) {
     const prefixIsValid = expected.requiredCompletedToolPrefix.every(
@@ -709,6 +743,28 @@ export function evaluateResearchBehavior({
     ) {
       evidenceIssues.push("EXPECTED_MARKET_METRIC_MISMATCH")
     }
+    if (expected.expectedBroadMarketContext !== undefined) {
+      const broadMarketContext = report.analysis.broadMarketContext
+      const contextMatches = broadMarketContext !== undefined &&
+        Object.entries(expected.expectedBroadMarketContext).every(
+          ([field, expectedValue]) => {
+            const actualValue = broadMarketContext[
+              field as keyof typeof broadMarketContext
+            ]
+            if (typeof expectedValue !== "number") {
+              return isDeepStrictEqual(actualValue, expectedValue)
+            }
+            const tolerance = field === "realizedVolatility20"
+              ? Math.abs(expectedValue) * 0.005
+              : 0.0005
+            return typeof actualValue === "number" &&
+              Math.abs(actualValue - expectedValue) <= tolerance
+          },
+        )
+      if (!contextMatches) {
+        evidenceIssues.push("EXPECTED_BROAD_MARKET_CONTEXT_MISMATCH")
+      }
+    }
     if (expected.expectedSnapshotObservedAt !== undefined) {
       if (
         marketRegime?.observedAt !==
@@ -733,20 +789,36 @@ export function evaluateResearchBehavior({
     }
     if (expected.expectedCandidateEvaluation !== undefined) {
       const candidateEvaluation = report.analysis.candidateEvaluations[0]
-      const actual = candidateEvaluation === undefined
+      const expectsV6 = "dte" in expected.expectedCandidateEvaluation
+      const actual = candidateEvaluation === undefined ||
+          expectsV6 !== ("dte" in candidateEvaluation)
         ? undefined
-        : {
+        : expectsV6 && "dte" in candidateEvaluation
+        ? {
             dte: candidateEvaluation.dte,
             legs: [...candidateEvaluation.legs].sort((left, right) =>
               left.role.localeCompare(right.role)
             ),
           }
-      const expectedEvaluation = {
-        dte: expected.expectedCandidateEvaluation.dte,
-        legs: [...expected.expectedCandidateEvaluation.legs].sort((left, right) =>
-          left.role.localeCompare(right.role)
-        ),
-      }
+        : {
+            legs: [...candidateEvaluation.legs].sort((left, right) =>
+              left.contractSymbol.localeCompare(right.contractSymbol)
+            ),
+          }
+      const expectedEvaluation = expectsV6
+        ? {
+            dte: expected.expectedCandidateEvaluation.dte,
+            legs: [...expected.expectedCandidateEvaluation.legs].sort((left, right) =>
+              "role" in left && "role" in right
+                ? left.role.localeCompare(right.role)
+                : left.contractSymbol.localeCompare(right.contractSymbol)
+            ),
+          }
+        : {
+            legs: [...expected.expectedCandidateEvaluation.legs].sort((left, right) =>
+              left.contractSymbol.localeCompare(right.contractSymbol)
+            ),
+          }
       if (!isDeepStrictEqual(actual, expectedEvaluation)) {
         evidenceIssues.push("EXPECTED_CANDIDATE_MISMATCH")
       }
