@@ -67,6 +67,24 @@ export const resolveMockLedgerConfiguration = (
   return { backend: "sqlite", path: ledgerPath }
 }
 
+/** Supplies a directionally coherent synthetic delta for the risk harness. */
+export const syntheticOpeningDelta = (
+  contractSymbol: string,
+  positionIntent: TradeIntentV4["legs"][number]["positionIntent"],
+): number => {
+  const parsed = parseAlpacaOptionSymbol(contractSymbol)
+  if (!parsed.success) throw new Error("Synthetic contract symbol is invalid")
+  const magnitude = positionIntent === "BUY_TO_OPEN"
+    ? 0.52
+    : positionIntent === "SELL_TO_OPEN"
+      ? 0.28
+      : undefined
+  if (magnitude === undefined) {
+    throw new Error("Mock execution supports only opening option legs")
+  }
+  return parsed.identity.optionType === "P" ? -magnitude : magnitude
+}
+
 type MockTradeOptions = Readonly<{
   longContractSymbol: string
   shortContractSymbol: string
@@ -213,7 +231,7 @@ const buildMockRiskContext = (
       tradable: true,
       exerciseStyle: "AMERICAN" as const,
       multiplier: 100,
-      delta: leg.positionIntent === "BUY_TO_OPEN" ? 0.52 : 0.28,
+      delta: syntheticOpeningDelta(leg.contractSymbol, leg.positionIntent),
       impliedVolatility: 0.17,
       gamma: 0.012,
       theta: -0.08,
