@@ -488,6 +488,28 @@ describe("processResearchCycle", () => {
     expect(risk.evaluate).not.toHaveBeenCalled()
   })
 
+  it("requires only the indicators and surface dimensions that decide", () => {
+    const trimmed = proposalReport(1)
+    for (const indicator of trimmed.analysis.symbolIndicators as Record<string, unknown>[]) {
+      delete indicator.atrPercent20
+      delete indicator.sma20Slope5d
+      delete indicator.completedSessionDollarVolumeRatio20
+    }
+    for (const surface of trimmed.analysis.optionSurfaces as Record<string, unknown>[]) {
+      delete surface.termStructureSlope
+      delete surface.putCallSkew25Delta
+      delete surface.smileCurvature
+    }
+    expect(researchReportV7Schema.safeParse(trimmed).success).toBe(true)
+
+    // The two that gate a decision are still required on a proposal.
+    for (const metric of ["ewmaRealizedVolatility20", "rangePosition20"] as const) {
+      const missing = proposalReport(1)
+      delete (missing.analysis.symbolIndicators[0] as Record<string, unknown>)[metric]
+      expect(researchReportV7Schema.safeParse(missing).success).toBe(false)
+    }
+  })
+
   it("evaluates up to three proposals and uses priority to break equal quality", async () => {
     const parsedReport = researchReportV7Schema.safeParse(proposalReport(3))
     if (!parsedReport.success) throw new Error(JSON.stringify(parsedReport.error.issues))

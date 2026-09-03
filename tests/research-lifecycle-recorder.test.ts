@@ -490,7 +490,7 @@ describe("createResearchLifecycleRecorder", () => {
         cycleId: "id-1",
         sessionId: "session-1",
         payload: {
-          invocationVersion: "7.6.0",
+          invocationVersion: "7.7.0",
           reason: "MODEL_DRIFT",
           expected: "gpt-5.6-terra",
           observed: "gpt-5.6-terra-fast",
