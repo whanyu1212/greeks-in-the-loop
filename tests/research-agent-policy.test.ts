@@ -109,7 +109,7 @@ describe("research agent policy", () => {
 
   it("keeps strategy selection inside the generic research prompt", () => {
     expect(systemPrompt).toContain("dynamic shortlist containing zero through eight symbols")
-    expect(systemPrompt).toContain("Promote no more than three symbols")
+    expect(systemPrompt).toContain("Promote exactly one finalist")
     expect(systemPrompt).toContain("symbol-strategy screen")
     expect(systemPrompt).toContain("Propose only an exact pair")
     expect(systemPrompt).toContain("APPLICATION_SUPPORT_PENDING")
