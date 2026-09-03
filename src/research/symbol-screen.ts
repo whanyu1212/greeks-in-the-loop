@@ -16,11 +16,18 @@ const LEGACY_SYMBOL_SCREEN_VERSION = "1.0.0" as const
 const LEGACY_SYMBOL_SCREEN_POLICY_VERSION = "1.0.0" as const
 export const SYMBOL_SCREEN_VERSION = "2.0.0" as const
 const LEGACY_SYMBOL_SCREEN_POLICY_VERSION_V2 = "2.0.0" as const
-export const SYMBOL_SCREEN_POLICY_VERSION = "3.0.0" as const
+const LEGACY_SYMBOL_SCREEN_POLICY_VERSION_V3 = "3.0.0" as const
+export const SYMBOL_SCREEN_POLICY_VERSION = "4.0.0" as const
 export const SYMBOL_SCREEN_MIN_ABSOLUTE_MOVE_PERCENT = 0.5
 export const SYMBOL_SCREEN_MIN_LIQUID_CONTRACTS = 4
 export const SYMBOL_SCREEN_MIN_OPEN_INTEREST = 1_000
-export const SYMBOL_SCREEN_MIN_OPEN_INTEREST_COVERAGE = 0.8
+// ponytail: open-interest coverage is measured across the whole 14-30 DTE
+// strike ladder, so null open interest on far-OTM wings sank symbols whose
+// near-the-money chains are among the deepest that trade (QQQ, IWM, GLD,
+// NVDA). The gate is disabled rather than retuned; restore a threshold once
+// coverage is measured over strikes near the money. `openInterestCoverage`
+// is still retained as evidence, and `OPEN_INTEREST_COVERAGE_LOW` remains a
+// valid reason code so persisted screens keep parsing.
 
 export const SYMBOL_SCREEN_REASON_CODES = [
   "OPTION_LIQUIDITY_UNAVAILABLE",
@@ -190,6 +197,7 @@ export const symbolScreenResultV2Schema = z
     screenVersion: z.literal(SYMBOL_SCREEN_VERSION),
     policyVersion: z.enum([
       LEGACY_SYMBOL_SCREEN_POLICY_VERSION_V2,
+      LEGACY_SYMBOL_SCREEN_POLICY_VERSION_V3,
       SYMBOL_SCREEN_POLICY_VERSION,
     ]),
     mode: z.literal("SHADOW"),
@@ -358,10 +366,6 @@ export function screenOptionUniverseV2(
             : []),
           ...(liquidity.totalOpenInterest < SYMBOL_SCREEN_MIN_OPEN_INTEREST
             ? ["OPEN_INTEREST_LOW" as const]
-            : []),
-          ...(liquidity.openInterestCoverage <
-            SYMBOL_SCREEN_MIN_OPEN_INTEREST_COVERAGE
-            ? ["OPEN_INTEREST_COVERAGE_LOW" as const]
             : []),
         ]
     return {

@@ -32,11 +32,11 @@ const optionUniverse = {
 describe("research agent request construction", () => {
   it("uses the fixed checked-in agent identity", () => {
     expect(RESEARCH_AGENT_NAME).toBe("research")
-    expect(RESEARCH_PROMPT_VERSION).toBe("7.1.0")
+    expect(RESEARCH_PROMPT_VERSION).toBe("7.2.0")
   })
 
   it("publishes bounded research budgets", () => {
-    expect(RESEARCH_MAX_AGENT_STEPS).toBe(32)
+    expect(RESEARCH_MAX_AGENT_STEPS).toBe(48)
     expect(RESEARCH_MAX_TOOL_CALLS).toBe(64)
     expect(RESEARCH_MAX_EXA_CALLS).toBe(4)
     expect(RESEARCH_MAX_FMP_CALLS).toBe(3)

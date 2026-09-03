@@ -13,6 +13,7 @@ import { canonicalJsonSha256 } from "../shared/canonical-json.js"
 import { optionUnderlyingV1Schema } from "../shared/alpaca-option-identity.js"
 
 const MAX_CONTRACT_PAGES = 5
+const CONTRACT_QUERY_CHUNK_SIZE = 25
 const LIQUID_OPEN_INTEREST = 500
 const ACTIVE_DISCOVERY_LIMIT = 50
 const GAINER_DISCOVERY_LIMIT = 25
@@ -297,59 +298,75 @@ export function createAlpacaOptionUniverseProvider(
         return snapshot(sessionDate, now().toISOString(), [])
       }
 
-      const contractsUrl = new URL("/v2/options/contracts", tradingBaseUrl)
-      contractsUrl.searchParams.set(
-        "underlying_symbols",
-        screened.map(({ underlying }) => underlying).join(","),
-      )
-      contractsUrl.searchParams.set("status", "active")
-      contractsUrl.searchParams.set("style", "american")
-      contractsUrl.searchParams.set("expiration_date_gte", addDays(sessionDate, 14))
-      contractsUrl.searchParams.set("expiration_date_lte", addDays(sessionDate, 30))
-      contractsUrl.searchParams.set("limit", "10000")
-
       const contractsBySeries = new Map<string, Map<number, number | undefined>>()
-      for (let page = 0; page < MAX_CONTRACT_PAGES; page += 1) {
-        const parsed = optionContractsSchema.safeParse(
-          await get(contractsUrl, signal),
-        )
-        if (!parsed.success) {
-          throw new Error("Alpaca option-universe response is invalid")
-        }
-        for (const contract of parsed.data.option_contracts) {
-          if (
-            contract.status !== "active" ||
-            !contract.tradable ||
-            contract.style !== "american"
-          ) continue
-          const strike = providerNumber(contract.strike_price)
-          const size = providerNumber(contract.size)
-          if (strike === undefined || strike <= 0 || size !== 100) continue
-          const key = [
-            contract.underlying_symbol,
-            contract.expiration_date,
-            contract.type,
-          ].join("|")
-          const openInterest = contract.open_interest == null
-            ? undefined
-            : providerNumber(contract.open_interest)
-          const contracts = contractsBySeries.get(key) ?? new Map()
-          contracts.set(
-            strike,
-            openInterest !== undefined && Number.isInteger(openInterest) &&
-                openInterest >= 0
-              ? openInterest
-              : undefined,
+      const readContractPages = async (underlyings: readonly string[]) => {
+        const contractsUrl = new URL("/v2/options/contracts", tradingBaseUrl)
+        contractsUrl.searchParams.set("underlying_symbols", underlyings.join(","))
+        contractsUrl.searchParams.set("status", "active")
+        contractsUrl.searchParams.set("style", "american")
+        contractsUrl.searchParams.set("expiration_date_gte", addDays(sessionDate, 14))
+        contractsUrl.searchParams.set("expiration_date_lte", addDays(sessionDate, 30))
+        contractsUrl.searchParams.set("limit", "10000")
+
+        for (let page = 0; page < MAX_CONTRACT_PAGES; page += 1) {
+          const parsed = optionContractsSchema.safeParse(
+            await get(contractsUrl, signal),
           )
-          contractsBySeries.set(key, contracts)
+          if (!parsed.success) {
+            throw new Error("Alpaca option-universe response is invalid")
+          }
+          for (const contract of parsed.data.option_contracts) {
+            if (
+              contract.status !== "active" ||
+              !contract.tradable ||
+              contract.style !== "american"
+            ) continue
+            const strike = providerNumber(contract.strike_price)
+            const size = providerNumber(contract.size)
+            if (strike === undefined || strike <= 0 || size !== 100) continue
+            const key = [
+              contract.underlying_symbol,
+              contract.expiration_date,
+              contract.type,
+            ].join("|")
+            const openInterest = contract.open_interest == null
+              ? undefined
+              : providerNumber(contract.open_interest)
+            const contracts = contractsBySeries.get(key) ?? new Map()
+            contracts.set(
+              strike,
+              openInterest !== undefined && Number.isInteger(openInterest) &&
+                  openInterest >= 0
+                ? openInterest
+                : undefined,
+            )
+            contractsBySeries.set(key, contracts)
+          }
+          const pageToken = parsed.data.next_page_token
+          if (pageToken === undefined || pageToken === null) return
+          if (page === MAX_CONTRACT_PAGES - 1) {
+            throw new Error("Alpaca option-universe contract result is too large")
+          }
+          contractsUrl.searchParams.set("page_token", pageToken)
         }
-        const pageToken = parsed.data.next_page_token
-        if (pageToken === undefined || pageToken === null) break
-        if (page === MAX_CONTRACT_PAGES - 1) {
-          throw new Error("Alpaca option-universe contract result is too large")
-        }
-        contractsUrl.searchParams.set("page_token", pageToken)
       }
+
+      // The whole pool in one query pages out on an active session, and the
+      // page bound is fatal rather than degrading. Chunking keeps every chunk
+      // far inside that bound and runs the requests concurrently.
+      const chunks: string[][] = []
+      for (
+        let start = 0;
+        start < screened.length;
+        start += CONTRACT_QUERY_CHUNK_SIZE
+      ) {
+        chunks.push(
+          screened
+            .slice(start, start + CONTRACT_QUERY_CHUNK_SIZE)
+            .map(({ underlying }) => underlying),
+        )
+      }
+      await Promise.all(chunks.map(readContractPages))
 
       const liquidityByUnderlying = new Map<string, {
         expirationCount: number
@@ -360,10 +377,18 @@ export function createAlpacaOptionUniverseProvider(
         totalOpenInterest: number
         openInterestCoverage: number
       }>()
+      const seriesByUnderlying = new Map<
+        string,
+        [string, Map<number, number | undefined>][]
+      >()
+      for (const entry of contractsBySeries) {
+        const underlying = entry[0].split("|")[0]!
+        const grouped = seriesByUnderlying.get(underlying)
+        if (grouped === undefined) seriesByUnderlying.set(underlying, [entry])
+        else grouped.push(entry)
+      }
       for (const candidate of screened) {
-        const series = [...contractsBySeries].filter(([key]) =>
-          key.startsWith(`${candidate.underlying}|`)
-        )
+        const series = seriesByUnderlying.get(candidate.underlying) ?? []
         const viableSeries = series.filter(([, contracts]) => contracts.size >= 2)
         const liquidSeries = viableSeries.filter(([, contracts]) =>
           [...contracts.values()].filter(

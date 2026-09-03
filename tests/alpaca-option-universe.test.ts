@@ -253,12 +253,17 @@ describe("Alpaca option universe provider", () => {
 
     await provider.discover("2026-08-25", new AbortController().signal)
 
-    const contractsCall = fetchMock.mock.calls.find(([input]) =>
+    // The pool is queried in chunks, so the screen is the union of the
+    // contract calls rather than a single request.
+    const contractsCalls = fetchMock.mock.calls.filter(([input]) =>
       new URL(String(input)).pathname === "/v2/options/contracts"
     )
-    const screened = new URL(String(contractsCall?.[0])).searchParams
-      .get("underlying_symbols")?.split(",") ?? []
+    const screened = contractsCalls.flatMap(([input]) =>
+      new URL(String(input)).searchParams.get("underlying_symbols")?.split(",") ??
+        []
+    )
     expect(screened).toHaveLength(100)
+    expect(new Set(screened).size).toBe(100)
     expect(screened.filter((symbol) => symbol.startsWith("A"))).toHaveLength(50)
     expect(screened.filter((symbol) => symbol.startsWith("G"))).toHaveLength(25)
     expect(screened.filter((symbol) => symbol.startsWith("L"))).toHaveLength(25)
