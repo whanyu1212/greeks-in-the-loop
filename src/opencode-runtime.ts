@@ -50,7 +50,26 @@ type StartOpencodeOptions = {
    * never terminates a cycle.
    */
   onSessionError?: (detail: string) => void
+  /**
+   * Receives the agent's own tool calls and narration as they stream.
+   *
+   * These live in the OpenCode server's memory and vanish with the process, so
+   * without this a failed run leaves no record of how it spent its time.
+   * Diagnostic only; never affects a cycle.
+   */
+  onAgentEvent?: (event: AgentStreamEvent) => void
 }
+
+export type AgentStreamEvent =
+  | Readonly<{
+    kind: "tool"
+    name: string
+    status: string
+    durationMs?: number
+    input?: unknown
+    error?: string
+  }>
+  | Readonly<{ kind: "note"; text: string }>
 
 /**
  * Waits for a child process to exit within a bounded duration.
@@ -171,6 +190,7 @@ export async function startOpencode({
   signal,
   timeoutMs,
   onSessionError,
+  onAgentEvent,
 }: StartOpencodeOptions): Promise<OpencodeRuntime> {
   signal.throwIfAborted()
   const configHome = mkdtempSync(join(tmpdir(), "greeks-opencode-"))
@@ -248,21 +268,48 @@ export async function startOpencode({
     fetch: (request) =>
       globalThis.fetch(request, { dispatcher } as RequestInit),
   })
-  if (onSessionError !== undefined) {
+  if (onSessionError !== undefined || onAgentEvent !== undefined) {
+    // One subscription serves both: provider failures that would otherwise
+    // present as silence, and the agent's own activity.
+    const seenToolCalls = new Set<string>()
     void (async () => {
       try {
         const events = await client.event.subscribe({ signal })
         for await (const event of events.stream) {
-          if (event.type !== "session.error") continue
-          const error = event.properties.error
-          onSessionError(
-            error === undefined
-              ? "unknown"
-              : `${error.name}: ${String(
-                (error.data as { message?: unknown } | undefined)?.message ??
-                  "",
-              ).slice(0, 300)}`,
-          )
+          if (event.type === "session.error") {
+            const error = event.properties.error
+            onSessionError?.(
+              error === undefined
+                ? "unknown"
+                : `${error.name}: ${String(
+                  (error.data as { message?: unknown } | undefined)?.message ??
+                    "",
+                ).slice(0, 300)}`,
+            )
+            continue
+          }
+          if (onAgentEvent === undefined) continue
+          if (event.type !== "message.part.updated") continue
+          const part = event.properties.part
+          if (part.type === "text") {
+            if (part.time?.end === undefined) continue
+            onAgentEvent({ kind: "note", text: part.text })
+            continue
+          }
+          if (part.type !== "tool") continue
+          const state = part.state
+          if (state.status !== "completed" && state.status !== "error") continue
+          // A part is updated repeatedly as it streams; report each call once.
+          if (seenToolCalls.has(part.callID)) continue
+          seenToolCalls.add(part.callID)
+          onAgentEvent({
+            kind: "tool",
+            name: part.tool,
+            status: state.status,
+            durationMs: state.time.end - state.time.start,
+            input: state.input,
+            ...(state.status === "error" ? { error: state.error } : {}),
+          })
         }
       } catch {
         // The event stream is diagnostic; losing it must not fail a cycle.

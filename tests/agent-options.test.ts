@@ -62,4 +62,20 @@ describe("parseAgentOptions", () => {
       rmSync(directory, { recursive: true, force: true })
     }
   })
+  it("keeps the run trace a dry-run development aid", () => {
+    expect(
+      parseAgentOptions(["--once", "--dry-run", "--trace", ".state/traces/run.jsonl"]),
+    ).toMatchObject({ tracePath: ".state/traces/run.jsonl" })
+    expect(parseAgentOptions(["--once"]).tracePath).toBeUndefined()
+    // The trace retains bounded model-authored tool inputs.
+    expect(() => parseAgentOptions(["--once", "--trace", "t.jsonl"])).toThrow(
+      "--trace requires --dry-run",
+    )
+    expect(() =>
+      parseAgentOptions(["--once", "--dry-run", "--trace", "a", "--trace", "b"])
+    ).toThrow("--trace may be provided only once")
+    expect(() => parseAgentOptions(["--once", "--dry-run", "--trace"])).toThrow(
+      "--trace requires a value",
+    )
+  })
 })

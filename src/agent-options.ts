@@ -13,6 +13,7 @@ export const DEFAULT_DRY_RUN_LEDGER_PATH = ".state/dry-run.sqlite" as const
 export type AgentOptions = Readonly<{
   once: boolean
   dryRun: boolean
+  tracePath?: string
   sessionDate?: string
   ledgerPath: string
 }>
@@ -139,6 +140,7 @@ export function parseAgentOptions(
   let dryRun = false
   let sessionDate: string | undefined
   let cliLedgerPath: string | undefined
+  let tracePath: string | undefined
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index]
@@ -166,6 +168,15 @@ export function parseAgentOptions(
       sessionDate = value
       continue
     }
+    if (argument === "--trace") {
+      if (tracePath !== undefined) {
+        throw new Error("--trace may be provided only once")
+      }
+      const value = args[++index]?.trim()
+      if (!value) throw new Error("--trace requires a value")
+      tracePath = value
+      continue
+    }
     if (argument === "--ledger") {
       if (cliLedgerPath !== undefined) {
         throw new Error("--ledger may be provided only once")
@@ -179,6 +190,11 @@ export function parseAgentOptions(
   }
 
   if (dryRun && !once) throw new Error("--dry-run requires --once")
+  // The trace retains bounded model-authored tool inputs, so it stays a
+  // development aid rather than something a production worker writes.
+  if (tracePath !== undefined && !dryRun) {
+    throw new Error("--trace requires --dry-run")
+  }
   if (sessionDate !== undefined && !dryRun) {
     throw new Error("--session requires --dry-run")
   }
@@ -201,6 +217,7 @@ export function parseAgentOptions(
     once,
     dryRun,
     ...(sessionDate === undefined ? {} : { sessionDate }),
+    ...(tracePath === undefined ? {} : { tracePath }),
     ledgerPath,
   }
 }

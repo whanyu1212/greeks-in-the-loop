@@ -49,7 +49,13 @@ import {
   RESEARCH_INVOCATION_VERSION,
   type ResearchInvocationV1,
 } from "./research/invocation.js"
-import { startOpencode } from "./opencode-runtime.js"
+import { startOpencode, type AgentStreamEvent } from "./opencode-runtime.js"
+import {
+  createRunTrace,
+  NOOP_RUN_TRACE,
+  traceInputDigest,
+  type RunTraceValue,
+} from "./observability/run-trace.js"
 import {
   buildResearchCyclePrompt,
   buildResearchReportRepairPrompt,
@@ -193,7 +199,7 @@ const agentOptions = parseAgentOptions(
   process.argv.slice(2),
   readSetting("RESEARCH_LEDGER_PATH"),
 )
-const { once, dryRun, ledgerPath } = agentOptions
+const { once, dryRun, ledgerPath, tracePath } = agentOptions
 const deploymentRole = readSetting("DEPLOYMENT_ROLE")?.trim() || "FULL"
 if (deploymentRole !== "FULL" && deploymentRole !== "RESEARCH_ONLY") {
   throw new Error("DEPLOYMENT_ROLE must be FULL or RESEARCH_ONLY")
@@ -356,14 +362,18 @@ try {
     provider: riskStateProvider,
     durableControl: createLedgerDurableRiskControlStateLoader(activeLedgerStore),
   })
-  // Assigned per cycle so a retried provider stream is attributed to the
-  // cycle it stalls; OpenCode owns the subscription for the whole run.
+  // Assigned per cycle so streamed agent activity is attributed to the cycle
+  // it belongs to; OpenCode owns the subscription for the whole run.
   let reportSessionError: ((detail: string) => void) | undefined
+  let recordAgentEvent: ((event: AgentStreamEvent) => void) | undefined
   const runtime = await startOpencode({
     port,
     signal: abortController.signal,
     timeoutMs: serverTimeout,
     onSessionError: (detail) => reportSessionError?.(detail),
+    ...(tracePath === undefined
+      ? {}
+      : { onAgentEvent: (event) => recordAgentEvent?.(event) }),
     environment: {
       ...process.env,
       EXECUTION_LEDGER_PATH: ledgerPath,
@@ -494,11 +504,38 @@ try {
           throw error
         }
         const cycleNumber = cycle.cycleNumber
+        const runTrace = tracePath === undefined
+          ? NOOP_RUN_TRACE
+          : createRunTrace({
+            path: tracePath,
+            cycleId: cycle.cycleId,
+            startedAtMs: Date.parse(cycle.startedAt),
+          })
+        recordAgentEvent = (event) =>
+          runTrace.append(event.kind, event.kind === "note"
+            ? { text: event.text }
+            : {
+              name: event.name,
+              status: event.status,
+              dur: event.durationMs ?? null,
+              in: traceInputDigest(event.input),
+              ...(event.error === undefined ? {} : { err: event.error }),
+            })
         const stageReporter = createTerminalStageReporter({
           cycleId: cycle.cycleId,
           cycleNumber,
           startedAt: cycle.startedAt,
           format: terminalLogFormat,
+          write: (line) => {
+            console.log(line)
+            if (tracePath === undefined) return
+            // The stage line already carries the useful detail (which symbols
+            // screened actionable, which reason codes rejected them); retain it
+            // rather than reducing the event to its name.
+            const { timestamp: _timestamp, cycleId: _cycleId, elapsedMs: _elapsedMs, ...retained } =
+              JSON.parse(line) as Record<string, RunTraceValue>
+            runTrace.append("stage", retained)
+          },
         })
         reportSessionError = (detail) =>
           stageReporter.report("research.agent.stream", "REJECTED", { detail })
