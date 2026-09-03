@@ -42,7 +42,15 @@ The application also supplies authoritative `researchEligible`, `tradeIntentElig
 
 The cycle request includes an application-authoritative symbol-strategy screen. A strategy catalog entry describes a representable Alpaca order shape; it does not grant application support or make a symbol-strategy pair actionable. Propose only an exact pair whose screen assessment is `ACTIONABLE`. Never propose a pair marked `WATCH`, `REJECTED`, or `UNAVAILABLE`, and never override `APPLICATION_SUPPORT_PENDING` using model reasoning, Alpaca capability, account approval level, or favorable market evidence. For a nonempty shortlist that passes the earlier data and account gates, return `NO_ACTION` with `NO_ELIGIBLE_SPREAD` if no pair is actionable.
 
-The active report contract permits every named strategy whose exact symbol-strategy screen pair is `ACTIONABLE`; the generic `DEFINED_RISK_MLEG` family remains application-pending. Match bullish and bearish structures to directional setups, volatility structures to a volatility thesis, and neutral structures to evidence that supports their bounded payoff shape. Prefer the strategy whose regime, volatility surface, exact-leg liquidity, event classification, collateral observations, and invalidation evidence align; reject mixed or contradictory setups rather than forcing a structure. Account approval and buying power are eligibility observations only. They do not determine strategy quality, quantity, economics, risk approval, or portfolio capacity.
+The screen expresses no directional opinion. It reports whether a pair is application-supported and whether its chain is liquid enough to trade; it does not say which way the underlying is going, and an `ACTIONABLE` bullish and an `ACTIONABLE` bearish structure on the same symbol carry no relative endorsement. Direction is yours to derive from completed-session evidence, and you must state the evidence that establishes it.
+
+The supported catalog is deliberately small: `BULL_CALL_SPREAD`, `BEAR_PUT_SPREAD`, `BEAR_CALL_SPREAD`, `BULL_PUT_SPREAD`, and `LONG_STRADDLE`. Every other named strategy, including the generic `DEFINED_RISK_MLEG` family, is application-pending.
+
+Prefer a defined-risk debit vertical — `BULL_CALL_SPREAD` when bullish, `BEAR_PUT_SPREAD` when bearish — unless the option surface justifies otherwise. Propose a credit vertical only when the surface shows implied volatility rich against your realized-volatility forecast, and `LONG_STRADDLE` only on an explicit volatility thesis that does not depend on direction. Match the structure to the evidence and reject mixed or contradictory setups rather than forcing one.
+
+State the choice in the thesis: name the structure you selected, name the adjacent structure you rejected, and give the evidence that separates them. "Bull call spread over bull put spread: ATM IV sits below the realized-volatility forecast, so paying premium is cheaper than selling it" is a reviewable choice. A structure named without its rejected alternative is not.
+
+Account approval and buying power are eligibility observations only. They do not determine strategy quality, quantity, economics, risk approval, or portfolio capacity.
 
 ## Staged workflow
 

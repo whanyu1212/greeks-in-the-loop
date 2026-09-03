@@ -41,7 +41,7 @@ const assessment = (
   .strategies.find((candidate) => candidate.strategy === strategy)!
 
 describe("screenOptionUniverseV2", () => {
-  it("maps qualified movers to supported directional debit spreads", () => {
+  it("marks every supported strategy actionable on liquidity alone", () => {
     const screen = screenOptionUniverseV2(universe([
       {
         rank: 1,
@@ -61,7 +61,7 @@ describe("screenOptionUniverseV2", () => {
 
     expect(screen).toMatchObject({
       screenVersion: "2.0.0",
-      policyVersion: "4.0.0",
+      policyVersion: "5.0.0",
       mode: "SHADOW",
       evaluatedAt: "2026-08-26T14:30:00.000Z",
       symbols: [{ underlying: "SPY" }, { underlying: "QQQ" }],
@@ -71,22 +71,27 @@ describe("screenOptionUniverseV2", () => {
       actionability: "ACTIONABLE",
       reasonCodes: [],
     })
+    // A bullish session move no longer rejects the bearish structure; the
+    // agent owns direction.
     expect(assessment(screen, "SPY", "BEAR_PUT_SPREAD")).toMatchObject({
-      actionability: "REJECTED",
-      reasonCodes: ["DIRECTION_MISMATCH"],
-    })
-    expect(assessment(screen, "QQQ", "BEAR_PUT_SPREAD")).toMatchObject({
       actionability: "ACTIONABLE",
       reasonCodes: [],
     })
-    expect(assessment(screen, "QQQ", "LONG_PUT")).toMatchObject({
+    expect(assessment(screen, "QQQ", "BULL_CALL_SPREAD")).toMatchObject({
       actionability: "ACTIONABLE",
       reasonCodes: [],
     })
-    expect(assessment(screen, "SPY", "IRON_CONDOR")).toMatchObject({
+    expect(assessment(screen, "SPY", "LONG_STRADDLE")).toMatchObject({
       actionability: "ACTIONABLE",
       reasonCodes: [],
     })
+    // Outside the shrunk catalog.
+    for (const strategy of ["LONG_PUT", "IRON_CONDOR", "CALENDAR_SPREAD"] as const) {
+      expect(assessment(screen, "SPY", strategy)).toMatchObject({
+        actionability: "UNAVAILABLE",
+        reasonCodes: ["APPLICATION_SUPPORT_PENDING"],
+      })
+    }
     expect(assessment(screen, "SPY", "DEFINED_RISK_MLEG")).toMatchObject({
       actionability: "UNAVAILABLE",
       reasonCodes: ["APPLICATION_SUPPORT_PENDING"],
@@ -97,7 +102,7 @@ describe("screenOptionUniverseV2", () => {
     expect(symbolScreenResultV2Schema.parse(screen)).toEqual(screen)
   })
 
-  it("watches symbols without a sufficient directional move", () => {
+  it("no longer withholds a strategy for a small or missing session move", () => {
     const screen = screenOptionUniverseV2(universe([
       {
         rank: 1,
@@ -113,12 +118,12 @@ describe("screenOptionUniverseV2", () => {
     ]))
 
     expect(assessment(screen, "SPY", "BULL_CALL_SPREAD")).toMatchObject({
-      actionability: "WATCH",
-      reasonCodes: ["SESSION_MOVE_UNAVAILABLE"],
+      actionability: "ACTIONABLE",
+      reasonCodes: [],
     })
     expect(assessment(screen, "QQQ", "BEAR_PUT_SPREAD")).toMatchObject({
-      actionability: "WATCH",
-      reasonCodes: ["SESSION_MOVE_BELOW_THRESHOLD"],
+      actionability: "ACTIONABLE",
+      reasonCodes: [],
     })
   })
 
