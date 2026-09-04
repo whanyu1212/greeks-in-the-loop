@@ -204,6 +204,10 @@ export type ResearchBehaviorExpectation = Readonly<{
     | "sma50"
     | "sessionVwap"
     | "spotMidpoint"
+    | "gapPercent"
+    | "distanceFromSma20"
+    | "distanceFromSessionVwap"
+    | "intradayRealizedVolatility"
     | "dailySessionCount"
     | "intradayBarCount",
     number

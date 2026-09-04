@@ -336,6 +336,13 @@ describe("research behavior evaluation", () => {
       expect(expected.requiredOrder).toEqual(
         expect.arrayContaining(expectedScreeningOrder),
       )
+      expect(expected.requiredOrder).toContainEqual([
+        {
+          pattern: "alpaca_get_option_chain",
+          input: { underlying_symbol: "TSLA", feed: "indicative" },
+        },
+        "fmp_*",
+      ])
       expect(expected.expectedBroadMarketContext).toEqual({
         observedAt: "2026-08-26T14:30:00.000Z",
         benchmark: "SPY",
@@ -344,6 +351,19 @@ describe("research behavior evaluation", () => {
         sma20: 648.875,
         sma50: 645.125,
         realizedVolatility20: 0.0000139464,
+      })
+      expect(expected.expectedMarketRegime).toEqual({
+        dailyClose: 603.25,
+        sma20: 600.875,
+        sma50: 597.125,
+        sessionVwap: 603.8,
+        spotMidpoint: 606,
+        gapPercent: -0.0019394944,
+        distanceFromSma20: 0.0085292282,
+        distanceFromSessionVwap: 0.0036435906,
+        intradayRealizedVolatility: 0.033735944,
+        dailySessionCount: 50,
+        intradayBarCount: 60,
       })
       expect(expected.expectedProposalCandidate).toMatchObject({
         underlying: "TSLA",

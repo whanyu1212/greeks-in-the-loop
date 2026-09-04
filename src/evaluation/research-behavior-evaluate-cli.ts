@@ -223,6 +223,10 @@ export const liveExpectation = (
     pattern: "alpaca_get_option_contracts",
     input: { underlying_symbols: "TSLA", status: "active" },
   } as const
+  const finalCandidateChain = {
+    pattern: "alpaca_get_option_chain",
+    input: { underlying_symbol: "TSLA", feed: "indicative" },
+  } as const
   const finalCandidateSnapshot = {
     pattern: "alpaca_get_option_snapshot",
     input: {
@@ -328,6 +332,7 @@ export const liveExpectation = (
             [screeningCall, deepResearchCall] as const
           )
         ),
+        [finalCandidateChain, "fmp_*"],
         ["exa_*", "alpaca_get_option_snapshot"],
         ["fmp_*", "alpaca_get_option_snapshot"],
       ],
@@ -474,6 +479,10 @@ export const liveExpectation = (
         sma50: 597.125,
         sessionVwap: 603.8,
         spotMidpoint: 606,
+        gapPercent: -0.0019394944,
+        distanceFromSma20: 0.0085292282,
+        distanceFromSessionVwap: 0.0036435906,
+        intradayRealizedVolatility: 0.033735944,
         dailySessionCount: 50,
         intradayBarCount: 60,
       },
@@ -641,6 +650,7 @@ export const liveExpectation = (
             [screeningCall, deepResearchCall] as const
           )
         ),
+        [finalCandidateChain, "fmp_*"],
         ["exa_*", "alpaca_get_option_snapshot"],
         ["fmp_*", "alpaca_get_option_snapshot"],
       ],
