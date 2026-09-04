@@ -572,6 +572,7 @@ export const liveExpectation = (
     } = live
     return {
       ...stale,
+      reasonCode: "REQUIRED_ALPACA_DATA_INVALID",
       requiredTools: [
         "alpaca_get_account_info",
         "trusted_time",

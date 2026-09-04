@@ -555,6 +555,7 @@ describe("research behavior evaluation", () => {
       ({ id }) => id === "stale-snapshot-single-rebuild",
     )!
     const expected = liveExpectation(scenario.id, scenario.expected)
+    expect(expected.reasonCode).toBe("REQUIRED_ALPACA_DATA_INVALID")
     const screeningSequence = [
       {
         pattern: "alpaca_get_stock_bars",
