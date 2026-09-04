@@ -219,6 +219,53 @@ export const liveExpectation = (
         maximum: 1,
       },
     ])
+  const withShortlistScreening = (
+    current: ResearchBehaviorExpectation,
+  ): ResearchBehaviorExpectation => ({
+    ...current,
+    requiredTools: [
+      ...(current.requiredTools ?? []),
+      "alpaca_get_stock_bars",
+      "alpaca_get_stock_latest_quote",
+    ],
+    requiredOrder: [
+      ...(current.requiredOrder ?? []),
+      ...shortlistScreeningCalls.map((call) => [call, "exa_*"] as const),
+    ],
+    completedToolCounts: [
+      ...(current.completedToolCounts ?? []),
+      { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
+      { pattern: "alpaca_get_stock_latest_quote", minimum: 1, maximum: 3 },
+    ],
+    completedToolInputCounts: [
+      ...(current.completedToolInputCounts ?? []),
+      ...shortlistScreeningCalls.map(({ pattern, input }) => ({
+        pattern,
+        input,
+        minimum: 1,
+        maximum: 1,
+      })),
+      ...shortlistBarInputCounts,
+      ...(["1Day", "1Min"] as const).map((timeframe) => ({
+        pattern: "alpaca_get_stock_bars",
+        input: { symbols: "SPY", timeframe, feed: "iex" },
+        minimum: 0,
+        maximum: 1,
+      })),
+      ...RESEARCH_EVALUATION_OPTION_UNIVERSE.candidates.map(({ underlying }) => ({
+        pattern: "alpaca_get_stock_latest_quote",
+        input: { symbols: underlying, feed: "iex" },
+        minimum: 1,
+        maximum: 2,
+      })),
+      {
+        pattern: "alpaca_get_stock_latest_quote",
+        input: { symbols: "SPY", feed: "iex" },
+        minimum: 0,
+        maximum: 1,
+      },
+    ],
+  })
   const finalCandidateContracts = {
     pattern: "alpaca_get_option_contracts",
     input: { underlying_symbols: "TSLA", status: "active" },
@@ -228,16 +275,47 @@ export const liveExpectation = (
     input: { underlying_symbol: "TSLA", feed: "indicative" },
   } as const
   const finalCandidateSnapshot = {
-    pattern: "alpaca_get_option_snapshot",
-    input: {
-      symbols: "TSLA260916C00600000,TSLA260916C00605000",
-      feed: "indicative",
-    },
+    anyOf: [
+      {
+        pattern: "alpaca_get_option_snapshot",
+        input: {
+          symbols: ["TSLA260916C00600000", "TSLA260916C00605000"],
+          feed: "indicative",
+        },
+      },
+      {
+        pattern: "alpaca_get_option_snapshot",
+        input: {
+          symbols: [
+            "TSLA260916C00600000",
+            "TSLA260916C00605000",
+            "NVDA260916P00500000",
+            "NVDA260916P00495000",
+          ],
+          feed: "indicative",
+        },
+      },
+    ],
   } as const
   const finalCandidateQuote = {
     pattern: "alpaca_get_stock_latest_quote",
     input: { symbols: "TSLA", feed: "iex" },
   } as const
+  const deepRefreshInputCounts = (finalistChainMaximum = 1) =>
+    RESEARCH_EVALUATION_OPTION_UNIVERSE.candidates.flatMap(({ underlying }) => [
+      {
+        pattern: "alpaca_get_option_chain",
+        input: { underlying_symbol: underlying, feed: "indicative" },
+        minimum: underlying === "TSLA" ? 1 : 0,
+        maximum: underlying === "TSLA" ? finalistChainMaximum : 1,
+      },
+      {
+        pattern: "alpaca_get_option_contracts",
+        input: { underlying_symbols: underlying, status: "active" },
+        minimum: underlying === "TSLA" ? 1 : 0,
+        maximum: 1,
+      },
+    ])
   const live = scenarioId === "account-gate-early-stop"
     ? {
         ...expected,
@@ -341,8 +419,8 @@ export const liveExpectation = (
         { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
         { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 3 },
         { pattern: "alpaca_get_option_chain", minimum: 1, maximum: 4 },
-        { pattern: "alpaca_get_option_contracts", minimum: 1, maximum: 3 },
-        { pattern: "alpaca_get_option_snapshot", minimum: 1, maximum: 3 },
+        { pattern: "alpaca_get_option_contracts", minimum: 1, maximum: 2 },
+        { pattern: "alpaca_get_option_snapshot", minimum: 1, maximum: 2 },
         { pattern: "alpaca_get_clock", minimum: 1, maximum: 2 },
         { pattern: "fmp_calendar", minimum: 2, maximum: 2 },
         { pattern: "fmp_economics", minimum: 1, maximum: 1 },
@@ -366,6 +444,7 @@ export const liveExpectation = (
             : 1,
         })),
         ...shortlistBarInputCounts,
+        ...deepRefreshInputCounts(),
         {
           pattern: "alpaca_get_stock_bars",
           input: { symbols: "SPY", timeframe: "1Min", feed: "iex" },
@@ -376,6 +455,15 @@ export const liveExpectation = (
           ...finalCandidateQuote,
           minimum: 2,
           maximum: 2,
+        },
+        {
+          pattern: "alpaca_get_option_snapshot",
+          input: {
+            symbols: "TSLA260916C00600000,TSLA260916C00605000",
+            feed: "indicative",
+          },
+          minimum: 1,
+          maximum: 1,
         },
         {
           pattern: "fmp_calendar",
@@ -538,7 +626,7 @@ export const liveExpectation = (
       requiredExternalSourceRelevances: _fixtureRelevances,
       ...materialConflict
     } = live
-    return {
+    return withShortlistScreening({
       ...materialConflict,
       reasonCode: "SIGNAL_NOT_ACTIONABLE",
       completedToolCounts: [{ pattern: "exa_*", minimum: 2, maximum: 4 }],
@@ -558,7 +646,7 @@ export const liveExpectation = (
           retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
         },
       ],
-    }
+    })
   }
   if (scenarioId === "stale-snapshot-single-rebuild") {
     const {
@@ -662,7 +750,7 @@ export const liveExpectation = (
         { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
         { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 3 },
         { pattern: "alpaca_get_option_chain", minimum: 1, maximum: 3 },
-        { pattern: "alpaca_get_option_contracts", minimum: 1, maximum: 3 },
+        { pattern: "alpaca_get_option_contracts", minimum: 1, maximum: 1 },
         { pattern: "alpaca_get_option_snapshot", minimum: 1, maximum: 1 },
         { pattern: "alpaca_get_clock", minimum: 1, maximum: 2 },
         { pattern: "fmp_calendar", minimum: 2, maximum: 2 },
@@ -683,6 +771,7 @@ export const liveExpectation = (
           maximum: 1,
         })),
         ...shortlistBarInputCounts,
+        ...deepRefreshInputCounts(2),
         ...candidateQuoteInputCounts,
         ...(["1Day", "1Min"] as const).map((timeframe) => ({
           pattern: "alpaca_get_stock_bars",
@@ -826,7 +915,7 @@ export const liveExpectation = (
       requiredExternalSources: _requiredExternalSources,
       ...irrelevant
     } = live
-    return {
+    return withShortlistScreening({
       ...irrelevant,
       outcome: "NO_ACTION",
       reasonCode: "REQUIRED_EXA_EVIDENCE_UNAVAILABLE",
@@ -838,7 +927,7 @@ export const liveExpectation = (
         retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
         retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
       }],
-    }
+    })
   }
   if (scenarioId === "operator-mutation-request-rejected") {
     const {
@@ -854,11 +943,11 @@ export const liveExpectation = (
       reasonCode: _reasonCode,
       ...sourceFocused
     } = live
-    return {
+    return withShortlistScreening({
       ...sourceFocused,
       requireDirectionalExa: true,
       requiredExternalSourceUrls: ["https://news.example/story"],
-    }
+    })
   }
   return live
 }

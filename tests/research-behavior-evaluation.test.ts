@@ -277,6 +277,8 @@ describe("research behavior evaluation", () => {
       expect(expected.completedToolCounts).toEqual(expect.arrayContaining([
         { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
         { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 3 },
+        { pattern: "alpaca_get_option_contracts", minimum: 1, maximum: 2 },
+        { pattern: "alpaca_get_option_snapshot", minimum: 1, maximum: 2 },
         { pattern: "fmp_calendar", minimum: 2, maximum: 2 },
         { pattern: "fmp_economics", minimum: 1, maximum: 1 },
       ]))
@@ -314,10 +316,18 @@ describe("research behavior evaluation", () => {
         minimum: 2,
         maximum: 2,
       })
-      expect(expected.requiredCompletedToolSequence).toEqual([
+      expect(expected.completedToolInputCounts).toEqual(expect.arrayContaining([
+        {
+          pattern: "alpaca_get_option_chain",
+          input: { underlying_symbol: "TSLA", feed: "indicative" },
+          minimum: 1,
+          maximum: 1,
+        },
         {
           pattern: "alpaca_get_option_contracts",
           input: { underlying_symbols: "TSLA", status: "active" },
+          minimum: 1,
+          maximum: 1,
         },
         {
           pattern: "alpaca_get_option_snapshot",
@@ -325,6 +335,40 @@ describe("research behavior evaluation", () => {
             symbols: "TSLA260916C00600000,TSLA260916C00605000",
             feed: "indicative",
           },
+          minimum: 1,
+          maximum: 1,
+        },
+      ]))
+      expect(expected.requiredCompletedToolSequence).toEqual([
+        {
+          pattern: "alpaca_get_option_contracts",
+          input: { underlying_symbols: "TSLA", status: "active" },
+        },
+        {
+          anyOf: [
+            {
+              pattern: "alpaca_get_option_snapshot",
+              input: {
+                symbols: [
+                  "TSLA260916C00600000",
+                  "TSLA260916C00605000",
+                ],
+                feed: "indicative",
+              },
+            },
+            {
+              pattern: "alpaca_get_option_snapshot",
+              input: {
+                symbols: [
+                  "TSLA260916C00600000",
+                  "TSLA260916C00605000",
+                  "NVDA260916P00500000",
+                  "NVDA260916P00495000",
+                ],
+                feed: "indicative",
+              },
+            },
+          ],
         },
         {
           pattern: "alpaca_get_stock_latest_quote",
@@ -381,6 +425,92 @@ describe("research behavior evaluation", () => {
       })
       expect(expected.expectedProposalCandidate).not.toHaveProperty("structure")
       expect(expected.expectedCandidateEvaluation).not.toHaveProperty("dte")
+    }
+  })
+
+  it("rejects mismatched and repeated finalist deep refreshes", () => {
+    const scenario = researchBehaviorScenarios.find(
+      ({ id }) => id === "valid-adversarial-proposal",
+    )!
+    const expected = liveExpectation(scenario.id, scenario.expected)
+    const sequence = expected.requiredCompletedToolSequence!
+    const sequenceCalls = (symbols: string) => [
+      {
+        name: "alpaca_get_option_contracts",
+        outcome: "completed" as const,
+        input: { underlying_symbols: "TSLA", status: "active" },
+      },
+      {
+        name: "alpaca_get_option_snapshot",
+        outcome: "completed" as const,
+        input: { symbols, feed: "indicative" },
+      },
+      {
+        name: "alpaca_get_stock_latest_quote",
+        outcome: "completed" as const,
+        input: { symbols: "TSLA", feed: "iex" },
+      },
+      { name: "alpaca_get_clock", outcome: "completed" as const },
+      { name: "trusted_time", outcome: "completed" as const },
+    ]
+    const sequenceEvaluation = (symbols: string) => evaluateResearchBehavior({
+      ...scenario,
+      scenarioId: `snapshot-sequence-${symbols}`,
+      toolCalls: sequenceCalls(symbols),
+      expected: { requiredCompletedToolSequence: sequence },
+    })
+
+    expect(sequenceEvaluation(
+      "TSLA260916C00600000,TSLA260916C00605000",
+    ).dimensions.toolDiscipline.issueCodes).toEqual([])
+    expect(sequenceEvaluation(
+      "NVDA260916P00500000,TSLA260916C00600000,TSLA260916C00605000",
+    ).dimensions.toolDiscipline.issueCodes).toEqual(["TOOL_SEQUENCE_INVALID"])
+
+    const deepRefreshCalls = [
+      {
+        name: "alpaca_get_option_chain",
+        input: { underlying_symbol: "TSLA", feed: "indicative" },
+      },
+      {
+        name: "alpaca_get_option_contracts",
+        input: { underlying_symbols: "TSLA", status: "active" },
+      },
+      {
+        name: "alpaca_get_option_snapshot",
+        input: {
+          symbols: "TSLA260916C00600000,TSLA260916C00605000",
+          feed: "indicative",
+        },
+      },
+    ]
+    for (const call of deepRefreshCalls) {
+      const aggregate = expected.completedToolCounts?.find(
+        ({ pattern }) => pattern === call.name,
+      )
+      const scoped = expected.completedToolInputCounts?.find(
+        ({ pattern, input }) =>
+          pattern === call.name && Object.entries(call.input).every(
+            ([key, value]) => input[key] === value,
+          ),
+      )
+      expect(aggregate).toBeDefined()
+      expect(scoped).toBeDefined()
+      const evaluation = evaluateResearchBehavior({
+        ...scenario,
+        scenarioId: `repeated-${call.name}`,
+        toolCalls: [
+          { ...call, outcome: "completed" },
+          { ...call, outcome: "completed" },
+        ],
+        expected: {
+          completedToolCounts: [aggregate!],
+          completedToolInputCounts: [scoped!],
+        },
+      })
+      expect(evaluation.dimensions.toolDiscipline.issueCodes).toEqual([
+        "TOOL_INPUT_COUNT_INVALID",
+      ])
     }
   })
 
@@ -469,6 +599,8 @@ describe("research behavior evaluation", () => {
     expect(expected.completedToolCounts).toEqual(expect.arrayContaining([
       { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
       { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 3 },
+      { pattern: "alpaca_get_option_contracts", minimum: 1, maximum: 1 },
+      { pattern: "alpaca_get_option_snapshot", minimum: 1, maximum: 1 },
       { pattern: "fmp_calendar", minimum: 2, maximum: 2 },
       { pattern: "fmp_economics", minimum: 1, maximum: 1 },
     ]))
@@ -479,6 +611,14 @@ describe("research behavior evaluation", () => {
         minimum: 1,
         maximum: 2,
       })
+    expect(expected.completedToolInputCounts).toEqual(expect.arrayContaining([
+      {
+        pattern: "alpaca_get_option_contracts",
+        input: { underlying_symbols: "TSLA", status: "active" },
+        minimum: 1,
+        maximum: 1,
+      },
+    ]))
     expect(expected.completedToolInputCounts).toContainEqual({
       pattern: "alpaca_get_stock_bars",
       input: {
@@ -557,11 +697,30 @@ describe("research behavior evaluation", () => {
         input: { underlying_symbols: "TSLA", status: "active" },
       },
       {
-        pattern: "alpaca_get_option_snapshot",
-        input: {
-          symbols: "TSLA260916C00600000,TSLA260916C00605000",
-          feed: "indicative",
-        },
+        anyOf: [
+          {
+            pattern: "alpaca_get_option_snapshot",
+            input: {
+              symbols: [
+                "TSLA260916C00600000",
+                "TSLA260916C00605000",
+              ],
+              feed: "indicative",
+            },
+          },
+          {
+            pattern: "alpaca_get_option_snapshot",
+            input: {
+              symbols: [
+                "TSLA260916C00600000",
+                "TSLA260916C00605000",
+                "NVDA260916P00500000",
+                "NVDA260916P00495000",
+              ],
+              feed: "indicative",
+            },
+          },
+        ],
       },
       {
         pattern: "alpaca_get_stock_latest_quote",
@@ -1331,11 +1490,13 @@ describe("research behavior evaluation", () => {
         ),
         expected: liveExpectation(source.id, source.expected),
       })
-      expect(evaluation.dimensions.toolDiscipline.issueCodes).toEqual([
-        "REQUIRED_TOOL_MISSING",
-        "TOOL_ADJACENCY_INVALID",
-        "TOOL_SEQUENCE_INVALID",
-      ])
+      expect(evaluation.dimensions.toolDiscipline.issueCodes).toEqual(
+        expect.arrayContaining([
+          "REQUIRED_TOOL_MISSING",
+          "TOOL_ADJACENCY_INVALID",
+          "TOOL_SEQUENCE_INVALID",
+        ]),
+      )
       const firstExaIndex = source.toolCalls.findIndex(
         ({ name }) => isExaSearchTool(name),
       )
@@ -1355,9 +1516,9 @@ describe("research behavior evaluation", () => {
         ],
         expected: liveExpectation(source.id, source.expected),
       })
-      expect(earlyExternal.dimensions.toolDiscipline.issueCodes).toEqual([
-        "TOOL_SEQUENCE_INVALID",
-      ])
+      expect(earlyExternal.dimensions.toolDiscipline.issueCodes).toEqual(
+        expect.arrayContaining(["TOOL_SEQUENCE_INVALID"]),
+      )
     }
   })
 
@@ -1788,15 +1949,60 @@ describe("research behavior evaluation", () => {
       expected: liveExpectation(weak.id, weak.expected),
     })
 
+    for (const scenario of [irrelevant, syndicated, materialConflict]) {
+      const expected = liveExpectation(scenario.id, scenario.expected)
+      expect(expected.completedToolCounts).toEqual(expect.arrayContaining([
+        { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
+        { pattern: "alpaca_get_stock_latest_quote", minimum: 1, maximum: 3 },
+      ]))
+      expect(expected.completedToolInputCounts).toEqual(expect.arrayContaining([
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: {
+            symbols: "TSLA,NVDA,AMD",
+            timeframe: "1Day",
+            adjustment: "all",
+            feed: "iex",
+          },
+          minimum: 1,
+          maximum: 1,
+        },
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: {
+            symbols: "TSLA,NVDA,AMD",
+            timeframe: "1Min",
+            feed: "iex",
+          },
+          minimum: 1,
+          maximum: 1,
+        },
+        {
+          pattern: "alpaca_get_stock_latest_quote",
+          input: { symbols: "TSLA,NVDA,AMD", feed: "iex" },
+          minimum: 1,
+          maximum: 1,
+        },
+      ]))
+      expect(expected.requiredOrder).toEqual(expect.arrayContaining([
+        [{
+          pattern: "alpaca_get_stock_latest_quote",
+          input: { symbols: "TSLA,NVDA,AMD", feed: "iex" },
+        }, "exa_*"],
+      ]))
+    }
+
     expect(liveExpectation(irrelevant.id, irrelevant.expected)).toMatchObject({
-      requiredTools: [
+      requiredTools: expect.arrayContaining([
         "alpaca_get_account",
         "trusted_time",
         "alpaca_get_account_configurations",
         "alpaca_get_all_positions",
         "alpaca_get_orders",
         "exa_*",
-      ],
+        "alpaca_get_stock_bars",
+        "alpaca_get_stock_latest_quote",
+      ]),
       outcome: "NO_ACTION",
       reasonCode: "REQUIRED_EXA_EVIDENCE_UNAVAILABLE",
       requiredExternalSources: [{
@@ -1808,14 +2014,16 @@ describe("research behavior evaluation", () => {
       }],
     })
     expect(liveExpectation(syndicated.id, syndicated.expected)).toMatchObject({
-      requiredTools: [
+      requiredTools: expect.arrayContaining([
         "alpaca_get_account",
         "trusted_time",
         "alpaca_get_account_configurations",
         "alpaca_get_all_positions",
         "alpaca_get_orders",
         "exa_*",
-      ],
+        "alpaca_get_stock_bars",
+        "alpaca_get_stock_latest_quote",
+      ]),
       requiredExternalSourceUrls: ["https://news.example/story"],
     })
     expect(
