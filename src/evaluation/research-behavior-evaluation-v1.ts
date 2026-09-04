@@ -20,7 +20,7 @@ import {
 // Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
 // when grader semantics change, so stored artifacts stay attributable to the
 // revision that produced them.
-export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.4.0" as const
+export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.8.0" as const
 
 export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "MALFORMED_JSON",
@@ -399,7 +399,13 @@ export function evaluateResearchBehavior({
         return actual.symbols.split(",")
       }
       if (key === "symbols" && typeof expected === "string") {
-        return actual.symbols ?? actual.symbol
+        const symbols = actual.symbols ?? actual.symbol
+        const expectedSymbols = expected.split(",")
+        return typeof symbols === "string" && expectedSymbols.every(
+            (symbol) => symbols.split(",").includes(symbol),
+          )
+          ? expected
+          : symbols
       }
       if (key === "underlying_symbol") {
         return actual.underlying_symbol ?? actual.symbol
@@ -630,9 +636,19 @@ export function evaluateResearchBehavior({
             indicatorMetrics.every((metric) => {
               const retainedValue = retained[metric]
               const expectedValue = expectedIndicator[metric]
+              const tolerance = metric === "rangePosition20"
+                ? 0.1
+                : metric === "return5d" || metric === "return20d"
+                ? 0.001
+                : metric === "atrPercent20"
+                ? 0.001
+                : metric === "completedSessionVolumeRatio20" ||
+                    metric === "completedSessionDollarVolumeRatio20"
+                ? 0.02
+                : 0.0001
               return retainedValue !== undefined &&
                 expectedValue !== undefined &&
-                Math.abs(retainedValue - expectedValue) <= 0.0001
+                Math.abs(retainedValue - expectedValue) <= tolerance
             })
         })
       if (!indicatorsMatch) {

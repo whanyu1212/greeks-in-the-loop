@@ -16,7 +16,7 @@ import type { SymbolScreenResultV2 } from "./symbol-screen.js"
 /** Checked-in OpenCode primary agent used by every unattended cycle. */
 export const RESEARCH_AGENT_NAME = "research" as const
 /** Increment when the system prompt or cycle-request behavior changes. */
-export const RESEARCH_PROMPT_VERSION = "7.2.0" as const
+export const RESEARCH_PROMPT_VERSION = "7.4.0" as const
 
 /** Hard OpenCode turn bound mirrored by the checked-in agent configuration. */
 export const RESEARCH_MAX_AGENT_STEPS = 48
@@ -65,6 +65,8 @@ export function buildResearchReportRepairPrompt(
     "Case-sensitive enums: evidence kind is SOURCED_FACT or INFERENCE; temporalClass is LIVE, DELAYED, or PRIOR_CLOSE; symbol direction is BULLISH, BEARISH, or NEUTRAL; symbol disposition is REJECT, WATCH, or PROPOSE.",
     "analysis.accountChecks is exactly {verification:\"AGENT_REPORTED\",observedAt,accountStatus,optionsTradingApproved,conflictingStrategyExposure}. Do not omit verification or add other fields.",
     "Each analysis.symbolIndicators item is exactly {underlying,throughSessionDate,return5d,return20d,relativeStrengthRank20d,realizedVolatility20,completedSessionVolumeRatio20} plus only optional atrPercent20, ewmaRealizedVolatility20, sma20Slope5d, completedSessionDollarVolumeRatio20, and rangePosition20. Do not add verification or any other field to symbol indicators.",
+    "Assign relativeStrengthRank20d by sorting every emitted symbol's numeric return20d descending; the largest return is rank 1.",
+    "A BULLISH or BEARISH marketRegimes item requires dailyClose, sma20, sma50, sessionVwap, spotMidpoint, gapPercent, distanceFromSma20, distanceFromSessionVwap, and intradayRealizedVolatility in addition to both session counts.",
     "NO_ACTION evidence is a non-empty array. Sourced facts are exactly {claimId,kind:\"SOURCED_FACT\",claim,provider,temporalClass,observedAt} plus optional locator. Inferences are exactly {claimId,kind:\"INFERENCE\",claim,basedOn} and basedOn references sourced-fact claim IDs.",
     "When analysis.broadMarketContext is present it requires verification, temporalClass, observedAt, benchmark, and signal. Use benchmark, not underlying.",
     "EXA externalContext is exactly {sourceId,provider:\"EXA\",verification:\"AGENT_REPORTED\",title,url,publishedAt,retrievedAt,summary,relevance}. FMP externalContext is exactly {sourceId,provider:\"FMP\",verification:\"AGENT_REPORTED\",dataset,observedAt,retrievedAt,summary,relevance}. Do not retain provider aliases or extra fields.",

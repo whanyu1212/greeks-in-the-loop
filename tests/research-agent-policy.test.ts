@@ -191,6 +191,28 @@ describe("research agent policy", () => {
     expect(systemPrompt).toContain("RSI, MACD, stochastic")
   })
 
+  it("defines valid batched light-pass requests and account normalization", () => {
+    expect(systemPrompt).toContain("single comma-separated `symbols` value")
+    expect(systemPrompt).toContain("Keep `limit` generous enough not to bind (1000)")
+    expect(systemPrompt).toContain("normalize a definitive provider status other than `ACTIVE` to `INACTIVE`")
+    expect(systemPrompt).toContain("`conflictingStrategyExposure` is always boolean")
+    expect(systemPrompt).toContain("copy `analysis.optionUniverse` verbatim")
+    expect(systemPrompt).toContain("`liquidSeriesCount`")
+    expect(systemPrompt).toContain("never emit an empty or partial `symbolIndicators` array")
+    expect(systemPrompt).toContain("the largest return is rank 1")
+    expect(systemPrompt).toContain("distinct thesis-supporting and thesis-challenging searches")
+    expect(systemPrompt).toContain("do not omit those computed fields")
+    expect(systemPrompt).toContain("as substantive no-action conclusions")
+    expect(systemPrompt).toContain("source trust affects confidence")
+    expect(systemPrompt).toContain("reject that finalist")
+    expect(systemPrompt).toContain("Retrying only an exact snapshot")
+    expect(systemPrompt).toContain("never repeat company-calendar calls per symbol")
+    expect(systemPrompt).toContain("trusted timestamp bounds the preceding final-refresh observations")
+    expect(systemPrompt).toContain("all ten listed signal metrics")
+    expect(systemPrompt).toContain("each larger `return20d` has a smaller rank")
+    expect(systemPrompt).toContain("Set `eventBeforeExpiration` to `false` for `CLEAR`")
+  })
+
   it("runs policy, MCP, and behavior diagnostics through reviewed entrypoints", () => {
     expect(manifest.scripts?.["agent:config"]).toContain(
       "scripts/run-isolated-opencode.mjs",
@@ -274,6 +296,9 @@ describe("research agent policy", () => {
     expect(evalMcp).toContain('"fmp_economics"')
     expect(evalMcp).toContain('"fmp_calendar"')
     expect(evalMcp).toContain('"exa_web_search_exa"')
+    expect(evalMcp).toContain('scenarioId === "candidate-change-abandoned"')
+    expect(evalMcp).toContain("longStrike + 1")
+    expect(evalMcp).toContain("challenges but does not invalidate")
     expect(evalMcp).not.toContain('"alpaca_get_account_configurations"')
     expect(evalMcp).not.toContain('"fmp_get_economic_calendar"')
     expect(evalMcp).not.toContain('"exa_search"')
