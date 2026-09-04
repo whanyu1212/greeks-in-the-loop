@@ -263,6 +263,21 @@ describe("research behavior evaluation", () => {
       expect(expected.completedToolInputCounts).toEqual(
         expect.arrayContaining([...seriesChecks, ...eventChecks]),
       )
+      expect(expected.completedToolInputCounts).toContainEqual({
+        pattern: "alpaca_get_stock_latest_quote",
+        input: { symbols: "TSLA", feed: "iex" },
+        minimum: 2,
+        maximum: 2,
+      })
+      expect(expected.requiredCompletedToolSequence).toEqual([
+        "alpaca_get_option_contracts",
+        {
+          pattern: "alpaca_get_stock_latest_quote",
+          input: { symbols: "TSLA", feed: "iex" },
+        },
+        "alpaca_get_clock",
+        "trusted_time",
+      ])
       const expectedScreeningOrder = seriesChecks.slice(0, 3).flatMap(({ pattern, input }) =>
         ["exa_*", "fmp_*", "alpaca_get_option_chain"].map((after) => [
           { pattern, input },
@@ -371,6 +386,37 @@ describe("research behavior evaluation", () => {
       minimum: 1,
       maximum: 1,
     })
+    expect(expected.completedToolInputCounts).toEqual(expect.arrayContaining([
+      {
+        pattern: "alpaca_get_stock_bars",
+        input: {
+          symbols: "TSLA",
+          timeframe: "1Day",
+          adjustment: "all",
+          feed: "iex",
+        },
+        minimum: 1,
+        maximum: 1,
+      },
+      {
+        pattern: "alpaca_get_stock_bars",
+        input: { symbols: "TSLA", timeframe: "1Min", feed: "iex" },
+        minimum: 1,
+        maximum: 1,
+      },
+      {
+        pattern: "alpaca_get_stock_latest_quote",
+        input: { symbols: "TSLA", feed: "iex" },
+        minimum: 2,
+        maximum: 2,
+      },
+      {
+        pattern: "alpaca_get_stock_bars",
+        input: { symbols: "SPY", timeframe: "1Day", feed: "iex" },
+        minimum: 0,
+        maximum: 1,
+      },
+    ]))
   })
 
   it("requires the complete stale light-pass rebuild after a trusted time check", () => {
@@ -1279,6 +1325,7 @@ describe("research behavior evaluation", () => {
       "TOOL_COUNT_INVALID",
       "TOOL_INPUT_COUNT_INVALID",
       "TOOL_ORDER_INVALID",
+      "TOOL_SEQUENCE_INVALID",
     ])
     expect(withoutRefresh.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_COUNT_INVALID",
