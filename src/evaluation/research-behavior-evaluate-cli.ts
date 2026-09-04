@@ -665,6 +665,8 @@ export const liveExpectation = (
         { pattern: "alpaca_get_option_contracts", minimum: 1, maximum: 3 },
         { pattern: "alpaca_get_option_snapshot", minimum: 1, maximum: 1 },
         { pattern: "alpaca_get_clock", minimum: 1, maximum: 2 },
+        { pattern: "fmp_calendar", minimum: 2, maximum: 2 },
+        { pattern: "fmp_economics", minimum: 1, maximum: 1 },
         { pattern: "trusted_time", minimum: 2, maximum: 5 },
       ],
       completedToolInputCounts: [
@@ -699,6 +701,36 @@ export const liveExpectation = (
           input: { underlying_symbol: "TSLA", feed: "indicative" },
           minimum: 1,
           maximum: 2,
+        },
+        {
+          pattern: "fmp_calendar",
+          input: {
+            endpoint: "earnings-calendar",
+            from_date: "2026-08-26",
+            to_date: "2026-09-16",
+          },
+          minimum: 1,
+          maximum: 1,
+        },
+        {
+          pattern: "fmp_calendar",
+          input: {
+            endpoint: "dividends-calendar",
+            from_date: "2026-08-26",
+            to_date: "2026-09-16",
+          },
+          minimum: 1,
+          maximum: 1,
+        },
+        {
+          pattern: "fmp_economics",
+          input: {
+            endpoint: "economics-calendar",
+            from_date: "2026-08-26",
+            to_date: "2026-09-16",
+          },
+          minimum: 1,
+          maximum: 1,
         },
       ],
       requiredAdjacentToolPairs: [

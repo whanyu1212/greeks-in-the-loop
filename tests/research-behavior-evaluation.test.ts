@@ -445,6 +445,10 @@ describe("research behavior evaluation", () => {
       "TSLA",
     ))
       .toBe("CHALLENGES")
+    expect(researchEvalExaQueryDirection(
+      "TSLA evidence contradicting the thesis",
+      "TSLA",
+    )).toBe("CHALLENGES")
     expect(researchEvalExaQueryDirection("TSLA current news", "TSLA"))
       .toBeUndefined()
     expect(researchEvalExaQueryDirection("TSLA bullish thesis risks", "TSLA"))
@@ -465,6 +469,8 @@ describe("research behavior evaluation", () => {
     expect(expected.completedToolCounts).toEqual(expect.arrayContaining([
       { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
       { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 3 },
+      { pattern: "fmp_calendar", minimum: 2, maximum: 2 },
+      { pattern: "fmp_economics", minimum: 1, maximum: 1 },
     ]))
     expect(expected.completedToolInputCounts)
       .toContainEqual({
@@ -512,6 +518,36 @@ describe("research behavior evaluation", () => {
         pattern: "alpaca_get_stock_bars",
         input: { symbols: "SPY", timeframe: "1Day", feed: "iex" },
         minimum: 0,
+        maximum: 1,
+      },
+      {
+        pattern: "fmp_calendar",
+        input: {
+          endpoint: "earnings-calendar",
+          from_date: "2026-08-26",
+          to_date: "2026-09-16",
+        },
+        minimum: 1,
+        maximum: 1,
+      },
+      {
+        pattern: "fmp_calendar",
+        input: {
+          endpoint: "dividends-calendar",
+          from_date: "2026-08-26",
+          to_date: "2026-09-16",
+        },
+        minimum: 1,
+        maximum: 1,
+      },
+      {
+        pattern: "fmp_economics",
+        input: {
+          endpoint: "economics-calendar",
+          from_date: "2026-08-26",
+          to_date: "2026-09-16",
+        },
+        minimum: 1,
         maximum: 1,
       },
     ]))

@@ -10,7 +10,7 @@ export const researchEvalExaSourceIndex = (
 
 const supportTerms = /\b(?:bullish|positive|support(?:s|ed|ing)?|upside)\b/iu
 const challengeTerms =
-  /\b(?:bearish|challenge(?:s|d|ing)?|concerns?|downside|negative|risks?)\b/iu
+  /\b(?:bearish|challenge(?:s|d|ing)?|concerns?|contradict(?:s|ed|ing|ions?|ory)?|downside|negative|risks?)\b/iu
 
 export const researchEvalExaQueryDirection = (
   query: string,
