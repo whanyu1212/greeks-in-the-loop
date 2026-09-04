@@ -621,6 +621,7 @@ export const liveExpectation = (
     const {
       completedToolCounts: _completedToolCounts,
       completedToolInputCounts: _completedToolInputCounts,
+      forbiddenAfter: _forbiddenAfter,
       forbiddenAfterCompletedToolOccurrence: _forbiddenAfterCompletedToolOccurrence,
       requiredCompletedToolSequence: _requiredCompletedToolSequence,
       ...candidateChanged
@@ -712,6 +713,10 @@ export const liveExpectation = (
         before: "alpaca_get_clock",
         after: "trusted_time",
         tools: ["*"],
+      }],
+      forbiddenAfter: [{
+        anchor: "alpaca_get_option_contracts",
+        tools: ["exa_*", "fmp_*"],
       }],
       requireDirectionalExa: true,
       requiredExternalSources: [

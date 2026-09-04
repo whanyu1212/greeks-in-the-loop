@@ -524,6 +524,10 @@ describe("research behavior evaluation", () => {
       "alpaca_get_clock",
       "trusted_time",
     ])
+    expect(expected.forbiddenAfter).toEqual([{
+      anchor: "alpaca_get_option_contracts",
+      tools: ["exa_*", "fmp_*"],
+    }])
     expect(expected).toMatchObject({
       requireDirectionalExa: true,
       requiredExternalSources: [
