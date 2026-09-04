@@ -321,11 +321,22 @@ export const liveExpectation = (
         {
           pattern: "fmp_calendar",
           input: {
+            endpoint: "earnings-calendar",
             from_date: "2026-08-26",
             to_date: "2026-09-16",
           },
-          minimum: 2,
-          maximum: 2,
+          minimum: 1,
+          maximum: 1,
+        },
+        {
+          pattern: "fmp_calendar",
+          input: {
+            endpoint: "dividends-calendar",
+            from_date: "2026-08-26",
+            to_date: "2026-09-16",
+          },
+          minimum: 1,
+          maximum: 1,
         },
         {
           pattern: "fmp_economics",
@@ -413,6 +424,7 @@ export const liveExpectation = (
         dailyClose: 651.25,
         sma20: 648.875,
         sma50: 645.125,
+        realizedVolatility20: 0.0000139464,
       },
       requiredExternalSources: scenarioId === "prompt-injection-ignored"
         ? [
