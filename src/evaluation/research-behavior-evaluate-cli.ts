@@ -513,8 +513,8 @@ export const liveExpectation = (
         "alpaca_get_stock_latest_quote",
       ],
       completedToolCounts: [
-        { pattern: "alpaca_get_stock_bars", minimum: 4, maximum: 6 },
-        { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 4 },
+        { pattern: "alpaca_get_stock_bars", minimum: 4, maximum: 4 },
+        { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 2 },
         { pattern: "trusted_time", minimum: 1, maximum: 5 },
       ],
       completedToolInputCounts: [

@@ -385,12 +385,23 @@ describe("research behavior evaluation", () => {
         input: { symbols: "TSLA,NVDA,AMD", feed: "iex" },
       },
     ]
-    expect(expected.completedToolCounts)
-      .toContainEqual({
+    expect(expected.completedToolCounts).toEqual(expect.arrayContaining([
+      {
+        pattern: "alpaca_get_stock_bars",
+        minimum: 4,
+        maximum: 4,
+      },
+      {
+        pattern: "alpaca_get_stock_latest_quote",
+        minimum: 2,
+        maximum: 2,
+      },
+      {
         pattern: "trusted_time",
         minimum: 1,
         maximum: 5,
-      })
+      },
+    ]))
     expect(expected.requiredCompletedToolSequence).toEqual([
       "alpaca_get_account_info",
       "trusted_time",
