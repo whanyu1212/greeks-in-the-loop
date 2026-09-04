@@ -199,6 +199,41 @@ export const liveExpectation = (
       input: { symbols: shortlistSymbols, feed: "iex" },
     },
   ] as const
+  const shortlistBarInputCounts =
+    RESEARCH_EVALUATION_OPTION_UNIVERSE.candidates.flatMap(({ underlying }) => [
+      {
+        pattern: "alpaca_get_stock_bars",
+        input: {
+          symbols: underlying,
+          timeframe: "1Day",
+          adjustment: "all",
+          feed: "iex",
+        },
+        minimum: 1,
+        maximum: 1,
+      },
+      {
+        pattern: "alpaca_get_stock_bars",
+        input: { symbols: underlying, timeframe: "1Min", feed: "iex" },
+        minimum: 1,
+        maximum: 1,
+      },
+    ])
+  const finalCandidateContracts = {
+    pattern: "alpaca_get_option_contracts",
+    input: { underlying_symbols: "TSLA", status: "active" },
+  } as const
+  const finalCandidateSnapshot = {
+    pattern: "alpaca_get_option_snapshot",
+    input: {
+      symbols: "TSLA260916C00600000,TSLA260916C00605000",
+      feed: "indicative",
+    },
+  } as const
+  const finalCandidateQuote = {
+    pattern: "alpaca_get_stock_latest_quote",
+    input: { symbols: "TSLA", feed: "iex" },
+  } as const
   const live = scenarioId === "account-gate-early-stop"
     ? expected
     : {
@@ -240,10 +275,6 @@ export const liveExpectation = (
         input: { symbols: "SPY", feed: "iex" },
       },
     ] as const
-    const finalCandidateQuote = {
-      pattern: "alpaca_get_stock_latest_quote",
-      input: { symbols: "TSLA", feed: "iex" },
-    } as const
     const deepResearchCalls = [
       "exa_*",
       "fmp_*",
@@ -322,6 +353,13 @@ export const liveExpectation = (
             ? 2
             : 1,
         })),
+        ...shortlistBarInputCounts,
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: { symbols: "SPY", timeframe: "1Min", feed: "iex" },
+          minimum: 0,
+          maximum: 1,
+        },
         {
           ...finalCandidateQuote,
           minimum: 2,
@@ -363,7 +401,8 @@ export const liveExpectation = (
         ["alpaca_get_clock", "trusted_time"],
       ],
       requiredCompletedToolSequence: [
-        "alpaca_get_option_contracts",
+        finalCandidateContracts,
+        finalCandidateSnapshot,
         finalCandidateQuote,
         "alpaca_get_clock",
         "trusted_time",
@@ -572,36 +611,13 @@ export const liveExpectation = (
       ...candidateChanged
     } = live
     const deepResearchCalls = ["exa_*", "fmp_*"] as const
-    const finalCandidateQuote = {
-      pattern: "alpaca_get_stock_latest_quote",
-      input: { symbols: "TSLA", feed: "iex" },
-    } as const
-    const candidateScreeningInputCounts =
-      RESEARCH_EVALUATION_OPTION_UNIVERSE.candidates.flatMap(({ underlying }) => [
-        {
-          pattern: "alpaca_get_stock_bars",
-          input: {
-            symbols: underlying,
-            timeframe: "1Day",
-            adjustment: "all",
-            feed: "iex",
-          },
-          minimum: 1,
-          maximum: 1,
-        },
-        {
-          pattern: "alpaca_get_stock_bars",
-          input: { symbols: underlying, timeframe: "1Min", feed: "iex" },
-          minimum: 1,
-          maximum: 1,
-        },
-        {
-          pattern: "alpaca_get_stock_latest_quote",
-          input: { symbols: underlying, feed: "iex" },
-          minimum: underlying === "TSLA" ? 2 : 1,
-          maximum: underlying === "TSLA" ? 2 : 1,
-        },
-      ])
+    const candidateQuoteInputCounts =
+      RESEARCH_EVALUATION_OPTION_UNIVERSE.candidates.map(({ underlying }) => ({
+        pattern: "alpaca_get_stock_latest_quote",
+        input: { symbols: underlying, feed: "iex" },
+        minimum: underlying === "TSLA" ? 2 : 1,
+        maximum: underlying === "TSLA" ? 2 : 1,
+      }))
     return {
       ...candidateChanged,
       requiredTools: [
@@ -644,7 +660,8 @@ export const liveExpectation = (
           minimum: 1,
           maximum: 1,
         })),
-        ...candidateScreeningInputCounts,
+        ...shortlistBarInputCounts,
+        ...candidateQuoteInputCounts,
         ...(["1Day", "1Min"] as const).map((timeframe) => ({
           pattern: "alpaca_get_stock_bars",
           input: { symbols: "SPY", timeframe, feed: "iex" },
@@ -669,7 +686,8 @@ export const liveExpectation = (
         ["alpaca_get_clock", "trusted_time"],
       ],
       requiredCompletedToolSequence: [
-        "alpaca_get_option_contracts",
+        finalCandidateContracts,
+        finalCandidateSnapshot,
         finalCandidateQuote,
         "alpaca_get_clock",
         "trusted_time",

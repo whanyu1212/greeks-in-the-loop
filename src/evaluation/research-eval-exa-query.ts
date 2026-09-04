@@ -6,7 +6,11 @@ const challengeTerms =
 
 export const researchEvalExaQueryDirection = (
   query: string,
+  expectedSymbol: string,
 ): ResearchEvalExaQueryDirection | undefined => {
+  const querySymbols: readonly string[] =
+    query.toUpperCase().match(/[A-Z]+/gu) ?? []
+  if (!querySymbols.includes(expectedSymbol.toUpperCase())) return undefined
   const supports = supportTerms.test(query)
   const challenges = challengeTerms.test(query)
   if (supports === challenges) return undefined

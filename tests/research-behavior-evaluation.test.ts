@@ -264,6 +264,31 @@ describe("research behavior evaluation", () => {
       expect(expected.completedToolInputCounts).toEqual(
         expect.arrayContaining([...seriesChecks, ...eventChecks]),
       )
+      expect(expected.completedToolInputCounts).toEqual(expect.arrayContaining([
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: {
+            symbols: "TSLA",
+            timeframe: "1Day",
+            adjustment: "all",
+            feed: "iex",
+          },
+          minimum: 1,
+          maximum: 1,
+        },
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: { symbols: "TSLA", timeframe: "1Min", feed: "iex" },
+          minimum: 1,
+          maximum: 1,
+        },
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: { symbols: "SPY", timeframe: "1Min", feed: "iex" },
+          minimum: 0,
+          maximum: 1,
+        },
+      ]))
       expect(expected.completedToolInputCounts).toContainEqual({
         pattern: "alpaca_get_stock_latest_quote",
         input: { symbols: "TSLA", feed: "iex" },
@@ -271,7 +296,17 @@ describe("research behavior evaluation", () => {
         maximum: 2,
       })
       expect(expected.requiredCompletedToolSequence).toEqual([
-        "alpaca_get_option_contracts",
+        {
+          pattern: "alpaca_get_option_contracts",
+          input: { underlying_symbols: "TSLA", status: "active" },
+        },
+        {
+          pattern: "alpaca_get_option_snapshot",
+          input: {
+            symbols: "TSLA260916C00600000,TSLA260916C00605000",
+            feed: "indicative",
+          },
+        },
         {
           pattern: "alpaca_get_stock_latest_quote",
           input: { symbols: "TSLA", feed: "iex" },
@@ -361,13 +396,21 @@ describe("research behavior evaluation", () => {
   })
 
   it("classifies only unambiguous directional Exa queries", () => {
-    expect(researchEvalExaQueryDirection("TSLA bullish catalysts and upside"))
+    expect(researchEvalExaQueryDirection(
+      "TSLA bullish catalysts and upside",
+      "TSLA",
+    ))
       .toBe("SUPPORTS")
-    expect(researchEvalExaQueryDirection("TSLA bearish risks and downside"))
+    expect(researchEvalExaQueryDirection(
+      "TSLA bearish risks and downside",
+      "TSLA",
+    ))
       .toBe("CHALLENGES")
-    expect(researchEvalExaQueryDirection("TSLA current news"))
+    expect(researchEvalExaQueryDirection("TSLA current news", "TSLA"))
       .toBeUndefined()
-    expect(researchEvalExaQueryDirection("TSLA bullish thesis risks"))
+    expect(researchEvalExaQueryDirection("TSLA bullish thesis risks", "TSLA"))
+      .toBeUndefined()
+    expect(researchEvalExaQueryDirection("NVDA bullish upside", "TSLA"))
       .toBeUndefined()
   })
 
@@ -430,7 +473,17 @@ describe("research behavior evaluation", () => {
       },
     ]))
     expect(expected.requiredCompletedToolSequence).toEqual([
-      "alpaca_get_option_contracts",
+      {
+        pattern: "alpaca_get_option_contracts",
+        input: { underlying_symbols: "TSLA", status: "active" },
+      },
+      {
+        pattern: "alpaca_get_option_snapshot",
+        input: {
+          symbols: "TSLA260916C00600000,TSLA260916C00605000",
+          feed: "indicative",
+        },
+      },
       {
         pattern: "alpaca_get_stock_latest_quote",
         input: { symbols: "TSLA", feed: "iex" },

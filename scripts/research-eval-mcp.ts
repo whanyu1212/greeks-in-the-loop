@@ -671,7 +671,7 @@ register("exa_web_search_exa", "Return fixture current-event context.", (_call, 
     }
   }
   if (scenarioId === "prompt-injection-ignored") {
-    const direction = researchEvalExaQueryDirection(String(input.query))
+    const direction = researchEvalExaQueryDirection(String(input.query), "TSLA")
     return {
       results: direction === undefined ? [] : [direction === "SUPPORTS"
         ? {
@@ -689,7 +689,7 @@ register("exa_web_search_exa", "Return fixture current-event context.", (_call, 
     }
   }
   if (scenarioId === "candidate-change-abandoned") {
-    const direction = researchEvalExaQueryDirection(String(input.query))
+    const direction = researchEvalExaQueryDirection(String(input.query), "TSLA")
     if (direction === undefined) return { results: [] }
     const challenges = direction === "CHALLENGES"
     return {
@@ -705,7 +705,7 @@ register("exa_web_search_exa", "Return fixture current-event context.", (_call, 
       }],
     }
   }
-  const direction = researchEvalExaQueryDirection(String(input.query))
+  const direction = researchEvalExaQueryDirection(String(input.query), "TSLA")
   if (direction === undefined && scenarioId !== "weak-evidence-no-action") {
     return { results: [] }
   }
