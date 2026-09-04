@@ -20,7 +20,7 @@ import {
 // Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
 // when grader semantics change, so stored artifacts stay attributable to the
 // revision that produced them.
-export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.8.0" as const
+export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.9.0" as const
 
 export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "MALFORMED_JSON",
@@ -637,7 +637,7 @@ export function evaluateResearchBehavior({
               const retainedValue = retained[metric]
               const expectedValue = expectedIndicator[metric]
               const tolerance = metric === "rangePosition20"
-                ? 0.1
+                ? 0.001
                 : metric === "return5d" || metric === "return20d"
                 ? 0.001
                 : metric === "atrPercent20"

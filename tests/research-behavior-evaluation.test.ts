@@ -810,11 +810,18 @@ describe("research behavior evaluation", () => {
       .completedSessionDollarVolumeRatio20 += 0.015
     roundedReport.analysis.symbolIndicators[0]!.atrPercent20 += 0.0005
     roundedReport.analysis.symbolIndicators[0]!.return20d += 0.0008
-    roundedReport.analysis.symbolIndicators[1]!.rangePosition20 += 0.09
+    roundedReport.analysis.symbolIndicators[1]!.rangePosition20 += 0.0008
     const roundedEvaluation = evaluateResearchBehavior({
       ...source,
       scenarioId: "rounded-universe-indicators",
       rawResponse: JSON.stringify(roundedReport),
+    })
+    const impreciseRangeReport = structuredClone(report)
+    impreciseRangeReport.analysis.symbolIndicators[1]!.rangePosition20 += 0.01
+    const impreciseRangeEvaluation = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "imprecise-range-position",
+      rawResponse: JSON.stringify(impreciseRangeReport),
     })
     report.analysis.symbolIndicators = report.analysis.symbolIndicators.map(
       (indicator) => ({
@@ -832,6 +839,8 @@ describe("research behavior evaluation", () => {
 
     expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
     expect(roundedEvaluation.dimensions.evidenceDiscipline.issueCodes).not
+      .toContain("EXPECTED_MARKET_METRIC_MISMATCH")
+    expect(impreciseRangeEvaluation.dimensions.evidenceDiscipline.issueCodes)
       .toContain("EXPECTED_MARKET_METRIC_MISMATCH")
     expect(evaluation.dimensions.evidenceDiscipline.issueCodes).toContain(
       "EXPECTED_MARKET_METRIC_MISMATCH",
