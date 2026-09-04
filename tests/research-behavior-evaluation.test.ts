@@ -348,13 +348,29 @@ describe("research behavior evaluation", () => {
     const scenario = researchBehaviorScenarios.find(
       ({ id }) => id === "candidate-change-abandoned",
     )!
-    expect(liveExpectation(scenario.id, scenario.expected).completedToolInputCounts)
+    const expected = liveExpectation(scenario.id, scenario.expected)
+    expect(expected.completedToolCounts).toEqual(expect.arrayContaining([
+      { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
+      { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 3 },
+    ]))
+    expect(expected.completedToolInputCounts)
       .toContainEqual({
         pattern: "alpaca_get_option_chain",
         input: { underlying_symbol: "TSLA", feed: "indicative" },
         minimum: 1,
         maximum: 2,
       })
+    expect(expected.completedToolInputCounts).toContainEqual({
+      pattern: "alpaca_get_stock_bars",
+      input: {
+        symbols: "TSLA,NVDA,AMD",
+        timeframe: "1Day",
+        adjustment: "all",
+        feed: "iex",
+      },
+      minimum: 1,
+      maximum: 1,
+    })
   })
 
   it("requires the complete stale light-pass rebuild after a trusted time check", () => {
@@ -1555,6 +1571,13 @@ describe("research behavior evaluation", () => {
       ],
       outcome: "NO_ACTION",
       reasonCode: "REQUIRED_EXA_EVIDENCE_UNAVAILABLE",
+      requiredExternalSources: [{
+        url: "https://example.com/unrelated",
+        relevance: "NEUTRAL",
+        publishedAt: "2026-08-26T13:00:00.000Z",
+        retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+        retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
+      }],
     })
     expect(liveExpectation(syndicated.id, syndicated.expected)).toMatchObject({
       requiredTools: [
@@ -1587,7 +1610,9 @@ describe("research behavior evaluation", () => {
     expect(
       liveExpectation(materialConflict.id, materialConflict.expected),
     ).not.toHaveProperty("reasonCode")
-    expect(mislabeledIrrelevant.dimensions.evidenceDiscipline.issueCodes).toEqual([])
+    expect(mislabeledIrrelevant.dimensions.evidenceDiscipline.issueCodes).toEqual([
+      "EXPECTED_RELEVANCE_MISSING",
+    ])
     expect(
       proposalResearchInsideSnapshot.dimensions.toolDiscipline.issueCodes,
     ).toEqual(["EARLY_STOP_VIOLATED"])

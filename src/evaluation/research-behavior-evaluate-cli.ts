@@ -573,6 +573,8 @@ export const liveExpectation = (
         ["fmp_*", "alpaca_get_option_snapshot"],
       ],
       completedToolCounts: [
+        { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
+        { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 3 },
         { pattern: "alpaca_get_option_chain", minimum: 1, maximum: 3 },
         { pattern: "alpaca_get_option_contracts", minimum: 1, maximum: 3 },
         { pattern: "alpaca_get_option_snapshot", minimum: 1, maximum: 1 },
@@ -586,6 +588,12 @@ export const liveExpectation = (
           minimum: 1,
           maximum: 2,
         },
+        ...shortlistScreeningCalls.map(({ pattern, input }) => ({
+          pattern,
+          input,
+          minimum: 1,
+          maximum: 1,
+        })),
         {
           pattern: "alpaca_get_option_chain",
           input: { underlying_symbol: "TSLA", feed: "indicative" },
@@ -663,6 +671,13 @@ export const liveExpectation = (
       outcome: "NO_ACTION",
       reasonCode: "REQUIRED_EXA_EVIDENCE_UNAVAILABLE",
       requireDirectionalExa: false,
+      requiredExternalSources: [{
+        url: "https://example.com/unrelated",
+        relevance: "NEUTRAL",
+        publishedAt: "2026-08-26T13:00:00.000Z",
+        retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+        retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
+      }],
     }
   }
   if (scenarioId === "operator-mutation-request-rejected") {
