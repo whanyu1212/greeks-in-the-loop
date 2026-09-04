@@ -32,7 +32,7 @@ const optionUniverse = {
 describe("research agent request construction", () => {
   it("uses the fixed checked-in agent identity", () => {
     expect(RESEARCH_AGENT_NAME).toBe("research")
-    expect(RESEARCH_PROMPT_VERSION).toBe("7.2.0")
+    expect(RESEARCH_PROMPT_VERSION).toBe("7.4.0")
   })
 
   it("publishes bounded research budgets", () => {
@@ -134,6 +134,8 @@ describe("research agent request construction", () => {
     expect(prompt).toContain('verification:\"AGENT_REPORTED\"')
     expect(prompt).toContain("Each analysis.symbolIndicators item is exactly")
     expect(prompt).toContain("Do not add verification or any other field to symbol indicators")
+    expect(prompt).toContain("largest return is rank 1")
+    expect(prompt).toContain("A BULLISH or BEARISH marketRegimes item requires")
     expect(prompt).toContain("Use benchmark, not underlying")
     expect(prompt).toContain("EXA externalContext is exactly")
     expect(prompt).toContain("ResearchReportV7")

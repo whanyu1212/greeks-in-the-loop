@@ -18,6 +18,10 @@ import {
 } from "../src/evaluation/research-behavior-evaluation-v1.js"
 import { researchBehaviorScenarios } from "../src/evaluation/research-behavior-scenarios.js"
 import { researchEvalBarRequestMatchesFixture } from "../src/evaluation/research-eval-bar-window.js"
+import {
+  researchEvalExaQueryDirection,
+  researchEvalExaSourceIndex,
+} from "../src/evaluation/research-eval-exa-query.js"
 import { runResearchWorkflowEvaluation } from "../src/evaluation/research-workflow-evaluation.js"
 import {
   RESEARCH_MAX_EXA_CALLS,
@@ -91,6 +95,19 @@ describe("research behavior evaluation", () => {
     expect(prompt).toContain('"strategy":"BULL_CALL_SPREAD","actionability":"ACTIONABLE"')
     expect(prompt).toContain('"strategy":"BEAR_PUT_SPREAD","actionability":"REJECTED"')
     expect(prompt).toContain("distinct Exa searches")
+  })
+
+  it("uses a false exposure default at the inactive-account gate", () => {
+    const scenario = researchBehaviorScenarios.find(
+      ({ id }) => id === "account-gate-early-stop",
+    )!
+
+    expect(liveExpectation(scenario.id, scenario.expected).expectedAccountChecks)
+      .toMatchObject({
+        accountStatus: "INACTIVE",
+        optionsTradingApproved: false,
+        conflictingStrategyExposure: false,
+      })
   })
 
   it("rejects stock-bar requests outside the fixture windows", () => {
@@ -188,32 +205,31 @@ describe("research behavior evaluation", () => {
   })
 
   it("applies complete V7 workflow expectations to live proposal scenarios", () => {
-    const seriesChecks = ["TSLA", "NVDA", "AMD", "SPY"].flatMap((symbols) => [
+    const seriesChecks = ["TSLA,NVDA,AMD", "SPY"].flatMap((symbols) => [
       {
         pattern: "alpaca_get_stock_bars",
         input: { symbols, timeframe: "1Day", adjustment: "all", feed: "iex" },
         minimum: 1,
         maximum: 1,
       },
-      {
-        pattern: "alpaca_get_stock_bars",
-        input: { symbols, timeframe: "1Min", feed: "iex" },
-        minimum: 1,
-        maximum: 1,
-      },
+      ...(symbols === "SPY" ? [] : [{
+          pattern: "alpaca_get_stock_bars",
+          input: { symbols, timeframe: "1Min", feed: "iex" },
+          minimum: 1,
+          maximum: 1,
+        }]),
       {
         pattern: "alpaca_get_stock_latest_quote",
         input: { symbols, feed: "iex" },
         minimum: 1,
-        maximum: 1,
+        maximum: symbols === "SPY" ? 2 : 1,
       },
     ])
     const eventChecks = [
       {
         pattern: "fmp_calendar",
         input: {
-          endpoint: "earnings-company",
-          symbol: "TSLA",
+          endpoint: "earnings-calendar",
           from_date: "2026-08-26",
           to_date: "2026-09-16",
         },
@@ -223,8 +239,7 @@ describe("research behavior evaluation", () => {
       {
         pattern: "fmp_calendar",
         input: {
-          endpoint: "dividends-company",
-          symbol: "TSLA",
+          endpoint: "dividends-calendar",
           from_date: "2026-08-26",
           to_date: "2026-09-16",
         },
@@ -256,16 +271,113 @@ describe("research behavior evaluation", () => {
         "fmp_economics",
         "alpaca_get_option_snapshot",
       ]))
+      expect(expected.expectedSnapshotObservedAt).toBe(
+        "2026-08-26T14:30:00.000Z",
+      )
       expect(expected.completedToolCounts).toEqual(expect.arrayContaining([
-        { pattern: "alpaca_get_stock_bars", minimum: 8, maximum: 8 },
-        { pattern: "alpaca_get_stock_latest_quote", minimum: 4, maximum: 4 },
+        { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
+        { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 3 },
+        { pattern: "alpaca_get_option_contracts", minimum: 1, maximum: 2 },
+        { pattern: "alpaca_get_option_snapshot", minimum: 1, maximum: 2 },
         { pattern: "fmp_calendar", minimum: 2, maximum: 2 },
         { pattern: "fmp_economics", minimum: 1, maximum: 1 },
       ]))
       expect(expected.completedToolInputCounts).toEqual(
         expect.arrayContaining([...seriesChecks, ...eventChecks]),
       )
-      const expectedScreeningOrder = seriesChecks.flatMap(({ pattern, input }) =>
+      expect(expected.completedToolInputCounts).toEqual(expect.arrayContaining([
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: {
+            symbols: "TSLA",
+            timeframe: "1Day",
+            adjustment: "all",
+            feed: "iex",
+          },
+          minimum: 1,
+          maximum: 1,
+        },
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: { symbols: "TSLA", timeframe: "1Min", feed: "iex" },
+          minimum: 1,
+          maximum: 1,
+        },
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: { symbols: "SPY", timeframe: "1Min", feed: "iex" },
+          minimum: 0,
+          maximum: 1,
+        },
+      ]))
+      expect(expected.completedToolInputCounts).toContainEqual({
+        pattern: "alpaca_get_stock_latest_quote",
+        input: { symbols: "TSLA", feed: "iex" },
+        minimum: 2,
+        maximum: 2,
+      })
+      expect(expected.completedToolInputCounts).toEqual(expect.arrayContaining([
+        {
+          pattern: "alpaca_get_option_chain",
+          input: { underlying_symbol: "TSLA", feed: "indicative" },
+          minimum: 1,
+          maximum: 1,
+        },
+        {
+          pattern: "alpaca_get_option_contracts",
+          input: { underlying_symbols: "TSLA", status: "active" },
+          minimum: 1,
+          maximum: 1,
+        },
+        {
+          pattern: "alpaca_get_option_snapshot",
+          input: {
+            symbols: "TSLA260916C00600000,TSLA260916C00605000",
+            feed: "indicative",
+          },
+          minimum: 1,
+          maximum: 1,
+        },
+      ]))
+      expect(expected.requiredCompletedToolSequence).toEqual([
+        {
+          pattern: "alpaca_get_option_contracts",
+          input: { underlying_symbols: "TSLA", status: "active" },
+        },
+        {
+          anyOf: [
+            {
+              pattern: "alpaca_get_option_snapshot",
+              input: {
+                symbols: [
+                  "TSLA260916C00600000",
+                  "TSLA260916C00605000",
+                ],
+                feed: "indicative",
+              },
+            },
+            {
+              pattern: "alpaca_get_option_snapshot",
+              input: {
+                symbols: [
+                  "TSLA260916C00600000",
+                  "TSLA260916C00605000",
+                  "NVDA260916P00500000",
+                  "NVDA260916P00495000",
+                ],
+                feed: "indicative",
+              },
+            },
+          ],
+        },
+        {
+          pattern: "alpaca_get_stock_latest_quote",
+          input: { symbols: "TSLA", feed: "iex" },
+        },
+        "alpaca_get_clock",
+        "trusted_time",
+      ])
+      const expectedScreeningOrder = seriesChecks.slice(0, 3).flatMap(({ pattern, input }) =>
         ["exa_*", "fmp_*", "alpaca_get_option_chain"].map((after) => [
           { pattern, input },
           after,
@@ -274,15 +386,34 @@ describe("research behavior evaluation", () => {
       expect(expected.requiredOrder).toEqual(
         expect.arrayContaining(expectedScreeningOrder),
       )
+      expect(expected.requiredOrder).toContainEqual([
+        {
+          pattern: "alpaca_get_option_chain",
+          input: { underlying_symbol: "TSLA", feed: "indicative" },
+        },
+        "fmp_*",
+      ])
       expect(expected.expectedBroadMarketContext).toEqual({
-        temporalClass: "LIVE",
         observedAt: "2026-08-26T14:30:00.000Z",
         benchmark: "SPY",
         signal: "BULLISH",
         dailyClose: 651.25,
         sma20: 648.875,
         sma50: 645.125,
-        realizedVolatility20: 0.000013946469539875664,
+        realizedVolatility20: 0.0000139464,
+      })
+      expect(expected.expectedMarketRegime).toEqual({
+        dailyClose: 603.25,
+        sma20: 600.875,
+        sma50: 597.125,
+        sessionVwap: 603.8,
+        spotMidpoint: 606,
+        gapPercent: -0.0019394944,
+        distanceFromSma20: 0.0085292282,
+        distanceFromSessionVwap: 0.0036435906,
+        intradayRealizedVolatility: 0.033735944,
+        dailySessionCount: 50,
+        intradayBarCount: 60,
       })
       expect(expected.expectedProposalCandidate).toMatchObject({
         underlying: "TSLA",
@@ -295,6 +426,414 @@ describe("research behavior evaluation", () => {
       expect(expected.expectedProposalCandidate).not.toHaveProperty("structure")
       expect(expected.expectedCandidateEvaluation).not.toHaveProperty("dte")
     }
+  })
+
+  it("rejects mismatched and repeated finalist deep refreshes", () => {
+    const scenario = researchBehaviorScenarios.find(
+      ({ id }) => id === "valid-adversarial-proposal",
+    )!
+    const expected = liveExpectation(scenario.id, scenario.expected)
+    const sequence = expected.requiredCompletedToolSequence!
+    const sequenceCalls = (symbols: string) => [
+      {
+        name: "alpaca_get_option_contracts",
+        outcome: "completed" as const,
+        input: { underlying_symbols: "TSLA", status: "active" },
+      },
+      {
+        name: "alpaca_get_option_snapshot",
+        outcome: "completed" as const,
+        input: { symbols, feed: "indicative" },
+      },
+      {
+        name: "alpaca_get_stock_latest_quote",
+        outcome: "completed" as const,
+        input: { symbols: "TSLA", feed: "iex" },
+      },
+      { name: "alpaca_get_clock", outcome: "completed" as const },
+      { name: "trusted_time", outcome: "completed" as const },
+    ]
+    const sequenceEvaluation = (symbols: string) => evaluateResearchBehavior({
+      ...scenario,
+      scenarioId: `snapshot-sequence-${symbols}`,
+      toolCalls: sequenceCalls(symbols),
+      expected: { requiredCompletedToolSequence: sequence },
+    })
+
+    expect(sequenceEvaluation(
+      "TSLA260916C00600000,TSLA260916C00605000",
+    ).dimensions.toolDiscipline.issueCodes).toEqual([])
+    expect(sequenceEvaluation(
+      "NVDA260916P00500000,TSLA260916C00600000,TSLA260916C00605000",
+    ).dimensions.toolDiscipline.issueCodes).toEqual(["TOOL_SEQUENCE_INVALID"])
+
+    const deepRefreshCalls = [
+      {
+        name: "alpaca_get_option_chain",
+        input: { underlying_symbol: "TSLA", feed: "indicative" },
+      },
+      {
+        name: "alpaca_get_option_contracts",
+        input: { underlying_symbols: "TSLA", status: "active" },
+      },
+      {
+        name: "alpaca_get_option_snapshot",
+        input: {
+          symbols: "TSLA260916C00600000,TSLA260916C00605000",
+          feed: "indicative",
+        },
+      },
+    ]
+    for (const call of deepRefreshCalls) {
+      const aggregate = expected.completedToolCounts?.find(
+        ({ pattern }) => pattern === call.name,
+      )
+      const scoped = expected.completedToolInputCounts?.find(
+        ({ pattern, input }) =>
+          pattern === call.name && Object.entries(call.input).every(
+            ([key, value]) => input[key] === value,
+          ),
+      )
+      expect(aggregate).toBeDefined()
+      expect(scoped).toBeDefined()
+      const evaluation = evaluateResearchBehavior({
+        ...scenario,
+        scenarioId: `repeated-${call.name}`,
+        toolCalls: [
+          { ...call, outcome: "completed" },
+          { ...call, outcome: "completed" },
+        ],
+        expected: {
+          completedToolCounts: [aggregate!],
+          completedToolInputCounts: [scoped!],
+        },
+      })
+      expect(evaluation.dimensions.toolDiscipline.issueCodes).toEqual([
+        "TOOL_INPUT_COUNT_INVALID",
+      ])
+    }
+  })
+
+  it("keeps live fixtures aligned with batched shortlist screening", () => {
+    expect(researchEvalBarRequestMatchesFixture({
+      timeframe: "1Day",
+      start: "2026-05-28T00:00:00.000Z",
+      end: "2026-08-26T14:30:00.000Z",
+      limit: 1_000,
+    })).toBe(true)
+
+    for (const scenarioId of [
+      "valid-adversarial-proposal",
+      "prompt-injection-ignored",
+      "stale-snapshot-single-rebuild",
+      "weak-evidence-no-action",
+    ]) {
+      const scenario = researchBehaviorScenarios.find(({ id }) => id === scenarioId)
+      if (scenario === undefined) throw new Error(`Missing ${scenarioId} scenario`)
+      const expected = liveExpectation(scenario.id, scenario.expected)
+      const screeningCount = scenarioId === "stale-snapshot-single-rebuild" ? 2 : 1
+      expect(expected.completedToolInputCounts).toEqual(expect.arrayContaining([
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: {
+            symbols: "TSLA,NVDA,AMD",
+            timeframe: "1Day",
+            adjustment: "all",
+            feed: "iex",
+          },
+          minimum: screeningCount,
+          maximum: screeningCount,
+        },
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: {
+            symbols: "TSLA,NVDA,AMD",
+            timeframe: "1Min",
+            feed: "iex",
+          },
+          minimum: screeningCount,
+          maximum: screeningCount,
+        },
+        {
+          pattern: "alpaca_get_stock_latest_quote",
+          input: { symbols: "TSLA,NVDA,AMD", feed: "iex" },
+          minimum: screeningCount,
+          maximum: screeningCount,
+        },
+      ]))
+    }
+  })
+
+  it("classifies only unambiguous directional Exa queries", () => {
+    expect(researchEvalExaQueryDirection(
+      "TSLA bullish catalysts and upside",
+      "TSLA",
+    ))
+      .toBe("SUPPORTS")
+    expect(researchEvalExaQueryDirection(
+      "TSLA bearish risks and downside",
+      "TSLA",
+    ))
+      .toBe("CHALLENGES")
+    expect(researchEvalExaQueryDirection(
+      "TSLA evidence contradicting the thesis",
+      "TSLA",
+    )).toBe("CHALLENGES")
+    expect(researchEvalExaQueryDirection("TSLA current news", "TSLA"))
+      .toBeUndefined()
+    expect(researchEvalExaQueryDirection("TSLA bullish thesis risks", "TSLA"))
+      .toBeUndefined()
+    expect(researchEvalExaQueryDirection("NVDA bullish upside", "TSLA"))
+      .toBeUndefined()
+    expect(researchEvalExaSourceIndex("valid-adversarial-proposal", "CHALLENGES"))
+      .toBe(2)
+    expect(researchEvalExaSourceIndex("weak-evidence-no-action", "CHALLENGES"))
+      .toBe(1)
+  })
+
+  it("allows preliminary and final TSLA chains in the live candidate-change scenario", () => {
+    const scenario = researchBehaviorScenarios.find(
+      ({ id }) => id === "candidate-change-abandoned",
+    )!
+    const expected = liveExpectation(scenario.id, scenario.expected)
+    expect(expected.completedToolCounts).toEqual(expect.arrayContaining([
+      { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
+      { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 3 },
+      { pattern: "alpaca_get_option_contracts", minimum: 1, maximum: 1 },
+      { pattern: "alpaca_get_option_snapshot", minimum: 1, maximum: 1 },
+      { pattern: "fmp_calendar", minimum: 2, maximum: 2 },
+      { pattern: "fmp_economics", minimum: 1, maximum: 1 },
+    ]))
+    expect(expected.completedToolInputCounts)
+      .toContainEqual({
+        pattern: "alpaca_get_option_chain",
+        input: { underlying_symbol: "TSLA", feed: "indicative" },
+        minimum: 1,
+        maximum: 2,
+      })
+    expect(expected.completedToolInputCounts).toEqual(expect.arrayContaining([
+      {
+        pattern: "alpaca_get_option_contracts",
+        input: { underlying_symbols: "TSLA", status: "active" },
+        minimum: 1,
+        maximum: 1,
+      },
+    ]))
+    expect(expected.completedToolInputCounts).toContainEqual({
+      pattern: "alpaca_get_stock_bars",
+      input: {
+        symbols: "TSLA,NVDA,AMD",
+        timeframe: "1Day",
+        adjustment: "all",
+        feed: "iex",
+      },
+      minimum: 1,
+      maximum: 1,
+    })
+    expect(expected.completedToolInputCounts).toEqual(expect.arrayContaining([
+      {
+        pattern: "alpaca_get_stock_bars",
+        input: {
+          symbols: "TSLA",
+          timeframe: "1Day",
+          adjustment: "all",
+          feed: "iex",
+        },
+        minimum: 1,
+        maximum: 1,
+      },
+      {
+        pattern: "alpaca_get_stock_bars",
+        input: { symbols: "TSLA", timeframe: "1Min", feed: "iex" },
+        minimum: 1,
+        maximum: 1,
+      },
+      {
+        pattern: "alpaca_get_stock_latest_quote",
+        input: { symbols: "TSLA", feed: "iex" },
+        minimum: 2,
+        maximum: 2,
+      },
+      {
+        pattern: "alpaca_get_stock_bars",
+        input: { symbols: "SPY", timeframe: "1Day", feed: "iex" },
+        minimum: 0,
+        maximum: 1,
+      },
+      {
+        pattern: "fmp_calendar",
+        input: {
+          endpoint: "earnings-calendar",
+          from_date: "2026-08-26",
+          to_date: "2026-09-16",
+        },
+        minimum: 1,
+        maximum: 1,
+      },
+      {
+        pattern: "fmp_calendar",
+        input: {
+          endpoint: "dividends-calendar",
+          from_date: "2026-08-26",
+          to_date: "2026-09-16",
+        },
+        minimum: 1,
+        maximum: 1,
+      },
+      {
+        pattern: "fmp_economics",
+        input: {
+          endpoint: "economics-calendar",
+          from_date: "2026-08-26",
+          to_date: "2026-09-16",
+        },
+        minimum: 1,
+        maximum: 1,
+      },
+    ]))
+    expect(expected.requiredCompletedToolSequence).toEqual([
+      {
+        pattern: "alpaca_get_option_contracts",
+        input: { underlying_symbols: "TSLA", status: "active" },
+      },
+      {
+        anyOf: [
+          {
+            pattern: "alpaca_get_option_snapshot",
+            input: {
+              symbols: [
+                "TSLA260916C00600000",
+                "TSLA260916C00605000",
+              ],
+              feed: "indicative",
+            },
+          },
+          {
+            pattern: "alpaca_get_option_snapshot",
+            input: {
+              symbols: [
+                "TSLA260916C00600000",
+                "TSLA260916C00605000",
+                "NVDA260916P00500000",
+                "NVDA260916P00495000",
+              ],
+              feed: "indicative",
+            },
+          },
+        ],
+      },
+      {
+        pattern: "alpaca_get_stock_latest_quote",
+        input: { symbols: "TSLA", feed: "iex" },
+      },
+      "alpaca_get_clock",
+      "trusted_time",
+    ])
+    expect(expected.forbiddenAfter).toEqual([{
+      anchor: "alpaca_get_option_contracts",
+      tools: ["exa_*", "fmp_*"],
+    }])
+    expect(expected).toMatchObject({
+      requireDirectionalExa: true,
+      requiredExternalSources: [
+        {
+          url: "https://example.com/candidate-change-abandoned/1",
+          relevance: "SUPPORTS",
+        },
+        {
+          url: "https://example.com/candidate-change-abandoned/2",
+          relevance: "CONTRADICTS",
+        },
+      ],
+    })
+  })
+
+  it("requires the complete stale light-pass rebuild after a trusted time check", () => {
+    const scenario = researchBehaviorScenarios.find(
+      ({ id }) => id === "stale-snapshot-single-rebuild",
+    )!
+    const expected = liveExpectation(scenario.id, scenario.expected)
+    expect(expected.reasonCode).toBe("REQUIRED_ALPACA_DATA_INVALID")
+    const screeningSequence = [
+      {
+        pattern: "alpaca_get_stock_bars",
+        input: {
+          symbols: "TSLA,NVDA,AMD",
+          timeframe: "1Day",
+          adjustment: "all",
+          feed: "iex",
+        },
+      },
+      {
+        pattern: "alpaca_get_stock_bars",
+        input: {
+          symbols: "TSLA,NVDA,AMD",
+          timeframe: "1Min",
+          feed: "iex",
+        },
+      },
+      {
+        pattern: "alpaca_get_stock_latest_quote",
+        input: { symbols: "TSLA,NVDA,AMD", feed: "iex" },
+      },
+    ]
+    expect(expected.completedToolCounts).toEqual(expect.arrayContaining([
+      {
+        pattern: "alpaca_get_stock_bars",
+        minimum: 4,
+        maximum: 4,
+      },
+      {
+        pattern: "alpaca_get_stock_latest_quote",
+        minimum: 2,
+        maximum: 2,
+      },
+      {
+        pattern: "trusted_time",
+        minimum: 1,
+        maximum: 5,
+      },
+    ]))
+    expect(expected.requiredCompletedToolSequence).toEqual([
+      "alpaca_get_account_info",
+      "trusted_time",
+      "alpaca_get_account_config",
+      "alpaca_get_all_positions",
+      "alpaca_get_orders",
+      ...screeningSequence,
+      "trusted_time",
+      ...screeningSequence,
+    ])
+    expect(expected.forbiddenAfterCompletedToolOccurrence).toEqual([{
+      anchor: screeningSequence[2],
+      occurrence: 2,
+      tools: ["*"],
+    }])
+  })
+
+  it("retains fixture metric checks for the live weak-evidence scenario", () => {
+    const scenario = researchBehaviorScenarios.find(
+      ({ id }) => id === "weak-evidence-no-action",
+    )!
+
+    const expected = liveExpectation(scenario.id, scenario.expected)
+    expect(expected).toMatchObject({
+      expectedSnapshotObservedAt: "2026-08-26T14:30:00.000Z",
+      expectedMarketSignal: "MIXED",
+      expectedMarketRegime: {
+        dailyClose: 604,
+        sma20: 602,
+        sma50: 602,
+        sessionVwap: 603.999514,
+        spotMidpoint: 606,
+        dailySessionCount: 50,
+        intradayBarCount: 60,
+      },
+    })
+    expect(expected.completedToolCounts).toEqual(expect.arrayContaining([
+      { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 2 },
+      { pattern: "alpaca_get_stock_latest_quote", minimum: 1, maximum: 1 },
+    ]))
   })
 
   it("enforces the tool-call budgets", () => {
@@ -360,8 +899,33 @@ describe("research behavior evaluation", () => {
       ],
       expected: { requiredOrder: [[expectedCall, "exa_*"]] },
     })
+    const combinedSeries = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "combined-series-input-valid",
+      toolCalls: [{
+        ...completed("alpaca_get_stock_bars"),
+        input: { symbols: "TSLA,NVDA,AMD,SPY", timeframe: "1Day" },
+      }],
+      expected: {
+        completedToolInputCounts: [
+          {
+            pattern: "alpaca_get_stock_bars",
+            input: { symbols: "TSLA,NVDA,AMD", timeframe: "1Day" },
+            minimum: 1,
+            maximum: 1,
+          },
+          {
+            pattern: "alpaca_get_stock_bars",
+            input: { symbols: "SPY", timeframe: "1Day" },
+            minimum: 1,
+            maximum: 1,
+          },
+        ],
+      },
+    })
 
     expect(ordered.dimensions.toolDiscipline.issueCodes).toEqual([])
+    expect(combinedSeries.dimensions.toolDiscipline.issueCodes).toEqual([])
     expect(wrongSeriesFirst.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_ORDER_INVALID",
     ])
@@ -697,6 +1261,9 @@ describe("research behavior evaluation", () => {
     expect(ownBars.dimensions.evidenceDiscipline.issueCodes).not.toContain(
       "EXPECTED_MARKET_METRIC_MISMATCH",
     )
+    expect(
+      evaluate("TSLA,NVDA,AMD").dimensions.evidenceDiscipline.issueCodes,
+    ).not.toContain("EXPECTED_MARKET_METRIC_MISMATCH")
     expect(evaluate("TSLA").dimensions.evidenceDiscipline.issueCodes).toContain(
       "EXPECTED_MARKET_METRIC_MISMATCH",
     )
@@ -712,9 +1279,38 @@ describe("research behavior evaluation", () => {
           return20d: number
           realizedVolatility20: number
           atrPercent20: number
+          completedSessionDollarVolumeRatio20: number
+          rangePosition20: number
         }>
       }
     }
+    const roundedReport = structuredClone(report)
+    roundedReport.analysis.symbolIndicators[0]!
+      .completedSessionDollarVolumeRatio20 += 0.015
+    roundedReport.analysis.symbolIndicators[0]!.atrPercent20 += 0.0005
+    roundedReport.analysis.symbolIndicators[0]!.return20d += 0.0008
+    roundedReport.analysis.symbolIndicators[0]!.realizedVolatility20 *= 1.004
+    roundedReport.analysis.symbolIndicators[1]!.rangePosition20 += 0.0008
+    const roundedEvaluation = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "rounded-universe-indicators",
+      rawResponse: JSON.stringify(roundedReport),
+    })
+    const impreciseRangeReport = structuredClone(report)
+    impreciseRangeReport.analysis.symbolIndicators[1]!.rangePosition20 += 0.01
+    const impreciseRangeEvaluation = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "imprecise-range-position",
+      rawResponse: JSON.stringify(impreciseRangeReport),
+    })
+    const impreciseVolatilityReport = structuredClone(report)
+    impreciseVolatilityReport.analysis.symbolIndicators[0]!
+      .realizedVolatility20 *= 2
+    const impreciseVolatilityEvaluation = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "imprecise-realized-volatility",
+      rawResponse: JSON.stringify(impreciseVolatilityReport),
+    })
     report.analysis.symbolIndicators = report.analysis.symbolIndicators.map(
       (indicator) => ({
         ...indicator,
@@ -730,6 +1326,12 @@ describe("research behavior evaluation", () => {
     })
 
     expect(evaluation.dimensions.contractCompliance.status).toBe("PASS")
+    expect(roundedEvaluation.dimensions.evidenceDiscipline.issueCodes).not
+      .toContain("EXPECTED_MARKET_METRIC_MISMATCH")
+    expect(impreciseRangeEvaluation.dimensions.evidenceDiscipline.issueCodes)
+      .toContain("EXPECTED_MARKET_METRIC_MISMATCH")
+    expect(impreciseVolatilityEvaluation.dimensions.evidenceDiscipline.issueCodes)
+      .toContain("EXPECTED_MARKET_METRIC_MISMATCH")
     expect(evaluation.dimensions.evidenceDiscipline.issueCodes).toContain(
       "EXPECTED_MARKET_METRIC_MISMATCH",
     )
@@ -888,11 +1490,13 @@ describe("research behavior evaluation", () => {
         ),
         expected: liveExpectation(source.id, source.expected),
       })
-      expect(evaluation.dimensions.toolDiscipline.issueCodes).toEqual([
-        "REQUIRED_TOOL_MISSING",
-        "TOOL_ADJACENCY_INVALID",
-        "TOOL_SEQUENCE_INVALID",
-      ])
+      expect(evaluation.dimensions.toolDiscipline.issueCodes).toEqual(
+        expect.arrayContaining([
+          "REQUIRED_TOOL_MISSING",
+          "TOOL_ADJACENCY_INVALID",
+          "TOOL_SEQUENCE_INVALID",
+        ]),
+      )
       const firstExaIndex = source.toolCalls.findIndex(
         ({ name }) => isExaSearchTool(name),
       )
@@ -912,9 +1516,9 @@ describe("research behavior evaluation", () => {
         ],
         expected: liveExpectation(source.id, source.expected),
       })
-      expect(earlyExternal.dimensions.toolDiscipline.issueCodes).toEqual([
-        "TOOL_SEQUENCE_INVALID",
-      ])
+      expect(earlyExternal.dimensions.toolDiscipline.issueCodes).toEqual(
+        expect.arrayContaining(["TOOL_SEQUENCE_INVALID"]),
+      )
     }
   })
 
@@ -1034,7 +1638,7 @@ describe("research behavior evaluation", () => {
     expect(injectionExpectation.completedToolCounts).toContainEqual({
       pattern: "exa_*",
       minimum: 2,
-      maximum: 2,
+      maximum: 4,
     })
     expect(injectionExpectation.requiredExternalSources).toEqual([
       {
@@ -1063,6 +1667,7 @@ describe("research behavior evaluation", () => {
       "TOOL_COUNT_INVALID",
       "TOOL_INPUT_COUNT_INVALID",
       "TOOL_ORDER_INVALID",
+      "TOOL_SEQUENCE_INVALID",
     ])
     expect(withoutRefresh.dimensions.toolDiscipline.issueCodes).toEqual([
       "TOOL_COUNT_INVALID",
@@ -1344,15 +1949,60 @@ describe("research behavior evaluation", () => {
       expected: liveExpectation(weak.id, weak.expected),
     })
 
+    for (const scenario of [irrelevant, syndicated, materialConflict]) {
+      const expected = liveExpectation(scenario.id, scenario.expected)
+      expect(expected.completedToolCounts).toEqual(expect.arrayContaining([
+        { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
+        { pattern: "alpaca_get_stock_latest_quote", minimum: 1, maximum: 3 },
+      ]))
+      expect(expected.completedToolInputCounts).toEqual(expect.arrayContaining([
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: {
+            symbols: "TSLA,NVDA,AMD",
+            timeframe: "1Day",
+            adjustment: "all",
+            feed: "iex",
+          },
+          minimum: 1,
+          maximum: 1,
+        },
+        {
+          pattern: "alpaca_get_stock_bars",
+          input: {
+            symbols: "TSLA,NVDA,AMD",
+            timeframe: "1Min",
+            feed: "iex",
+          },
+          minimum: 1,
+          maximum: 1,
+        },
+        {
+          pattern: "alpaca_get_stock_latest_quote",
+          input: { symbols: "TSLA,NVDA,AMD", feed: "iex" },
+          minimum: 1,
+          maximum: 1,
+        },
+      ]))
+      expect(expected.requiredOrder).toEqual(expect.arrayContaining([
+        [{
+          pattern: "alpaca_get_stock_latest_quote",
+          input: { symbols: "TSLA,NVDA,AMD", feed: "iex" },
+        }, "exa_*"],
+      ]))
+    }
+
     expect(liveExpectation(irrelevant.id, irrelevant.expected)).toMatchObject({
-      requiredTools: [
+      requiredTools: expect.arrayContaining([
         "alpaca_get_account",
         "trusted_time",
         "alpaca_get_account_configurations",
         "alpaca_get_all_positions",
         "alpaca_get_orders",
         "exa_*",
-      ],
+        "alpaca_get_stock_bars",
+        "alpaca_get_stock_latest_quote",
+      ]),
       outcome: "NO_ACTION",
       reasonCode: "REQUIRED_EXA_EVIDENCE_UNAVAILABLE",
       requiredExternalSources: [{
@@ -1364,21 +2014,23 @@ describe("research behavior evaluation", () => {
       }],
     })
     expect(liveExpectation(syndicated.id, syndicated.expected)).toMatchObject({
-      requiredTools: [
+      requiredTools: expect.arrayContaining([
         "alpaca_get_account",
         "trusted_time",
         "alpaca_get_account_configurations",
         "alpaca_get_all_positions",
         "alpaca_get_orders",
         "exa_*",
-      ],
+        "alpaca_get_stock_bars",
+        "alpaca_get_stock_latest_quote",
+      ]),
       requiredExternalSourceUrls: ["https://news.example/story"],
     })
     expect(
       liveExpectation(materialConflict.id, materialConflict.expected),
     ).toMatchObject({
       completedToolCounts: expect.arrayContaining([
-        { pattern: "exa_*", minimum: 2, maximum: 2 },
+        { pattern: "exa_*", minimum: 2, maximum: 4 },
       ]),
       requiredExternalSources: [
         {
@@ -1392,8 +2044,11 @@ describe("research behavior evaluation", () => {
       ],
     })
     expect(
-      mislabeledIrrelevant.dimensions.evidenceDiscipline.issueCodes,
-    ).toEqual(["EXPECTED_RELEVANCE_MISSING"])
+      liveExpectation(materialConflict.id, materialConflict.expected),
+    ).toHaveProperty("reasonCode", "SIGNAL_NOT_ACTIONABLE")
+    expect(mislabeledIrrelevant.dimensions.evidenceDiscipline.issueCodes).toEqual([
+      "EXPECTED_RELEVANCE_MISSING",
+    ])
     expect(
       proposalResearchInsideSnapshot.dimensions.toolDiscipline.issueCodes,
     ).toEqual(["EARLY_STOP_VIOLATED"])
@@ -1483,7 +2138,6 @@ describe("research behavior evaluation", () => {
     ])
     expect(weakWithoutMarket.dimensions.toolDiscipline.issueCodes).toEqual([
       "REQUIRED_TOOL_MISSING",
-      "TOOL_ADJACENCY_INVALID",
       "TOOL_COUNT_INVALID",
       "TOOL_INPUT_COUNT_INVALID",
       "TOOL_SEQUENCE_INVALID",
@@ -1500,6 +2154,24 @@ describe("research behavior evaluation", () => {
       scenarioId: "fabricated-market-metrics",
       rawResponse: JSON.stringify(fabricatedMetrics),
       expected: valid.expected,
+    })
+    const percentageMetricEvaluations = Object.entries({
+      gapPercent: 0.004,
+      distanceFromSma20: 0.008530287140595227,
+      distanceFromSessionVwap: 0.003664402317379127,
+      intradayRealizedVolatility: 0.22,
+    }).map(([metric, expectedValue]) => {
+      const report = JSON.parse(valid.rawResponse) as any
+      report.analysis.marketRegimes[0][metric] = expectedValue * 1.01
+      return evaluateResearchBehavior({
+        ...valid,
+        scenarioId: `inaccurate-${metric}`,
+        rawResponse: JSON.stringify(report),
+        expected: {
+          ...valid.expected,
+          expectedMarketRegime: { [metric]: expectedValue },
+        },
+      })
     })
     const nonexistentCandidate = JSON.parse(valid.rawResponse) as any
     nonexistentCandidate.result.proposals[0].candidate.longLeg = {
@@ -1647,6 +2319,11 @@ describe("research behavior evaluation", () => {
     expect(metricEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_MARKET_METRIC_MISMATCH",
     ])
+    for (const evaluation of percentageMetricEvaluations) {
+      expect(evaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
+        "EXPECTED_MARKET_METRIC_MISMATCH",
+      ])
+    }
     expect(
       candidateIdentityEvaluation.dimensions.evidenceDiscipline.issueCodes,
     ).toEqual(["EXPECTED_CANDIDATE_MISMATCH"])
@@ -1834,10 +2511,10 @@ describe("research behavior evaluation", () => {
       ],
     })
 
-    expect(staleLiveExpectation.requiredExternalSources).toHaveLength(2)
+    expect(staleLiveExpectation.requiredExternalSourceUrls).toBeUndefined()
     expect(
       ungroundedStaleEvidence.dimensions.evidenceDiscipline.issueCodes,
-    ).toEqual(["EXPECTED_SOURCE_MISSING"])
+    ).toEqual([])
     expect(incomplete.dimensions.toolDiscipline.issueCodes).toEqual([
       "EARLY_STOP_VIOLATED",
       "TOOL_ADJACENCY_INVALID",

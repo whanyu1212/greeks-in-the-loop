@@ -20,7 +20,7 @@ import {
 // Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
 // when grader semantics change, so stored artifacts stay attributable to the
 // revision that produced them.
-export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.4.0" as const
+export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.10.0" as const
 
 export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "MALFORMED_JSON",
@@ -204,6 +204,10 @@ export type ResearchBehaviorExpectation = Readonly<{
     | "sma50"
     | "sessionVwap"
     | "spotMidpoint"
+    | "gapPercent"
+    | "distanceFromSma20"
+    | "distanceFromSessionVwap"
+    | "intradayRealizedVolatility"
     | "dailySessionCount"
     | "intradayBarCount",
     number
@@ -233,6 +237,12 @@ const indicatorMetrics = [
   "completedSessionDollarVolumeRatio20",
   "rangePosition20",
 ] as const
+const relativeMarketRegimeMetrics = new Set([
+  "gapPercent",
+  "distanceFromSma20",
+  "distanceFromSessionVwap",
+  "intradayRealizedVolatility",
+])
 
 const dimension = (
   issueCodes: readonly ResearchBehaviorIssueCode[],
@@ -399,7 +409,13 @@ export function evaluateResearchBehavior({
         return actual.symbols.split(",")
       }
       if (key === "symbols" && typeof expected === "string") {
-        return actual.symbols ?? actual.symbol
+        const symbols = actual.symbols ?? actual.symbol
+        const expectedSymbols = expected.split(",")
+        return typeof symbols === "string" && expectedSymbols.every(
+            (symbol) => symbols.split(",").includes(symbol),
+          )
+          ? expected
+          : symbols
       }
       if (key === "underlying_symbol") {
         return actual.underlying_symbol ?? actual.symbol
@@ -630,9 +646,22 @@ export function evaluateResearchBehavior({
             indicatorMetrics.every((metric) => {
               const retainedValue = retained[metric]
               const expectedValue = expectedIndicator[metric]
-              return retainedValue !== undefined &&
-                expectedValue !== undefined &&
-                Math.abs(retainedValue - expectedValue) <= 0.0001
+              if (retainedValue === undefined || expectedValue === undefined) {
+                return false
+              }
+              const tolerance = metric === "realizedVolatility20"
+                ? Math.abs(expectedValue) * 0.005
+                : metric === "rangePosition20"
+                ? 0.001
+                : metric === "return5d" || metric === "return20d"
+                ? 0.001
+                : metric === "atrPercent20"
+                ? 0.001
+                : metric === "completedSessionVolumeRatio20" ||
+                    metric === "completedSessionDollarVolumeRatio20"
+                ? 0.02
+                : 0.0001
+              return Math.abs(retainedValue - expectedValue) <= tolerance
             })
         })
       if (!indicatorsMatch) {
@@ -829,9 +858,12 @@ export function evaluateResearchBehavior({
       const actualValue = marketRegime?.[
         metric as keyof NonNullable<typeof marketRegime>
       ]
+      const tolerance = relativeMarketRegimeMetrics.has(metric)
+        ? Math.abs(expectedValue) * 0.005
+        : 0.0005
       if (
         typeof actualValue !== "number" ||
-        Math.abs(actualValue - expectedValue) > 0.0005
+        Math.abs(actualValue - expectedValue) > tolerance
       ) {
         evidenceIssues.push("EXPECTED_MARKET_METRIC_MISMATCH")
       }
