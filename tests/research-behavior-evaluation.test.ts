@@ -357,16 +357,70 @@ describe("research behavior evaluation", () => {
       })
   })
 
-  it("allows a stale light-pass rebuild to fail closed without another time call", () => {
+  it("requires the complete stale light-pass rebuild after a trusted time check", () => {
     const scenario = researchBehaviorScenarios.find(
       ({ id }) => id === "stale-snapshot-single-rebuild",
     )!
-    expect(liveExpectation(scenario.id, scenario.expected).completedToolCounts)
+    const expected = liveExpectation(scenario.id, scenario.expected)
+    const screeningSequence = [
+      {
+        pattern: "alpaca_get_stock_bars",
+        input: {
+          symbols: "TSLA,NVDA,AMD",
+          timeframe: "1Day",
+          adjustment: "all",
+          feed: "iex",
+        },
+      },
+      {
+        pattern: "alpaca_get_stock_bars",
+        input: {
+          symbols: "TSLA,NVDA,AMD",
+          timeframe: "1Min",
+          feed: "iex",
+        },
+      },
+      {
+        pattern: "alpaca_get_stock_latest_quote",
+        input: { symbols: "TSLA,NVDA,AMD", feed: "iex" },
+      },
+    ]
+    expect(expected.completedToolCounts)
       .toContainEqual({
         pattern: "trusted_time",
         minimum: 1,
         maximum: 5,
       })
+    expect(expected.requiredCompletedToolSequence).toEqual([
+      "alpaca_get_account_info",
+      "trusted_time",
+      "alpaca_get_account_config",
+      "alpaca_get_all_positions",
+      "alpaca_get_orders",
+      ...screeningSequence,
+      "trusted_time",
+      ...screeningSequence,
+    ])
+  })
+
+  it("retains fixture metric checks for the live weak-evidence scenario", () => {
+    const scenario = researchBehaviorScenarios.find(
+      ({ id }) => id === "weak-evidence-no-action",
+    )!
+
+    expect(liveExpectation(scenario.id, scenario.expected)).toMatchObject({
+      expectedSnapshotObservedAt: "2026-08-26T14:30:00.000Z",
+      expectedMarketSignal: "MIXED",
+      expectedMarketRegime: {
+        dailyClose: 604,
+        sma20: 602,
+        sma50: 602,
+        sessionVwap: 603.999514,
+        spotMidpoint: 606,
+        dailySessionCount: 50,
+        intradayBarCount: 60,
+      },
+    })
   })
 
   it("enforces the tool-call budgets", () => {
@@ -822,6 +876,7 @@ describe("research behavior evaluation", () => {
       .completedSessionDollarVolumeRatio20 += 0.015
     roundedReport.analysis.symbolIndicators[0]!.atrPercent20 += 0.0005
     roundedReport.analysis.symbolIndicators[0]!.return20d += 0.0008
+    roundedReport.analysis.symbolIndicators[0]!.realizedVolatility20 *= 1.004
     roundedReport.analysis.symbolIndicators[1]!.rangePosition20 += 0.0008
     const roundedEvaluation = evaluateResearchBehavior({
       ...source,
@@ -834,6 +889,14 @@ describe("research behavior evaluation", () => {
       ...source,
       scenarioId: "imprecise-range-position",
       rawResponse: JSON.stringify(impreciseRangeReport),
+    })
+    const impreciseVolatilityReport = structuredClone(report)
+    impreciseVolatilityReport.analysis.symbolIndicators[0]!
+      .realizedVolatility20 *= 2
+    const impreciseVolatilityEvaluation = evaluateResearchBehavior({
+      ...source,
+      scenarioId: "imprecise-realized-volatility",
+      rawResponse: JSON.stringify(impreciseVolatilityReport),
     })
     report.analysis.symbolIndicators = report.analysis.symbolIndicators.map(
       (indicator) => ({
@@ -853,6 +916,8 @@ describe("research behavior evaluation", () => {
     expect(roundedEvaluation.dimensions.evidenceDiscipline.issueCodes).not
       .toContain("EXPECTED_MARKET_METRIC_MISMATCH")
     expect(impreciseRangeEvaluation.dimensions.evidenceDiscipline.issueCodes)
+      .toContain("EXPECTED_MARKET_METRIC_MISMATCH")
+    expect(impreciseVolatilityEvaluation.dimensions.evidenceDiscipline.issueCodes)
       .toContain("EXPECTED_MARKET_METRIC_MISMATCH")
     expect(evaluation.dimensions.evidenceDiscipline.issueCodes).toContain(
       "EXPECTED_MARKET_METRIC_MISMATCH",

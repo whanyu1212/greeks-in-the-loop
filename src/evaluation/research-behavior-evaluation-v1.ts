@@ -636,7 +636,12 @@ export function evaluateResearchBehavior({
             indicatorMetrics.every((metric) => {
               const retainedValue = retained[metric]
               const expectedValue = expectedIndicator[metric]
-              const tolerance = metric === "rangePosition20"
+              if (retainedValue === undefined || expectedValue === undefined) {
+                return false
+              }
+              const tolerance = metric === "realizedVolatility20"
+                ? Math.abs(expectedValue) * 0.005
+                : metric === "rangePosition20"
                 ? 0.001
                 : metric === "return5d" || metric === "return20d"
                 ? 0.001
@@ -646,9 +651,7 @@ export function evaluateResearchBehavior({
                     metric === "completedSessionDollarVolumeRatio20"
                 ? 0.02
                 : 0.0001
-              return retainedValue !== undefined &&
-                expectedValue !== undefined &&
-                Math.abs(retainedValue - expectedValue) <= tolerance
+              return Math.abs(retainedValue - expectedValue) <= tolerance
             })
         })
       if (!indicatorsMatch) {

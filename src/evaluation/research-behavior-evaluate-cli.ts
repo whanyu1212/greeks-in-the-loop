@@ -531,6 +531,16 @@ export const liveExpectation = (
           maximum: 2,
         })),
       ],
+      requiredCompletedToolSequence: [
+        "alpaca_get_account_info",
+        "trusted_time",
+        "alpaca_get_account_config",
+        "alpaca_get_all_positions",
+        "alpaca_get_orders",
+        ...shortlistScreeningCalls,
+        "trusted_time",
+        ...shortlistScreeningCalls,
+      ],
     }
   }
   if (scenarioId === "candidate-change-abandoned") {
@@ -598,9 +608,6 @@ export const liveExpectation = (
     const {
       completedToolCounts: _completedToolCounts,
       completedToolInputCounts: _completedToolInputCounts,
-      expectedMarketRegime: _expectedMarketRegime,
-      expectedMarketSignal: _expectedMarketSignal,
-      expectedSnapshotObservedAt: _expectedSnapshotObservedAt,
       forbiddenAfterAdjacentToolPairs: _forbiddenAfterAdjacentToolPairs,
       requiredAdjacentToolPairs: _requiredAdjacentToolPairs,
       requiredCompletedToolSequence: _requiredCompletedToolSequence,
