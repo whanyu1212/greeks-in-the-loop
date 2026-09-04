@@ -271,6 +271,9 @@ describe("research behavior evaluation", () => {
         "fmp_economics",
         "alpaca_get_option_snapshot",
       ]))
+      expect(expected.expectedSnapshotObservedAt).toBe(
+        "2026-08-26T14:30:00.000Z",
+      )
       expect(expected.completedToolCounts).toEqual(expect.arrayContaining([
         { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
         { pattern: "alpaca_get_stock_latest_quote", minimum: 2, maximum: 3 },
@@ -1798,7 +1801,7 @@ describe("research behavior evaluation", () => {
     })
     expect(
       liveExpectation(materialConflict.id, materialConflict.expected),
-    ).not.toHaveProperty("reasonCode")
+    ).toHaveProperty("reasonCode", "SIGNAL_NOT_ACTIONABLE")
     expect(mislabeledIrrelevant.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_RELEVANCE_MISSING",
     ])
@@ -1907,6 +1910,24 @@ describe("research behavior evaluation", () => {
       scenarioId: "fabricated-market-metrics",
       rawResponse: JSON.stringify(fabricatedMetrics),
       expected: valid.expected,
+    })
+    const percentageMetricEvaluations = Object.entries({
+      gapPercent: 0.004,
+      distanceFromSma20: 0.008530287140595227,
+      distanceFromSessionVwap: 0.003664402317379127,
+      intradayRealizedVolatility: 0.22,
+    }).map(([metric, expectedValue]) => {
+      const report = JSON.parse(valid.rawResponse) as any
+      report.analysis.marketRegimes[0][metric] = expectedValue * 1.01
+      return evaluateResearchBehavior({
+        ...valid,
+        scenarioId: `inaccurate-${metric}`,
+        rawResponse: JSON.stringify(report),
+        expected: {
+          ...valid.expected,
+          expectedMarketRegime: { [metric]: expectedValue },
+        },
+      })
     })
     const nonexistentCandidate = JSON.parse(valid.rawResponse) as any
     nonexistentCandidate.result.proposals[0].candidate.longLeg = {
@@ -2054,6 +2075,11 @@ describe("research behavior evaluation", () => {
     expect(metricEvaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
       "EXPECTED_MARKET_METRIC_MISMATCH",
     ])
+    for (const evaluation of percentageMetricEvaluations) {
+      expect(evaluation.dimensions.evidenceDiscipline.issueCodes).toEqual([
+        "EXPECTED_MARKET_METRIC_MISMATCH",
+      ])
+    }
     expect(
       candidateIdentityEvaluation.dimensions.evidenceDiscipline.issueCodes,
     ).toEqual(["EXPECTED_CANDIDATE_MISMATCH"])

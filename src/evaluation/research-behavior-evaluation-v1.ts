@@ -20,7 +20,7 @@ import {
 // Stamped onto every evaluation and persisted by `research:eval:live`. Bump it
 // when grader semantics change, so stored artifacts stay attributable to the
 // revision that produced them.
-export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.9.0" as const
+export const RESEARCH_BEHAVIOR_EVALUATION_VERSION = "3.10.0" as const
 
 export const RESEARCH_BEHAVIOR_ISSUE_CODES = [
   "MALFORMED_JSON",
@@ -237,6 +237,12 @@ const indicatorMetrics = [
   "completedSessionDollarVolumeRatio20",
   "rangePosition20",
 ] as const
+const relativeMarketRegimeMetrics = new Set([
+  "gapPercent",
+  "distanceFromSma20",
+  "distanceFromSessionVwap",
+  "intradayRealizedVolatility",
+])
 
 const dimension = (
   issueCodes: readonly ResearchBehaviorIssueCode[],
@@ -852,9 +858,12 @@ export function evaluateResearchBehavior({
       const actualValue = marketRegime?.[
         metric as keyof NonNullable<typeof marketRegime>
       ]
+      const tolerance = relativeMarketRegimeMetrics.has(metric)
+        ? Math.abs(expectedValue) * 0.005
+        : 0.0005
       if (
         typeof actualValue !== "number" ||
-        Math.abs(actualValue - expectedValue) > 0.0005
+        Math.abs(actualValue - expectedValue) > tolerance
       ) {
         evidenceIssues.push("EXPECTED_MARKET_METRIC_MISMATCH")
       }

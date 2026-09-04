@@ -310,6 +310,7 @@ export const liveExpectation = (
     } = live
     return {
       ...current,
+      expectedSnapshotObservedAt: "2026-08-26T14:30:00.000Z",
       requiredTools: [
         "alpaca_get_account_info",
         "alpaca_get_account_config",
@@ -539,6 +540,7 @@ export const liveExpectation = (
     } = live
     return {
       ...materialConflict,
+      reasonCode: "SIGNAL_NOT_ACTIONABLE",
       completedToolCounts: [{ pattern: "exa_*", minimum: 2, maximum: 4 }],
       requiredExternalSources: [
         {
