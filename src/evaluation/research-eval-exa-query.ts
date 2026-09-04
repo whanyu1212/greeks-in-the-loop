@@ -1,5 +1,13 @@
 export type ResearchEvalExaQueryDirection = "SUPPORTS" | "CHALLENGES"
 
+export const researchEvalExaSourceIndex = (
+  scenarioId: string,
+  direction: ResearchEvalExaQueryDirection | undefined,
+): 1 | 2 =>
+  scenarioId === "weak-evidence-no-action" || direction !== "CHALLENGES"
+    ? 1
+    : 2
+
 const supportTerms = /\b(?:bullish|positive|support(?:s|ed|ing)?|upside)\b/iu
 const challengeTerms =
   /\b(?:bearish|challenge(?:s|d|ing)?|concerns?|downside|negative|risks?)\b/iu

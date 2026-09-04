@@ -18,7 +18,10 @@ import {
 } from "../src/evaluation/research-behavior-evaluation-v1.js"
 import { researchBehaviorScenarios } from "../src/evaluation/research-behavior-scenarios.js"
 import { researchEvalBarRequestMatchesFixture } from "../src/evaluation/research-eval-bar-window.js"
-import { researchEvalExaQueryDirection } from "../src/evaluation/research-eval-exa-query.js"
+import {
+  researchEvalExaQueryDirection,
+  researchEvalExaSourceIndex,
+} from "../src/evaluation/research-eval-exa-query.js"
 import { runResearchWorkflowEvaluation } from "../src/evaluation/research-workflow-evaluation.js"
 import {
   RESEARCH_MAX_EXA_CALLS,
@@ -445,6 +448,10 @@ describe("research behavior evaluation", () => {
       .toBeUndefined()
     expect(researchEvalExaQueryDirection("NVDA bullish upside", "TSLA"))
       .toBeUndefined()
+    expect(researchEvalExaSourceIndex("valid-adversarial-proposal", "CHALLENGES"))
+      .toBe(2)
+    expect(researchEvalExaSourceIndex("weak-evidence-no-action", "CHALLENGES"))
+      .toBe(1)
   })
 
   it("allows preliminary and final TSLA chains in the live candidate-change scenario", () => {

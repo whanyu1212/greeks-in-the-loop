@@ -3,7 +3,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 
 import { researchEvalBarRequestMatchesFixture } from "../src/evaluation/research-eval-bar-window.js"
-import { researchEvalExaQueryDirection } from "../src/evaluation/research-eval-exa-query.js"
+import {
+  researchEvalExaQueryDirection,
+  researchEvalExaSourceIndex,
+} from "../src/evaluation/research-eval-exa-query.js"
 import {
   RESEARCH_EVALUATION_OPTION_UNDERLYINGS,
   type ResearchEvaluationOptionUnderlying,
@@ -711,10 +714,14 @@ register("exa_web_search_exa", "Return fixture current-event context.", (_call, 
   }
   const contradicts = direction === "CHALLENGES" ||
     scenarioId === "weak-evidence-no-action"
+  const sourceIndex = researchEvalExaSourceIndex(
+    scenarioId,
+    contradicts ? "CHALLENGES" : "SUPPORTS",
+  )
   return {
     results: [{
       title: contradicts ? "Current downside catalyst" : "Current supportive context",
-      url: `https://example.com/${scenarioId}/${contradicts ? 2 : 1}`,
+      url: `https://example.com/${scenarioId}/${sourceIndex}`,
       publishedAt: "2026-08-26T13:00:00.000Z",
       summary: contradicts
         ? scenarioId === "valid-adversarial-proposal"
