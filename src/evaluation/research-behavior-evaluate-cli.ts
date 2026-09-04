@@ -556,6 +556,11 @@ export const liveExpectation = (
         "trusted_time",
         ...shortlistScreeningCalls,
       ],
+      forbiddenAfterCompletedToolOccurrence: [{
+        anchor: shortlistScreeningCalls[2],
+        occurrence: 2,
+        tools: ["*"],
+      }],
     }
   }
   if (scenarioId === "candidate-change-abandoned") {
@@ -567,6 +572,10 @@ export const liveExpectation = (
       ...candidateChanged
     } = live
     const deepResearchCalls = ["exa_*", "fmp_*"] as const
+    const finalCandidateQuote = {
+      pattern: "alpaca_get_stock_latest_quote",
+      input: { symbols: "TSLA", feed: "iex" },
+    } as const
     const candidateScreeningInputCounts =
       RESEARCH_EVALUATION_OPTION_UNIVERSE.candidates.flatMap(({ underlying }) => [
         {
@@ -659,11 +668,34 @@ export const liveExpectation = (
         ["alpaca_get_account_info", "trusted_time"],
         ["alpaca_get_clock", "trusted_time"],
       ],
+      requiredCompletedToolSequence: [
+        "alpaca_get_option_contracts",
+        finalCandidateQuote,
+        "alpaca_get_clock",
+        "trusted_time",
+      ],
       forbiddenAfterAdjacentToolPairs: [{
         before: "alpaca_get_clock",
         after: "trusted_time",
         tools: ["*"],
       }],
+      requireDirectionalExa: true,
+      requiredExternalSources: [
+        {
+          url: "https://example.com/candidate-change-abandoned/1",
+          relevance: "SUPPORTS",
+          publishedAt: "2026-08-26T13:00:00.000Z",
+          retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+          retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
+        },
+        {
+          url: "https://example.com/candidate-change-abandoned/2",
+          relevance: "CONTRADICTS",
+          publishedAt: "2026-08-26T13:00:00.000Z",
+          retrievedAtMinimum: "2026-08-26T14:20:00.000Z",
+          retrievedAtMaximum: "2026-08-26T14:30:30.000Z",
+        },
+      ],
     }
   }
   if (scenarioId === "weak-evidence-no-action") {

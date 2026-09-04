@@ -18,6 +18,7 @@ import {
 } from "../src/evaluation/research-behavior-evaluation-v1.js"
 import { researchBehaviorScenarios } from "../src/evaluation/research-behavior-scenarios.js"
 import { researchEvalBarRequestMatchesFixture } from "../src/evaluation/research-eval-bar-window.js"
+import { researchEvalExaQueryDirection } from "../src/evaluation/research-eval-exa-query.js"
 import { runResearchWorkflowEvaluation } from "../src/evaluation/research-workflow-evaluation.js"
 import {
   RESEARCH_MAX_EXA_CALLS,
@@ -359,6 +360,17 @@ describe("research behavior evaluation", () => {
     }
   })
 
+  it("classifies only unambiguous directional Exa queries", () => {
+    expect(researchEvalExaQueryDirection("TSLA bullish catalysts and upside"))
+      .toBe("SUPPORTS")
+    expect(researchEvalExaQueryDirection("TSLA bearish risks and downside"))
+      .toBe("CHALLENGES")
+    expect(researchEvalExaQueryDirection("TSLA current news"))
+      .toBeUndefined()
+    expect(researchEvalExaQueryDirection("TSLA bullish thesis risks"))
+      .toBeUndefined()
+  })
+
   it("allows preliminary and final TSLA chains in the live candidate-change scenario", () => {
     const scenario = researchBehaviorScenarios.find(
       ({ id }) => id === "candidate-change-abandoned",
@@ -417,6 +429,28 @@ describe("research behavior evaluation", () => {
         maximum: 1,
       },
     ]))
+    expect(expected.requiredCompletedToolSequence).toEqual([
+      "alpaca_get_option_contracts",
+      {
+        pattern: "alpaca_get_stock_latest_quote",
+        input: { symbols: "TSLA", feed: "iex" },
+      },
+      "alpaca_get_clock",
+      "trusted_time",
+    ])
+    expect(expected).toMatchObject({
+      requireDirectionalExa: true,
+      requiredExternalSources: [
+        {
+          url: "https://example.com/candidate-change-abandoned/1",
+          relevance: "SUPPORTS",
+        },
+        {
+          url: "https://example.com/candidate-change-abandoned/2",
+          relevance: "CONTRADICTS",
+        },
+      ],
+    })
   })
 
   it("requires the complete stale light-pass rebuild after a trusted time check", () => {
@@ -474,6 +508,11 @@ describe("research behavior evaluation", () => {
       "trusted_time",
       ...screeningSequence,
     ])
+    expect(expected.forbiddenAfterCompletedToolOccurrence).toEqual([{
+      anchor: screeningSequence[2],
+      occurrence: 2,
+      tools: ["*"],
+    }])
   })
 
   it("retains fixture metric checks for the live weak-evidence scenario", () => {
