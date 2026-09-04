@@ -94,6 +94,19 @@ describe("research behavior evaluation", () => {
     expect(prompt).toContain("distinct Exa searches")
   })
 
+  it("uses a false exposure default at the inactive-account gate", () => {
+    const scenario = researchBehaviorScenarios.find(
+      ({ id }) => id === "account-gate-early-stop",
+    )!
+
+    expect(liveExpectation(scenario.id, scenario.expected).expectedAccountChecks)
+      .toMatchObject({
+        accountStatus: "INACTIVE",
+        optionsTradingApproved: false,
+        conflictingStrategyExposure: false,
+      })
+  })
+
   it("rejects stock-bar requests outside the fixture windows", () => {
     expect(researchEvalBarRequestMatchesFixture({
       timeframe: "1Day",
@@ -573,7 +586,8 @@ describe("research behavior evaluation", () => {
       ({ id }) => id === "weak-evidence-no-action",
     )!
 
-    expect(liveExpectation(scenario.id, scenario.expected)).toMatchObject({
+    const expected = liveExpectation(scenario.id, scenario.expected)
+    expect(expected).toMatchObject({
       expectedSnapshotObservedAt: "2026-08-26T14:30:00.000Z",
       expectedMarketSignal: "MIXED",
       expectedMarketRegime: {
@@ -586,6 +600,10 @@ describe("research behavior evaluation", () => {
         intradayBarCount: 60,
       },
     })
+    expect(expected.completedToolCounts).toEqual(expect.arrayContaining([
+      { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 2 },
+      { pattern: "alpaca_get_stock_latest_quote", minimum: 1, maximum: 1 },
+    ]))
   })
 
   it("enforces the tool-call budgets", () => {

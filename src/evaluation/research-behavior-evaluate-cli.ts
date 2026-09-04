@@ -235,7 +235,13 @@ export const liveExpectation = (
     input: { symbols: "TSLA", feed: "iex" },
   } as const
   const live = scenarioId === "account-gate-early-stop"
-    ? expected
+    ? {
+        ...expected,
+        expectedAccountChecks: {
+          ...expected.expectedAccountChecks,
+          conflictingStrategyExposure: false,
+        },
+      }
     : {
         ...expected,
         expectedAccountChecks: {
@@ -729,8 +735,8 @@ export const liveExpectation = (
       ...weak,
       completedToolCounts: [
         { pattern: "trusted_time", minimum: 1, maximum: 4 },
-        { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 4 },
-        { pattern: "alpaca_get_stock_latest_quote", minimum: 1, maximum: 3 },
+        { pattern: "alpaca_get_stock_bars", minimum: 2, maximum: 2 },
+        { pattern: "alpaca_get_stock_latest_quote", minimum: 1, maximum: 1 },
       ],
       completedToolInputCounts: [
         {
